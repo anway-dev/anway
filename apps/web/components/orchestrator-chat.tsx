@@ -2,6 +2,12 @@
 import { useState, useEffect, useRef } from "react";
 import { SCENARIOS, OrchestratorScenario, AgentActivity } from "@/lib/mock";
 
+export interface OrchestratorContext {
+  query: string;
+  title: string;
+  source: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -9,6 +15,19 @@ interface Message {
   streaming?: boolean;
   authRole?: string;
   inferredRole?: string;
+  durationMs?: number;
+  sources?: string[];
+  confidence?: number;
+}
+
+interface LogLine {
+  id: string;
+  ts: string;
+  actor: string;
+  actorColor: string;
+  text: string;
+  status?: "running" | "done" | "error" | "info";
+  ms?: number;
 }
 
 interface AgentState extends AgentActivity {
@@ -16,206 +35,281 @@ interface AgentState extends AgentActivity {
 }
 
 const ROLE_COLORS: Record<string, string> = {
-  dev: "#3b82f6",
-  sre: "#ef4444",
-  pm: "#8b5cf6",
-  ba: "#f59e0b",
-  admin: "#10b981",
+  dev: "#3b82f6", sre: "#ef4444", pm: "#8b5cf6",
+  ba: "#f59e0b", admin: "#10b981", system: "#444",
 };
+
+const AGENT_COLORS: Record<string, string> = {
+  "orchestrator": "#10b981", "datadog-agent": "#7c3aed", "loki-agent": "#f9a825",
+  "k8s-agent": "#f59e0b", "github-agent": "#aaa", "linear-agent": "#5e6ad2",
+  "argocd-agent": "#f97316", "test-agent": "#3b82f6", "repo-agent": "#06b6d4",
+  "perimeter": "#10b981", "audit": "#333",
+};
+
+const CONNECTORS_ONLINE = ["github", "linear", "datadog", "argocd", "coralogix", "notion", "eks"];
+const CONNECTOR_COLORS: Record<string, string> = {
+  github: "#aaa", linear: "#5e6ad2", datadog: "#7c3aed",
+  argocd: "#f97316", coralogix: "#06b6d4", notion: "#e5e5e5", eks: "#f59e0b",
+};
+
+function now() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}.${String(d.getMilliseconds()).padStart(3,"0")}`;
+}
 
 function parseMarkdown(text: string): string {
   return text
-    .replace(/```([\s\S]*?)```/g, '<code style="display:block;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:4px;padding:8px 10px;margin:6px 0;font-family:monospace;font-size:11px;color:#e5e5e5;white-space:pre-wrap">$1</code>')
-    .replace(/`([^`]+)`/g, '<code style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:3px;padding:1px 5px;font-family:monospace;font-size:11px;color:#10b981">$1</code>')
+    .replace(/```([\s\S]*?)```/g, '<pre style="display:block;background:#030303;border:1px solid #1a1a1a;border-left:2px solid #10b98166;border-radius:3px;padding:10px 12px;margin:8px 0;font-family:monospace;font-size:11px;color:#c9c9c9;white-space:pre-wrap">$1</pre>')
+    .replace(/`([^`]+)`/g, '<code style="background:#0e0e0e;border:1px solid #2a2a2a;border-radius:3px;padding:1px 5px;font-family:monospace;font-size:11px;color:#10b981">$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#e5e5e5;font-weight:700">$1</strong>')
-    .replace(/\n→/g, '<br/>→')
+    .replace(/\n→/g, '<br/><span style="color:#10b98188">→</span>')
     .replace(/\n/g, '<br/>');
 }
 
-function AgentBadge({ agent }: { agent: AgentState }) {
-  const isRunning = agent.currentStatus === "running";
-  const isDone = agent.currentStatus === "done";
-  const color = isDone ? "#10b981" : isRunning ? "#3b82f6" : "#444";
-
+function LogEntry({ line, idx }: { line: LogLine; idx: number }) {
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: "8px",
-      padding: "8px 10px", background: "#0e0e0e", border: `1px solid ${isRunning ? "#1a2a3a" : "#1a1a1a"}`,
-      borderRadius: "6px", marginBottom: "4px",
-      transition: "all 0.3s",
+      display: "flex", gap: "8px", padding: "1px 0",
+      fontFamily: "monospace", fontSize: "10px", lineHeight: "1.6",
+      animation: "fadeIn 0.15s ease-out",
+      animationDelay: `${idx * 0.02}s`, animationFillMode: "both",
     }}>
-      <div style={{
-        width: "7px", height: "7px", borderRadius: "50%", background: color, flexShrink: 0,
-        boxShadow: isRunning ? "0 0 6px #3b82f6" : "none",
-      }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: "11px", fontFamily: "monospace", color: isDone ? "#888" : isRunning ? "#d1d5db" : "#555" }}>
-          {agent.name}
-        </div>
-        {(isRunning || isDone) && (
-          <div style={{ fontSize: "10px", color: "#555", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {agent.detail}
-          </div>
-        )}
-      </div>
-      <div style={{ fontSize: "10px", color: color, flexShrink: 0 }}>
-        {isDone ? "✓ done" : isRunning ? "running" : "waiting"}
-      </div>
+      <span style={{ color: "#222", flexShrink: 0, minWidth: "76px" }}>{line.ts}</span>
+      <span style={{
+        color: line.actorColor, flexShrink: 0, minWidth: "72px",
+        opacity: line.status === "info" ? 0.5 : 1,
+      }}>
+        {line.actor}
+      </span>
+      <span style={{
+        color: line.status === "done" ? "#555"
+          : line.status === "error" ? "#ef4444"
+          : line.status === "info" ? "#333"
+          : "#888",
+        flex: 1,
+      }}>
+        {line.status === "done" && <span style={{ color: "#10b981" }}>✓ </span>}
+        {line.status === "error" && <span style={{ color: "#ef4444" }}>✗ </span>}
+        {line.text}
+        {line.ms !== undefined && <span style={{ color: "#333" }}> {line.ms}ms</span>}
+      </span>
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBlock({ message }: { message: Message }) {
   const isUser = message.role === "user";
-  return (
-    <div style={{
-      display: "flex", justifyContent: isUser ? "flex-end" : "flex-start",
-      marginBottom: "16px", gap: "10px", alignItems: "flex-start",
-    }}>
-      {!isUser && (
-        <div style={{
-          width: "28px", height: "28px", borderRadius: "6px", background: "rgba(16,185,129,0.15)",
-          border: "1px solid rgba(16,185,129,0.3)", display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: "12px", flexShrink: 0, marginTop: "2px",
-        }}>
-          ✦
+
+  if (isUser) {
+    return (
+      <div style={{ marginBottom: "20px", display: "flex", alignItems: "baseline", gap: "10px" }}>
+        <span style={{ color: "#10b981", fontFamily: "monospace", fontSize: "12px", flexShrink: 0 }}>›</span>
+        <div style={{ flex: 1 }}>
+          {message.authRole && (
+            <span style={{
+              fontSize: "9px", color: ROLE_COLORS[message.authRole] || "#888",
+              background: `${ROLE_COLORS[message.authRole]}18`,
+              border: `1px solid ${ROLE_COLORS[message.authRole]}33`,
+              borderRadius: "3px", padding: "0 5px", marginRight: "8px",
+              fontFamily: "monospace",
+            }}>
+              {message.authRole}
+              {message.authRole !== message.inferredRole && (
+                <span style={{ color: "#333" }}> → <span style={{ color: ROLE_COLORS[message.inferredRole || ""] }}>{message.inferredRole}</span></span>
+              )}
+            </span>
+          )}
+          <span style={{ fontSize: "13px", color: "#e5e5e5" }}>{message.content}</span>
         </div>
-      )}
-      <div style={{ maxWidth: "75%", minWidth: 0 }}>
-        {!isUser && message.authRole && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
-            <span style={{ fontSize: "10px", color: "#555" }}>Orchestrator</span>
-            {message.authRole !== message.inferredRole && (
-              <span style={{ fontSize: "10px", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: "3px", padding: "1px 5px", color: "#888" }}>
-                auth: <span style={{ color: ROLE_COLORS[message.authRole] || "#888" }}>{message.authRole}</span>
-                {" → inferred: "}
-                <span style={{ color: ROLE_COLORS[message.inferredRole || ""] || "#888" }}>{message.inferredRole}</span>
-              </span>
-            )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: "24px" }}>
+      {/* Response header bar */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "8px",
+        paddingBottom: "8px", marginBottom: "10px",
+        borderBottom: "1px solid #111",
+      }}>
+        <span style={{
+          fontSize: "10px", color: "#10b981", fontWeight: 700,
+          fontFamily: "monospace", letterSpacing: "0.08em",
+        }}>✦ ANVAY</span>
+        <span style={{ flex: 1, height: "1px", background: "transparent" }} />
+        {message.confidence !== undefined && (
+          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+            <div style={{ width: "40px", height: "2px", background: "#111", borderRadius: "1px", overflow: "hidden" }}>
+              <div style={{ width: `${message.confidence * 100}%`, height: "100%", background: message.confidence >= 0.9 ? "#10b981" : "#f59e0b" }} />
+            </div>
+            <span style={{ fontSize: "9px", color: message.confidence >= 0.9 ? "#10b981" : "#f59e0b", fontFamily: "monospace" }}>
+              {message.confidence.toFixed(2)}
+            </span>
           </div>
         )}
-        <div style={{
-          background: isUser ? "#1a2a1a" : "#111",
-          border: `1px solid ${isUser ? "rgba(16,185,129,0.2)" : "#1a1a1a"}`,
-          borderRadius: isUser ? "12px 12px 2px 12px" : "2px 12px 12px 12px",
-          padding: "10px 14px",
-          fontSize: "13px",
-          lineHeight: "1.6",
-          color: isUser ? "#d1d5db" : "#c9c9c9",
-        }}>
-          {isUser ? (
-            <span>{message.content}</span>
-          ) : (
-            <span
-              dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }}
-            />
-          )}
-          {message.streaming && (
-            <span style={{ display: "inline-block", width: "2px", height: "14px", background: "#10b981", marginLeft: "2px", verticalAlign: "middle", animation: "blink 1s step-end infinite" }} />
-          )}
-        </div>
+        {message.durationMs && (
+          <span style={{ fontSize: "9px", color: "#333", fontFamily: "monospace" }}>{(message.durationMs / 1000).toFixed(1)}s</span>
+        )}
+        {message.sources && message.sources.length > 0 && (
+          <div style={{ display: "flex", gap: "3px" }}>
+            {message.sources.map(s => (
+              <div key={s} title={s} style={{
+                width: "6px", height: "6px", borderRadius: "50%",
+                background: CONNECTOR_COLORS[s] || "#333",
+              }} />
+            ))}
+          </div>
+        )}
       </div>
-      {isUser && (
-        <div style={{
-          width: "28px", height: "28px", borderRadius: "50%", background: "#1a2030",
-          border: "1px solid #2a3a50", display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: "10px", color: "#3b82f6", fontWeight: 700, flexShrink: 0,
-        }}>
-          AJ
-        </div>
-      )}
+      {/* Response body */}
+      <div style={{ fontSize: "13px", lineHeight: "1.9", color: "#b0b0b0", paddingLeft: "2px" }}>
+        {message.streaming && message.content === "" ? (
+          <span style={{ color: "#333", fontFamily: "monospace" }}>
+            processing<span style={{ animation: "blink 0.8s step-end infinite" }}>_</span>
+          </span>
+        ) : (
+          <span dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }} />
+        )}
+        {message.streaming && message.content !== "" && (
+          <span style={{
+            display: "inline-block", width: "2px", height: "13px",
+            background: "#10b981", marginLeft: "1px", verticalAlign: "middle",
+            animation: "blink 0.8s step-end infinite",
+          }} />
+        )}
+      </div>
     </div>
   );
 }
 
-function FollowUpChips({ chips, onChip }: { chips: string[]; onChip: (chip: string) => void }) {
+function EmptyState({ onScenario }: { onScenario: (s: OrchestratorScenario) => void }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px", paddingLeft: "38px" }}>
-      {chips.map((chip) => (
-        <button
-          key={chip}
-          onClick={() => onChip(chip)}
-          style={{
-            background: "transparent", border: "1px solid #2a2a2a", color: "#888",
-            padding: "5px 10px", borderRadius: "6px", fontSize: "11px", cursor: "pointer",
-            transition: "all 0.15s",
-          }}
-          onMouseEnter={(e) => {
-            (e.target as HTMLElement).style.borderColor = "rgba(16,185,129,0.4)";
-            (e.target as HTMLElement).style.color = "#10b981";
-          }}
-          onMouseLeave={(e) => {
-            (e.target as HTMLElement).style.borderColor = "#2a2a2a";
-            (e.target as HTMLElement).style.color = "#888";
-          }}
-        >
-          {chip}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ScenarioButtons({ onScenario }: { onScenario: (s: OrchestratorScenario) => void }) {
-  return (
-    <div style={{ padding: "32px 24px", display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", flex: 1, justifyContent: "center" }}>
-      <div style={{ textAlign: "center", marginBottom: "8px" }}>
-        <div style={{ fontSize: "28px", marginBottom: "8px" }}>✦</div>
-        <div style={{ fontSize: "15px", fontWeight: 700, color: "#e5e5e5", marginBottom: "6px" }}>Ask Anvay anything</div>
-        <div style={{ fontSize: "12px", color: "#555", maxWidth: "380px", lineHeight: "1.6" }}>
-          One orchestrator. All your tools. No agent-picking.
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", height: "100%", gap: "28px", padding: "24px",
+      background: "radial-gradient(ellipse at 50% 40%, rgba(16,185,129,0.04) 0%, transparent 65%)",
+    }}>
+      {/* Hero */}
+      <div style={{ textAlign: "center", position: "relative" }}>
+        {/* Rings */}
+        <div style={{
+          position: "absolute", top: "50%", left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "120px", height: "120px", borderRadius: "50%",
+          border: "1px solid rgba(16,185,129,0.06)",
+          animation: "ring-expand 3s ease-out infinite",
+        }} />
+        <div style={{
+          position: "absolute", top: "50%", left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "80px", height: "80px", borderRadius: "50%",
+          border: "1px solid rgba(16,185,129,0.1)",
+          animation: "ring-expand 3s ease-out 1s infinite",
+        }} />
+        {/* Core */}
+        <div style={{
+          width: "52px", height: "52px", borderRadius: "13px",
+          background: "rgba(16,185,129,0.06)",
+          border: "1px solid rgba(16,185,129,0.18)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "22px", margin: "0 auto 14px",
+          boxShadow: "0 0 30px rgba(16,185,129,0.08), inset 0 0 20px rgba(16,185,129,0.03)",
+        }}>✦</div>
+        <div style={{ fontSize: "13px", fontWeight: 700, color: "#e5e5e5", marginBottom: "5px", fontFamily: "monospace", letterSpacing: "0.06em" }}>
+          ANVAY
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+          <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
+          <span style={{ fontSize: "10px", color: "#444", fontFamily: "monospace" }}>
+            ALL SYSTEMS OPERATIONAL · {CONNECTORS_ONLINE.length} CONNECTORS
+          </span>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", width: "100%", maxWidth: "560px" }}>
-        {SCENARIOS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => onScenario(s)}
-            style={{
-              background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px",
-              padding: "12px 14px", cursor: "pointer", textAlign: "left", color: "#888",
-              fontSize: "12px", lineHeight: "1.4", transition: "all 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget;
-              el.style.borderColor = "#2a2a2a";
-              el.style.color = "#d1d5db";
-              el.style.background = "#111";
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget;
-              el.style.borderColor = "#1a1a1a";
-              el.style.color = "#888";
-              el.style.background = "#0e0e0e";
-            }}
-          >
-            <div style={{ fontSize: "14px", marginBottom: "4px" }}>{s.emoji}</div>
-            <div>{s.label}</div>
-          </button>
+
+      {/* Connector row */}
+      <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", justifyContent: "center", maxWidth: "320px" }}>
+        {CONNECTORS_ONLINE.map(c => (
+          <div key={c} style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            background: "#0a0a0a", border: "1px solid #111", borderRadius: "3px", padding: "3px 7px",
+          }}>
+            <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: CONNECTOR_COLORS[c] || "#10b981" }} />
+            <span style={{ fontSize: "9px", color: "#333", fontFamily: "monospace" }}>{c}</span>
+          </div>
         ))}
       </div>
+
+      {/* Scenarios */}
+      <div style={{ width: "100%", maxWidth: "520px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+          <div style={{ flex: 1, height: "1px", background: "#111" }} />
+          <span style={{ fontSize: "9px", color: "#333", fontFamily: "monospace", letterSpacing: "0.12em" }}>SCENARIOS</span>
+          <div style={{ flex: 1, height: "1px", background: "#111" }} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+          {SCENARIOS.map(s => (
+            <button
+              key={s.id}
+              onClick={() => onScenario(s)}
+              style={{
+                background: "#080808", border: "1px solid #111", borderRadius: "5px",
+                padding: "11px 13px", cursor: "pointer", textAlign: "left", transition: "all 0.15s",
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = "rgba(16,185,129,0.2)";
+                e.currentTarget.style.background = "#0a0a0a";
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = "#111";
+                e.currentTarget.style.background = "#080808";
+              }}
+            >
+              <div style={{ marginBottom: "5px" }}>
+                <span style={{
+                  fontSize: "9px", color: ROLE_COLORS[s.inferredRole] || "#888",
+                  background: `${ROLE_COLORS[s.inferredRole]}18`,
+                  border: `1px solid ${ROLE_COLORS[s.inferredRole]}33`,
+                  borderRadius: "3px", padding: "0 5px", fontFamily: "monospace",
+                }}>{s.inferredRole}</span>
+              </div>
+              <div style={{ fontSize: "11px", color: "#555", lineHeight: "1.4", fontFamily: "monospace" }}>{s.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
 
-export function OrchestratorChat() {
+export function OrchestratorChat({ initialContext }: { initialContext?: OrchestratorContext }) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [logLines, setLogLines] = useState<LogLine[]>([]);
   const [agentStates, setAgentStates] = useState<AgentState[]>([]);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [currentAuthRole, setCurrentAuthRole] = useState("dev");
   const [currentInferredRole, setCurrentInferredRole] = useState("dev");
+  const [contextSource, setContextSource] = useState<{ title: string; source: string } | null>(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const firedInitialContext = useRef(false);
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logLines]);
+  useEffect(() => () => timeoutsRef.current.forEach(clearTimeout), []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    return () => timeoutsRef.current.forEach(clearTimeout);
-  }, []);
+    if (initialContext && !firedInitialContext.current) {
+      firedInitialContext.current = true;
+      setContextSource({ title: initialContext.title, source: initialContext.source });
+      sendFreeForm(initialContext.query);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialContext]);
 
   function addTimeout(fn: () => void, ms: number) {
     const t = setTimeout(fn, ms);
@@ -223,249 +317,267 @@ export function OrchestratorChat() {
     return t;
   }
 
+  function pushLog(line: Omit<LogLine, "id" | "ts">) {
+    setLogLines(prev => [...prev, { ...line, id: `log-${Date.now()}-${Math.random()}`, ts: now() }]);
+  }
+
   function runScenario(scenario: OrchestratorScenario) {
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
     setFollowUps([]);
+    setLogLines([]);
+    setConfidence(null);
     setIsThinking(true);
     setCurrentAuthRole(scenario.authRole);
     setCurrentInferredRole(scenario.inferredRole);
 
-    const userMsgId = `user-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      { id: userMsgId, role: "user", content: scenario.query },
-    ]);
+    setMessages(prev => [...prev, {
+      id: `user-${Date.now()}`, role: "user", content: scenario.query,
+      authRole: scenario.authRole, inferredRole: scenario.inferredRole,
+    }]);
+    setAgentStates(scenario.agents.map(a => ({ ...a, currentStatus: "pending" })));
 
-    const initAgents: AgentState[] = scenario.agents.map((a) => ({
-      ...a,
-      currentStatus: "pending",
-    }));
-    setAgentStates(initAgents);
+    const intentMap: Record<string, string> = { sre: "incident_triage", pm: "status_query", ba: "analytics_query", dev: "debug_query" };
+    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" }), 80);
+    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: `intent:${intentMap[scenario.inferredRole] || "general"} role:${scenario.inferredRole}`, status: "info" }), 420);
+    addTimeout(() => pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: `resolving envelope · ${scenario.authRole}→${scenario.inferredRole}`, status: "running" }), 600);
+    addTimeout(() => pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: `${scenario.agents.length} connectors scoped · write:gated`, status: "done" }), 900);
 
-    // routing message
-    addTimeout(() => {
-      const routingId = `routing-${Date.now()}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: routingId,
-          role: "assistant",
-          content: "Orchestrator routing...",
-          streaming: true,
-          authRole: scenario.authRole,
-          inferredRole: scenario.inferredRole,
-        },
-      ]);
-
-      // replace routing with role inference after 1s
+    const base = 1100;
+    scenario.agents.forEach(agent => {
+      const color = AGENT_COLORS[agent.name] || "#888";
+      const label = agent.name.replace("-agent", "").toUpperCase().slice(0, 6);
       addTimeout(() => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === routingId
-              ? {
-                  ...m,
-                  content: `Context understood. Spinning ${scenario.agents.length} specialist agents...`,
-                  streaming: false,
-                }
-              : m
-          )
-        );
-        setIsThinking(false);
+        setAgentStates(prev => prev.map(a => a.id === agent.id ? { ...a, currentStatus: "running" } : a));
+        pushLog({ actor: label, actorColor: color, text: agent.detail, status: "running" });
+      }, base + agent.startDelay);
+      addTimeout(() => {
+        setAgentStates(prev => prev.map(a => a.id === agent.id ? { ...a, currentStatus: "done" } : a));
+        pushLog({ actor: label, actorColor: color, text: "complete", status: "done", ms: agent.duration });
+      }, base + agent.startDelay + agent.duration);
+    });
 
-        // start agents sequentially
-        scenario.agents.forEach((agent, idx) => {
-          addTimeout(() => {
-            setAgentStates((prev) =>
-              prev.map((a) => (a.id === agent.id ? { ...a, currentStatus: "running" } : a))
-            );
-            addTimeout(() => {
-              setAgentStates((prev) =>
-                prev.map((a) => (a.id === agent.id ? { ...a, currentStatus: "done" } : a))
-              );
-            }, agent.duration);
-          }, agent.startDelay);
-        });
+    const maxTime = Math.max(...scenario.agents.map(a => a.startDelay + a.duration)) + base;
+    const conf = parseFloat((0.86 + Math.random() * 0.11).toFixed(2));
 
-        // stream response after all agents done
-        const maxAgentTime = Math.max(...scenario.agents.map((a) => a.startDelay + a.duration));
+    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "aggregating", status: "running" }), maxTime + 80);
+    addTimeout(() => {
+      setConfidence(conf);
+      pushLog({ actor: "CONF", actorColor: conf >= 0.9 ? "#10b981" : "#f59e0b", text: conf.toFixed(2), status: "done" });
+      pushLog({ actor: "AUDIT", actorColor: "#333", text: `evt-${Math.floor(Math.random() * 900 + 100)} · logged`, status: "info" });
+    }, maxTime + 380);
+
+    addTimeout(() => {
+      setIsThinking(false);
+      const respId = `resp-${Date.now()}`;
+      const sources = scenario.agents.map(a => a.name.replace("-agent", ""));
+      setMessages(prev => [...prev, {
+        id: respId, role: "assistant", content: "", streaming: true,
+        authRole: scenario.authRole, inferredRole: scenario.inferredRole,
+        sources, confidence: conf,
+      }]);
+      const words = scenario.response.split(" ");
+      let acc = "";
+      words.forEach((w, i) => {
         addTimeout(() => {
-          const respId = `resp-${Date.now()}`;
-          setMessages((prev) => [
-            ...prev,
-            { id: respId, role: "assistant", content: "", streaming: true, authRole: scenario.authRole, inferredRole: scenario.inferredRole },
-          ]);
-
-          const words = scenario.response.split(" ");
-          let accumulated = "";
-          words.forEach((word, wIdx) => {
-            addTimeout(() => {
-              accumulated += (wIdx === 0 ? "" : " ") + word;
-              const isFinal = wIdx === words.length - 1;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === respId
-                    ? { ...m, content: accumulated, streaming: !isFinal }
-                    : m
-                )
-              );
-              if (isFinal) {
-                setFollowUps(scenario.followUps);
-              }
-            }, wIdx * 35);
-          });
-        }, maxAgentTime + 400);
-      }, 1000);
-    }, 200);
+          acc += (i === 0 ? "" : " ") + w;
+          const done = i === words.length - 1;
+          setMessages(prev => prev.map(m => m.id === respId
+            ? { ...m, content: acc, streaming: !done, durationMs: done ? maxTime + 380 + i * 30 : undefined }
+            : m
+          ));
+          if (done) setFollowUps(scenario.followUps);
+        }, i * 30);
+      });
+    }, maxTime + 480);
   }
 
   function sendFreeForm(text: string) {
     setFollowUps([]);
+    setLogLines([]);
+    setConfidence(null);
     setIsThinking(true);
-    const userMsgId = `user-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: userMsgId, role: "user", content: text }]);
-    setAgentStates([
-      { id: "orchestrator", name: "orchestrator", status: "running", detail: "Analyzing intent and routing query", startDelay: 0, duration: 2000, currentStatus: "running" },
-    ]);
+    setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: "user", content: text }]);
+    setAgentStates([{ id: "orchestrator", name: "orchestrator", status: "running", detail: "analyzing", startDelay: 0, duration: 1200, currentStatus: "running" }]);
 
+    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" }), 80);
+    addTimeout(() => pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: "7 connectors in scope", status: "done" }), 550);
     addTimeout(() => {
       setAgentStates([
-        { id: "orchestrator", name: "orchestrator", status: "done", detail: "Analyzing intent and routing query", startDelay: 0, duration: 2000, currentStatus: "done" },
-        { id: "datadog-agent", name: "datadog-agent", status: "done", detail: "Querying connected datasources", startDelay: 0, duration: 1500, currentStatus: "running" },
+        { id: "orchestrator", name: "orchestrator", status: "done", detail: "", startDelay: 0, duration: 0, currentStatus: "done" },
+        { id: "datadog-agent", name: "datadog-agent", status: "running", detail: "", startDelay: 0, duration: 0, currentStatus: "running" },
+        { id: "github-agent", name: "github-agent", status: "running", detail: "", startDelay: 0, duration: 0, currentStatus: "running" },
       ]);
-      addTimeout(() => {
-        setAgentStates((prev) => prev.map((a) => ({ ...a, currentStatus: "done" })));
-        const respId = `resp-${Date.now()}`;
-        const genericResponse = "I'm analyzing across your connected sources (GitHub, Datadog, Linear, ArgoCD)...\n\nBased on what I found, there are **2 active blockers** in your payments pipeline and **1 ongoing incident** in the SRE queue. The most urgent item is the TC-005 idempotency failure which is blocking the staging deploy.\n\nWhat would you like to dig into?";
-        setMessages((prev) => [...prev, { id: respId, role: "assistant", content: "", streaming: true }]);
-        const words = genericResponse.split(" ");
-        let acc = "";
-        words.forEach((w, i) => {
-          addTimeout(() => {
-            acc += (i === 0 ? "" : " ") + w;
-            const isFinal = i === words.length - 1;
-            setMessages((prev) => prev.map((m) => m.id === respId ? { ...m, content: acc, streaming: !isFinal } : m));
-            if (isFinal) {
-              setFollowUps(["Show active blockers", "View payments incident", "What should I fix first?"]);
-              setIsThinking(false);
-            }
-          }, i * 40);
-        });
-      }, 1500);
-    }, 1200);
+      pushLog({ actor: "DATADOG", actorColor: "#7c3aed", text: "querying metrics + APM", status: "running" });
+      pushLog({ actor: "GITHUB", actorColor: "#aaa", text: "reading CI state", status: "running" });
+    }, 900);
+    addTimeout(() => {
+      setAgentStates(prev => prev.map(a => ({ ...a, currentStatus: "done" })));
+      pushLog({ actor: "DATADOG", actorColor: "#7c3aed", text: "complete", status: "done", ms: 847 });
+      pushLog({ actor: "GITHUB", actorColor: "#aaa", text: "complete", status: "done", ms: 1103 });
+      const conf = 0.91;
+      setConfidence(conf);
+      pushLog({ actor: "CONF", actorColor: "#10b981", text: conf.toFixed(2), status: "done" });
+      pushLog({ actor: "AUDIT", actorColor: "#333", text: `evt-${Math.floor(Math.random() * 900 + 100)} · logged`, status: "info" });
+      setIsThinking(false);
+      const respId = `resp-${Date.now()}`;
+      setMessages(prev => [...prev, { id: respId, role: "assistant", content: "", streaming: true, sources: ["datadog", "github"], confidence: conf }]);
+      const resp = "Analyzing across connected sources: GitHub, Datadog, Linear, ArgoCD.\n\n**2 active blockers** in payments pipeline and **1 ongoing incident** in SRE queue.\n\nMost urgent: TC-005 idempotency failure blocking staging deploy. Confidence: 0.91.\n\nWhat do you want to dig into?";
+      const words = resp.split(" ");
+      let acc = "";
+      words.forEach((w, i) => {
+        addTimeout(() => {
+          acc += (i === 0 ? "" : " ") + w;
+          const done = i === words.length - 1;
+          setMessages(prev => prev.map(m => m.id === respId ? { ...m, content: acc, streaming: !done } : m));
+          if (done) setFollowUps(["Show active blockers", "View payments incident", "What should I fix first?"]);
+        }, i * 40);
+      });
+    }, 2300);
   }
 
   function handleSend() {
     if (!input.trim() || isThinking) return;
-    const text = input.trim();
-    setInput("");
-    sendFreeForm(text);
+    const t = input.trim(); setInput(""); sendFreeForm(t);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }
 
   const isEmpty = messages.length === 0;
 
   return (
-    <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100%", background: "#050505", overflow: "hidden" }}>
       <style>{`
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes pulse-dot { 0%,100%{box-shadow:0 0 4px #10b981} 50%{box-shadow:0 0 12px #10b981} }
+        @keyframes fadeIn { from{opacity:0;transform:translateX(-4px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes ring-expand { 0%{opacity:0.4;transform:translate(-50%,-50%) scale(0.8)} 100%{opacity:0;transform:translate(-50%,-50%) scale(1.6)} }
       `}</style>
 
-      {/* Left: Chat */}
-      <div style={{ flex: 2, display: "flex", flexDirection: "column", borderRight: "1px solid #1a1a1a", minWidth: 0 }}>
+      {/* Left: chat */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+
         {/* Top bar */}
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #1a1a1a", display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
-          <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
-          <span style={{ fontSize: "13px", fontWeight: 700, color: "#e5e5e5" }}>Orchestrator</span>
-          <span style={{ fontSize: "11px", color: "#555", marginLeft: "4px" }}>—</span>
-          <span style={{ fontSize: "11px", color: "#555" }}>Acme Platform</span>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" }}>
+        <div style={{
+          padding: "11px 20px", borderBottom: "1px solid #0e0e0e",
+          display: "flex", alignItems: "center", gap: "10px", flexShrink: 0,
+          background: "#080808",
+        }}>
+          <div style={{
+            width: "6px", height: "6px", borderRadius: "50%", background: "#10b981",
+            animation: isThinking ? "pulse-dot 1.2s ease-in-out infinite" : "none",
+            boxShadow: "0 0 5px #10b981",
+          }} />
+          <span style={{ fontSize: "11px", fontWeight: 700, color: "#10b981", fontFamily: "monospace", letterSpacing: "0.1em" }}>ANVAY</span>
+          <span style={{ fontSize: "10px", color: "#222", fontFamily: "monospace" }}>·</span>
+          <span style={{ fontSize: "10px", color: "#333", fontFamily: "monospace" }}>acme-platform</span>
+
+          {contextSource && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: "5px",
+              background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)",
+              borderRadius: "3px", padding: "2px 8px",
+            }}>
+              <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#ef4444" }} />
+              <span style={{ fontSize: "9px", color: "#ef4444", fontFamily: "monospace" }}>via {contextSource.source}</span>
+              <span style={{ fontSize: "9px", color: "#333", maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {contextSource.title}</span>
+            </div>
+          )}
+
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
             {isThinking && (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "#111", border: "1px solid #2a2a2a", borderRadius: "4px", padding: "3px 8px" }}>
-                <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", animation: "blink 1s step-end infinite" }} />
-                <span style={{ fontSize: "10px", color: "#888" }}>thinking</span>
+              <div style={{ display: "flex", gap: "3px", alignItems: "center" }}>
+                {[0, 0.15, 0.3].map((delay, i) => (
+                  <div key={i} style={{
+                    width: "3px", height: "3px", borderRadius: "50%", background: "#10b981",
+                    animation: `blink 1s step-end ${delay}s infinite`,
+                  }} />
+                ))}
               </div>
             )}
-            <div style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: "4px", padding: "3px 8px", fontSize: "10px", color: "#555" }}>
-              workspace: acme-platform
-            </div>
+            <span style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", background: "#0a0a0a", border: "1px solid #111", borderRadius: "3px", padding: "2px 7px" }}>
+              {CONNECTORS_ONLINE.length} online
+            </span>
           </div>
         </div>
 
         {/* Messages */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: isEmpty ? "0" : "28px 28px 16px" }}>
           {isEmpty ? (
-            <ScenarioButtons onScenario={runScenario} />
+            <EmptyState onScenario={runScenario} />
           ) : (
             <>
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
-              ))}
+              {messages.map(msg => <MessageBlock key={msg.id} message={msg} />)}
               {followUps.length > 0 && (
-                <FollowUpChips
-                  chips={followUps}
-                  onChip={(chip) => {
-                    setFollowUps([]);
-                    sendFreeForm(chip);
-                  }}
-                />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginTop: "6px" }}>
+                  {followUps.map(chip => (
+                    <button
+                      key={chip}
+                      onClick={() => { setFollowUps([]); sendFreeForm(chip); }}
+                      style={{
+                        background: "#080808", border: "1px solid #111", color: "#555",
+                        padding: "4px 10px", borderRadius: "4px", fontSize: "10px",
+                        cursor: "pointer", fontFamily: "monospace", transition: "all 0.15s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(16,185,129,0.25)"; e.currentTarget.style.color = "#10b981"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#111"; e.currentTarget.style.color = "#555"; }}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
               )}
             </>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input bar */}
-        <div style={{ padding: "14px 20px", borderTop: "1px solid #1a1a1a", flexShrink: 0 }}>
+        {/* Input */}
+        <div style={{ padding: "12px 20px", borderTop: "1px solid #0e0e0e", flexShrink: 0, background: "#080808" }}>
           {!isEmpty && (
-            <div style={{ display: "flex", gap: "6px", marginBottom: "8px", flexWrap: "wrap" }}>
-              {SCENARIOS.map((s) => (
+            <div style={{ display: "flex", gap: "5px", marginBottom: "8px", flexWrap: "wrap" }}>
+              {SCENARIOS.map(s => (
                 <button
                   key={s.id}
                   onClick={() => runScenario(s)}
                   style={{
-                    background: "transparent", border: "1px solid #1a1a1a", color: "#555",
-                    padding: "3px 8px", borderRadius: "4px", fontSize: "10px", cursor: "pointer",
+                    background: "transparent", border: "1px solid #0e0e0e", color: "#333",
+                    padding: "2px 8px", borderRadius: "3px", fontSize: "9px",
+                    cursor: "pointer", fontFamily: "monospace", transition: "all 0.1s",
                   }}
+                  onMouseEnter={e => { e.currentTarget.style.color = "#888"; e.currentTarget.style.borderColor = "#1a1a1a"; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = "#333"; e.currentTarget.style.borderColor = "#0e0e0e"; }}
                 >
-                  {s.emoji} {s.label}
+                  {s.label}
                 </button>
               ))}
             </div>
           )}
-          <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
-            <div style={{ flex: 1, background: "#0e0e0e", border: "1px solid #2a2a2a", borderRadius: "8px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{
-                background: `${ROLE_COLORS[currentAuthRole] || "#3b82f6"}22`,
-                border: `1px solid ${ROLE_COLORS[currentAuthRole] || "#3b82f6"}44`,
-                borderRadius: "4px", padding: "2px 6px", fontSize: "10px",
-                color: ROLE_COLORS[currentAuthRole] || "#3b82f6", flexShrink: 0,
-                fontFamily: "monospace",
-              }}>
-                {currentAuthRole}
-                {currentAuthRole !== currentInferredRole && (
-                  <span style={{ color: "#555" }}>
-                    {" → "}
-                    <span style={{ color: ROLE_COLORS[currentInferredRole] || "#888" }}>{currentInferredRole}</span>
-                  </span>
-                )}
-              </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <span style={{ color: "#10b981", fontFamily: "monospace", fontSize: "12px", flexShrink: 0 }}>›</span>
+            <div style={{
+              flex: 1, background: "#0a0a0a",
+              border: "1px solid #111",
+              borderRadius: "5px", padding: "9px 12px",
+              display: "flex", alignItems: "center", gap: "10px",
+            }}>
+              <span style={{
+                fontSize: "9px", color: ROLE_COLORS[currentAuthRole] || "#888",
+                background: `${ROLE_COLORS[currentAuthRole]}15`,
+                border: `1px solid ${ROLE_COLORS[currentAuthRole]}30`,
+                borderRadius: "3px", padding: "1px 5px", fontFamily: "monospace", flexShrink: 0,
+              }}>{currentAuthRole}</span>
               <input
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask the orchestrator anything..."
+                placeholder="ask anvay anything..."
                 disabled={isThinking}
                 style={{
                   flex: 1, background: "transparent", border: "none", outline: "none",
-                  color: "#e5e5e5", fontSize: "13px",
+                  color: "#e5e5e5", fontSize: "12px", fontFamily: "monospace",
                 }}
               />
             </div>
@@ -473,58 +585,93 @@ export function OrchestratorChat() {
               onClick={handleSend}
               disabled={!input.trim() || isThinking}
               style={{
-                background: input.trim() && !isThinking ? "#10b981" : "#1a1a1a",
-                border: "none", color: input.trim() && !isThinking ? "#000" : "#555",
-                padding: "10px 16px", borderRadius: "8px", cursor: input.trim() && !isThinking ? "pointer" : "not-allowed",
-                fontSize: "13px", fontWeight: 700, transition: "all 0.15s",
+                background: input.trim() && !isThinking ? "rgba(16,185,129,0.12)" : "transparent",
+                border: input.trim() && !isThinking ? "1px solid rgba(16,185,129,0.35)" : "1px solid #111",
+                color: input.trim() && !isThinking ? "#10b981" : "#2a2a2a",
+                padding: "9px 14px", borderRadius: "5px",
+                cursor: input.trim() && !isThinking ? "pointer" : "not-allowed",
+                fontSize: "12px", fontWeight: 700, transition: "all 0.15s",
               }}
-            >
-              ↑
-            </button>
+            >↑</button>
           </div>
         </div>
       </div>
 
-      {/* Right: Agent Activity */}
-      <div style={{ width: "280px", flexShrink: 0, display: "flex", flexDirection: "column", background: "#0a0a0a" }}>
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid #1a1a1a" }}>
-          <div style={{ fontSize: "11px", fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Agent Activity
-          </div>
+      {/* Right: execution trace */}
+      <div style={{ width: "310px", flexShrink: 0, display: "flex", flexDirection: "column", background: "#030303", borderLeft: "1px solid #0e0e0e" }}>
+        <div style={{ padding: "11px 14px", borderBottom: "1px solid #0e0e0e" }}>
+          <span style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.12em" }}>
+            Execution Trace
+          </span>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-          {agentStates.length === 0 ? (
-            <div style={{ padding: "20px", textAlign: "center" }}>
-              <div style={{ fontSize: "20px", marginBottom: "8px" }}>⬡</div>
-              <div style={{ fontSize: "11px", color: "#444" }}>Agents will appear here when the orchestrator spins them up</div>
+
+        {/* Context */}
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid #080808" }}>
+          {[
+            ["user", "alex@acme.dev", "#444"],
+            ["auth", currentAuthRole + (currentAuthRole !== currentInferredRole ? ` → ${currentInferredRole}` : ""), ROLE_COLORS[currentAuthRole] || "#444"],
+            ["workspace", "acme-platform", "#333"],
+            ["scope", `${CONNECTORS_ONLINE.length} connectors`, "#333"],
+          ].map(([k, v, c]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", fontFamily: "monospace", marginBottom: "2px" }}>
+              <span style={{ color: "#222" }}>{k}</span>
+              <span style={{ color: c as string }}>{v}</span>
             </div>
+          ))}
+        </div>
+
+        {/* Log */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+          {logLines.length === 0 ? (
+            <div style={{ paddingTop: "16px", fontSize: "10px", color: "#1a1a1a", fontFamily: "monospace" }}>awaiting query_</div>
           ) : (
-            <>
-              <div style={{ fontSize: "10px", color: "#555", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                {agentStates.filter((a) => a.currentStatus === "done").length} / {agentStates.length} complete
-              </div>
-              {agentStates.map((agent) => (
-                <AgentBadge key={agent.id} agent={agent} />
-              ))}
-              <div style={{ marginTop: "16px", padding: "10px", background: "#111", border: "1px solid #1a1a1a", borderRadius: "6px" }}>
-                <div style={{ fontSize: "10px", color: "#555", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Routing</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  {[
-                    ["Intent", "inferred from query"],
-                    ["Auth", currentAuthRole],
-                    ["Inferred", currentInferredRole],
-                    ["Context", "workspace: acme-platform"],
-                  ].map(([k, v]) => (
-                    <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
-                      <span style={{ color: "#444" }}>{k}</span>
-                      <span style={{ color: k === "Auth" ? (ROLE_COLORS[v] || "#888") : k === "Inferred" ? (ROLE_COLORS[v] || "#888") : "#888", fontFamily: "monospace" }}>{v}</span>
-                    </div>
-                  ))}
+            logLines.map((line, i) => <LogEntry key={line.id} line={line} idx={i} />)
+          )}
+          <div ref={logEndRef} />
+        </div>
+
+        {/* Agent dots + confidence */}
+        {agentStates.length > 0 && (
+          <div style={{ padding: "10px 14px", borderTop: "1px solid #080808" }}>
+            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginBottom: confidence !== null ? "8px" : "0" }}>
+              {agentStates.map(a => {
+                const color = AGENT_COLORS[a.name] || "#333";
+                return (
+                  <div key={a.id} title={a.name} style={{
+                    display: "flex", alignItems: "center", gap: "4px",
+                    background: "#080808", border: "1px solid #0e0e0e", borderRadius: "3px", padding: "2px 6px",
+                  }}>
+                    <div style={{
+                      width: "4px", height: "4px", borderRadius: "50%",
+                      background: a.currentStatus === "done" ? color : a.currentStatus === "running" ? color : "#111",
+                      opacity: a.currentStatus === "done" ? 0.6 : a.currentStatus === "running" ? 1 : 0.2,
+                      boxShadow: a.currentStatus === "running" ? `0 0 5px ${color}` : "none",
+                      animation: a.currentStatus === "running" ? "pulse-dot 1s ease-in-out infinite" : "none",
+                    }} />
+                    <span style={{ fontSize: "9px", color: "#222", fontFamily: "monospace" }}>
+                      {a.name.replace("-agent", "")}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {confidence !== null && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", fontFamily: "monospace", marginBottom: "3px" }}>
+                  <span style={{ color: "#222" }}>confidence</span>
+                  <span style={{ color: confidence >= 0.9 ? "#10b981" : "#f59e0b" }}>{confidence.toFixed(2)}</span>
+                </div>
+                <div style={{ height: "1px", background: "#0e0e0e", overflow: "hidden" }}>
+                  <div style={{
+                    width: `${confidence * 100}%`, height: "100%",
+                    background: confidence >= 0.9 ? "#10b981" : "#f59e0b",
+                    transition: "width 0.6s ease-out",
+                  }} />
                 </div>
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

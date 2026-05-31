@@ -46,8 +46,8 @@ export const FEATURES: Feature[] = [
         actions: ["View in GitHub", "Run All", "Generate More"],
       },
       {
-        id: "col-1", type: "collection", label: "API Collection", title: "payments-v2.restol",
-        state: "running", connector: "Restol", connectorColor: "#10b981",
+        id: "col-1", type: "collection", label: "API Collection", title: "payments-v2.anvay",
+        state: "running", connector: "Anvay", connectorColor: "#10b981",
         stats: "8 requests",
         detail: `**Collection**: payments-v2\n**Environment**: staging\n**Last run**: 2 min ago · 6/8 passing\n\nPOST /v2/payments/quick-checkout ✅\nGET  /v2/payments/methods/:id ✅\nPOST /v2/payments (legacy) ✅\nDELETE /v2/payments/:id ✅\nPOST /v2/payments/refund ✅\nGET  /v2/payments/status ✅\nPOST /v2/payments/quick-checkout (high-value) ❌\nGET  /v2/payments/methods (empty) ❌`,
         actions: ["Run Collection", "View Results", "Export k6"],
@@ -139,6 +139,10 @@ export const CONNECTORS: Connector[] = [
   { id: "terraform", name: "Terraform Cloud", category: "Infrastructure", description: "IaC runs, state, workspaces", connected: false, color: "#7b42bc", icon: "TF", capabilities: ["infrastructure"], configFields: [{ label: "API Token", key: "token", type: "password" }, { label: "Organization", key: "org", type: "text" }] },
   { id: "pagerduty", name: "PagerDuty", category: "Alerting", description: "Incidents, on-call schedules", connected: false, color: "#06a94d", icon: "PD", capabilities: ["alerts", "incidents"], configFields: [{ label: "API Key", key: "api_key", type: "password" }, { label: "Service ID", key: "service_id", type: "text" }] },
   { id: "gke", name: "Google GKE", category: "Kubernetes", description: "GCP managed Kubernetes", connected: false, color: "#4285f4", icon: "GK", capabilities: ["k8s", "infrastructure"], configFields: [{ label: "Project ID", key: "project_id", type: "text" }, { label: "Cluster Name", key: "cluster", type: "text" }, { label: "Service Account JSON", key: "sa_json", type: "textarea" }] },
+  { id: "aws-cloudwatch", name: "AWS CloudWatch", category: "Cloud Health", description: "Metrics, alarms, logs, health events", connected: false, color: "#ff9900", icon: "CW", capabilities: ["metrics", "logs", "alerts", "infrastructure"], configFields: [{ label: "Access Key ID", key: "access_key_id", type: "text" }, { label: "Secret Access Key", key: "secret_access_key", type: "password" }, { label: "Region", key: "region", type: "text" }] },
+  { id: "aws-health", name: "AWS Health", category: "Cloud Health", description: "Service events, scheduled maintenance, account health", connected: false, color: "#ff9900", icon: "AH", capabilities: ["alerts", "infrastructure"], configFields: [{ label: "Access Key ID", key: "access_key_id", type: "text" }, { label: "Secret Access Key", key: "secret_access_key", type: "password" }] },
+  { id: "gcp-monitoring", name: "GCP Cloud Monitoring", category: "Cloud Health", description: "Metrics, uptime checks, alerting policies", connected: false, color: "#4285f4", icon: "GM", capabilities: ["metrics", "alerts", "infrastructure"], configFields: [{ label: "Project ID", key: "project_id", type: "text" }, { label: "Service Account JSON", key: "sa_json", type: "textarea" }] },
+  { id: "azure-monitor", name: "Azure Monitor", category: "Cloud Health", description: "Metrics, logs, alerts, service health", connected: false, color: "#0078d4", icon: "AM", capabilities: ["metrics", "logs", "alerts", "infrastructure"], configFields: [{ label: "Tenant ID", key: "tenant_id", type: "text" }, { label: "Client ID", key: "client_id", type: "text" }, { label: "Client Secret", key: "client_secret", type: "password" }, { label: "Subscription ID", key: "subscription_id", type: "text" }] },
 ];
 
 export const AI_RESPONSES: Record<string, string[]> = {
@@ -173,7 +177,7 @@ export const AI_RESPONSES: Record<string, string[]> = {
   "Generate Collection": [
     "Reading spec contracts...\n",
     "Parsing endpoint schemas...\n\n",
-    "Building collection: payments-v2.restol.yaml\n\n",
+    "Building collection: payments-v2.anvay.yaml\n\n",
     "  POST /v2/payments/quick-checkout — with body + assertions\n",
     "  GET  /v2/payments/methods/:userId — parameterized\n",
     "  POST /v2/payments/quick-checkout (high-value) — edge case\n",
@@ -785,3 +789,1587 @@ export const SCENARIOS: OrchestratorScenario[] = [
     followUps: ["Export to Linear", "Compare to last month", "Identify highest-value drop-off"],
   },
 ];
+
+// ─── Projects + Teams ───────────────────────────────────────────────────────
+
+export interface Project {
+  id: string
+  name: string
+  repo: string
+  team: string
+  description: string
+  knowledgeBase: {
+    code: "ready" | "syncing" | "pending"
+    infra: "ready" | "syncing" | "pending"
+    metrics: "ready" | "syncing" | "pending"
+    issues: "ready" | "syncing" | "pending"
+    docs: "ready" | "syncing" | "pending"
+    deploys: "ready" | "syncing" | "pending"
+  }
+  connectors: string[]  // connector ids active for this project
+  autonomyLevel: "L1" | "L2" | "L3" | "L4"
+  lastSync: string
+}
+
+export interface Team {
+  id: string
+  name: string
+  projectIds: string[]
+  members: { name: string; role: string; avatar: string }[]
+}
+
+export const PROJECTS: Project[] = [
+  {
+    id: "payments-api",
+    name: "payments-api",
+    repo: "acme/payments-api",
+    team: "payments",
+    description: "Core payment processing service",
+    knowledgeBase: { code: "ready", infra: "ready", metrics: "ready", issues: "ready", docs: "ready", deploys: "ready" },
+    connectors: ["github", "linear", "datadog", "argocd", "eks"],
+    autonomyLevel: "L2",
+    lastSync: "2 min ago"
+  },
+  {
+    id: "checkout-v2",
+    name: "checkout-v2",
+    repo: "acme/checkout-v2",
+    team: "growth",
+    description: "New checkout flow redesign",
+    knowledgeBase: { code: "ready", infra: "syncing", metrics: "pending", issues: "ready", docs: "ready", deploys: "pending" },
+    connectors: ["github", "linear", "datadog"],
+    autonomyLevel: "L1",
+    lastSync: "15 min ago"
+  },
+  {
+    id: "auth-service",
+    name: "auth-service",
+    repo: "acme/auth-service",
+    team: "platform",
+    description: "Authentication and authorization service",
+    knowledgeBase: { code: "ready", infra: "ready", metrics: "ready", issues: "ready", docs: "pending", deploys: "ready" },
+    connectors: ["github", "datadog", "argocd", "eks"],
+    autonomyLevel: "L2",
+    lastSync: "5 min ago"
+  },
+  {
+    id: "catalog-service",
+    name: "catalog-service",
+    repo: "acme/catalog-service",
+    team: "platform",
+    description: "Product catalog and search",
+    knowledgeBase: { code: "ready", infra: "ready", metrics: "syncing", issues: "pending", docs: "pending", deploys: "ready" },
+    connectors: ["github", "datadog", "eks"],
+    autonomyLevel: "L3",
+    lastSync: "1 hour ago"
+  },
+  {
+    id: "api-gateway",
+    name: "api-gateway",
+    repo: "acme/api-gateway",
+    team: "platform",
+    description: "API gateway and rate limiting",
+    knowledgeBase: { code: "pending", infra: "pending", metrics: "pending", issues: "pending", docs: "pending", deploys: "pending" },
+    connectors: [],
+    autonomyLevel: "L1",
+    lastSync: "never"
+  }
+]
+
+// ─── Intake / Signal Routing ────────────────────────────────────────────────
+
+export type IntakeMode = "bypass" | "monitor" | "handle"
+export type IntakeDisposition = "context_surfaced" | "escalated" | "suppressed" | "open"
+
+export interface IntakeSource {
+  id: string
+  name: string
+  icon: string
+  color: string
+  category: "alertmanager" | "ticketing" | "observability"
+  mode: IntakeMode
+  confidenceThreshold: number
+  escalationPolicy: string
+  webhookConfigured: boolean
+  webhookPath: string
+  stats: { received: number; assisted: number; escalated: number }
+}
+
+export interface IntakeEvent {
+  id: string
+  sourceId: string
+  sourceName: string
+  sourceColor: string
+  title: string
+  receivedAt: string
+  confidence: number
+  disposition: IntakeDisposition
+  triageSummary: string
+  escalatedTo?: string
+  durationMs: number
+}
+
+export const INTAKE_SOURCES: IntakeSource[] = [
+  {
+    id: "pagerduty",
+    name: "PagerDuty",
+    icon: "PD",
+    color: "#06a94d",
+    category: "alertmanager",
+    mode: "handle",
+    confidenceThreshold: 0.85,
+    escalationPolicy: "payments-oncall",
+    webhookConfigured: true,
+    webhookPath: "/intake/pagerduty/acme",
+    stats: { received: 47, assisted: 31, escalated: 16 },
+  },
+  {
+    id: "opsgenie",
+    name: "OpsGenie",
+    icon: "OG",
+    color: "#f97316",
+    category: "alertmanager",
+    mode: "handle",
+    confidenceThreshold: 0.90,
+    escalationPolicy: "platform-oncall",
+    webhookConfigured: true,
+    webhookPath: "/intake/opsgenie/acme",
+    stats: { received: 22, assisted: 18, escalated: 4 },
+  },
+  {
+    id: "alertmanager",
+    name: "Prometheus Alertmanager",
+    icon: "AM",
+    color: "#e55b2e",
+    category: "alertmanager",
+    mode: "monitor",
+    confidenceThreshold: 0.90,
+    escalationPolicy: "sre-oncall",
+    webhookConfigured: true,
+    webhookPath: "/intake/alertmanager/acme",
+    stats: { received: 134, assisted: 0, escalated: 134 },
+  },
+  {
+    id: "victorops",
+    name: "VictorOps",
+    icon: "VO",
+    color: "#8b5cf6",
+    category: "alertmanager",
+    mode: "bypass",
+    confidenceThreshold: 0.85,
+    escalationPolicy: "default",
+    webhookConfigured: false,
+    webhookPath: "/intake/victorops/acme",
+    stats: { received: 0, assisted: 0, escalated: 0 },
+  },
+  {
+    id: "zendesk",
+    name: "Zendesk",
+    icon: "ZD",
+    color: "#03363d",
+    category: "ticketing",
+    mode: "handle",
+    confidenceThreshold: 0.80,
+    escalationPolicy: "support-tier1",
+    webhookConfigured: true,
+    webhookPath: "/intake/zendesk/acme",
+    stats: { received: 89, assisted: 52, escalated: 37 },
+  },
+  {
+    id: "intercom",
+    name: "Intercom",
+    icon: "IC",
+    color: "#286efa",
+    category: "ticketing",
+    mode: "handle",
+    confidenceThreshold: 0.75,
+    escalationPolicy: "support-tier1",
+    webhookConfigured: true,
+    webhookPath: "/intake/intercom/acme",
+    stats: { received: 63, assisted: 41, escalated: 22 },
+  },
+  {
+    id: "freshdesk",
+    name: "Freshdesk",
+    icon: "FD",
+    color: "#25c16f",
+    category: "ticketing",
+    mode: "bypass",
+    confidenceThreshold: 0.80,
+    escalationPolicy: "support-tier1",
+    webhookConfigured: false,
+    webhookPath: "/intake/freshdesk/acme",
+    stats: { received: 0, assisted: 0, escalated: 0 },
+  },
+]
+
+export const INTAKE_LOG: IntakeEvent[] = [
+  {
+    id: "in-001",
+    sourceId: "pagerduty",
+    sourceName: "PagerDuty",
+    sourceColor: "#06a94d",
+    title: "P1 · payments-api error rate > 5%",
+    receivedAt: "2 min ago",
+    confidence: 0.94,
+    disposition: "escalated",
+    triageSummary: "Root cause found: v2.3.0 deploy 14 min ago, NullPointerException QuickCheckoutHandler:89. Recommended: rollback v2.2.9. Escalated with full context to payments-oncall.",
+    escalatedTo: "alice (on-call)",
+    durationMs: 3240,
+  },
+  {
+    id: "in-002",
+    sourceId: "zendesk",
+    sourceName: "Zendesk",
+    sourceColor: "#03363d",
+    title: "ZD-4421 · Payment not going through (14 reports)",
+    receivedAt: "3 min ago",
+    confidence: 0.91,
+    disposition: "escalated",
+    triageSummary: "14 customer reports in 8 min. Root cause linked to alrt-001 (payments-api error spike). All failures on quick-checkout flow with amount > 500. Escalated with triage context.",
+    escalatedTo: "support-tier1",
+    durationMs: 1820,
+  },
+  {
+    id: "in-003",
+    sourceId: "opsgenie",
+    sourceName: "OpsGenie",
+    sourceColor: "#f97316",
+    title: "catalog-service memory usage 91%",
+    receivedAt: "12 min ago",
+    confidence: 0.93,
+    disposition: "context_surfaced",
+    triageSummary: "Memory spike traced to missing GC on large search result sets. Known pattern. Anvay surfaced root cause + recommended pod restart to platform-oncall. Team actioned within 2 min.",
+    durationMs: 2100,
+  },
+  {
+    id: "in-004",
+    sourceId: "pagerduty",
+    sourceName: "PagerDuty",
+    sourceColor: "#06a94d",
+    title: "auth-service p99 > 1000ms",
+    receivedAt: "18 min ago",
+    confidence: 0.72,
+    disposition: "escalated",
+    triageSummary: "Latency spike detected. Possible causes: DB pool saturation (92%), upstream payments load. Confidence below threshold (0.72 < 0.85) — escalated with partial context.",
+    escalatedTo: "eve (sre)",
+    durationMs: 1540,
+  },
+  {
+    id: "in-005",
+    sourceId: "intercom",
+    sourceName: "Intercom",
+    sourceColor: "#286efa",
+    title: "IC-8834 · Can't save payment method",
+    receivedAt: "22 min ago",
+    confidence: 0.82,
+    disposition: "context_surfaced",
+    triageSummary: "Linked to payments-api v2.3.0 regression. Anvay surfaced full trace + downstream congestion context to support-tier1. Agent suggested reply template — support rep sent within 3 min.",
+    durationMs: 980,
+  },
+  {
+    id: "in-006",
+    sourceId: "zendesk",
+    sourceName: "Zendesk",
+    sourceColor: "#03363d",
+    title: "ZD-4418 · 3DS keeps triggering on small purchases",
+    receivedAt: "1 hour ago",
+    confidence: 0.88,
+    disposition: "escalated",
+    triageSummary: "6 customers reporting 3DS on $30–$50 range. Root cause: TC-004 boundary gap in risk threshold spec. Linked to LIN-2289. Escalated to eng with full trace.",
+    escalatedTo: "bob (dev)",
+    durationMs: 2340,
+  },
+]
+
+// ─── Cloud Health ────────────────────────────────────────────────────────────
+
+export type CloudProvider = "aws" | "gcp" | "azure"
+export type CloudResourceStatus = "healthy" | "warning" | "critical" | "unknown"
+export type CloudFindingSeverity = "critical" | "high" | "medium" | "low"
+export type CloudFindingCategory = "exposure" | "misconfiguration" | "vulnerability" | "compliance"
+
+export interface CloudResource {
+  id: string
+  provider: CloudProvider
+  region: string
+  service: string
+  name: string
+  type: string
+  status: CloudResourceStatus
+  metrics?: { cpu?: number; memory?: number; storage?: number; connections?: number }
+  tags?: string[]
+}
+
+export interface CloudSecurityFinding {
+  id: string
+  provider: CloudProvider
+  severity: CloudFindingSeverity
+  category: CloudFindingCategory
+  resource: string
+  service: string
+  title: string
+  detail: string
+  detectedAt: string
+  cve?: string
+}
+
+export interface CloudConfigIssue {
+  id: string
+  provider: CloudProvider
+  severity: "critical" | "high" | "medium"
+  service: string
+  resource: string
+  issue: string
+  recommendation: string
+}
+
+export interface CloudProviderSummary {
+  provider: CloudProvider
+  label: string
+  color: string
+  icon: string
+  connected: boolean
+  regions: number
+  resources: number
+  criticalAlerts: number
+  securityFindings: number
+  configIssues: number
+}
+
+export const CLOUD_PROVIDERS: CloudProviderSummary[] = [
+  { provider: "aws", label: "Amazon Web Services", color: "#ff9900", icon: "AWS", connected: true, regions: 3, resources: 47, criticalAlerts: 2, securityFindings: 5, configIssues: 7 },
+  { provider: "gcp", label: "Google Cloud", color: "#4285f4", icon: "GCP", connected: false, regions: 0, resources: 0, criticalAlerts: 0, securityFindings: 0, configIssues: 0 },
+  { provider: "azure", label: "Microsoft Azure", color: "#0078d4", icon: "AZR", connected: false, regions: 0, resources: 0, criticalAlerts: 0, securityFindings: 0, configIssues: 0 },
+]
+
+export const CLOUD_RESOURCES: CloudResource[] = [
+  { id: "r-001", provider: "aws", region: "us-east-1", service: "RDS", name: "payments-db-prod", type: "db.r6g.xlarge", status: "critical", metrics: { cpu: 81, memory: 74, connections: 94, storage: 61 }, tags: ["payments", "prod"] },
+  { id: "r-002", provider: "aws", region: "us-east-1", service: "ElastiCache", name: "session-cache-prod", type: "cache.r6g.large", status: "warning", metrics: { cpu: 44, memory: 87 }, tags: ["auth", "prod"] },
+  { id: "r-003", provider: "aws", region: "us-east-1", service: "EC2", name: "batch-worker-03", type: "c6i.2xlarge", status: "warning", metrics: { cpu: 78, memory: 52 }, tags: ["batch", "prod"] },
+  { id: "r-004", provider: "aws", region: "us-east-1", service: "RDS", name: "auth-db-prod", type: "db.t4g.large", status: "healthy", metrics: { cpu: 22, memory: 41, connections: 38, storage: 34 }, tags: ["auth", "prod"] },
+  { id: "r-005", provider: "aws", region: "us-east-1", service: "ECS", name: "payments-api", type: "FARGATE", status: "healthy", metrics: { cpu: 34, memory: 58 }, tags: ["payments", "prod"] },
+  { id: "r-006", provider: "aws", region: "us-east-1", service: "Lambda", name: "webhook-processor", type: "arm64 · 512MB", status: "healthy", metrics: { cpu: 12 }, tags: ["payments"] },
+  { id: "r-007", provider: "aws", region: "us-east-1", service: "ECS", name: "auth-service", type: "FARGATE", status: "healthy", metrics: { cpu: 28, memory: 43 }, tags: ["auth", "prod"] },
+  { id: "r-008", provider: "aws", region: "us-west-2", service: "RDS", name: "payments-db-replica", type: "db.r6g.xlarge", status: "healthy", metrics: { cpu: 18, memory: 55, connections: 21, storage: 61 }, tags: ["payments", "replica"] },
+  { id: "r-009", provider: "aws", region: "eu-west-1", service: "EC2", name: "catalog-worker-01", type: "t3.large", status: "healthy", metrics: { cpu: 41, memory: 66 }, tags: ["catalog", "prod"] },
+  { id: "r-010", provider: "aws", region: "us-east-1", service: "S3", name: "acme-user-uploads", type: "Standard", status: "warning", tags: ["storage"] },
+]
+
+export const CLOUD_SECURITY: CloudSecurityFinding[] = [
+  {
+    id: "sec-001", provider: "aws", severity: "critical", category: "exposure",
+    service: "S3", resource: "acme-user-uploads",
+    title: "S3 bucket has public read access enabled",
+    detail: "Bucket ACL allows s3:GetObject for AllUsers. Any file uploaded by users is publicly readable without authentication.",
+    detectedAt: "3 hours ago",
+  },
+  {
+    id: "sec-002", provider: "aws", severity: "critical", category: "exposure",
+    service: "EC2", resource: "sg-0a1b2c3d4e (payments-api-sg)",
+    title: "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+    detail: "Inbound rule exposes SSH to the entire internet. No IP restriction. Direct attack surface for brute force and exploit attempts.",
+    detectedAt: "2 days ago",
+  },
+  {
+    id: "sec-003", provider: "aws", severity: "high", category: "misconfiguration",
+    service: "RDS", resource: "payments-db-prod",
+    title: "RDS instance not encrypted at rest",
+    detail: "Storage encryption is disabled. Data at rest on the DB volume is unencrypted. Encryption cannot be enabled on existing instance — requires snapshot + restore.",
+    detectedAt: "14 days ago",
+  },
+  {
+    id: "sec-004", provider: "aws", severity: "high", category: "compliance",
+    service: "IAM", resource: "user: svc-deploy-legacy",
+    title: "IAM user with console access and no MFA",
+    detail: "svc-deploy-legacy has AWS console login enabled and no MFA enforced. Service accounts should use roles, not IAM users with console access.",
+    detectedAt: "22 days ago",
+  },
+  {
+    id: "sec-005", provider: "aws", severity: "medium", category: "vulnerability",
+    service: "Lambda", resource: "webhook-processor",
+    title: "Lambda execution role has wildcard S3 permissions",
+    detail: "Role policy grants s3:* on *. Function only needs GetObject/PutObject on acme-user-uploads. Over-provisioned permissions violate least-privilege.",
+    detectedAt: "5 days ago",
+  },
+]
+
+export const CLOUD_CONFIG: CloudConfigIssue[] = [
+  { id: "cfg-001", provider: "aws", severity: "high", service: "RDS", resource: "payments-db-prod", issue: "Automated backups disabled", recommendation: "Enable automated backups with ≥7 day retention. Current RPO is effectively unbounded." },
+  { id: "cfg-002", provider: "aws", severity: "high", service: "CloudWatch", resource: "webhook-processor (Lambda)", issue: "No CloudWatch log group configured — logs discarded", recommendation: "Set LOG_LEVEL and configure /aws/lambda/webhook-processor log group with 30-day retention." },
+  { id: "cfg-003", provider: "aws", severity: "high", service: "EC2", resource: "batch-worker-03", issue: "No auto-scaling policy attached", recommendation: "CPU at 78% with no scale-out trigger. Add target tracking policy at 60% CPU." },
+  { id: "cfg-004", provider: "aws", severity: "medium", service: "S3", resource: "acme-user-uploads", issue: "No lifecycle policy — objects accumulate indefinitely", recommendation: "Add lifecycle rule: transition to Glacier after 90 days, expire after 365 days." },
+  { id: "cfg-005", provider: "aws", severity: "medium", service: "EBS", resource: "batch-worker-03 (vol-0x4f9)", issue: "EBS volume not encrypted", recommendation: "Create encrypted snapshot and replace volume. Enable default encryption for region." },
+  { id: "cfg-006", provider: "aws", severity: "medium", service: "RDS", resource: "payments-db-prod", issue: "Minor version auto-upgrade disabled", recommendation: "Enable auto minor version upgrade to receive security patches automatically." },
+  { id: "cfg-007", provider: "aws", severity: "medium", service: "CloudWatch", resource: "payments-db-prod", issue: "No alarm on FreeStorageSpace", recommendation: "RDS storage at 61%. Add alarm at 75% to trigger expansion before hitting limit." },
+]
+
+// ─── Live Alerts, Tickets, Metric Outliers ─────────────────────────────────
+
+export type AlertSeverity = "critical" | "high" | "medium" | "low"
+export type TriageStatus = "auto_triaged" | "triaging" | "pending" | "escalated"
+
+export interface LiveAlert {
+  id: string
+  kind: "alert" | "ticket" | "metric" | "customer" | "ci" | "error"
+  severity: AlertSeverity
+  title: string
+  source: string
+  sourceIcon: string
+  sourceColor: string
+  service: string
+  timestamp: string
+  triageStatus: TriageStatus
+  triageSummary?: string
+  confidence?: number
+  gateId?: string
+  gateStatus?: "pending_approval" | "auto_approved"
+  orchestratorQuery: string
+  // CI-specific
+  branch?: string
+  commitSha?: string
+  runUrl?: string
+  // Error-specific
+  errorCount?: number
+  firstSeen?: string
+}
+
+export const LIVE_ALERTS: LiveAlert[] = [
+  {
+    id: "alrt-001",
+    kind: "alert",
+    severity: "critical",
+    title: "payments-api error rate 8.4% (threshold: 1%)",
+    source: "Datadog",
+    sourceIcon: "DD",
+    sourceColor: "#7c3aed",
+    service: "payments-api",
+    timestamp: "2 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "Root cause: payments-service v2.3.0 deployed 14 min ago. NullPointerException in QuickCheckoutHandler.java:89 — riskScore null when amount > 500. 3/5 pods in CrashLoopBackOff.",
+    confidence: 0.94,
+    gateId: "gate-prod-rollback-881",
+    gateStatus: "pending_approval",
+    orchestratorQuery: "Why is payments-api error rate at 8.4%? Alert triggered 2 min ago.",
+  },
+  {
+    id: "alrt-002",
+    kind: "alert",
+    severity: "critical",
+    title: "3 pods CrashLoopBackOff — payments namespace",
+    source: "Amazon EKS",
+    sourceIcon: "EK",
+    sourceColor: "#f59e0b",
+    service: "payments-api",
+    timestamp: "3 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "All 3 pods on v2.3.0. Restart count: 5. Same root cause as Datadog error alert — null pointer at startup in QuickCheckoutHandler.",
+    confidence: 0.91,
+    gateId: "gate-k8s-scale-992",
+    gateStatus: "auto_approved",
+    orchestratorQuery: "Why are 3 payments-api pods in CrashLoopBackOff?",
+  },
+  {
+    id: "alrt-003",
+    kind: "alert",
+    severity: "high",
+    title: "auth-service p99 latency spike — 1,240ms (baseline: 180ms)",
+    source: "Datadog",
+    sourceIcon: "DD",
+    sourceColor: "#7c3aed",
+    service: "auth-service",
+    timestamp: "8 min ago",
+    triageStatus: "triaging",
+    orchestratorQuery: "Why did auth-service p99 latency spike to 1240ms? Baseline is 180ms.",
+  },
+  {
+    id: "alrt-004",
+    kind: "alert",
+    severity: "high",
+    title: "OOMKilled — 3 payments-api pods in last 30 min",
+    source: "Amazon EKS",
+    sourceIcon: "EK",
+    sourceColor: "#f59e0b",
+    service: "payments-api",
+    timestamp: "18 min ago",
+    triageStatus: "pending",
+    orchestratorQuery: "Why are payments-api pods getting OOMKilled?",
+  },
+  {
+    id: "tkt-001",
+    kind: "ticket",
+    severity: "high",
+    title: "LIN-2289 · 3DS bypass not triggering for $30–$50 range",
+    source: "Linear",
+    sourceIcon: "LN",
+    sourceColor: "#5e6ad2",
+    service: "payments-api",
+    timestamp: "1 hour ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "Linked to TC-004 test failure. Risk threshold spec gap: spec says skip 3DS for < $50 but doesn't define boundary case. Fix: add guard clause in RiskEvaluator::evaluate() at line 47.",
+    confidence: 0.88,
+    orchestratorQuery: "Why is LIN-2289 blocked? 3DS bypass not working for $30–$50 range.",
+  },
+  {
+    id: "tkt-002",
+    kind: "ticket",
+    severity: "high",
+    title: "LIN-2291 · Mobile checkout drop-off increasing",
+    source: "Linear",
+    sourceIcon: "LN",
+    sourceColor: "#5e6ad2",
+    service: "checkout-v2",
+    timestamp: "2 hours ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "Datadog RUM: 40% drop at payment entry on mobile. Correlates with 3DS prompt on $30–$50 range. Same root cause as LIN-2289. Not a UI issue — auth friction causing abandonment.",
+    confidence: 0.85,
+    orchestratorQuery: "Why is mobile checkout drop-off increasing? LIN-2291.",
+  },
+  {
+    id: "tkt-003",
+    kind: "ticket",
+    severity: "medium",
+    title: "LIN-2293 · Saved payment methods list empty for new users",
+    source: "Linear",
+    sourceIcon: "LN",
+    sourceColor: "#5e6ad2",
+    service: "payments-api",
+    timestamp: "4 hours ago",
+    triageStatus: "pending",
+    orchestratorQuery: "Why are saved payment methods empty for new users? LIN-2293.",
+  },
+  {
+    id: "met-001",
+    kind: "metric",
+    severity: "critical",
+    title: "Checkout conversion dropped 31.4% → 22.1% in last hour",
+    source: "Datadog",
+    sourceIcon: "DD",
+    sourceColor: "#7c3aed",
+    service: "checkout-v2",
+    timestamp: "5 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "Conversion drop correlates exactly with payments-api v2.3.0 deploy at 14:32. Error rate spike causing checkout failures. Not a funnel issue — payment completion step failing.",
+    confidence: 0.96,
+    orchestratorQuery: "Why did checkout conversion drop from 31.4% to 22.1% in the last hour?",
+  },
+  {
+    id: "met-002",
+    kind: "metric",
+    severity: "high",
+    title: "POST /v2/payments/quick-checkout error rate 34%",
+    source: "Datadog APM",
+    sourceIcon: "DD",
+    sourceColor: "#7c3aed",
+    service: "payments-api",
+    timestamp: "3 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "34% of quick-checkout requests returning 500. Trace: all failing requests have amount > 500. Healthy requests: amount ≤ 500 (100% success). Clear threshold boundary.",
+    confidence: 0.97,
+    orchestratorQuery: "Why is POST /v2/payments/quick-checkout erroring at 34%?",
+  },
+  {
+    id: "met-003",
+    kind: "metric",
+    severity: "medium",
+    title: "auth-service DB connection pool saturation 92%",
+    source: "Datadog",
+    sourceIcon: "DD",
+    sourceColor: "#7c3aed",
+    service: "auth-service",
+    timestamp: "12 min ago",
+    triageStatus: "pending",
+    orchestratorQuery: "Why is auth-service DB connection pool at 92% saturation?",
+  },
+  // Customer tickets
+  {
+    id: "cust-001",
+    kind: "customer",
+    severity: "critical",
+    title: "ZD-4421 · Payment not going through (14 customers, 8 min)",
+    source: "Zendesk",
+    sourceIcon: "ZD",
+    sourceColor: "#03363d",
+    service: "payments-api",
+    timestamp: "3 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "14 reports in 8 min. All failures on quick-checkout, amount > $500. Root cause linked to alrt-001 (v2.3.0 NullPointerException). Estimated CSAT impact: −12 points if unresolved > 30 min.",
+    confidence: 0.91,
+    gateId: "gate-cust-autorespond-441",
+    gateStatus: "pending_approval",
+    orchestratorQuery: "Why are 14 customers reporting payment failures in the last 8 minutes? ZD-4421.",
+  },
+  {
+    id: "cust-002",
+    kind: "customer",
+    severity: "high",
+    title: "ZD-4418 · 3DS triggered on small purchases (6 customers)",
+    source: "Zendesk",
+    sourceIcon: "ZD",
+    sourceColor: "#03363d",
+    service: "payments-api",
+    timestamp: "1 hour ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "6 customers reporting unexpected 3DS on $30–$50 purchases. Root cause: risk threshold boundary gap (spec issue). Linked to LIN-2289 and TC-004 failure. Fix in progress on PR #342.",
+    confidence: 0.88,
+    orchestratorQuery: "Why are customers seeing 3DS on small purchases under $50? ZD-4418.",
+  },
+  {
+    id: "cust-003",
+    kind: "customer",
+    severity: "high",
+    title: "IC-8841 · Checkout keeps failing on mobile (3 customers)",
+    source: "Intercom",
+    sourceIcon: "IC",
+    sourceColor: "#286efa",
+    service: "checkout-v2",
+    timestamp: "22 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "3 mobile users, all iOS Safari. Failure at payment step — correlates with payments-api error spike. Not a frontend issue. Auto-reply sent: 'Our team is investigating a payment issue affecting some users.'",
+    confidence: 0.85,
+    orchestratorQuery: "Why is checkout failing on mobile for customers? IC-8841.",
+  },
+  {
+    id: "cust-004",
+    kind: "customer",
+    severity: "medium",
+    title: "ZD-4423 · Can't add new payment method (2 customers)",
+    source: "Zendesk",
+    sourceIcon: "ZD",
+    sourceColor: "#03363d",
+    service: "payments-api",
+    timestamp: "35 min ago",
+    triageStatus: "pending",
+    orchestratorQuery: "Why can't customers add a new payment method? ZD-4423.",
+  },
+  // GitHub Actions CI failures
+  {
+    id: "ci-001",
+    kind: "ci",
+    severity: "critical",
+    title: "payments-api · CI failed on main — 2 tests failing",
+    source: "GitHub Actions",
+    sourceIcon: "GH",
+    sourceColor: "#6e7681",
+    service: "payments-api",
+    timestamp: "6 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "TC-004 and TC-005 failing. TC-004: risk threshold null for amounts $50–$100. TC-005: idempotency lock missing at checkout.ts:14. PR #342 open with fix for TC-005.",
+    confidence: 0.93,
+    branch: "main",
+    commitSha: "a4f21bc",
+    orchestratorQuery: "Why is payments-api CI failing on main? Commit a4f21bc.",
+  },
+  {
+    id: "ci-002",
+    kind: "ci",
+    severity: "high",
+    title: "auth-service · Deploy pipeline blocked — security scan failed",
+    source: "GitHub Actions",
+    sourceIcon: "GH",
+    sourceColor: "#6e7681",
+    service: "auth-service",
+    timestamp: "42 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "Snyk scan found 1 critical CVE in jsonwebtoken@8.5.1 (CVE-2022-23529). Dependency needs upgrade to ≥9.0.0. No code changes required — package.json update only.",
+    confidence: 0.99,
+    branch: "feat/auth-refactor",
+    commitSha: "7b3c9d1",
+    orchestratorQuery: "Why did auth-service deploy pipeline fail the security scan?",
+  },
+  {
+    id: "ci-003",
+    kind: "ci",
+    severity: "medium",
+    title: "checkout-v2 · E2E tests timing out on 3 scenarios",
+    source: "GitHub Actions",
+    sourceIcon: "GH",
+    sourceColor: "#6e7681",
+    service: "checkout-v2",
+    timestamp: "1 hour ago",
+    triageStatus: "pending",
+    branch: "feat/mobile-checkout",
+    commitSha: "2e8f14a",
+    orchestratorQuery: "Why are checkout-v2 E2E tests timing out? Branch feat/mobile-checkout.",
+  },
+  // Sentry / error tracker
+  {
+    id: "err-001",
+    kind: "error",
+    severity: "critical",
+    title: "NullPointerException — QuickCheckoutHandler.java:89 (47 events)",
+    source: "Sentry",
+    sourceIcon: "SN",
+    sourceColor: "#362d59",
+    service: "payments-api",
+    timestamp: "14 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "47 events since v2.3.0 deploy at 14:32. riskScore is null when amount > 500. Introduced in commit a4f21bc — removed null check in risk scoring path. Affects 100% of high-value quick-checkout requests.",
+    confidence: 0.97,
+    errorCount: 47,
+    firstSeen: "14 min ago",
+    orchestratorQuery: "Why is Sentry reporting NullPointerException in QuickCheckoutHandler at line 89? 47 events.",
+  },
+  {
+    id: "err-002",
+    kind: "error",
+    severity: "high",
+    title: "TypeError: Cannot read properties of undefined — checkout.ts:14 (12 events)",
+    source: "Sentry",
+    sourceIcon: "SN",
+    sourceColor: "#362d59",
+    service: "payments-api",
+    timestamp: "28 min ago",
+    triageStatus: "auto_triaged",
+    triageSummary: "Race condition in idempotency check. Two concurrent requests both pass ownership check before either commits to DB. Fix on PR #342.",
+    confidence: 0.89,
+    errorCount: 12,
+    firstSeen: "28 min ago",
+    orchestratorQuery: "Why is checkout.ts:14 throwing TypeError for undefined properties in Sentry?",
+  },
+  {
+    id: "err-003",
+    kind: "error",
+    severity: "medium",
+    title: "ConnectionTimeout — auth-service DB pool (8 events)",
+    source: "Sentry",
+    sourceIcon: "SN",
+    sourceColor: "#362d59",
+    service: "auth-service",
+    timestamp: "15 min ago",
+    triageStatus: "pending",
+    errorCount: 8,
+    firstSeen: "15 min ago",
+    orchestratorQuery: "Why is auth-service getting DB connection timeouts? 8 Sentry events.",
+  },
+]
+
+// ─── Project Wiki ────────────────────────────────────────────────────────────
+
+export interface ProjectMetric {
+  label: string
+  value: string
+  unit: string
+  trend: "up" | "down" | "neutral"
+  trendValue: string
+  status: "healthy" | "warning" | "critical"
+}
+
+export interface ChangeEvent {
+  id: string
+  kind: "deploy" | "pr" | "incident" | "feature" | "rollback" | "test"
+  title: string
+  detail: string
+  author: string
+  timestamp: string
+  status: "success" | "failure" | "in_progress" | "resolved" | "open"
+  meta?: string
+}
+
+export interface StackComponent {
+  name: string
+  version: string
+  role: string
+  health: "healthy" | "warning" | "critical"
+  scaleSignal: string
+  suggestion?: string
+  suggestionKind?: "upgrade" | "scale" | "replace" | "observe"
+}
+
+export interface ProjectWiki {
+  projectId: string
+  tagline: string
+  description: string
+  stack: string[]
+  owners: string[]
+  oncall: string
+  slo: string
+  metrics: ProjectMetric[]
+  changes: ChangeEvent[]
+  testHealth: {
+    total: number
+    passing: number
+    failing: number
+    flaky: number
+    lastRun: string
+    coverage: number
+  }
+  deployHealth: {
+    frequency: string
+    lastDeploy: string
+    lastVersion: string
+    env: string
+    rollbacks30d: number
+  }
+  stackHealth: StackComponent[]
+}
+
+export const PROJECT_WIKIS: ProjectWiki[] = [
+  {
+    projectId: "payments-api",
+    tagline: "Core payment processing — quick checkout, saved methods, 3DS risk scoring",
+    description: "Handles all payment flows for Acme Commerce. Exposes /v2/payments/* endpoints consumed by checkout-v2, mobile clients, and internal billing. Integrates with Stripe for card processing, a proprietary risk-scoring service for 3DS bypass decisions, and ArgoCD for GitOps deployments. Critical path service — any degradation directly impacts checkout conversion.",
+    stack: ["Java 21", "Spring Boot 3", "PostgreSQL 15", "Redis", "Kafka"],
+    owners: ["Alice Chen", "Bob Tran"],
+    oncall: "payments-oncall (PagerDuty)",
+    slo: "99.9% availability · p99 < 300ms · error rate < 1%",
+    metrics: [
+      { label: "Error Rate",       value: "8.4",  unit: "%",      trend: "up",      trendValue: "+7.3%",  status: "critical" },
+      { label: "p99 Latency",      value: "1,240", unit: "ms",    trend: "up",      trendValue: "+1,100ms", status: "critical" },
+      { label: "Deploy Freq",      value: "2.3",  unit: "/week",  trend: "neutral", trendValue: "stable", status: "healthy" },
+      { label: "Build Pass Rate",  value: "71",   unit: "%",      trend: "down",    trendValue: "−23%",   status: "warning" },
+      { label: "Test Pass Rate",   value: "71",   unit: "%",      trend: "down",    trendValue: "2 failing", status: "warning" },
+      { label: "Uptime (30d)",     value: "99.87", unit: "%",     trend: "down",    trendValue: "−0.03%", status: "warning" },
+      { label: "Throughput",       value: "1,240", unit: "rpm",   trend: "neutral", trendValue: "stable", status: "healthy" },
+      { label: "Feature Velocity", value: "3",    unit: "/month", trend: "neutral", trendValue: "on target", status: "healthy" },
+    ],
+    testHealth: {
+      total: 7, passing: 5, failing: 2, flaky: 1, lastRun: "6 min ago", coverage: 68,
+    },
+    deployHealth: {
+      frequency: "2.3×/week", lastDeploy: "14 min ago", lastVersion: "v2.3.0",
+      env: "prod (eks-us-east-1)", rollbacks30d: 2,
+    },
+    changes: [
+      { id: "chg-001", kind: "deploy",   title: "v2.3.0 → prod",                    detail: "QuickCheckout null fix + risk scoring refactor",  author: "ArgoCD",     timestamp: "14 min ago", status: "failure",     meta: "caused incident INC-441" },
+      { id: "chg-002", kind: "incident", title: "INC-441 — error rate 8.4%",         detail: "NullPointerException QuickCheckoutHandler:89",    author: "PagerDuty",  timestamp: "14 min ago", status: "open",        meta: "P1 · active" },
+      { id: "chg-003", kind: "pr",       title: "PR #342 — fix idempotency TC-005",  detail: "Add lock before paymentService.create()",         author: "bob",        timestamp: "20 min ago", status: "in_progress", meta: "feat/quick-checkout" },
+      { id: "chg-004", kind: "test",     title: "CI failed on main",                 detail: "TC-004 and TC-005 failing — blocking deploy gate", author: "GitHub CI",  timestamp: "6 min ago",  status: "failure",     meta: "2/7 failing" },
+      { id: "chg-005", kind: "pr",       title: "PR #338 — 3DS bypass refactor",     detail: "Risk threshold logic moved to RiskEvaluator",     author: "alice",      timestamp: "2 hours ago",status: "success",     meta: "merged to main" },
+      { id: "chg-006", kind: "deploy",   title: "v2.2.9 → prod",                    detail: "Stable release — all tests passing",              author: "ArgoCD",     timestamp: "3 days ago", status: "success",     meta: "prev stable" },
+      { id: "chg-007", kind: "feature",  title: "Quick checkout v2 shipped",         detail: "One-click checkout for returning users",          author: "carol (PM)", timestamp: "4 days ago", status: "success",     meta: "LIN-2180" },
+      { id: "chg-008", kind: "rollback", title: "v2.3.0 → v2.2.9 rollback",         detail: "Gate: gate-prod-rollback-881 approved by priya",  author: "ArgoCD",     timestamp: "pending",    status: "in_progress", meta: "ETA 90s" },
+    ],
+    stackHealth: [
+      { name: "Java 21 / Spring Boot 3", version: "3.2.1",  role: "API runtime",         health: "healthy",  scaleSignal: "p99 1,240ms under incident load. GC pauses < 5ms at baseline. Vertical scaling headroom remains.",  suggestion: "Current heap tuned for 512Mi. At 2× traffic baseline consider bumping to 1Gi and enabling ZGC.", suggestionKind: "scale" },
+      { name: "PostgreSQL 15",           version: "15.4",   role: "Primary datastore",   health: "warning",  scaleSignal: "Connection pool saturation hitting 80% during peak. Slow query log shows full-table scan on payments.risk_score column.", suggestion: "Add index on risk_score + amount. Consider PgBouncer for connection pooling at > 500 RPM.", suggestionKind: "scale" },
+      { name: "Redis 7",                 version: "7.2",    role: "Session + idempotency cache", health: "healthy", scaleSignal: "Hit rate 94%. Eviction rate near zero. Memory at 31% capacity.", suggestion: undefined },
+      { name: "Kafka 3.5",               version: "3.5.1",  role: "Async event bus",     health: "healthy",  scaleSignal: "Consumer lag stable. Throughput 1,200 msg/s — well below partition limit.", suggestion: undefined },
+      { name: "Amazon EKS 1.28",         version: "1.28",   role: "Container orchestration", health: "critical", scaleSignal: "3/5 pods in CrashLoopBackOff. Horizontal pod autoscaler not triggered — failure is crash, not CPU.", suggestion: "After rollback: review HPA policy to include error-rate signal via KEDA, not just CPU.", suggestionKind: "observe" },
+      { name: "ArgoCD 2.9",              version: "2.9.3",  role: "GitOps deployment",   health: "warning",  scaleSignal: "App sync lag 8 min (baseline < 2 min). Likely overloaded by concurrent deploys during incident.", suggestion: "Gate concurrent prod deploys — max 1 active sync at a time for critical services.", suggestionKind: "scale" },
+    ],
+  },
+  {
+    projectId: "auth-service",
+    tagline: "Authentication, session tokens, and authorization for all Acme services",
+    description: "Issues and validates JWTs for all internal and external clients. Handles SSO via OAuth2/OIDC, session management, and role-based access control. Upstream dependency for every service — latency spikes here cascade across the platform. Currently undergoing JWT library upgrade (CVE-2022-23529).",
+    stack: ["TypeScript", "Node.js 20", "Redis", "PostgreSQL 15"],
+    owners: ["David Lee"],
+    oncall: "platform-oncall (OpsGenie)",
+    slo: "99.95% availability · p99 < 200ms",
+    metrics: [
+      { label: "Error Rate",       value: "0.3",  unit: "%",      trend: "up",      trendValue: "+0.2%",  status: "warning" },
+      { label: "p99 Latency",      value: "1,240", unit: "ms",    trend: "up",      trendValue: "+1,060ms", status: "critical" },
+      { label: "Deploy Freq",      value: "1.1",  unit: "/week",  trend: "neutral", trendValue: "stable", status: "healthy" },
+      { label: "Build Pass Rate",  value: "89",   unit: "%",      trend: "neutral", trendValue: "stable", status: "healthy" },
+      { label: "Test Pass Rate",   value: "100",  unit: "%",      trend: "neutral", trendValue: "all pass", status: "healthy" },
+      { label: "Uptime (30d)",     value: "99.94", unit: "%",     trend: "neutral", trendValue: "on SLO", status: "healthy" },
+      { label: "DB Pool",          value: "92",   unit: "%",      trend: "up",      trendValue: "+40%",   status: "critical" },
+      { label: "Token Issuance",   value: "340",  unit: "/min",   trend: "neutral", trendValue: "stable", status: "healthy" },
+    ],
+    testHealth: {
+      total: 24, passing: 24, failing: 0, flaky: 2, lastRun: "1 hour ago", coverage: 84,
+    },
+    deployHealth: {
+      frequency: "1.1×/week", lastDeploy: "2 days ago", lastVersion: "v3.1.4",
+      env: "prod (eks-us-east-1)", rollbacks30d: 0,
+    },
+    changes: [
+      { id: "ach-001", kind: "incident", title: "p99 spike — 1,240ms",              detail: "DB pool saturation 92% — upstream load from payments incident", author: "Datadog", timestamp: "8 min ago",  status: "open",        meta: "P2 · active" },
+      { id: "ach-002", kind: "pr",       title: "PR #201 — upgrade jsonwebtoken",   detail: "Fix CVE-2022-23529 · jsonwebtoken 8.5.1 → 9.0.0",         author: "david",   timestamp: "42 min ago", status: "in_progress", meta: "security fix" },
+      { id: "ach-003", kind: "deploy",   title: "v3.1.4 → prod",                   detail: "Session timeout config update",                            author: "ArgoCD",  timestamp: "2 days ago", status: "success",     meta: "stable" },
+      { id: "ach-004", kind: "feature",  title: "OIDC provider support shipped",    detail: "Google + GitHub SSO now available",                       author: "david",   timestamp: "1 week ago", status: "success",     meta: "LIN-2100" },
+    ],
+    stackHealth: [
+      { name: "TypeScript / Node.js 20", version: "20.11", role: "API runtime",        health: "critical", scaleSignal: "Event loop lag 340ms at current load. DB pool saturation 92% — blocking async I/O.", suggestion: "Switch DB calls to connection pool with max 20 connections + queue. Consider pg-pool with backpressure.", suggestionKind: "scale" },
+      { name: "PostgreSQL 15",           version: "15.4",  role: "Auth + token store",  health: "critical", scaleSignal: "Pool at 92% saturation. Token lookup queries running full-table scan on sessions.", suggestion: "Index on sessions.user_id + expires_at. Offload read traffic to Redis TTL cache for active tokens.", suggestionKind: "upgrade" },
+      { name: "Redis 7",                 version: "7.2",   role: "Token cache",         health: "healthy",  scaleSignal: "Hit rate 89%. Token TTL cache working well. Memory at 18%.", suggestion: undefined },
+      { name: "Amazon EKS 1.28",         version: "1.28",  role: "Container orchestration", health: "warning", scaleSignal: "2 pods running with p99 1,240ms. HPA ceiling hit at 5 replicas — CPU threshold was wrong signal.", suggestion: "Add latency-based HPA via KEDA + Datadog metric. CPU is a lagging indicator for I/O-bound auth workload.", suggestionKind: "observe" },
+    ],
+  },
+  {
+    projectId: "checkout-v2",
+    tagline: "Next-gen checkout flow — reduced friction, mobile-first, 3DS-aware",
+    description: "Frontend checkout experience consuming payments-api v2. Redesigned for mobile with autofill, one-click payment for returning users, and progressive 3DS challenge. Currently in feature development — not yet in prod.",
+    stack: ["TypeScript", "React 18", "Next.js 15", "Tailwind CSS"],
+    owners: ["Frank Ray", "Grace Ng"],
+    oncall: "growth-oncall",
+    slo: "Not yet in prod",
+    metrics: [
+      { label: "Conversion Rate",  value: "31.4", unit: "%",      trend: "down",    trendValue: "→22.1% (incident)", status: "critical" },
+      { label: "Build Pass Rate",  value: "88",   unit: "%",      trend: "neutral", trendValue: "stable", status: "healthy" },
+      { label: "Test Pass Rate",   value: "76",   unit: "%",      trend: "down",    trendValue: "3 E2E failing", status: "warning" },
+      { label: "Deploy Freq",      value: "0",    unit: "/week",  trend: "neutral", trendValue: "not in prod", status: "healthy" },
+      { label: "Bundle Size",      value: "142",  unit: "kB",     trend: "neutral", trendValue: "on target", status: "healthy" },
+      { label: "LCP (mobile)",     value: "2.1",  unit: "s",      trend: "neutral", trendValue: "good", status: "healthy" },
+      { label: "Feature Velocity", value: "4",    unit: "/month", trend: "up",      trendValue: "+1 vs last month", status: "healthy" },
+      { label: "Mobile Drop-off",  value: "40",   unit: "%",      trend: "up",      trendValue: "+12%",   status: "warning" },
+    ],
+    testHealth: {
+      total: 18, passing: 14, failing: 3, flaky: 2, lastRun: "1 hour ago", coverage: 61,
+    },
+    deployHealth: {
+      frequency: "not in prod", lastDeploy: "staging only", lastVersion: "v0.9.1-beta",
+      env: "staging", rollbacks30d: 0,
+    },
+    changes: [
+      { id: "cch-001", kind: "pr",      title: "PR #88 — mobile checkout redesign", detail: "Fix drop-off at payment step on iOS Safari", author: "frank",  timestamp: "3 hours ago",status: "in_progress", meta: "feat/mobile-checkout" },
+      { id: "cch-002", kind: "test",    title: "E2E timeout — 3 scenarios",         detail: "Mobile checkout scenarios timing out > 30s",  author: "CI",     timestamp: "1 hour ago", status: "failure",     meta: "feat/mobile-checkout" },
+      { id: "cch-003", kind: "feature", title: "Autofill from saved methods",        detail: "One-click for returning users shipped",      author: "grace",  timestamp: "5 days ago", status: "success",     meta: "LIN-2201" },
+    ],
+    stackHealth: [
+      { name: "React 18 / Next.js 15",   version: "15.1", role: "Frontend framework",   health: "healthy",  scaleSignal: "LCP 2.1s mobile (good). Bundle 142kB gzipped. No hydration errors in prod.", suggestion: "RSC migration would drop bundle by ~30kB — consider for v2 when stable.", suggestionKind: "upgrade" },
+      { name: "TypeScript 5.3",          version: "5.3",  role: "Type safety",          health: "healthy",  scaleSignal: "Zero type errors in CI. Strict mode enabled.", suggestion: undefined },
+      { name: "Vercel Edge Network",     version: "—",    role: "CDN + routing",        health: "healthy",  scaleSignal: "TTFB < 80ms globally. Cache hit rate 72%.", suggestion: "Enable ISR for product listing pages to push cache hit rate > 90%.", suggestionKind: "scale" },
+      { name: "Playwright 1.40",         version: "1.40", role: "E2E testing",          health: "warning",  scaleSignal: "3 tests timing out > 30s on mobile viewport. Mobile emulation may not reflect real device latency.", suggestion: "Add real device tests via BrowserStack for mobile checkout critical path.", suggestionKind: "upgrade" },
+    ],
+  },
+]
+
+export const TEAMS: Team[] = [
+  {
+    id: "payments",
+    name: "Payments",
+    projectIds: ["payments-api"],
+    members: [
+      { name: "Alice Chen", role: "Lead", avatar: "AC" },
+      { name: "Bob Kim", role: "Dev", avatar: "BK" },
+      { name: "Carol Wu", role: "PM", avatar: "CW" }
+    ]
+  },
+  {
+    id: "platform",
+    name: "Platform",
+    projectIds: ["auth-service", "catalog-service", "api-gateway"],
+    members: [
+      { name: "David Lee", role: "Lead", avatar: "DL" },
+      { name: "Eve Patel", role: "SRE", avatar: "EP" }
+    ]
+  },
+  {
+    id: "growth",
+    name: "Growth",
+    projectIds: ["checkout-v2"],
+    members: [
+      { name: "Frank Ray", role: "Lead", avatar: "FR" },
+      { name: "Grace Ng", role: "BA", avatar: "GN" }
+    ]
+  }
+]
+
+// ─── Incident War Room ────────────────────────────────────────────────────────
+
+export type IncidentSeverity = "critical" | "high" | "medium"
+export type IncidentStatus = "active" | "investigating" | "resolved"
+
+export interface IncidentTimelineEvent {
+  at: string
+  type: "alert" | "deploy" | "spike" | "ack" | "note" | "rollback"
+  label: string
+  actor?: string
+}
+
+export interface IncidentMetric {
+  name: string
+  value: string
+  unit: string
+  status: "critical" | "warning" | "ok"
+  spark: number[]
+}
+
+export interface IncidentDeploy {
+  sha: string
+  service: string
+  version: string
+  deployedBy: string
+  at: string
+  status: "ok" | "suspect" | "culprit"
+}
+
+export interface IncidentPR {
+  number: number
+  title: string
+  author: string
+  mergedAt: string
+  repo: string
+  status: "ok" | "suspect"
+}
+
+export interface Incident {
+  id: string
+  title: string
+  severity: IncidentSeverity
+  status: IncidentStatus
+  service: string
+  startedAt: string
+  duration: string
+  oncall: string
+  hypothesis: string
+  confidence: number
+  timeline: IncidentTimelineEvent[]
+  metrics: IncidentMetric[]
+  deploys: IncidentDeploy[]
+  prs: IncidentPR[]
+  runbook: string[]
+}
+
+export const INCIDENTS: Incident[] = [
+  {
+    id: "INC-041",
+    title: "payments-api error rate spike — 8.7%",
+    severity: "critical",
+    status: "active",
+    service: "payments-api",
+    startedAt: "14:23:01",
+    duration: "14m",
+    oncall: "alice@acme.dev",
+    confidence: 0.91,
+    hypothesis: "v2.3.1 deploy at 14:05 introduced null-check regression in RiskEvaluator::evaluate() at line 47. Error rate jumped from 0.2% → 8.7% within 3 min of deploy. P99 latency spiked to 4.2s. Recommend: rollback to v2.3.0 or hotfix RiskEvaluator.ts:47 — add guard for undefined riskScore before threshold comparison.",
+    timeline: [
+      { at: "14:05:12", type: "deploy",  label: "v2.3.1 deployed to prod",          actor: "argocd"   },
+      { at: "14:08:44", type: "spike",   label: "error rate crossed 2%",            actor: "datadog"  },
+      { at: "14:10:31", type: "alert",   label: "P0 alert fired: error rate 5.1%",  actor: "pagerduty"},
+      { at: "14:11:02", type: "ack",     label: "Alice acknowledged",               actor: "alice"    },
+      { at: "14:23:01", type: "spike",   label: "error rate peaked at 8.7%",        actor: "datadog"  },
+      { at: "14:24:15", type: "note",    label: "Anvay hypothesis surfaced",        actor: "anvay"    },
+    ],
+    metrics: [
+      { name: "Error Rate",   value: "8.7",  unit: "%",   status: "critical", spark: [2, 2, 2, 3, 3, 18, 52, 87]  },
+      { name: "P99 Latency",  value: "4.2",  unit: "s",   status: "critical", spark: [30, 31, 32, 33, 38, 55, 80, 95] },
+      { name: "RPS",          value: "1240", unit: "req/s", status: "warning", spark: [80, 82, 83, 81, 79, 72, 65, 60] },
+      { name: "Pod Restarts", value: "7",    unit: "",    status: "warning",  spark: [0, 0, 0, 0, 1, 2, 3, 7]      },
+    ],
+    deploys: [
+      { sha: "a4f21bc", service: "payments-api",  version: "v2.3.1", deployedBy: "alice",  at: "14:05:12", status: "culprit" },
+      { sha: "3b8e9cd", service: "api-gateway",   version: "v1.8.4", deployedBy: "david",  at: "12:30:05", status: "ok"      },
+      { sha: "7c1d3fa", service: "auth-service",  version: "v3.1.0", deployedBy: "bob",    at: "09:15:44", status: "ok"      },
+    ],
+    prs: [
+      { number: 412, title: "Risk evaluator: remove legacy 3DS bypass for amounts < $50", author: "alice",  mergedAt: "13:58:32", repo: "payments-api", status: "suspect" },
+      { number: 408, title: "Add idempotency key to quick-checkout endpoint",             author: "bob",    mergedAt: "11:22:10", repo: "payments-api", status: "ok"      },
+    ],
+    runbook: [
+      "Check error rate + P99 in Datadog — confirm scope (single region or global)",
+      "Review last deploy: `argocd app history payments-api --last 3`",
+      "If deploy is culprit: rollback via `argocd app rollback payments-api`",
+      "Hotfix path: patch RiskEvaluator.ts:47 — add null guard before threshold compare",
+      "Verify error rate drops below 1% within 3 min of rollback",
+      "Update incident status and post in #incidents-prod",
+    ],
+  },
+  {
+    id: "INC-040",
+    title: "auth-service P99 latency 3.8s",
+    severity: "high",
+    status: "investigating",
+    service: "auth-service",
+    startedAt: "13:45:18",
+    duration: "52m",
+    oncall: "david@acme.dev",
+    confidence: 0.74,
+    hypothesis: "JWT token cache growing unbounded since v3.1.0 deploy. Heap usage increased 40% over past hour. GC pauses likely causing latency spikes. Suspect: cache eviction policy disabled in new config — `TOKEN_CACHE_MAX_SIZE` not set in prod env.",
+    timeline: [
+      { at: "09:15:44", type: "deploy",  label: "v3.1.0 deployed to prod",        actor: "argocd"   },
+      { at: "13:10:00", type: "spike",   label: "P99 crossed 1s",                 actor: "datadog"  },
+      { at: "13:45:18", type: "alert",   label: "High alert: P99 > 2s",           actor: "pagerduty"},
+      { at: "13:46:30", type: "ack",     label: "David acknowledged",             actor: "david"    },
+      { at: "14:12:00", type: "spike",   label: "P99 peaked at 3.8s",             actor: "datadog"  },
+      { at: "14:18:00", type: "note",    label: "Heap dump analysis in progress", actor: "david"    },
+    ],
+    metrics: [
+      { name: "P99 Latency",   value: "3.8",  unit: "s",   status: "critical", spark: [10, 11, 15, 20, 35, 55, 72, 90] },
+      { name: "Heap Usage",    value: "78",   unit: "%",   status: "warning",  spark: [38, 42, 45, 50, 57, 62, 68, 78] },
+      { name: "Error Rate",    value: "0.4",  unit: "%",   status: "ok",       spark: [3, 3, 3, 4, 4, 4, 4, 4]         },
+      { name: "Auth RPS",      value: "890",  unit: "req/s", status: "ok",     spark: [85, 85, 87, 86, 88, 87, 89, 88] },
+    ],
+    deploys: [
+      { sha: "7c1d3fa", service: "auth-service", version: "v3.1.0", deployedBy: "bob",   at: "09:15:44", status: "suspect" },
+      { sha: "9e2b4dc", service: "auth-service", version: "v3.0.9", deployedBy: "david", at: "2d ago",   status: "ok"      },
+      { sha: "2a7f8bc", service: "api-gateway",  version: "v1.8.3", deployedBy: "eve",   at: "3d ago",   status: "ok"      },
+    ],
+    prs: [
+      { number: 389, title: "JWT cache: switch to LRU with configurable max size",   author: "bob",   mergedAt: "09:00:10", repo: "auth-service", status: "suspect" },
+      { number: 385, title: "Add refresh token rotation support",                    author: "david", mergedAt: "2d ago",   repo: "auth-service", status: "ok"      },
+    ],
+    runbook: [
+      "Check heap metrics in Datadog: `auth-service.jvm.heap_used`",
+      "Verify TOKEN_CACHE_MAX_SIZE is set in prod environment config",
+      "If not set: `kubectl set env deployment/auth-service TOKEN_CACHE_MAX_SIZE=10000 -n prod`",
+      "Monitor heap usage — should stabilise within 5 min",
+      "If no improvement: trigger rolling restart to clear heap",
+      "Long-term: add alert on heap > 70% with 10min sustain window",
+    ],
+  },
+  {
+    id: "INC-039",
+    title: "catalog-service timeout cascade",
+    severity: "high",
+    status: "resolved",
+    service: "catalog-service",
+    startedAt: "yesterday 10:12",
+    duration: "28m",
+    oncall: "david@acme.dev",
+    confidence: 0.96,
+    hypothesis: "Database connection pool exhausted due to slow query introduced in v2.1.4. All catalog reads timed out after pool queue depth exceeded 200. Resolved by increasing pool size + fixing N+1 query in ProductRepository::findByCategory.",
+    timeline: [
+      { at: "10:12:05", type: "alert",    label: "P0: catalog-service timeout rate 45%", actor: "pagerduty" },
+      { at: "10:13:20", type: "ack",      label: "David acknowledged",                   actor: "david"     },
+      { at: "10:22:00", type: "note",     label: "Root cause identified: pool exhaustion",actor: "david"    },
+      { at: "10:31:00", type: "note",     label: "Pool size increased to 50",            actor: "david"     },
+      { at: "10:40:05", type: "rollback", label: "v2.1.4 rolled back to v2.1.3",         actor: "argocd"    },
+    ],
+    metrics: [
+      { name: "Timeout Rate",  value: "0.1",  unit: "%",  status: "ok", spark: [45, 44, 40, 30, 15, 5, 1, 0] },
+      { name: "DB Pool Used",  value: "22",   unit: "%",  status: "ok", spark: [100, 100, 98, 70, 40, 28, 24, 22] },
+      { name: "Error Rate",    value: "0.0",  unit: "%",  status: "ok", spark: [40, 38, 28, 12, 3, 1, 0, 0]   },
+      { name: "P99 Latency",   value: "320",  unit: "ms", status: "ok", spark: [95, 90, 75, 55, 40, 32, 30, 30] },
+    ],
+    deploys: [
+      { sha: "5d8c2ef", service: "catalog-service", version: "v2.1.4", deployedBy: "carol", at: "yesterday 08:45", status: "culprit" },
+      { sha: "1b3a9dc", service: "catalog-service", version: "v2.1.3", deployedBy: "carol", at: "3d ago",          status: "ok"      },
+    ],
+    prs: [
+      { number: 371, title: "Category page: eager-load all product variants",        author: "carol",  mergedAt: "yesterday 08:30", repo: "catalog-service", status: "suspect" },
+      { number: 368, title: "Add Redis cache for category list",                     author: "frank",  mergedAt: "2d ago",          repo: "catalog-service", status: "ok"      },
+    ],
+    runbook: [
+      "Increase DB pool size to 50: update `DB_POOL_MAX` in prod env",
+      "Rollback to previous release: `argocd app rollback catalog-service`",
+      "Fix N+1 query in ProductRepository::findByCategory — add JOIN + limit variant fields",
+      "Add slow query alert on catalog-service Postgres: > 500ms sustained",
+    ],
+  },
+  {
+    id: "INC-038",
+    title: "api-gateway memory leak — OOMKilled",
+    severity: "critical",
+    status: "resolved",
+    service: "api-gateway",
+    startedAt: "3 days ago 02:14",
+    duration: "2h 14m",
+    oncall: "eve@acme.dev",
+    confidence: 0.98,
+    hypothesis: "Request tracing middleware accumulated spans in-memory with no flush interval set. Heap grew until OOMKill at 1.5GB. Fixed by setting TRACE_FLUSH_INTERVAL_MS=5000 and capping in-flight span buffer to 500.",
+    timeline: [
+      { at: "02:14:00", type: "alert",    label: "api-gateway OOMKilled — pod restarted",   actor: "k8s"       },
+      { at: "02:15:10", type: "ack",      label: "Eve acknowledged",                        actor: "eve"       },
+      { at: "02:50:00", type: "spike",    label: "Second OOMKill — heap 1.5GB",            actor: "k8s"       },
+      { at: "03:10:00", type: "note",     label: "Tracer flush interval identified as root cause", actor: "eve"},
+      { at: "04:28:00", type: "rollback", label: "TRACE_FLUSH_INTERVAL_MS=5000 applied",   actor: "eve"       },
+    ],
+    metrics: [
+      { name: "Heap Usage",    value: "42",  unit: "%", status: "ok", spark: [100, 100, 98, 80, 60, 50, 45, 42] },
+      { name: "Pod Restarts",  value: "0",   unit: "",  status: "ok", spark: [2, 1, 0, 0, 0, 0, 0, 0]           },
+      { name: "Error Rate",    value: "0.1", unit: "%", status: "ok", spark: [15, 12, 8, 4, 2, 1, 0, 0]         },
+      { name: "P99 Latency",   value: "85",  unit: "ms", status: "ok", spark: [50, 45, 40, 35, 30, 25, 20, 18] },
+    ],
+    deploys: [
+      { sha: "8e4b2ac", service: "api-gateway", version: "v1.8.4", deployedBy: "david", at: "3d ago 22:10", status: "culprit" },
+    ],
+    prs: [
+      { number: 360, title: "Add distributed tracing middleware (OpenTelemetry)",   author: "eve",   mergedAt: "3d ago 21:55", repo: "api-gateway", status: "suspect" },
+    ],
+    runbook: [
+      "Check pod memory: `kubectl top pods -n prod -l app=api-gateway`",
+      "If OOMKilled: restart pod and set memory limit to 2GB",
+      "Set TRACE_FLUSH_INTERVAL_MS=5000 + TRACE_BUFFER_MAX=500 in prod env",
+      "Confirm heap stabilises < 60% after 15 min",
+    ],
+  },
+]
+
+// ─── Service Catalog ──────────────────────────────────────────────────────────
+
+export type ServiceHealth = "healthy" | "degraded" | "down"
+
+export interface ServiceMetrics {
+  errorRate: number
+  p99ms: number
+  rps: number
+  uptime: number
+}
+
+export interface CatalogService {
+  id: string
+  name: string
+  team: string
+  oncall: string
+  language: string
+  repo: string
+  health: ServiceHealth
+  version: string
+  lastDeploy: string
+  dependencies: string[]
+  callers: string[]
+  metrics: ServiceMetrics
+  activeIncidents: number
+  recentIncidents: string[]
+  description: string
+}
+
+export const CATALOG_SERVICES: CatalogService[] = [
+  {
+    id: "checkout-frontend",
+    name: "checkout-frontend",
+    team: "Growth",
+    oncall: "frank@acme.dev",
+    language: "TypeScript / Next.js",
+    repo: "acme/checkout-frontend",
+    health: "healthy",
+    version: "v4.1.2",
+    lastDeploy: "2h ago",
+    dependencies: ["api-gateway"],
+    callers: [],
+    metrics: { errorRate: 0.1, p99ms: 210, rps: 480, uptime: 99.98 },
+    activeIncidents: 0,
+    recentIncidents: [],
+    description: "Customer-facing checkout flow. React SPA served via Vercel edge.",
+  },
+  {
+    id: "api-gateway",
+    name: "api-gateway",
+    team: "Platform",
+    oncall: "eve@acme.dev",
+    language: "TypeScript / Fastify",
+    repo: "acme/api-gateway",
+    health: "healthy",
+    version: "v1.8.4",
+    lastDeploy: "12h ago",
+    dependencies: ["payments-api", "auth-service", "catalog-service"],
+    callers: ["checkout-frontend"],
+    metrics: { errorRate: 0.3, p99ms: 95, rps: 1820, uptime: 99.95 },
+    activeIncidents: 0,
+    recentIncidents: ["INC-038"],
+    description: "BFF gateway. Auth, perimeter enforcement, request routing. Single ingress for all frontend clients.",
+  },
+  {
+    id: "payments-api",
+    name: "payments-api",
+    team: "Payments",
+    oncall: "alice@acme.dev",
+    language: "TypeScript / Fastify",
+    repo: "acme/payments-api",
+    health: "degraded",
+    version: "v2.3.1",
+    lastDeploy: "32m ago",
+    dependencies: ["notification-service"],
+    callers: ["api-gateway"],
+    metrics: { errorRate: 8.7, p99ms: 4200, rps: 1240, uptime: 99.41 },
+    activeIncidents: 1,
+    recentIncidents: ["INC-041"],
+    description: "Core payment processing. Stripe integration, risk scoring, 3DS orchestration.",
+  },
+  {
+    id: "auth-service",
+    name: "auth-service",
+    team: "Platform",
+    oncall: "david@acme.dev",
+    language: "Go",
+    repo: "acme/auth-service",
+    health: "degraded",
+    version: "v3.1.0",
+    lastDeploy: "5h ago",
+    dependencies: [],
+    callers: ["api-gateway"],
+    metrics: { errorRate: 0.4, p99ms: 3800, rps: 890, uptime: 99.87 },
+    activeIncidents: 1,
+    recentIncidents: ["INC-040"],
+    description: "JWT issuance, refresh token rotation, RBAC. Single source of auth truth.",
+  },
+  {
+    id: "catalog-service",
+    name: "catalog-service",
+    team: "Platform",
+    oncall: "carol@acme.dev",
+    language: "Python / FastAPI",
+    repo: "acme/catalog-service",
+    health: "healthy",
+    version: "v2.1.3",
+    lastDeploy: "1d ago",
+    dependencies: [],
+    callers: ["api-gateway"],
+    metrics: { errorRate: 0.1, p99ms: 320, rps: 620, uptime: 99.97 },
+    activeIncidents: 0,
+    recentIncidents: ["INC-039"],
+    description: "Product catalog CRUD. Postgres-backed with Redis read cache.",
+  },
+  {
+    id: "notification-service",
+    name: "notification-service",
+    team: "Platform",
+    oncall: "eve@acme.dev",
+    language: "Go",
+    repo: "acme/notification-service",
+    health: "healthy",
+    version: "v1.4.2",
+    lastDeploy: "3d ago",
+    dependencies: [],
+    callers: ["payments-api"],
+    metrics: { errorRate: 0.0, p99ms: 45, rps: 310, uptime: 100.0 },
+    activeIncidents: 0,
+    recentIncidents: [],
+    description: "Email + webhook delivery. Idempotent dispatch, retry with backoff.",
+  },
+]
+
+// ─── Automations — Event Triggers + Cron Monitors ────────────────────────────
+
+export type TriggerStatus = "active" | "paused" | "error"
+export type TriggerEventType =
+  | "alert_fired"
+  | "deploy_completed"
+  | "deploy_failed"
+  | "error_rate_threshold"
+  | "slo_burn_rate"
+  | "pr_merged"
+  | "test_failed"
+  | "incident_created"
+  | "cloud_finding"
+
+export type TriggerActionType =
+  | "notify_oncall"
+  | "notify_channel"
+  | "create_incident"
+  | "open_war_room"
+  | "surface_context"
+  | "escalate"
+  | "run_runbook"
+  | "block_deploy_gate"
+
+export interface TriggerAction {
+  type: TriggerActionType
+  target?: string
+  params?: Record<string, string>
+}
+
+export interface AutomationTrigger {
+  id: string
+  name: string
+  status: TriggerStatus
+  event: TriggerEventType
+  condition: string
+  scope: string
+  actions: TriggerAction[]
+  lastFired: string | null
+  fireCount: number
+  createdBy: string
+}
+
+export const AUTOMATION_TRIGGERS: AutomationTrigger[] = [
+  {
+    id: "trg-001",
+    name: "payments-api critical error rate",
+    status: "active",
+    event: "error_rate_threshold",
+    condition: "error_rate > 5% sustained 2m",
+    scope: "payments-api · prod",
+    actions: [
+      { type: "notify_oncall",  target: "payments team"          },
+      { type: "create_incident", params: { severity: "critical" } },
+      { type: "open_war_room"                                     },
+      { type: "surface_context", params: { agent: "sre" }        },
+    ],
+    lastFired: "14m ago",
+    fireCount: 3,
+    createdBy: "alice",
+  },
+  {
+    id: "trg-002",
+    name: "prod deploy failure alert",
+    status: "active",
+    event: "deploy_failed",
+    condition: "any service · prod environment",
+    scope: "all services · prod",
+    actions: [
+      { type: "notify_channel", target: "#deploys"           },
+      { type: "notify_oncall",  target: "service owner"      },
+      { type: "surface_context", params: { agent: "deploy" } },
+    ],
+    lastFired: "3d ago",
+    fireCount: 7,
+    createdBy: "eve",
+  },
+  {
+    id: "trg-003",
+    name: "cloud critical finding",
+    status: "active",
+    event: "cloud_finding",
+    condition: "severity = critical",
+    scope: "all cloud providers",
+    actions: [
+      { type: "create_incident", params: { severity: "high" }     },
+      { type: "notify_channel",  target: "#security-alerts"       },
+      { type: "surface_context", params: { agent: "cloud-sre" }   },
+    ],
+    lastFired: "2h ago",
+    fireCount: 12,
+    createdBy: "eve",
+  },
+  {
+    id: "trg-004",
+    name: "test suite failure blocks deploy",
+    status: "active",
+    event: "test_failed",
+    condition: "main branch · failure rate > 0",
+    scope: "all repos · main",
+    actions: [
+      { type: "notify_channel",   target: "#ci-failures"       },
+      { type: "block_deploy_gate", params: { env: "prod" }     },
+      { type: "notify_oncall",     target: "repo owner"        },
+    ],
+    lastFired: "1h ago",
+    fireCount: 18,
+    createdBy: "david",
+  },
+  {
+    id: "trg-005",
+    name: "SLO error budget burn rate",
+    status: "active",
+    event: "slo_burn_rate",
+    condition: "burn rate > 10x in 1h window",
+    scope: "all services · prod",
+    actions: [
+      { type: "notify_oncall",   target: "service owner"         },
+      { type: "escalate",        params: { to: "team lead" }     },
+      { type: "surface_context", params: { agent: "sre" }        },
+    ],
+    lastFired: "yesterday",
+    fireCount: 5,
+    createdBy: "alice",
+  },
+  {
+    id: "trg-006",
+    name: "high-risk PR merged to main",
+    status: "paused",
+    event: "pr_merged",
+    condition: "risk_score > 0.7 · target = main",
+    scope: "all repos",
+    actions: [
+      { type: "notify_channel",  target: "#eng-reviews"          },
+      { type: "run_runbook",     params: { id: "post-merge-check" } },
+    ],
+    lastFired: null,
+    fireCount: 0,
+    createdBy: "bob",
+  },
+]
+
+export type CronStatus = "active" | "paused" | "error"
+export type CronResultStatus = "ok" | "warning" | "error" | "skipped"
+
+export interface CronMonitor {
+  id: string
+  name: string
+  status: CronStatus
+  schedule: string
+  description: string
+  agentType: string
+  lastRun: string
+  lastResult: CronResultStatus
+  lastResultSummary: string
+  nextRun: string
+  runCount: number
+  errorCount: number
+}
+
+export const CRON_MONITORS: CronMonitor[] = [
+  {
+    id: "cron-001",
+    name: "Service health sweep",
+    status: "active",
+    schedule: "*/5 * * * *",
+    description: "Check error rate, P99, and pod health for all prod services. Create incident if threshold breached.",
+    agentType: "sre",
+    lastRun: "2m ago",
+    lastResult: "warning",
+    lastResultSummary: "2 services degraded (payments-api, auth-service). Incidents INC-041, INC-040 already open.",
+    nextRun: "in 3m",
+    runCount: 1840,
+    errorCount: 0,
+  },
+  {
+    id: "cron-002",
+    name: "Cloud security findings scan",
+    status: "active",
+    schedule: "*/15 * * * *",
+    description: "Pull security findings from all connected cloud providers. Surface critical findings to war room.",
+    agentType: "cloud-sre",
+    lastRun: "8m ago",
+    lastResult: "warning",
+    lastResultSummary: "2 critical findings unchanged (S3 public ACL, root API key). 1 new medium finding on GCP.",
+    nextRun: "in 7m",
+    runCount: 612,
+    errorCount: 0,
+  },
+  {
+    id: "cron-003",
+    name: "SLO burn rate check",
+    status: "active",
+    schedule: "0 * * * *",
+    description: "Compute 1h and 6h error budget burn rate for all SLOs. Trigger escalation if burn > 10x.",
+    agentType: "sre",
+    lastRun: "28m ago",
+    lastResult: "ok",
+    lastResultSummary: "All SLOs within budget. payments-api SLO at 82% — monitor closely.",
+    nextRun: "in 32m",
+    runCount: 284,
+    errorCount: 1,
+  },
+  {
+    id: "cron-004",
+    name: "Cloud cost anomaly detection",
+    status: "active",
+    schedule: "0 */6 * * *",
+    description: "Compare current cloud spend to 7d baseline. Alert if any service exceeds 2x baseline.",
+    agentType: "cloud-sre",
+    lastRun: "2h ago",
+    lastResult: "ok",
+    lastResultSummary: "AWS spend nominal. EKS cluster within expected range. No anomalies detected.",
+    nextRun: "in 4h",
+    runCount: 47,
+    errorCount: 0,
+  },
+  {
+    id: "cron-005",
+    name: "Daily deploy health report",
+    status: "active",
+    schedule: "0 8 * * *",
+    description: "Aggregate all deploys from past 24h. Summarise success rates, rollbacks, incidents caused. Post to #deploys.",
+    agentType: "deploy",
+    lastRun: "today 08:00",
+    lastResult: "ok",
+    lastResultSummary: "14 deploys: 13 success, 1 rollback (catalog-service v2.1.4). 1 incident caused. Report posted to #deploys.",
+    nextRun: "tomorrow 08:00",
+    runCount: 18,
+    errorCount: 0,
+  },
+  {
+    id: "cron-006",
+    name: "Oncall morning brief",
+    status: "active",
+    schedule: "0 9 * * *",
+    description: "Generate shift-change brief for current oncall: open incidents, overnight alerts, SLO status, upcoming deploys.",
+    agentType: "orchestrator",
+    lastRun: "today 09:00",
+    lastResult: "ok",
+    lastResultSummary: "Brief sent to alice (payments), david (platform). 2 open incidents, 3 overnight alerts, all SLOs green at brief time.",
+    nextRun: "tomorrow 09:00",
+    runCount: 18,
+    errorCount: 0,
+  },
+  {
+    id: "cron-007",
+    name: "Weekly incident retrospective",
+    status: "active",
+    schedule: "0 9 * * 1",
+    description: "Analyse all incidents from past 7 days. Identify patterns, recurring root causes, MTTR trends. Post summary to #post-mortems.",
+    agentType: "orchestrator",
+    lastRun: "Mon 09:00",
+    lastResult: "ok",
+    lastResultSummary: "4 incidents reviewed. 2 caused by deploys (60%), 1 config drift, 1 external. MTTR 34m (improving). Pattern: 2 deploy-caused incidents both lacked pre-deploy checklist.",
+    nextRun: "next Mon 09:00",
+    runCount: 4,
+    errorCount: 0,
+  },
+]
+

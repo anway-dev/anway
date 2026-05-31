@@ -37,6 +37,7 @@ export function AiPanel({ node, action, onClose }: Props) {
       setLines((prev) => {
         const last = prev[prev.length - 1] ?? "";
         const chunk = chunks[i];
+        if (!chunk) return prev;
         if (chunk.includes("\n")) {
           const parts = (last + chunk).split("\n");
           return [...prev.slice(0, -1), ...parts];
@@ -117,7 +118,7 @@ export function AiPanel({ node, action, onClose }: Props) {
         {chatHistory.map((msg, i) => (
           <div key={i} style={{ marginBottom: "12px" }}>
             <div style={{ fontSize: "10px", color: msg.role === "user" ? "#3b82f6" : "#8b5cf6", marginBottom: "4px", textTransform: "uppercase" }}>
-              {msg.role === "user" ? "You" : "✦ Restol AI"}
+              {msg.role === "user" ? "You" : "✦ Anvay"}
             </div>
             <div style={{ fontSize: "12px", color: "#d1d5db", lineHeight: "1.6", whiteSpace: "pre-wrap", background: msg.role === "user" ? "#1a1a1a" : "transparent", padding: msg.role === "user" ? "8px 10px" : "0", borderRadius: "6px" }}>
               {msg.text}

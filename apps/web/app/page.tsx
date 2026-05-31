@@ -4,38 +4,64 @@ import { LifecycleView } from "@/components/lifecycle";
 import { ConnectorsView } from "@/components/connectors";
 import { ApiClientView } from "@/components/apiclient";
 import { AiPanel } from "@/components/ai-panel";
-import { OrchestratorChat } from "@/components/orchestrator-chat";
+import { OrchestratorChat, OrchestratorContext } from "@/components/orchestrator-chat";
 import { WorkflowView } from "@/components/workflow-view";
 import { AuditView } from "@/components/audit-view";
 import { AccessView } from "@/components/access-view";
 import { EditorView } from "@/components/editor-view";
+import { ModelConfig } from "@/components/model-config";
+import { AlertsView } from "@/components/alerts-view";
+import { IntakeView } from "@/components/intake-view";
+import { KbView } from "@/components/kb-view";
+import { CloudView } from "@/components/cloud-view";
+import { IncidentView } from "@/components/incident-view";
+import { ServiceCatalog } from "@/components/service-catalog";
+import { AutomationsView } from "@/components/automations-view";
 import { StageNode } from "@/lib/mock";
-import { AUDIT_EVENTS } from "@/lib/mock";
+import { AUDIT_EVENTS, LIVE_ALERTS, CLOUD_PROVIDERS, INCIDENTS } from "@/lib/mock";
 
-type View = "chat" | "lifecycle" | "editor" | "workflow" | "api" | "connectors" | "audit" | "access" | "k8s";
+type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations";
 
 const NAV: { id: View; label: string; icon: string }[] = [
-  { id: "chat",       label: "Orchestrator", icon: "✦" },
-  { id: "lifecycle",  label: "Lifecycle",    icon: "◈" },
-  { id: "editor",     label: "Editor",       icon: "⌗" },
-  { id: "workflow",   label: "Workflows",    icon: "⬡" },
-  { id: "api",        label: "API Client",   icon: "⚡" },
-  { id: "connectors", label: "Connectors",   icon: "⬡" },
-  { id: "audit",      label: "Audit",        icon: "◎" },
-  { id: "access",     label: "Access",       icon: "⊡" },
-  { id: "k8s",        label: "K8s",          icon: "☸" },
+  { id: "chat",        label: "Anvay",        icon: "✦" },
+  { id: "alerts",      label: "Signals",      icon: "◎" },
+  { id: "incident",    label: "War Room",     icon: "⚠" },
+  { id: "catalog",     label: "Services",     icon: "⬢" },
+  { id: "routing",     label: "Routing",      icon: "⇉" },
+  { id: "lifecycle",   label: "Lifecycle",    icon: "◈" },
+  { id: "editor",      label: "Editor",       icon: "⌗" },
+  { id: "kb",          label: "Knowledge",    icon: "◉" },
+  { id: "workflow",    label: "Workflows",    icon: "⬡" },
+  { id: "automations", label: "Automations",  icon: "⟳" },
+  { id: "api",         label: "API Client",   icon: "⚡" },
+  { id: "connectors",  label: "Connectors",   icon: "⬡" },
+  { id: "audit",       label: "Audit",        icon: "⊡" },
+  { id: "access",      label: "Access",       icon: "⊞" },
+  { id: "models",      label: "Models",       icon: "◈" },
+  { id: "cloud",       label: "Cloud",        icon: "☁" },
+  { id: "k8s",         label: "K8s",          icon: "☸" },
 ];
 
 const RECENT_QUERIES = AUDIT_EVENTS.slice(0, 3);
+
+const CRITICAL_COUNT = LIVE_ALERTS.filter(a => a.severity === "critical").length;
+const CLOUD_ISSUES = CLOUD_PROVIDERS.reduce((acc, p) => acc + p.criticalAlerts + p.securityFindings, 0);
+const ACTIVE_INCIDENTS = INCIDENTS.filter(i => i.status === "active" || i.status === "investigating").length;
 
 export default function App() {
   const [view, setView] = useState<View>("chat");
   const [activeNode, setActiveNode] = useState<StageNode | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [orchestratorContext, setOrchestratorContext] = useState<OrchestratorContext | undefined>(undefined);
 
   const handleNodeClick = (node: StageNode, action?: string) => {
     setActiveNode(node);
     setActiveAction(action ?? null);
+  };
+
+  const handleTriggerOrchestrator = (query: string, context: { title: string; source: string }) => {
+    setOrchestratorContext({ query, title: context.title, source: context.source });
+    setView("chat");
   };
 
   return (
@@ -95,6 +121,21 @@ export default function App() {
               {item.id === "chat" && (
                 <span style={{ marginLeft: "auto", width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 4px #10b981" }} />
               )}
+              {item.id === "alerts" && CRITICAL_COUNT > 0 && (
+                <span style={{ marginLeft: "auto", fontSize: "10px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", padding: "1px 5px", borderRadius: "10px", fontWeight: 700 }}>
+                  {CRITICAL_COUNT}
+                </span>
+              )}
+              {item.id === "incident" && ACTIVE_INCIDENTS > 0 && (
+                <span style={{ marginLeft: "auto", fontSize: "10px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", padding: "1px 5px", borderRadius: "10px", fontWeight: 700 }}>
+                  {ACTIVE_INCIDENTS}
+                </span>
+              )}
+              {item.id === "cloud" && CLOUD_ISSUES > 0 && (
+                <span style={{ marginLeft: "auto", fontSize: "10px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", padding: "1px 5px", borderRadius: "10px", fontWeight: 700 }}>
+                  {CLOUD_ISSUES}
+                </span>
+              )}
             </button>
           ))}
 
@@ -136,7 +177,12 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
         {/* View area */}
         <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
-          {view === "chat" && <OrchestratorChat />}
+          {view === "chat" && <OrchestratorChat key={orchestratorContext?.query} initialContext={orchestratorContext} />}
+          {view === "alerts" && (
+            <AlertsView onTriggerOrchestrator={handleTriggerOrchestrator} />
+          )}
+          {view === "routing" && <IntakeView />}
+          {view === "kb" && <KbView />}
           {view === "lifecycle" && (
             <div style={{ height: "100%", overflowY: "auto" }}>
               <LifecycleView onNodeClick={handleNodeClick} activeNodeId={activeNode?.id ?? null} />
@@ -148,6 +194,11 @@ export default function App() {
           {view === "connectors" && <ConnectorsView />}
           {view === "audit" && <AuditView />}
           {view === "access" && <AccessView />}
+          {view === "models" && <ModelConfig />}
+          {view === "cloud" && <CloudView onTriggerOrchestrator={handleTriggerOrchestrator} />}
+          {view === "incident" && <IncidentView onTriggerOrchestrator={handleTriggerOrchestrator} />}
+          {view === "catalog" && <ServiceCatalog onTriggerOrchestrator={handleTriggerOrchestrator} />}
+          {view === "automations" && <AutomationsView />}
           {view === "k8s" && <K8sPlaceholder />}
         </div>
 
@@ -205,3 +256,4 @@ function K8sPlaceholder() {
     </div>
   );
 }
+

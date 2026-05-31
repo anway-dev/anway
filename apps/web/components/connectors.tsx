@@ -2,7 +2,7 @@
 import { CONNECTORS, Connector } from "@/lib/mock";
 import { useState } from "react";
 
-const CATEGORIES = ["All", "Observability", "Logging", "Kubernetes", "Code & CI", "Issue Tracking", "Deployment", "Infrastructure", "Alerting", "Docs"];
+const CATEGORIES = ["All", "Cloud Health", "Observability", "Logging", "Kubernetes", "Code & CI", "Issue Tracking", "Deployment", "Infrastructure", "Alerting", "Docs"];
 
 export function ConnectorsView() {
   const [filter, setFilter] = useState("All");
@@ -22,7 +22,7 @@ export function ConnectorsView() {
           <span style={{ fontSize: "12px", color: "#10b981" }}>{connected} / {CONNECTORS.length} connected</span>
         </div>
         <p style={{ fontSize: "12px", color: "#888", marginTop: "6px", maxWidth: "520px" }}>
-          Restol reads from your existing tools — no data migration, no rip-and-replace. Connect once, get unified lifecycle visibility.
+          Anvay reads from your existing tools — no data migration, no rip-and-replace. Connect once, get unified lifecycle visibility.
         </p>
       </div>
 
@@ -81,7 +81,7 @@ export function ConnectorsView() {
 
             <div style={{ display: "flex", gap: "8px", fontSize: "11px", color: "#555", marginBottom: "20px", alignItems: "flex-start" }}>
               <span>🔒</span>
-              <span>Credentials are encrypted at rest. Restol only reads — it never writes to your tools unless a workflow hook explicitly requires it.</span>
+              <span>Credentials are encrypted at rest. Anvay only reads — it never writes to your tools unless a workflow hook explicitly requires it.</span>
             </div>
 
             <div style={{ display: "flex", gap: "8px" }}>

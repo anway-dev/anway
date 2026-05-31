@@ -224,7 +224,7 @@ The full autonomy dial (L1→L4) is the product roadmap. V1 is L2 for everything
 - **Python FastAPI** — heavy parsing, LLM inference jobs, embedding
 - **Fastify** — BFF gateway, auth, team sync, proxy
 - **Next.js** — web UI (`apps/web`). All styles inline (`style={{}}`). Do NOT use Tailwind — v4 breaks silently.
-- **Rust** (planned) — core engine, WASM, collection runner, FSM
+- **Go** — collection runner, FSM, high-throughput connector agents where TypeScript is a bottleneck
 
 ### Monorepo Layout
 ```
@@ -524,11 +524,12 @@ interface CronJob {
 }
 ```
 
-**Scheduling:** Use a durable scheduler (not in-process `setInterval`). Options in priority order:
-1. **Trigger.dev** — TypeScript-native, background jobs + crons, integrates with Next.js. Evaluate first.
-2. **Inngest** — event-driven background functions, cron support, strong DX.
-3. **BullMQ** — Redis-backed job queue + cron scheduler. Self-hosted.
-4. **pg-boss** — Postgres-backed. Good if already on Postgres, no Redis dependency.
+**Scheduling:** Use a durable scheduler (not in-process `setInterval`). Locked decision:
+
+1. **Trigger.dev** — OSS (Apache 2.0), self-hosted, TypeScript-native, background jobs + crons + event-driven. Primary. Runs in Docker alongside the stack.
+2. **BullMQ** — OSS (MIT), Redis-backed, battle-tested fallback if Trigger.dev adds too much ops overhead. Redis already in the stack.
+
+Inngest: proprietary SaaS, not self-hostable — disqualified for an OSS product.
 
 Do not use `setInterval` or `cron` npm packages in production — no persistence, no retry, no visibility.
 
@@ -711,28 +712,34 @@ Knowledge graph   Start in Postgres (adjacency table: entity_id, rel_type, targe
                   Postgres handles moderate graph queries fine with proper indexes.
 ```
 
-### Proven memory systems to evaluate
+### Memory systems — locked decisions
 
-Don't build the memory layer from scratch. These are production-tested:
+Two separate concerns, two separate solutions:
 
-| System | What it is | Use for |
-|--------|-----------|---------|
-| **Mem0** (mem0.ai) | Purpose-built memory layer for AI agents. Manages user, session, and org memory with automatic extraction + retrieval. Open source + hosted. | Drop-in for session + project memory. Handles extraction, dedup, retrieval out of the box. Evaluate first. |
-| **Zep** | Long-term memory for LLM apps. Stores conversation history, extracts facts, builds user/entity models. TypeScript SDK. | Session + project memory. Strong on conversation summarisation and entity extraction from threads. |
-| **Letta (MemGPT)** | Stateful agents with persistent memory, self-editing memory blocks. Manages what to keep/evict autonomously. | Org-level memory that self-curates. Useful when memory volume exceeds context window. |
-| **LangGraph checkpointing** | Persistence layer for agent state graphs (thread-level). Postgres or Redis backends. | Session memory if using LangGraph for agent orchestration. Not standalone. |
-| **pgvector + custom** | Roll your own on Postgres. Full control, no vendor dependency. | When none of the above fit the access pattern or the schema is too specific. |
+**Session memory (conversation context)**  
+Redis + rolling summary. Trivial to build, zero external dependency beyond Redis already in the stack. TTL = session lifetime, auto-evict. No third-party library needed.
 
-**Recommendation for Anvay v1:**
-- Evaluate **Mem0** first — closest match to the three-scope (session/project/org) model already defined above.
-- If Mem0 doesn't fit the connector-event-driven invalidation model, fall back to **Zep** for conversation memory + custom Postgres for KB.
-- Do not build a bespoke memory system before proving the access patterns with one of the above.
+**KB / project / org memory (knowledge graph)**  
+**Graphiti** — temporal knowledge graph by the Zep team. OSS (Apache 2.0), self-hosted.
+
+Why Graphiti over Mem0/Zep for KB:
+- Anvay's KB is explicitly a graph (Service → depends_on → Service, Incident → caused_by → Deploy). Mem0 is flat memory — no relationships, no graph.
+- Graphiti stores facts with `valid_from` / `valid_to` timestamps — directly solves context rot (what was true at time T, not just what is true now)
+- Episode + fact + entity graph structure maps exactly to Anvay's L2–L4 knowledge layers
+- Mem0 is good for "remember this about the user" — not for "what was the state of the payments-api dependency graph yesterday"
+
+Graphiti dependency: Neo4j (or FalkorDB as lighter alternative). Start with FalkorDB — Redis-protocol compatible, lighter than Neo4j, OSS (RSAL license).
+
+| Scope | Solution | OSS |
+|-------|----------|-----|
+| Session memory | Redis + rolling summary (bespoke, ~50 lines) | ✓ |
+| KB / project / org | Graphiti (Zep) + FalkorDB | ✓ |
 
 **Why not a dedicated vector DB (Qdrant/Pinecone) first?**
 pgvector on Postgres is sufficient at org scale. Dedicated vector DB adds ops cost before you have the data volume that justifies it. Switch when benchmarks demand it.
 
-**Why not a graph DB first?**
-The entity model needs to stabilise before picking a graph DB. Start relational, migrate when you can name the specific traversal queries that are slow in Postgres.
+**Why not a dedicated vector DB (Qdrant/Pinecone) first?**
+pgvector on Postgres is sufficient at org scale. Dedicated vector DB adds ops cost before you have the data volume that justifies it. Switch when benchmarks demand it.
 
 **Full stack:**
 ```

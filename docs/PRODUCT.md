@@ -452,12 +452,12 @@ LLM provider and model selection for the orchestrator and specialist agents.
 | BFF Gateway | Fastify, TypeScript | Auth, perimeter enforcement, request routing, team sync |
 | Agent Service | Python FastAPI | Heavy LLM inference, embedding, long-running jobs |
 | Agent Harness | `@anvay/agent`, TypeScript, Anthropic SDK | Orchestrator core, specialist agents, perimeter middleware |
-| Background Jobs | Trigger.dev (primary) / Inngest (fallback) | Event triggers, cron monitors, durable scheduling |
+| Background Jobs | Trigger.dev (OSS, self-hosted) · BullMQ fallback | Event triggers, cron monitors, durable scheduling |
 | Database | PostgreSQL + pgvector | Entities, KB, audit log, relationships, semantic retrieval |
 | Cache | Redis | Session memory, hot KB entries, TTL-based eviction |
 | Event Bus | Internal (phase 1) → Kafka (when volume demands) | Connector events, trigger routing |
 | CLI | `anvay` CLI, TypeScript | Developer-facing, collection runner, local agent |
-| Core Engine | Rust (planned, phase 4+) | Collection runner, FSM, WASM |
+| Collection Runner / FSM | Go | High-throughput collection runner, workflow FSM, connector agents where TS throughput is a bottleneck |
 
 ### 5.2 Monorepo Layout
 
@@ -1167,7 +1167,7 @@ pnpm dev
 - Seed script: demo tenant, users, connector config, initial KB state
 - `docs/CONTRIBUTING.md`: OSS contributor guide
 - `docs/connectors/`: per-connector implementation guide
-- GitHub repo: public, LICENSE (Apache 2.0), CI badges, README with demo gif
+- GitHub repo: public, `LICENSE` (AGPL v3), `LICENSE-COMMERCIAL` (commercial license terms), CI badges, README with demo gif
 
 ---
 
@@ -1203,11 +1203,12 @@ These are hard constraints. Not guidelines.
 
 | Question | Blocking milestone | Current assumption |
 |----------|-------------------|-------------------|
-| Memory system: Mem0 vs Zep vs bespoke | M1 | Evaluate Mem0 first |
-| Trigger.dev vs Inngest for background jobs | M5 | Trigger.dev (TypeScript-native) |
+| Memory — session scope | M1 | Redis + rolling summary (bespoke, trivial) |
+| Memory — KB/project/org scope | M4 | Graphiti (Zep's temporal knowledge graph, Apache 2.0, OSS) |
+| Background jobs scheduler | Locked | Trigger.dev (OSS Apache 2.0, self-hosted) · BullMQ fallback |
 | Graph DB: stay on Postgres adj table vs FalkorDB | M4 | Postgres until traversal is bottleneck |
 | Kafka vs internal event bus | M5 | Internal until event volume demands Kafka |
 | Rust core engine timeline | M4+ | Defer until TypeScript is bottleneck |
 | Connector simulator fidelity level | M8 | Faithful API surface, not byte-perfect |
-| OSS license | M8 | Apache 2.0 |
+| OSS license | Locked | AGPL v3 + commercial dual license |
 | Pricing model (seats vs usage vs connector count) | M7 | Usage-based (tokens + connector calls) |

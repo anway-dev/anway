@@ -4,19 +4,32 @@ import { LifecycleView } from "@/components/lifecycle";
 import { ConnectorsView } from "@/components/connectors";
 import { ApiClientView } from "@/components/apiclient";
 import { AiPanel } from "@/components/ai-panel";
+import { OrchestratorChat } from "@/components/orchestrator-chat";
+import { WorkflowView } from "@/components/workflow-view";
+import { AuditView } from "@/components/audit-view";
+import { AccessView } from "@/components/access-view";
+import { EditorView } from "@/components/editor-view";
 import { StageNode } from "@/lib/mock";
+import { AUDIT_EVENTS } from "@/lib/mock";
 
-type View = "lifecycle" | "api" | "connectors" | "k8s";
+type View = "chat" | "lifecycle" | "editor" | "workflow" | "api" | "connectors" | "audit" | "access" | "k8s";
 
 const NAV: { id: View; label: string; icon: string }[] = [
-  { id: "lifecycle", label: "Lifecycle", icon: "◈" },
-  { id: "api", label: "API Client", icon: "⚡" },
-  { id: "connectors", label: "Connectors", icon: "⬡" },
-  { id: "k8s", label: "K8s", icon: "☸" },
+  { id: "chat",       label: "Orchestrator", icon: "✦" },
+  { id: "lifecycle",  label: "Lifecycle",    icon: "◈" },
+  { id: "editor",     label: "Editor",       icon: "⌗" },
+  { id: "workflow",   label: "Workflows",    icon: "⬡" },
+  { id: "api",        label: "API Client",   icon: "⚡" },
+  { id: "connectors", label: "Connectors",   icon: "⬡" },
+  { id: "audit",      label: "Audit",        icon: "◎" },
+  { id: "access",     label: "Access",       icon: "⊡" },
+  { id: "k8s",        label: "K8s",          icon: "☸" },
 ];
 
+const RECENT_QUERIES = AUDIT_EVENTS.slice(0, 3);
+
 export default function App() {
-  const [view, setView] = useState<View>("lifecycle");
+  const [view, setView] = useState<View>("chat");
   const [activeNode, setActiveNode] = useState<StageNode | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
 
@@ -33,9 +46,9 @@ export default function App() {
         <div style={{ padding: "18px 16px", borderBottom: "1px solid #1a1a1a" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div style={{ width: "24px", height: "24px", background: "#10b981", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 900, color: "#000" }}>
-              R
+              A
             </div>
-            <span style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", letterSpacing: "-0.02em" }}>restol</span>
+            <span style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", letterSpacing: "-0.02em" }}>anvay</span>
             <span style={{ fontSize: "10px", background: "#1a2a1a", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)", padding: "1px 5px", borderRadius: "3px", marginLeft: "2px" }}>
               beta
             </span>
@@ -55,7 +68,7 @@ export default function App() {
         </div>
 
         {/* Nav */}
-        <nav style={{ padding: "8px 8px", flex: 1 }}>
+        <nav style={{ padding: "8px", flex: 1, overflowY: "auto" }}>
           <div style={{ fontSize: "10px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "8px 8px 4px" }}>
             Platform
           </div>
@@ -72,27 +85,35 @@ export default function App() {
                 textAlign: "left",
               }}
             >
-              <span style={{ fontSize: "14px", width: "18px", textAlign: "center" }}>{item.icon}</span>
+              <span style={{ fontSize: "13px", width: "18px", textAlign: "center" }}>{item.icon}</span>
               {item.label}
               {item.id === "connectors" && (
                 <span style={{ marginLeft: "auto", fontSize: "10px", background: "#1a2a1a", color: "#10b981", border: "1px solid rgba(16,185,129,0.2)", padding: "1px 5px", borderRadius: "10px" }}>
                   7
                 </span>
               )}
+              {item.id === "chat" && (
+                <span style={{ marginLeft: "auto", width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 4px #10b981" }} />
+              )}
             </button>
           ))}
 
+          {/* Recent section */}
           <div style={{ fontSize: "10px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "16px 8px 4px" }}>
-            Features
+            Recent
           </div>
-          {["Reduce Checkout Friction", "Payment Methods", "Subscription Billing"].map((f, i) => (
+          {RECENT_QUERIES.map((evt) => (
             <button
-              key={f}
-              onClick={() => setView("lifecycle")}
-              style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "6px 8px", borderRadius: "6px", cursor: "pointer", border: "none", background: "transparent", color: "#666", fontSize: "11px", textAlign: "left" }}
+              key={evt.id}
+              onClick={() => setView("chat")}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: "6px", width: "100%",
+                padding: "6px 8px", borderRadius: "6px", cursor: "pointer", border: "none",
+                background: "transparent", color: "#555", fontSize: "11px", textAlign: "left",
+              }}
             >
-              <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: i === 0 ? "#f97316" : i === 1 ? "#f59e0b" : "#555", flexShrink: 0 }} />
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</span>
+              <span style={{ color: "#444", fontSize: "11px", marginTop: "1px", flexShrink: 0 }}>↗</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{evt.query}</span>
             </button>
           ))}
         </nav>
@@ -115,18 +136,23 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
         {/* View area */}
         <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
+          {view === "chat" && <OrchestratorChat />}
           {view === "lifecycle" && (
             <div style={{ height: "100%", overflowY: "auto" }}>
               <LifecycleView onNodeClick={handleNodeClick} activeNodeId={activeNode?.id ?? null} />
             </div>
           )}
+          {view === "editor" && <EditorView />}
+          {view === "workflow" && <WorkflowView />}
           {view === "api" && <ApiClientView />}
           {view === "connectors" && <ConnectorsView />}
+          {view === "audit" && <AuditView />}
+          {view === "access" && <AccessView />}
           {view === "k8s" && <K8sPlaceholder />}
         </div>
 
-        {/* AI Panel */}
-        {activeNode && (
+        {/* AI Panel (only for lifecycle view) */}
+        {view === "lifecycle" && activeNode && (
           <AiPanel
             node={activeNode}
             action={activeAction}

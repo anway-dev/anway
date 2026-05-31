@@ -414,38 +414,47 @@ interface IEmbeddingProvider {
 
 Provider implementations (`AnthropicProvider`, `OpenAIProvider`, `GroqProvider`, `MistralProvider`, `OllamaProvider`) live in `packages/agent/providers/`. Orchestrator and agents call `IModelProvider` — never a provider SDK directly.
 
-### Evaluate existing harnesses first
+### Harness decision — Mastra with wrappers (locked)
 
-Before building, evaluate whether an existing harness satisfies all six requirements:
+**Mastra** is the harness implementation. Decision locked after evaluation against all six requirements.
 
-| Requirement | Why it matters |
+| Requirement | Mastra verdict |
 |-------------|---------------|
-| Model-agnostic | No vendor lock-in. Provider swap = config change only |
-| Deterministic perimeter | Policy check runs before tool result returns to LLM — structural, not a warning |
-| Full audit hook on every tool call | No bypass path — compliance and trust depend on this |
-| Human-in-loop gate insertable at any step | Core product mechanic — autonomy dial requires it |
-| Streaming passthrough to SSE without buffering | Real-time UX, not batch |
-| Multi-agent context handoff with typed contracts | Specialist agents share context without losing type safety |
+| Model-agnostic | ✓ Native multi-provider. Anthropic, OpenAI, Groq, Mistral, Ollama, any OpenAI-compatible |
+| Deterministic perimeter | ✓ Tool call lifecycle hooks — `onToolCall` middleware runs before result returns to LLM |
+| Full audit hook on every tool call | ✓ Same lifecycle hook wires the audit sink |
+| Human-in-loop gate insertable at any step | ✓ Built-in `waitForInput` / suspend-resume primitives |
+| Streaming passthrough to SSE without buffering | ✓ Native streaming, SSE-compatible |
+| Multi-agent context handoff with typed contracts | ✓ Typed agent-to-agent handoff, shared context object |
 
-**Candidates to evaluate (in order):**
+**Wrapper layer (`packages/agent`):**
 
-**Mastra** — TypeScript-first, model-agnostic (multi-provider), streaming, human-in-loop workflows, tool use lifecycle hooks. Closest match. Evaluate first.
+Mastra handles the agent lifecycle. Two thin wrappers sit on top — neither is optional:
 
-**Vercel AI SDK** — Model-agnostic, TypeScript, streaming-first, tool use, multi-step agents. Strong for both web layer and agent logic if it supports perimeter middleware.
+1. **Perimeter middleware** — every tool call passes through `perimeterCheck(call, userPerimeter)` before Mastra executes it. Hard block if outside scope. Wired into Mastra's `onToolCall` hook.
+2. **Token metering middleware** — every call increments counters in `TokenBudget`. If per-query, per-session, or per-tenant limit is exceeded, call is blocked before reaching the LLM. Wired into Mastra's `onModelCall` hook.
 
-**LangGraph.js** — Model-agnostic, graph-based agent flows, checkpointing (human-in-loop), TypeScript. Heavier abstraction but configurable.
+```typescript
+// packages/agent/src/middleware/perimeter.ts
+export function createPerimeterMiddleware(perimeter: AgentPerimeter) {
+  return async (call: ToolCall): Promise<ToolCall | HardBlock> => {
+    if (!perimeter.allows(call)) return hardBlock(call, perimeter)
+    auditSink.append({ type: "tool_call", call, allowed: true })
+    return call
+  }
+}
 
-**LlamaIndex.ts** — Model-agnostic, TypeScript. More data/RAG focused — less suited to orchestration layer.
+// packages/agent/src/middleware/token-meter.ts
+export function createTokenMeterMiddleware(budget: TokenBudget) {
+  return async (req: ModelCallRequest): Promise<ModelCallRequest | HardBlock> => {
+    if (!budget.canSpend(req.estimatedTokens)) return hardBlock("token_limit_exceeded")
+    return req
+  }
+}
+```
 
-Do NOT adopt without verifying all six requirements are satisfied without workarounds. A framework that forces a bypass on requirement 2 or 3 is disqualified regardless of other strengths.
+**The harness itself remains replaceable.** Mastra is the first concrete implementation behind `IModelProvider`. If Mastra changes license, breaks an API, or fails a requirement — swap it. The wrappers are the same regardless of which framework runs underneath.
 
-### If no existing harness satisfies requirements — build it
-
-`packages/agent` (`@anvay/agent`) is the harness. Build bespoke only if evaluation confirms no framework satisfies all six requirements without compromise.
-
-A 500-line bespoke harness fully under our control beats a framework that forces a workaround on the perimeter or audit requirement. Those are non-negotiable.
-
-Build surface for `@anvay/agent`:
 ```typescript
 createOrchestrator({ model: IModelProvider, tools, perimeter, auditSink })
 createSpecialistAgent({ name, model: IModelProvider, tools, systemPrompt })
@@ -453,7 +462,7 @@ createGate({ condition, approvers, autoApproveThreshold })
 runSession(orchestrator, input, context) → AsyncIterator<StreamEvent>
 ```
 
-All surface functions accept `IModelProvider` — never a concrete provider class.
+All surface functions accept `IModelProvider` — never Mastra types or a concrete provider class directly.
 
 ### Event Triggers — reactive automation
 
@@ -729,9 +738,10 @@ memory            Entities and relationships as tables with FK adjacency.
                   Redis in front as hot-entry cache (TTL-based, connector sync results).
 
 Knowledge graph   Start in Postgres (adjacency table: entity_id, rel_type, target_id).
-                  Migrate to FalkorDB or Neo4j only when relationship traversal
-                  becomes the measured bottleneck. Don't pre-optimise —
-                  Postgres handles moderate graph queries fine with proper indexes.
+                  Migrate to KùzuDB (MIT, embedded) only when traversal is measured
+                  bottleneck. FalkorDB disqualified (RSAL, not clean OSS). Neo4j
+                  disqualified (AGPL with commercial restrictions).
+                  Postgres handles 2-3 hop queries fine with proper indexes.
 ```
 
 ### Memory systems — locked decisions
@@ -797,8 +807,9 @@ Session     Redis          (TTL, ephemeral, in-process for prototype)
 Knowledge   Postgres       (entities, relationships, freshness scoring)
             + pgvector     (semantic retrieval over derived knowledge)
 Cache       Redis          (hot entries, connector sync results, TTL-based eviction)
-Events      Postgres       (event log, invalidation triggers)
-            → Kafka        (when event volume demands it — not before)
+Events      Redis Pub/Sub  (already in stack, zero ops cost)
+            Postgres       (event log, invalidation triggers, durable record)
+            → Kafka        (upgrade when: >10 connectors concurrent + need durable replay)
 ```
 
 ### Implementation notes (not yet built)

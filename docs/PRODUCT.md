@@ -554,44 +554,54 @@ interface IEmbeddingProvider {
 // Orchestrator and agents call IModelProvider — never a provider SDK directly
 ```
 
-**Harness evaluation strategy — adopt before building:**
+**Harness decision — Mastra with wrappers (locked)**
 
-Evaluate existing harnesses against six requirements. Adopt the first that satisfies all six without workaround. Build bespoke only if none qualify.
+Evaluated against all six requirements. Mastra satisfies all without workarounds.
 
-| Requirement | Rationale |
-|-------------|-----------|
-| **Model-agnostic** | Provider swap = config change only. No SDK imports in agent logic. |
-| **Deterministic perimeter** | Policy check runs before tool result returns to LLM. Structural, not advisory. |
-| **Full audit hook — no bypass** | Every tool call logged. Compliance and trust depend on zero-bypass. |
-| **Human-in-loop gate at any step** | Core product mechanic. Autonomy dial requires insertable gates. |
-| **Streaming passthrough without buffering** | Real-time UX. Full response before display is not acceptable. |
-| **Multi-agent typed context handoff** | Specialist agents share context without losing type contracts. |
+| Requirement | Mastra verdict |
+|-------------|---------------|
+| **Model-agnostic** | ✓ Native multi-provider (Anthropic, OpenAI, Groq, Mistral, Ollama, any OpenAI-compatible) |
+| **Deterministic perimeter** | ✓ `onToolCall` lifecycle hook — perimeter check runs before result returns to LLM |
+| **Full audit hook — no bypass** | ✓ Same hook wires audit sink; no path around it |
+| **Human-in-loop gate at any step** | ✓ `waitForInput` / suspend-resume primitives, gate insertable anywhere |
+| **Streaming passthrough without buffering** | ✓ Native streaming, SSE-compatible |
+| **Multi-agent typed context handoff** | ✓ Typed agent-to-agent handoff, shared context object |
 
-**Candidates (evaluate in this order):**
-1. **Mastra** — TypeScript-first, multi-provider, streaming, human-in-loop, tool lifecycle hooks. Closest match. Evaluate first.
-2. **Vercel AI SDK** — Multi-provider, streaming-first, TypeScript, tool use, multi-step agents.
-3. **LangGraph.js** — Multi-provider, graph-based flows, checkpointing (human-in-loop), TypeScript.
+**Wrapper layer built in `packages/agent` on top of Mastra:**
 
-A framework that forces a workaround on the perimeter or audit requirement is disqualified regardless of other strengths.
+Two thin wrappers — neither optional:
 
-**If no framework qualifies — build `@anvay/agent`:**
+1. **Perimeter middleware** — `onToolCall` hook. Every tool call passes `perimeterCheck(call, userPerimeter)`. Hard block if outside scope. Audit-logged regardless of outcome.
+2. **Token metering middleware** — `onModelCall` hook. Every call checked against `TokenBudget`. Hard block if per-query, per-session, or per-tenant limit exceeded before reaching the LLM.
 
 ```typescript
-// packages/agent/src/index.ts
+// packages/agent/src/middleware/perimeter.ts
+export function createPerimeterMiddleware(perimeter: AgentPerimeter) {
+  return async (call: ToolCall): Promise<ToolCall | HardBlock> => {
+    if (!perimeter.allows(call)) return hardBlock(call, perimeter)
+    auditSink.append({ type: "tool_call", call, allowed: true })
+    return call
+  }
+}
+
+// packages/agent/src/middleware/token-meter.ts
+export function createTokenMeterMiddleware(budget: TokenBudget) {
+  return async (req: ModelCallRequest): Promise<ModelCallRequest | HardBlock> => {
+    if (!budget.canSpend(req.estimatedTokens)) return hardBlock("token_limit_exceeded")
+    return req
+  }
+}
+```
+
+**The harness itself remains replaceable.** Mastra is the first concrete implementation behind the `IModelProvider` interface. If Mastra changes license, drops a required feature, or fails a future requirement — swap it. The wrappers are framework-agnostic.
+
+```typescript
+// packages/agent public surface — all accept IModelProvider, never Mastra types directly
 createOrchestrator({ model: IModelProvider, tools, perimeter, auditSink }): Orchestrator
 createSpecialistAgent({ name, model: IModelProvider, tools, systemPrompt }): SpecialistAgent
 createGate({ condition, approvers, autoApproveThreshold }): Gate
 runSession(orch: Orchestrator, input: string, ctx: SessionContext): AsyncIterator<StreamEvent>
-
-// Every tool call routes through this — no bypass path
-async function toolCallMiddleware(
-  call: ToolCall,
-  perimeter: AgentPerimeter,
-  audit: AuditSink
-): Promise<ToolResult | HardBlock>
 ```
-
-A 500-line bespoke harness under full control beats a framework that compromises on requirement 2 or 3.
 
 ---
 
@@ -1379,16 +1389,36 @@ These are hard constraints. Not guidelines.
 
 ---
 
-## 11. Open Questions (to resolve per milestone)
+## 11. Decisions
 
-| Question | Blocking milestone | Current assumption |
-|----------|-------------------|-------------------|
-| Memory — session scope | Locked | `RedisSessionMemory` implements `ISessionMemory` — Redis + rolling summary |
-| Memory — KB/project/org scope | Locked | `GraphitiKnowledgeGraph` implements `IKnowledgeGraph` — Graphiti (Apache 2.0) + Apache AGE on Postgres. Swappable via interface — no agent code changes to switch backend. |
-| Background jobs scheduler | Locked | Trigger.dev (OSS Apache 2.0, self-hosted) · BullMQ fallback |
-| Graph DB: stay on Postgres adj table vs FalkorDB | M4 | Postgres until traversal is bottleneck |
-| Kafka vs internal event bus | M5 | Internal until event volume demands Kafka |
-| Rust core engine timeline | M4+ | Defer until TypeScript is bottleneck |
-| Connector simulator fidelity level | M8 | Faithful API surface, not byte-perfect |
+All questions resolved and locked.
+
+| Decision | Status | Resolution |
+|----------|--------|------------|
+| Memory — session scope | Locked | `RedisSessionMemory implements ISessionMemory` — Redis + rolling summary |
+| Memory — KB/project/org scope | Locked | `GraphitiKnowledgeGraph implements IKnowledgeGraph` — Graphiti (Apache 2.0) + Apache AGE on Postgres. Swap path: KùzuDB (MIT). No agent code changes to switch. |
+| Background jobs scheduler | Locked | Trigger.dev (Apache 2.0, self-hosted) primary · BullMQ (MIT, Redis-backed) fallback |
+| Graph DB | Locked | Postgres adjacency table until traversal is measured bottleneck. Named swap target: KùzuDB (MIT, embedded, zero new service). FalkorDB disqualified (RSAL). |
+| Event bus | Locked | Redis Pub/Sub (already in stack, zero ops cost). Switch trigger: >10 connectors at concurrent high frequency OR need durable replay across restarts. Kafka is the named upgrade path. |
+| High-perf services (was: Rust) | Locked | Go for collection runner, FSM, high-throughput connector agents. Switch from TypeScript only when benchmarks show bottleneck. Timeline: M4+. |
+| Connector simulator fidelity | Locked | Faithful API surface (match tool definitions + response shape). Not byte-perfect. Good enough for integration testing without brittle fixtures. |
 | OSS license | Locked | AGPL v3 + commercial dual license |
-| Pricing model (seats vs usage vs connector count) | M7 | Usage-based (tokens + connector calls) |
+| Agent harness | Locked | Mastra + wrappers. Perimeter middleware + token metering wired into Mastra lifecycle hooks. Harness remains swappable — surface functions accept `IModelProvider`, never Mastra types directly. |
+| Pricing model | Locked | Connector-count tiers + token pool. Configurable per deployment. Defaults: |
+
+```
+Tier 1  — up to  3 connectors · 1M tokens/mo  ·  5 seats
+Tier 2  — up to 10 connectors · 10M tokens/mo · 25 seats
+Tier 3  — unlimited connectors · 100M tokens/mo · unlimited seats
+Overage — tokens billed at cost + margin; connector count triggers upgrade nudge (not hard block)
+```
+
+**Enforcement model:**
+
+| Limit | Enforcement | Rationale |
+|-------|-------------|-----------|
+| Token pool | Hard stop | Real cost. Overage = pay-as-you-go if billing configured, else block. |
+| Connector count | Soft limit | Not a cost driver. Exceed tier → upgrade nudge + 14-day grace, then read-only. Never hard block in production. |
+| Seats | Advisory only | No enforcement. Org manages internally. |
+
+Connector count is the primary tier differentiator for sales messaging. Token pool is the real cost enforcer — more connectors = more agent calls = token cap hit sooner = natural upgrade pressure without breaking production. All thresholds (connector limits, token caps, grace periods, overage rates) are runtime-configurable — no hardcoded values in billing logic.

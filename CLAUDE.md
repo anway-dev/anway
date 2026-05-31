@@ -373,48 +373,65 @@ Tasks:
 
 ## Agent Harness Guidance
 
-### Preferred: Anthropic SDK direct + thin harness in `@anvay/agent`
+### Non-negotiable: model-agnostic, no vendor lock-in
 
-Do NOT adopt a heavy framework (LangChain, LlamaIndex, CrewAI, AutoGen). They add abstraction that fights the deterministic perimeter requirement.
+The harness must not be coupled to any single LLM provider. Users bring their own models — Anthropic, OpenAI, Groq, Mistral, Ollama, LM Studio, or any OpenAI-compatible endpoint. Swapping the model must require only a config change, not a code change.
 
-**Why direct SDK:**
-- Full control over every tool call — perimeter check runs as middleware before the LLM sees a result
-- Native streaming (`stream_manager`, SSE passthrough)
-- Tool use lifecycle hooks: `on_tool_call` → check policy → execute or block → audit log
-- No hidden agent decisions — every routing step is explicit code, not framework magic
+The harness abstracts over providers via a typed interface:
 
-**Thin harness pattern (`packages/agent`):**
-```
-OrchestratorAgent
-  resolveEffectiveRole(user, query)
-  resolveCapabilities(user, connectors)        ← deterministic perimeter
-  routeToSpecialist(intent) → SpecialistAgent
-  SpecialistAgent.run(tools filtered to perimeter)
-  every tool_call → audit_log.append(event)
+```typescript
+interface IModelProvider {
+  chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse>
+  stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncIterator<StreamChunk>
+}
+
+interface IEmbeddingProvider {
+  embed(texts: string[]): Promise<number[][]>
+}
 ```
 
-**Vercel AI SDK** — acceptable for the web streaming layer only (`apps/web` server routes → browser SSE). Not for agent logic.
+Provider implementations (`AnthropicProvider`, `OpenAIProvider`, `GroqProvider`, `MistralProvider`, `OllamaProvider`) live in `packages/agent/providers/`. Orchestrator and agents call `IModelProvider` — never a provider SDK directly.
 
-**Mastra** — TypeScript-first, supports Anthropic, human-in-loop workflows. Evaluate if the harness in `@anvay/agent` grows complex. Don't start with it.
+### Evaluate existing harnesses first
+
+Before building, evaluate whether an existing harness satisfies all six requirements:
+
+| Requirement | Why it matters |
+|-------------|---------------|
+| Model-agnostic | No vendor lock-in. Provider swap = config change only |
+| Deterministic perimeter | Policy check runs before tool result returns to LLM — structural, not a warning |
+| Full audit hook on every tool call | No bypass path — compliance and trust depend on this |
+| Human-in-loop gate insertable at any step | Core product mechanic — autonomy dial requires it |
+| Streaming passthrough to SSE without buffering | Real-time UX, not batch |
+| Multi-agent context handoff with typed contracts | Specialist agents share context without losing type safety |
+
+**Candidates to evaluate (in order):**
+
+**Mastra** — TypeScript-first, model-agnostic (multi-provider), streaming, human-in-loop workflows, tool use lifecycle hooks. Closest match. Evaluate first.
+
+**Vercel AI SDK** — Model-agnostic, TypeScript, streaming-first, tool use, multi-step agents. Strong for both web layer and agent logic if it supports perimeter middleware.
+
+**LangGraph.js** — Model-agnostic, graph-based agent flows, checkpointing (human-in-loop), TypeScript. Heavier abstraction but configurable.
+
+**LlamaIndex.ts** — Model-agnostic, TypeScript. More data/RAG focused — less suited to orchestration layer.
+
+Do NOT adopt without verifying all six requirements are satisfied without workarounds. A framework that forces a bypass on requirement 2 or 3 is disqualified regardless of other strengths.
 
 ### If no existing harness satisfies requirements — build it
 
-`packages/agent` (`@anvay/agent`) is the harness. If any evaluated framework cannot satisfy all of:
-- Deterministic perimeter (policy check runs before tool result returns to LLM)
-- Full audit hook on every tool call with no bypass path
-- Human-in-loop gate insertable at any step
-- Streaming passthrough to SSE without buffering
-- Multi-agent context handoff with typed contracts
+`packages/agent` (`@anvay/agent`) is the harness. Build bespoke only if evaluation confirms no framework satisfies all six requirements without compromise.
 
-...then build the harness in `@anvay/agent` rather than compromise on any of the above. The harness is core product — it is not a commodity. A bespoke 500-line harness we fully control beats a framework that forces a workaround on requirement #2.
+A 500-line bespoke harness fully under our control beats a framework that forces a workaround on the perimeter or audit requirement. Those are non-negotiable.
 
 Build surface for `@anvay/agent`:
 ```typescript
-createOrchestrator({ model, tools, perimeter, auditSink })
-createSpecialistAgent({ name, tools, systemPrompt })
+createOrchestrator({ model: IModelProvider, tools, perimeter, auditSink })
+createSpecialistAgent({ name, model: IModelProvider, tools, systemPrompt })
 createGate({ condition, approvers, autoApproveThreshold })
 runSession(orchestrator, input, context) → AsyncIterator<StreamEvent>
 ```
+
+All surface functions accept `IModelProvider` — never a concrete provider class.
 
 ### Event Triggers — reactive automation
 

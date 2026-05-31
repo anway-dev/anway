@@ -531,39 +531,67 @@ Background jobs (Trigger.dev)
 
 ### 5.4 Agent Harness Design
 
-Direct Anthropic SDK. No heavy framework (LangChain, LlamaIndex, CrewAI).
+**Non-negotiable: model-agnostic. No vendor lock-in.**
+
+The harness must not be coupled to any single LLM provider. Users bring their own model — Anthropic, OpenAI, Groq, Mistral, Ollama, LM Studio, or any OpenAI-compatible endpoint. Swapping the provider requires only a config change, never a code change.
+
+Every provider is an implementation of a typed interface:
 
 ```typescript
-// packages/agent/src/orchestrator.ts
-interface OrchestratorOptions {
-  model: ModelConfig
-  tools: ToolDefinition[]
-  perimeter: AgentPerimeter
-  auditSink: AuditSink
-  kbClient: KBClient
+// packages/agent/src/interfaces/model.ts
+
+interface IModelProvider {
+  chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse>
+  stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncIterator<StreamChunk>
 }
 
-// Every tool call goes through this middleware — no bypass path
+interface IEmbeddingProvider {
+  embed(texts: string[]): Promise<number[][]>
+}
+
+// Provider implementations in packages/agent/src/providers/
+// AnthropicProvider, OpenAIProvider, GroqProvider, MistralProvider, OllamaProvider
+// Orchestrator and agents call IModelProvider — never a provider SDK directly
+```
+
+**Harness evaluation strategy — adopt before building:**
+
+Evaluate existing harnesses against six requirements. Adopt the first that satisfies all six without workaround. Build bespoke only if none qualify.
+
+| Requirement | Rationale |
+|-------------|-----------|
+| **Model-agnostic** | Provider swap = config change only. No SDK imports in agent logic. |
+| **Deterministic perimeter** | Policy check runs before tool result returns to LLM. Structural, not advisory. |
+| **Full audit hook — no bypass** | Every tool call logged. Compliance and trust depend on zero-bypass. |
+| **Human-in-loop gate at any step** | Core product mechanic. Autonomy dial requires insertable gates. |
+| **Streaming passthrough without buffering** | Real-time UX. Full response before display is not acceptable. |
+| **Multi-agent typed context handoff** | Specialist agents share context without losing type contracts. |
+
+**Candidates (evaluate in this order):**
+1. **Mastra** — TypeScript-first, multi-provider, streaming, human-in-loop, tool lifecycle hooks. Closest match. Evaluate first.
+2. **Vercel AI SDK** — Multi-provider, streaming-first, TypeScript, tool use, multi-step agents.
+3. **LangGraph.js** — Multi-provider, graph-based flows, checkpointing (human-in-loop), TypeScript.
+
+A framework that forces a workaround on the perimeter or audit requirement is disqualified regardless of other strengths.
+
+**If no framework qualifies — build `@anvay/agent`:**
+
+```typescript
+// packages/agent/src/index.ts
+createOrchestrator({ model: IModelProvider, tools, perimeter, auditSink }): Orchestrator
+createSpecialistAgent({ name, model: IModelProvider, tools, systemPrompt }): SpecialistAgent
+createGate({ condition, approvers, autoApproveThreshold }): Gate
+runSession(orch: Orchestrator, input: string, ctx: SessionContext): AsyncIterator<StreamEvent>
+
+// Every tool call routes through this — no bypass path
 async function toolCallMiddleware(
   call: ToolCall,
   perimeter: AgentPerimeter,
   audit: AuditSink
 ): Promise<ToolResult | HardBlock>
-
-createOrchestrator(opts: OrchestratorOptions): Orchestrator
-createSpecialistAgent(opts: SpecialistOptions): SpecialistAgent
-createGate(opts: GateOptions): Gate
-runSession(orch: Orchestrator, input: string, ctx: SessionContext): AsyncIterator<StreamEvent>
 ```
 
-**Five non-negotiable harness properties:**
-1. Deterministic perimeter — policy check runs before tool result returns to LLM
-2. Full audit hook on every tool call — no bypass path
-3. Human-in-loop gate insertable at any step
-4. Streaming passthrough to SSE without buffering
-5. Multi-agent context handoff with typed contracts
-
-If any evaluated framework cannot satisfy all five → build bespoke in `packages/agent`.
+A 500-line bespoke harness under full control beats a framework that compromises on requirement 2 or 3.
 
 ---
 
@@ -1163,9 +1191,11 @@ These are hard constraints. Not guidelines.
 
 8. **Zero `console.log` in production code.** Structured logging via pino/structlog. Every log: trace_id, service, tenant_id.
 
-9. **No framework lock-in for the agent harness.** The harness is core product. A bespoke 500-line harness we fully control beats a framework that forces a workaround on perimeter requirement.
+9. **No vendor lock-in. Period.** The harness is model-agnostic. Agents call `IModelProvider`, never a provider SDK directly. Connector logic calls `IConnector`, never a vendor client directly. Swapping any provider — LLM, database, queue, scheduler — requires only config, not code. Every external dependency is behind an interface.
 
-10. **Docker compose demo works without local dev environment.** `docker compose -f docker-compose.demo.yml up` is the only prerequisite (plus API key in `.env`).
+10. **Evaluate before building the harness.** Existing solutions (Mastra, Vercel AI SDK, LangGraph.js) must be evaluated against all six harness requirements before building bespoke. Bespoke is the fallback, not the default.
+
+11. **Docker compose demo works without local dev environment.** `docker compose -f docker-compose.demo.yml up` is the only prerequisite (plus API key in `.env`).
 
 ---
 

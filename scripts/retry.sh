@@ -1,46 +1,42 @@
 #!/usr/bin/env bash
-# retry.sh — rate-limit-aware retry loop for claude + opencode
+# retry.sh — rate-limit-aware session runner for claude + opencode
 #
 # Usage:
 #   ./scripts/retry.sh claude   "your prompt"
 #   ./scripts/retry.sh opencode "your prompt"
 #   ./scripts/retry.sh claude   "your prompt" --max-retries 10
-#   ./scripts/retry.sh opencode "your prompt" --max-retries 10
 #
 # Behaviour:
-#   - Runs the prompt against the chosen tool
-#   - On rate limit: parses wait time from error output, sleeps, retries
-#   - No LLM involved in retry logic — pure shell pattern matching
-#   - opencode always uses kimi-k2.6 (nvidia/moonshotai/kimi-k2.6)
-#   - claude uses default model configured in Claude Code settings
+#   1. First run: starts execution with the prompt
+#   2. Rate limit hit mid-run: detects from output, parses wait time, sleeps
+#   3. Resume: sends --continue (claude) or --continue (opencode) — NO prompt re-sent
+#   4. Loops until successful completion or non-rate-limit error
+#
+#   No LLM involved in retry logic — pure shell pattern matching.
+#   opencode always uses nvidia/moonshotai/kimi-k2.6
+#   claude uses default model from Claude Code settings
 
 set -euo pipefail
 
-# ── constants ────────────────────────────────────────────────────────────────
-
 OPENCODE_MODEL="nvidia/moonshotai/kimi-k2.6"
-DEFAULT_MAX_RETRIES=20
-FALLBACK_WAIT_SECS=60      # used when no wait time found in error
-MAX_FALLBACK_WAIT=3600     # cap exponential backoff at 1h
-
-# ── colours ──────────────────────────────────────────────────────────────────
+DEFAULT_MAX_RETRIES=50
+FALLBACK_WAIT_SECS=60
+MAX_WAIT_SECS=3600
 
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-CYAN='\033[0;36m'; RESET='\033[0m'
+CYAN='\033[0;36m'; DIM='\033[2m'; RESET='\033[0m'
 
 log()  { echo -e "${CYAN}[retry]${RESET} $*" >&2; }
 warn() { echo -e "${YELLOW}[retry]${RESET} $*" >&2; }
 ok()   { echo -e "${GREEN}[retry]${RESET} $*" >&2; }
 err()  { echo -e "${RED}[retry]${RESET} $*" >&2; }
 
-# ── parse args ───────────────────────────────────────────────────────────────
+# ── args ─────────────────────────────────────────────────────────────────────
 
 TOOL="${1:-}"
 PROMPT="${2:-}"
 MAX_RETRIES=$DEFAULT_MAX_RETRIES
-
 shift 2 2>/dev/null || true
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
@@ -52,157 +48,146 @@ if [[ -z "$TOOL" || -z "$PROMPT" ]]; then
   echo "Usage: $0 <claude|opencode> \"prompt\" [--max-retries N]" >&2
   exit 1
 fi
-
 if [[ "$TOOL" != "claude" && "$TOOL" != "opencode" ]]; then
   err "Unknown tool: $TOOL — must be 'claude' or 'opencode'"
   exit 1
 fi
 
-# ── detect rate limit in output ──────────────────────────────────────────────
-# Returns 0 (true) if output looks like a rate limit error
+# ── rate limit detection ──────────────────────────────────────────────────────
 
 is_rate_limited() {
-  local output="$1"
-  echo "$output" | grep -qiE \
-    "rate.?limit|429|too many requests|quota exceeded|retry.?after|please try again in|usage limit reached|you've exceeded"
+  echo "$1" | grep -qiE \
+    "rate.?limit|429|too many requests|quota.?exceed|retry.?after|please try again in|usage limit|you've exceeded|overloaded"
 }
 
-# ── parse wait seconds from error output ─────────────────────────────────────
-# Tries multiple patterns; returns seconds as integer on stdout
-# Falls back to FALLBACK_WAIT_SECS if nothing found
+# ── wait time parser ──────────────────────────────────────────────────────────
+# Reads error output, returns seconds to wait as integer
 
 parse_wait_secs() {
-  local output="$1"
-  local secs=0
+  local out="$1"
+  local n
 
-  # Pattern: "retry after N seconds" / "retry in N seconds"
-  if echo "$output" | grep -oiE "retry.{1,10}([0-9]+) second" | grep -oE "[0-9]+" | head -1 | read -r n 2>/dev/null; then
-    [[ -n "$n" && "$n" -gt 0 ]] && { echo "$n"; return; }
-  fi
-  n=$(echo "$output" | grep -oiE "retry.{1,10}([0-9]+) second" | grep -oE "[0-9]+" | head -1)
-  [[ -n "$n" && "$n" -gt 0 ]] && { echo "$n"; return; }
-
-  # Pattern: "try again in Xm Ys" (Anthropic format)
+  # "Xm Ys" — Anthropic standard format e.g. "try again in 2m 30s"
   local mins secs_part
-  mins=$(echo "$output" | grep -oiE "([0-9]+)m [0-9]+s" | grep -oE "^[0-9]+" | head -1)
-  secs_part=$(echo "$output" | grep -oiE "[0-9]+m ([0-9]+)s" | grep -oE "[0-9]+s$" | grep -oE "[0-9]+" | head -1)
+  mins=$(echo "$out" | grep -oiE "([0-9]+)m [0-9]+s" | grep -oE "^[0-9]+" | head -1)
+  secs_part=$(echo "$out" | grep -oiE "[0-9]+m ([0-9]+)s" | grep -oE "[0-9]+s$" | grep -oE "^[0-9]+" | head -1)
   if [[ -n "$mins" ]]; then
-    secs=$(( mins * 60 + ${secs_part:-0} ))
-    [[ "$secs" -gt 0 ]] && { echo "$secs"; return; }
+    echo $(( mins * 60 + ${secs_part:-0} )); return
   fi
 
-  # Pattern: "try again in Xs" (seconds only)
-  n=$(echo "$output" | grep -oiE "again in ([0-9]+)s" | grep -oE "[0-9]+" | head -1)
+  # "again in Xs" — seconds only
+  n=$(echo "$out" | grep -oiE "again in ([0-9]+)s" | grep -oE "[0-9]+" | head -1)
   [[ -n "$n" && "$n" -gt 0 ]] && { echo "$n"; return; }
 
-  # Pattern: "Retry-After: N" (HTTP header in output)
-  n=$(echo "$output" | grep -oiE "Retry-After: ([0-9]+)" | grep -oE "[0-9]+" | head -1)
+  # "retry after N seconds"
+  n=$(echo "$out" | grep -oiE "after ([0-9]+) second" | grep -oE "[0-9]+" | head -1)
   [[ -n "$n" && "$n" -gt 0 ]] && { echo "$n"; return; }
 
-  # Pattern: ISO timestamp "retry after 2025-01-01T14:30:00Z"
+  # "Retry-After: N" header
+  n=$(echo "$out" | grep -oiE "Retry-After: ?([0-9]+)" | grep -oE "[0-9]+" | head -1)
+  [[ -n "$n" && "$n" -gt 0 ]] && { echo "$n"; return; }
+
+  # ISO timestamp "retry after 2025-06-01T14:30:00Z"
   local ts
-  ts=$(echo "$output" | grep -oiE "retry.{1,10}(20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]+Z)" \
-    | grep -oE "20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]+Z" | head -1)
+  ts=$(echo "$out" | grep -oiE "20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]+Z" | head -1)
   if [[ -n "$ts" ]]; then
     local target now
     target=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" "+%s" 2>/dev/null \
           || date -d "$ts" "+%s" 2>/dev/null || echo 0)
     now=$(date +%s)
-    secs=$(( target - now ))
-    [[ "$secs" -gt 0 ]] && { echo "$secs"; return; }
+    local diff=$(( target - now ))
+    [[ "$diff" -gt 0 ]] && { echo "$diff"; return; }
   fi
 
   echo "$FALLBACK_WAIT_SECS"
 }
 
-# ── countdown display ────────────────────────────────────────────────────────
+# ── countdown ────────────────────────────────────────────────────────────────
 
 countdown() {
-  local secs="$1"
-  local end=$(( $(date +%s) + secs ))
+  local total="$1"
+  local end=$(( $(date +%s) + total ))
   while [[ $(date +%s) -lt $end ]]; do
-    local remaining=$(( end - $(date +%s) ))
-    printf "\r${YELLOW}[retry]${RESET} Rate limited — retrying in %3ds " "$remaining" >&2
+    local rem=$(( end - $(date +%s) ))
+    local mm=$(( rem / 60 ))
+    local ss=$(( rem % 60 ))
+    printf "\r${YELLOW}[retry]${RESET} Rate limited — resuming in %02d:%02d " "$mm" "$ss" >&2
     sleep 1
   done
-  printf "\r${GREEN}[retry]${RESET} Wait done — retrying now                \n" >&2
+  printf "\r${GREEN}[retry]${RESET} Limit cleared — sending continue          \n" >&2
 }
 
-# ── run the tool ─────────────────────────────────────────────────────────────
+# ── run first attempt (with prompt) ──────────────────────────────────────────
 
-run_tool() {
-  local tool="$1"
-  local prompt="$2"
-  local combined_output
-
-  if [[ "$tool" == "claude" ]]; then
-    # --print-output: print to stdout and exit (non-interactive)
-    combined_output=$(claude --print "$prompt" 2>&1) && {
-      echo "$combined_output"
-      return 0
-    } || {
-      echo "$combined_output"
-      return 1
-    }
+run_first() {
+  if [[ "$TOOL" == "claude" ]]; then
+    claude --print "$PROMPT" 2>&1
   else
-    # opencode run: always kimi-k2.6, json format for reliable exit codes
-    combined_output=$(opencode run \
-      --model "$OPENCODE_MODEL" \
-      "$prompt" 2>&1) && {
-      echo "$combined_output"
-      return 0
-    } || {
-      echo "$combined_output"
-      return 1
-    }
+    opencode run --model "$OPENCODE_MODEL" "$PROMPT" 2>&1
   fi
 }
 
-# ── main retry loop ──────────────────────────────────────────────────────────
+# ── resume (no prompt — continue from last session state) ────────────────────
+
+run_continue() {
+  if [[ "$TOOL" == "claude" ]]; then
+    claude --continue --print "continue" 2>&1
+  else
+    opencode run --continue --model "$OPENCODE_MODEL" 2>&1
+  fi
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+log "Tool    : $TOOL"
+log "Model   : $( [[ "$TOOL" == "opencode" ]] && echo "$OPENCODE_MODEL" || echo "Claude Code default" )"
+log "Prompt  : ${PROMPT:0:100}$( [[ ${#PROMPT} -gt 100 ]] && echo ' …' )"
+log "Retries : $MAX_RETRIES"
+echo >&2
 
 attempt=0
-fallback_wait=$FALLBACK_WAIT_SECS
-
-log "Tool: $TOOL | Model: $( [[ "$TOOL" == "opencode" ]] && echo "$OPENCODE_MODEL" || echo "default (Claude Code settings)" )"
-log "Max retries: $MAX_RETRIES"
-log "Prompt: ${PROMPT:0:80}$( [[ ${#PROMPT} -gt 80 ]] && echo '…' )"
-echo >&2
+is_first=true
 
 while true; do
   attempt=$(( attempt + 1 ))
 
   if [[ $attempt -gt $MAX_RETRIES ]]; then
-    err "Max retries ($MAX_RETRIES) exceeded. Giving up."
+    err "Max retries ($MAX_RETRIES) exhausted."
     exit 1
   fi
 
-  log "Attempt $attempt / $MAX_RETRIES …"
+  if [[ "$is_first" == "true" ]]; then
+    log "Starting — attempt $attempt"
+    output=$(run_first 2>&1) && exit_code=0 || exit_code=$?
+    is_first=false
+  else
+    log "Resuming — attempt $attempt (--continue)"
+    output=$(run_continue 2>&1) && exit_code=0 || exit_code=$?
+  fi
 
-  output=$(run_tool "$TOOL" "$PROMPT" 2>&1) && exit_code=0 || exit_code=$?
-
+  # Success
   if [[ $exit_code -eq 0 ]] && ! is_rate_limited "$output"; then
-    ok "Success on attempt $attempt"
+    ok "Done on attempt $attempt"
     echo "$output"
     exit 0
   fi
 
+  # Rate limit — wait then continue
   if is_rate_limited "$output"; then
     wait_secs=$(parse_wait_secs "$output")
+    [[ "$wait_secs" -gt $MAX_WAIT_SECS ]] && wait_secs=$MAX_WAIT_SECS
 
-    # Cap wait at MAX_FALLBACK_WAIT
-    [[ "$wait_secs" -gt $MAX_FALLBACK_WAIT ]] && wait_secs=$MAX_FALLBACK_WAIT
-
-    warn "Rate limited. Waiting ${wait_secs}s before retry."
-    warn "Error snippet: $(echo "$output" | grep -iE "rate.?limit|429|retry|quota|again in" | head -2)"
+    warn "Rate limited on attempt $attempt. Wait: ${wait_secs}s"
+    # Show the rate limit line from output for debugging
+    echo "$output" | grep -iE "rate.?limit|429|retry|again in|quota" | head -2 \
+      | while IFS= read -r line; do warn "  ↳ $line"; done
 
     countdown "$wait_secs"
-
-    # Reset fallback since we got a real wait time
-    fallback_wait=$FALLBACK_WAIT_SECS
-  else
-    # Non-rate-limit error — print and exit immediately, don't retry
-    err "Non-rate-limit error (exit $exit_code) on attempt $attempt:"
-    echo "$output" >&2
-    exit $exit_code
+    continue
   fi
+
+  # Any other error — abort, don't retry
+  err "Non-rate-limit failure (exit $exit_code) — aborting"
+  echo "$output" >&2
+  exit $exit_code
 done

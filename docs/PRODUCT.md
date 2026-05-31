@@ -786,23 +786,188 @@ Every connector package has a `README.md` with: supported operations, required e
 
 ### 6.8 Context Optimisation
 
-LLM context is a finite, expensive resource. Every agent call must be deliberate about what goes in.
+Token cost is an existential risk. 15+ connectors each returning large payloads, naive injection, multi-turn sessions — this bankrupts the operator. Context optimisation is not a nice-to-have. It is a first-class architectural constraint enforced at every layer.
 
-**Rules:**
-- Never dump raw connector output into context — summarise and ground
-- Every KB entry injected into context carries: source, fetched_at, confidence
-- Context budget per agent call: defined in harness config, enforced at injection time
-- Conversation history: summarised after N turns, not raw-appended forever
-- Tool results: trimmed to relevant fields before returning to LLM
+---
+
+#### Model Tier Strategy — Henchmen + Coordinator
+
+**Core principle:** cheap models do the work, expensive models coordinate and verify.
+
+```
+Cheap model (Haiku / gpt-4o-mini / gemini-flash):
+  - Intent classification
+  - Connector response trimming and summarisation
+  - Large payload summarisation (logs, diffs, metric series)
+  - Tool result extraction (raw JSON → 3 relevant fields)
+  - "Does this turn need fresh context?" classifier
+  - Routing decision (which specialist agent?)
+  - Handoff envelope assembly
+  - No-progress detection
+  - Negative caching classifier
+
+Expensive model (Opus / GPT-4o / Sonnet):
+  - Final orchestrator response to user
+  - Root cause hypothesis (correctness guaranteed here)
+  - Cross-connector multi-hop reasoning
+  - Verification pass when cheap model confidence < threshold
+  - Gate approval decisions with justification
+  - Security / compliance analysis
+```
+
+60–70% of agent work is henchman work. Only the coordinator and verifier need the expensive model. Target: 5–10× cost reduction vs always routing to the expensive model.
+
+**Verification pattern:**
+Cheap model produces output → expensive model verifies only when:
+- Confidence score < configured threshold
+- Action is a write (gate decisions always verified)
+- Query explicitly requests analysis (not a simple lookup)
+
+Don't verify everything — that negates the saving. Verify where correctness is load-bearing.
+
+---
+
+#### Context Assembly Pipeline
+
+Context is not built by data dumping. Every query goes through a staged pipeline with budget enforcement at each gate.
+
+```
+Query received
+  │
+  ▼
+[1] Intent classification (cheap model)
+    → which connectors / KB domains relevant?
+    → route to correct specialist(s)
+  │
+  ▼
+[2] KB retrieval
+    → top-K entries ranked by (relevance × freshness × confidence)
+    → only entries above freshness threshold
+    → connector called live only when KB entry stale
+  │
+  ▼
+[3] Tool schema subsetting
+    → inject only perimeter-filtered tools for resolved specialist
+    → NOT the full union of all connector tools
+    → schema bloat = 20K+ tokens before query lands — prevent this
+  │
+  ▼
+[4] Trimmed DTOs from connector calls
+    → connector adapter returns typed summary DTO only
+    → raw API response never touches context
+    → GitHub PR: 50+ fields → 8 fields (85% reduction)
+  │
+  ▼
+[5] Large payload summarisation (cheap model, async where possible)
+    → logs / diffs / metric series → 1-3 line summary
+    → run at KB sync time (paid once), not per query (paid per retrieval)
+  │
+  ▼
+[6] Budget allocation + ranked injection
+    → score every candidate: relevance × freshness × confidence
+    → inject highest value-per-token first
+    → trim lowest-ranked until under hard limit
+    → structured output enforced (JSON schema, not prose)
+  │
+  ▼
+[7] Hard limit check
+    → verify total tokens < perQueryHardLimit before dispatch
+    → if over: trim further, never exceed
+  │
+  ▼
+[8] Dispatch to model (cheap or expensive per routing decision)
+  │
+  ▼
+[9] Token metering
+    → record against session / tenant-daily / tenant-monthly budget
+    → alert at threshold, hard stop at limit
+```
+
+---
+
+#### Token Configuration Schema
+
+Every limit is configurable per tenant. None are optional.
 
 ```typescript
-interface ContextBudget {
-  maxTokens: number
-  reserveForResponse: number     // tokens reserved for completion
-  kbEntriesMaxTokens: number     // cap on injected KB context
-  historyMaxTurns: number        // beyond this, history is summarised
+interface TokenConfig {
+  // Hard limits — never exceeded
+  perQueryHardLimit: number           // max tokens per single agent call
+  perSessionLimit: number             // max for entire conversation thread
+  perTenantDailyLimit: number         // hard ceiling per org per day
+  perTenantMonthlyLimit: number       // billing ceiling
+
+  // Alert thresholds (0.0–1.0)
+  alertThreshold: number              // default 0.8 — alert at 80% burn of any limit
+
+  // Budget fractions within a query (must sum to ≤ 1.0)
+  kbContextFraction: number           // fraction for KB entries
+  historyFraction: number             // fraction for conversation history
+  toolResultFraction: number          // fraction for tool call results
+  responseReserveFraction: number     // reserved for completion — never trimmed
+
+  // Per-source budgets
+  perConnectorBudgets: Record<string, number>  // Datadog logs ≠ Linear ticket
+
+  // Agentic loop controls
+  maxStepsPerAgent: number            // tool-call iterations per specialist agent
+  maxToolCallsPerSession: number      // total tool calls in one conversation
+  noProgressDetection: boolean        // same tool + same args twice → halt
+
+  // Model routing thresholds
+  cheapModelConfidenceThreshold: number   // below this → escalate to expensive model
+  alwaysVerifyWrites: boolean             // write actions always go through verifier
 }
 ```
+
+---
+
+#### Additional Controls
+
+**Parallel tool calls:** Force parallel invocation wherever tools are independent. Sequential loops re-send full context each round — unnecessary token burn. Both Anthropic and OpenAI support parallel tool calls.
+
+**Conversation compression:** After N turns, older turns compressed to a summary block. Raw turns kept only for last M. Never raw-append history indefinitely.
+
+**Speculative retrieval gating:** Don't re-run KB retrieval on every turn. Cheap classifier: "does this turn introduce new entity references?" Only retrieve when yes.
+
+**Tool result caching:** Same connector read within session hits Redis cache. TTL = min(session lifetime, connector TTL). Zero tokens on cache hit.
+
+**Negative caching:** Cache "no result" answers. Agents re-query absent data otherwise, burning tokens on guaranteed misses.
+
+**Cross-agent handoff envelope:** Orchestrator → specialist never passes raw conversation history. Typed envelope only:
+```typescript
+interface AgentHandoffEnvelope {
+  intent: ClassifiedIntent
+  groundedFacts: GroundedFact[]   // KB entries, already retrieved
+  perimeter: AgentPerimeter
+  sessionSummary: string          // compressed, not raw turns
+}
+```
+
+**Prompt caching:** Stable system prompt + org-level KB context = cacheable prefix. Design: stable content at top, variable at bottom. Never randomise the prefix. 90%+ cache hit rate on warm sessions.
+
+**Streaming abort propagation:** User closes tab → generation continues, billed fully without abort. Client disconnect must propagate server-side cancellation. Required infrastructure.
+
+**Retry budget check:** Before retrying a failed provider call, check token budget. Retry storms on provider 5xx = cost explosion. Exponential backoff + budget gate before each retry.
+
+**Audit log isolation:** Audit events never enter LLM context. Ever. Injecting audit history for "transparency" explodes cost with zero reasoning value.
+
+---
+
+#### Implementation Order
+
+Ship in this sequence — each unblocks the next:
+
+1. **Token metering + hard limits** — fly blind on nothing. Ship first.
+2. **Agentic loop caps** — #1 token sinkhole in multi-agent systems. Ship with M1.
+3. **Tool schema subsetting** — 20K+ tokens of schemas before query lands. Ship with first connector.
+4. **Trimmed DTOs** — per connector, at connector implementation time.
+5. **Intent-scoped activation** — before M2 (multiple connectors live).
+6. **Model routing (henchmen + coordinator)** — before expensive model costs accumulate.
+7. **KB-first retrieval** — replaces live connector calls at M4.
+8. **Prompt caching** — after system prompt stabilises.
+9. **Payload summarisation at sync time** — M4 KB sync layer.
+10. **Conversation compression + speculative retrieval** — ongoing tuning post-M1.
 
 ---
 

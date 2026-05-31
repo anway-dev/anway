@@ -373,6 +373,28 @@ Tasks:
 
 ## Agent Harness Guidance
 
+### Model tier strategy — henchmen + coordinator
+
+Cheap models do the work. Expensive models coordinate and verify. Never route to the expensive model when the cheap model is sufficient.
+
+```
+Cheap model (Haiku / gpt-4o-mini / gemini-flash)     — henchmen
+  intent classification, connector summarisation, payload trimming,
+  tool result extraction, routing decisions, handoff assembly,
+  no-progress detection, "needs fresh context?" classifier
+
+Expensive model (Opus / GPT-4o / Sonnet)              — coordinator + verifier
+  final user-facing response, root cause hypothesis,
+  cross-connector multi-hop reasoning, write action verification,
+  gate approval decisions, security analysis
+```
+
+Verification fires only when: confidence < threshold OR action is a write OR query is complex analysis. Not on every call.
+
+The harness must route per call, not per session. `createOrchestrator` and `createSpecialistAgent` both accept a model tier config, not a single model.
+
+---
+
 ### Non-negotiable: model-agnostic, no vendor lock-in
 
 The harness must not be coupled to any single LLM provider. Users bring their own models — Anthropic, OpenAI, Groq, Mistral, Ollama, LM Studio, or any OpenAI-compatible endpoint. Swapping the model must require only a config change, not a code change.

@@ -714,32 +714,60 @@ Knowledge graph   Start in Postgres (adjacency table: entity_id, rel_type, targe
 
 ### Memory systems — locked decisions
 
-Two separate concerns, two separate solutions:
+Two separate concerns, two separate solutions. **Both behind interfaces — implementations are swappable without touching agent or business logic.**
 
-**Session memory (conversation context)**  
-Redis + rolling summary. Trivial to build, zero external dependency beyond Redis already in the stack. TTL = session lifetime, auto-evict. No third-party library needed.
+#### Interface contract (non-negotiable)
 
-**KB / project / org memory (knowledge graph)**  
-**Graphiti** — temporal knowledge graph by the Zep team. OSS (Apache 2.0), self-hosted.
+```typescript
+// packages/agent/src/interfaces/memory.ts
 
-Why Graphiti over Mem0/Zep for KB:
-- Anvay's KB is explicitly a graph (Service → depends_on → Service, Incident → caused_by → Deploy). Mem0 is flat memory — no relationships, no graph.
-- Graphiti stores facts with `valid_from` / `valid_to` timestamps — directly solves context rot (what was true at time T, not just what is true now)
-- Episode + fact + entity graph structure maps exactly to Anvay's L2–L4 knowledge layers
-- Mem0 is good for "remember this about the user" — not for "what was the state of the payments-api dependency graph yesterday"
+interface ISessionMemory {
+  get(sessionId: string): Promise<SessionContext>
+  append(sessionId: string, turn: ConversationTurn): Promise<void>
+  summarise(sessionId: string): Promise<void>  // compress old turns
+  clear(sessionId: string): Promise<void>
+}
 
-Graphiti dependency: Neo4j (or FalkorDB as lighter alternative). Start with FalkorDB — Redis-protocol compatible, lighter than Neo4j, OSS (RSAL license).
+interface IKnowledgeGraph {
+  addEpisode(episode: Episode): Promise<void>           // event from connector
+  getFacts(query: string, at?: Date): Promise<Fact[]>   // temporal: facts valid at time T
+  getEntity(id: string): Promise<Entity>
+  getRelationships(entityId: string, type?: string): Promise<Relationship[]>
+  search(query: string, topK: number): Promise<KBEntry[]>  // semantic + graph
+}
+```
 
-| Scope | Solution | OSS |
-|-------|----------|-----|
-| Session memory | Redis + rolling summary (bespoke, ~50 lines) | ✓ |
-| KB / project / org | Graphiti (Zep) + FalkorDB | ✓ |
+Agent code imports `ISessionMemory` and `IKnowledgeGraph`. Never a concrete class. Config determines which implementation loads at startup. Swap = change one line in DI config, no agent code changes.
 
-**Why not a dedicated vector DB (Qdrant/Pinecone) first?**
-pgvector on Postgres is sufficient at org scale. Dedicated vector DB adds ops cost before you have the data volume that justifies it. Switch when benchmarks demand it.
+#### Locked implementations (first pass)
 
-**Why not a dedicated vector DB (Qdrant/Pinecone) first?**
-pgvector on Postgres is sufficient at org scale. Dedicated vector DB adds ops cost before you have the data volume that justifies it. Switch when benchmarks demand it.
+**Session memory:** `RedisSessionMemory implements ISessionMemory`
+- Redis + rolling summary. ~50 lines. Zero new dependency — Redis already in stack.
+- TTL = session lifetime, auto-evict.
+
+**KB / project / org memory:** `GraphitiKnowledgeGraph implements IKnowledgeGraph`
+- Graphiti (Zep, Apache 2.0) for temporal graph logic (episode extraction, fact validity window, relationship traversal)
+- Apache AGE as graph storage backend (Cypher on Postgres — zero new service)
+- Why Graphiti: temporal `valid_from`/`valid_to` on facts directly solves context rot. Mem0 is flat — no relationships, no temporal graph. Wrong fit for a graph-first KB.
+
+#### Swap path if AGE underperforms
+
+```
+IKnowledgeGraph
+  └── GraphitiKnowledgeGraph (current — Graphiti + Apache AGE on Postgres)
+  └── GraphitiKnowledgeGraph (future — Graphiti + KùzuDB if AGE traversal is bottleneck)
+  └── NativeGraphKnowledge  (fallback — bespoke Postgres adjacency + pgvector if Graphiti doesn't fit)
+```
+
+All three implement the same interface. Agent code unchanged.
+
+| Scope | Implementation | OSS |
+|-------|---------------|-----|
+| Session memory | `RedisSessionMemory` | ✓ |
+| KB / project / org | `GraphitiKnowledgeGraph` (AGE backend) | ✓ |
+
+**Why not a dedicated vector DB (Qdrant/Pinecone)?**
+pgvector on Postgres sufficient at org scale. Dedicated vector DB adds ops cost before data volume justifies it. Switch when benchmarks demand it.
 
 **Full stack:**
 ```

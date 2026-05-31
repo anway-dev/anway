@@ -613,6 +613,21 @@ Interface      everything depends on an interface, not a concrete class
 
 Every external dependency is injectable. No hardcoded clients in business logic. This enables: unit testing with mocks, swapping implementations (e.g. Redis → Memcached), multi-tenant config injection.
 
+**This applies to every infrastructure concern — without exception:**
+
+| Concern | Interface | First implementation | Swap path |
+|---------|-----------|---------------------|-----------|
+| LLM provider | `IModelProvider` | `AnthropicProvider` | Any: OpenAI, Groq, Mistral, Ollama |
+| Embedding | `IEmbeddingProvider` | `OpenAIEmbedding` | Any compatible provider |
+| Session memory | `ISessionMemory` | `RedisSessionMemory` | Any K/V store |
+| Knowledge graph | `IKnowledgeGraph` | `GraphitiKnowledgeGraph` (AGE backend) | KùzuDB, Neo4j, bespoke |
+| Connector | `IConnector` | per-connector impl | Any new connector |
+| Audit sink | `IAuditSink` | `PostgresAuditSink` | Any durable store |
+| Scheduler | `IScheduler` | `TriggerDevScheduler` | BullMQ, pg-boss |
+| Cache | `ICache` | `RedisCache` | Any cache backend |
+
+Swap = change DI config. Zero agent or business logic changes.
+
 ### 6.2 Dependency Injection
 
 TypeScript packages use constructor injection. No global singletons except logger and config.
@@ -1203,8 +1218,8 @@ These are hard constraints. Not guidelines.
 
 | Question | Blocking milestone | Current assumption |
 |----------|-------------------|-------------------|
-| Memory — session scope | M1 | Redis + rolling summary (bespoke, trivial) |
-| Memory — KB/project/org scope | M4 | Graphiti (Zep's temporal knowledge graph, Apache 2.0, OSS) |
+| Memory — session scope | Locked | `RedisSessionMemory` implements `ISessionMemory` — Redis + rolling summary |
+| Memory — KB/project/org scope | Locked | `GraphitiKnowledgeGraph` implements `IKnowledgeGraph` — Graphiti (Apache 2.0) + Apache AGE on Postgres. Swappable via interface — no agent code changes to switch backend. |
 | Background jobs scheduler | Locked | Trigger.dev (OSS Apache 2.0, self-hosted) · BullMQ fallback |
 | Graph DB: stay on Postgres adj table vs FalkorDB | M4 | Postgres until traversal is bottleneck |
 | Kafka vs internal event bus | M5 | Internal until event volume demands Kafka |

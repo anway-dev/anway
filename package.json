@@ -6,7 +6,8 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "test": "turbo test"
+    "test": "turbo test",
+    "smoke": "bash scripts/smoke-test.sh"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

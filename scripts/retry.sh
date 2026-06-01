@@ -110,9 +110,11 @@ for line in sys.stdin:
             content = e.get("content","")
             if isinstance(content, list):
                 for c in content:
-                    if c.get("type") == "text": print(f"[result] {c[\"text\"][:300]}", flush=True)
+                    if c.get("type") == "text":
+                        txt = c.get("text","")[:300]
+                        print("[result] " + txt, flush=True)
             elif content:
-                print(f"[result] {str(content)[:300]}", flush=True)
+                print("[result] " + str(content)[:300], flush=True)
         elif t == "result":
             r = e.get("result","")
             if r: print(r, flush=True)

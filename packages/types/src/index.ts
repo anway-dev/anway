@@ -1,0 +1,136 @@
+// Branded type primitive — prevents plain string assignment without explicit cast
+declare const __brand: unique symbol
+type Brand<T, B> = T & { readonly [__brand]: B }
+
+export type TenantId = Brand<string, 'TenantId'>
+export type UserId = Brand<string, 'UserId'>
+export type SessionId = Brand<string, 'SessionId'>
+export type ConnectorId = Brand<string, 'ConnectorId'>
+
+export const TenantId = (s: string): TenantId => s as TenantId
+export const UserId = (s: string): UserId => s as UserId
+export const SessionId = (s: string): SessionId => s as SessionId
+export const ConnectorId = (s: string): ConnectorId => s as ConnectorId
+
+// ---------------------------------------------------------------------------
+// Error codes
+// ---------------------------------------------------------------------------
+
+export const ErrorCode = {
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+  NOT_FOUND: 'NOT_FOUND',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  UPSTREAM_ERROR: 'UPSTREAM_ERROR',
+  RATE_LIMITED: 'RATE_LIMITED',
+  TOKEN_LIMIT_EXCEEDED: 'TOKEN_LIMIT_EXCEEDED',
+} as const
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
+
+// ---------------------------------------------------------------------------
+// AppError base class
+// ---------------------------------------------------------------------------
+
+export class AppError extends Error {
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+    readonly cause?: Error,
+  ) {
+    super(message)
+    this.name = 'AppError'
+    if (cause) this.stack = `${this.stack ?? ''}\nCaused by: ${cause.stack ?? ''}`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Result<T, E> — discriminated union
+// ---------------------------------------------------------------------------
+
+export type Ok<T> = { readonly ok: true; readonly value: T }
+export type Err<E> = { readonly ok: false; readonly error: E }
+export type Result<T, E = AppError> = Ok<T> | Err<E>
+
+export const ok = <T>(value: T): Ok<T> => ({ ok: true, value })
+export const err = <E>(error: E): Err<E> => ({ ok: false, error })
+
+// ---------------------------------------------------------------------------
+// Domain enums
+// ---------------------------------------------------------------------------
+
+export const AgentRole = {
+  sre: 'sre',
+  dev: 'dev',
+  pm: 'pm',
+  ba: 'ba',
+  admin: 'admin',
+} as const
+export type AgentRole = (typeof AgentRole)[keyof typeof AgentRole]
+
+export const ConnectorMode = {
+  read: 'read',
+  write: 'write',
+  'read-write': 'read-write',
+} as const
+export type ConnectorMode = (typeof ConnectorMode)[keyof typeof ConnectorMode]
+
+// ---------------------------------------------------------------------------
+// Message
+// ---------------------------------------------------------------------------
+
+export type MessageRole = 'user' | 'assistant' | 'system'
+
+export interface Message {
+  readonly role: MessageRole
+  readonly content: string
+}
+
+// ---------------------------------------------------------------------------
+// StreamEvent — discriminated union over streaming response types
+// ---------------------------------------------------------------------------
+
+export interface TextDeltaEvent {
+  readonly type: 'text_delta'
+  readonly content: string
+}
+
+export interface ToolCallEvent {
+  readonly type: 'tool_call'
+  readonly toolName: string
+  readonly toolCallId: string
+  readonly args: Record<string, unknown>
+}
+
+export interface ToolResultEvent {
+  readonly type: 'tool_result'
+  readonly toolCallId: string
+  readonly result: unknown
+}
+
+export interface GateRequiredEvent {
+  readonly type: 'gate_required'
+  readonly gateId: string
+  readonly action: string
+  readonly target: string
+  readonly confidence: number
+}
+
+export interface DoneEvent {
+  readonly type: 'done'
+  readonly inputTokens: number
+  readonly outputTokens: number
+}
+
+export interface ErrorEvent {
+  readonly type: 'error'
+  readonly code: ErrorCode
+  readonly message: string
+}
+
+export type StreamEvent =
+  | TextDeltaEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | GateRequiredEvent
+  | DoneEvent
+  | ErrorEvent

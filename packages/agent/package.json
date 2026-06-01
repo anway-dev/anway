@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@mastra/core": "^1.37.1",
     "ioredis": "^5.4.2",
     "openai": "^4.77.0"
   },

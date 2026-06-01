@@ -35,4 +35,17 @@ export { ProviderFactory } from './providers/factory.js'
 export { RedisSessionMemory } from './memory/redis-session.js'
 export { MemoryFactory } from './memory/factory.js'
 export { createPerimeterMiddleware } from './middleware/perimeter.js'
+export type { PerimeterCtx } from './middleware/perimeter.js'
 export { createTokenMeterMiddleware } from './middleware/token-meter.js'
+
+// Orchestrator — no Mastra types exported
+export type { OrchestratorConfig, Orchestrator, ExecutableTool } from './orchestrator.js'
+export { createOrchestrator, runSession } from './orchestrator.js'
+
+// Specialist agent
+export type { SpecialistAgentConfig, SpecialistAgent } from './specialist-agent.js'
+export { createSpecialistAgent } from './specialist-agent.js'
+
+// Gate
+export type { GateConfig, GateDecision, Gate } from './gate.js'
+export { createGate } from './gate.js'

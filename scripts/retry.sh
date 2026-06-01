@@ -57,6 +57,15 @@ parse_wait_secs() {
   local out="$1"
   local n
 
+  # claude rate_limit_event: {"resetsAt": <unix_timestamp>}
+  local reset_at now
+  reset_at=$(echo "$out" | grep -oE '"resetsAt":[0-9]+' | grep -oE '[0-9]+' | head -1)
+  now=$(date +%s)
+  if [[ -n "$reset_at" && "$reset_at" -gt "$now" ]]; then
+    echo $(( reset_at - now + 5 ))
+    return
+  fi
+
   local mins secs_part
   mins=$(echo "$out" | grep -oiE "([0-9]+)m [0-9]+s" | grep -oE "^[0-9]+" | head -1)
   secs_part=$(echo "$out" | grep -oiE "[0-9]+m ([0-9]+)s" | grep -oE "[0-9]+s$" | grep -oE "^[0-9]+" | head -1)
@@ -118,10 +127,14 @@ for line in sys.stdin:
         elif t == "result":
             r = e.get("result","")
             if r: print(r, flush=True)
-        elif t in ("error","system"):
-            print(str(e), flush=True)
+        elif t == "error":
+            print("[error] " + str(e.get("error", e)), flush=True)
+        elif t == "system":
+            sub = e.get("subtype","")
+            if sub not in ("hook_started","hook_response","init"):
+                print("[system] " + str(e), flush=True)
     except Exception:
-        print(line, flush=True)
+        pass
 '
 
 # ── run tool — streams to terminal, saves raw to tmpfile ─────────────────────
@@ -135,13 +148,13 @@ run_tool() {
 
   if [[ "$TOOL" == "claude" ]]; then
     if [[ "$first" == "true" ]]; then
-      claude --dangerously-skip-permissions --output-format stream-json \
+      claude --dangerously-skip-permissions --verbose --output-format stream-json \
         --print "$PROMPT" 2>&1 \
         | tee "$TMPFILE" \
         | python3 -c "$PARSER" \
         || exit_code=${PIPESTATUS[0]}
     else
-      claude --dangerously-skip-permissions --output-format stream-json \
+      claude --dangerously-skip-permissions --verbose --output-format stream-json \
         --continue --print "continue" 2>&1 \
         | tee "$TMPFILE" \
         | python3 -c "$PARSER" \

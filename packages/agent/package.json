@@ -19,10 +19,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "ioredis": "^5.4.2",
     "openai": "^4.77.0"
   },
   "devDependencies": {
     "@anvay/types": "workspace:*",
+    "@types/node": "^22.0.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.0"
   }

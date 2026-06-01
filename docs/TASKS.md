@@ -713,24 +713,40 @@ Each connector task follows the same pattern. Implement them simultaneously.
 ---
 
 #### M4-T6 `[PARALLEL]`
-**Title:** Connector bootstrap contract + event-driven graph updates
+**Title:** Graph Builder Agent — event-driven graph maintenance
 
 **What to do:**
+- `packages/agent/src/agents/graph-builder.ts`:
+  - `GraphBuilderAgent` — Mastra specialist agent, cheap model tier only (Haiku / gpt-4o-mini)
+  - Not routable by orchestrator — event-driven only, triggered by Trigger.dev jobs
+  - Handles the full event table from CLAUDE.md "Graph Builder Agent" section
+  - System prompt: focused on entity extraction, relationship inference, coordinate resolution. No user-facing output.
 - `packages/agent/src/interfaces/bootstrap.ts`:
-  - `IConnectorBootstrap` interface: `bootstrap(connector: ConnectorConfig): Promise<GraphSeed>`
+  - `IConnectorBootstrap`: `bootstrap(connector: ConnectorConfig): Promise<GraphSeed>`
   - `GraphSeed`: `{ entities: EntitySpec[], relationships: RelationshipSpec[], episodeHints: string[] }`
-- `packages/agent/src/kb/bootstrap-runner.ts`:
-  - `runBootstrap(connector, bootstrap, graph)`: calls `bootstrap()`, writes all entities + relationships to `StructuralGraph`, emits episodes to Graphiti
-  - Idempotent: re-running bootstrap merges, does not duplicate
-  - Emits `bootstrap:completed` and `bootstrap:failed` events to EventBus
-- Mock bootstrap implementations for testing (GitHub-shaped, Linear-shaped) — real connector bootstraps come with connector packages in M2+
-- Event pipeline `packages/agent/src/kb/graph-updater.ts`:
-  - Subscribes to connector events (Redis Pub/Sub)
-  - Routes each event type to the appropriate graph mutation (see CLAUDE.md "Event-driven graph updates" table)
-  - Ticket entity creation includes service resolution: cheap-model extraction → fuzzy match → confidence scoring → `unconfirmed: true` if < 0.7
-- Register `connector_registered` event → trigger `runBootstrap` automatically
+- `packages/agent/src/agents/graph-builder.ts` — `runBootstrap(connector, seed)`:
+  - Calls `IConnectorBootstrap.bootstrap()`, writes entities + relationships to `StructuralGraph`, emits episodes to Graphiti
+  - Idempotent — upsert, never duplicate
+  - Emits `bootstrap:completed` / `bootstrap:failed` to EventBus
+  - Emits `graph:updated` on every mutation (downstream caches invalidate)
+- Event handlers wired per event type (see CLAUDE.md trigger table):
+  - `connector_registered` → `runBootstrap()`
+  - `ticket_created` → create Ticket entity, run service resolution: cheap-model extract service name → fuzzy match known Service entities → confidence score → `unconfirmed: true` if < 0.7
+  - `pr_merged` → create Commit entity, parse "fixes #N" → `Commit→FIXES→Ticket`
+  - `resource_added` → extract cloud tags/labels → resolve owning Service
+  - All others: upsert entity, upsert relationships per event payload
+- Mock `IConnectorBootstrap` implementations for GitHub-shaped + Linear-shaped data — real connector bootstraps ship with their connector packages
+- Tests: `connector_registered` event → assert graph seeded with correct entities + relationships; `ticket_created` event → assert service resolution fires + confidence scored
 
-**Ref:** CLAUDE.md "Connector Bootstrap Contract", CLAUDE.md "Event-driven graph updates"
+**Ref:** CLAUDE.md "Graph Builder Agent", PRODUCT.md §5.5
+
+**Files:** `packages/agent/src/agents/graph-builder.ts`, `packages/agent/src/interfaces/bootstrap.ts`
+
+**Done when:**
+- `connector_registered` triggers bootstrap, graph seeded with mock GitHub connector data
+- `ticket_created` creates Ticket entity + attempts service resolution
+- `graph:updated` emitted after every mutation
+- All runs idempotent (running twice = same graph state)
 
 **Files:** `packages/agent/src/interfaces/bootstrap.ts`, `packages/agent/src/kb/bootstrap-runner.ts`, `packages/agent/src/kb/graph-updater.ts`
 

@@ -632,6 +632,32 @@ createGate({ condition, approvers, autoApproveThreshold }): Gate
 runSession(orch: Orchestrator, input: string, ctx: SessionContext): AsyncIterator<StreamEvent>
 ```
 
+### 5.5 Graph Builder Agent
+
+Dedicated agent that owns the Knowledge Graph. Not user-facing. Never called on-demand. Runs exclusively on connector lifecycle events via Trigger.dev.
+
+**Trigger contract:**
+
+| Event | Action |
+|-------|--------|
+| `connector_registered` | Full bootstrap — crawl connector, extract all entities + relationships |
+| `connector_reconnected` | Re-bootstrap — diff against existing graph, update changes |
+| `project_created` | Seed Project entity, link to Team |
+| `repo_created` | Seed Repo, parse CODEOWNERS → Team, extract language |
+| `namespace_created` | Seed Namespace, scan services inside → relationships |
+| `resource_added` (cloud) | Extract tags → resolve owning Service + Team |
+| `team_changed` / `oncall_rotation` | Update Team→ONCALL→Engineer edge |
+| `service_deployed` | Create Deploy entity, Deploy→DEPLOYED_TO→Service |
+| `pr_merged` | Create Commit entity, parse "fixes #N" → Commit→FIXES→Ticket |
+| `ticket_created` | Create Ticket, run service resolution (LLM + fuzzy match) |
+| `incident_created` | Create Incident, link to triggering Alert |
+
+**Model used:** cheap tier only (Haiku / gpt-4o-mini). All inputs are structured events — no expensive model justified.
+
+**Output:** updated StructuralGraph + Graphiti episodes + `graph:updated` event emitted so downstream caches invalidate.
+
+**This is why connector bootstrap is non-negotiable.** Without Graph Builder running on `connector_registered`, the graph is empty, `connectorCoordinates` is empty, and every agent scatter-gathers. Graph Builder is what makes targeted connector calls possible.
+
 ---
 
 ## 6. Code Standards

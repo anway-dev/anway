@@ -144,6 +144,7 @@ Human loop insertable at any point. Configurable per team/service.
 | Agent | Role |
 |-------|------|
 | **Orchestrator** | Single entry point. Classifies, routes, aggregates, responds |
+| **Graph Builder Agent** | Owns the Knowledge Graph. Runs on connector lifecycle events. Extracts entities, resolves relationships, populates connector coordinates. Never called by users — event-driven only. |
 | **Product Agent** | Writes PRD from conversation |
 | **TechSpec Agent** | Writes tech spec from PRD |
 | **Bootstrap Agent** | Scaffolds service/feature in codebase |
@@ -152,6 +153,68 @@ Human loop insertable at any point. Configurable per team/service.
 | **Deploy Agent** | Triggers deploy pipeline |
 | **SRE Agent** | Monitors metrics, alerts, root cause traces |
 | **Connector Agents** | One per datasource — each operates within declared capability manifest |
+
+---
+
+## Graph Builder Agent
+
+The only agent responsible for building and maintaining the Software Intelligence Graph. Never called by users or the orchestrator on-demand. Runs exclusively in response to connector lifecycle events.
+
+**Trigger events:**
+
+| Event | What Graph Builder does |
+|-------|------------------------|
+| `connector_registered` | Full bootstrap: crawl entire connector, extract all entities + relationships, seed graph |
+| `connector_reconnected` | Re-bootstrap: diff against existing graph, add new entities, update changed ones |
+| `project_created` | Seed Project entity, link to Team via connector metadata |
+| `repo_created` | Seed Repo entity, parse CODEOWNERS → Team, extract language/stack |
+| `namespace_created` | Seed Namespace entity, scan services in namespace → Service→HOSTED_IN→Namespace |
+| `resource_added` (cloud) | Extract tags/labels → resolve owning Service, Team; create cloud resource entity |
+| `team_changed` | Update Team entity, re-resolve Team→ONCALL→Engineer edges |
+| `oncall_rotation` | Update Team→ONCALL→Engineer edge (point-in-time, keep history) |
+| `service_deployed` | Create/update Deploy entity, create Deploy→DEPLOYED_TO→Service |
+| `pr_merged` | Create Commit entity, link to Repo, extract "fixes #N" → Commit→FIXES→Ticket |
+| `ticket_created` | Create Ticket entity, run service resolution (LLM extract + fuzzy match) |
+| `incident_created` | Create Incident entity, link to Alert that fired it |
+| `connector_capability_changed` | Re-index connector coordinates for all entities sourced from that connector |
+
+**How it works:**
+
+```
+Event arrives on EventBus
+  → Graph Builder Agent wakes (Trigger.dev job)
+  → Reads event payload
+  → Calls connector (read-only, perimeter-scoped) to fetch related entities
+  → Cheap model: extract entity names, relationships, connector coordinates from payload
+  → Upsert entities into StructuralGraph (idempotent — merge on id + tenant_id)
+  → Upsert relationships
+  → Emit episode to Graphiti (episodic layer) with raw event text
+  → Write connector coordinates to AgentContext store
+  → Emit `graph:updated` event (downstream agents can invalidate cached contexts)
+  → Audit log: what was extracted, from which connector, confidence scores
+```
+
+**Cheap model for extraction** — Graph Builder uses the cheap model tier (Haiku / gpt-4o-mini) for:
+- Extracting service names from ticket text
+- Fuzzy-matching names to known entities
+- Parsing "fixes #123" commit messages into Ticket references
+- Inferring relationships from unstructured metadata (k8s labels, cloud tags)
+
+Expensive model is never used by Graph Builder. All inputs are structured events — cheap model is sufficient.
+
+**Idempotency contract:** running Graph Builder twice on the same event produces identical graph state. No duplicates. `upsertEntity` and `upsertRelationship` are merge operations.
+
+**Confidence scoring:**
+- Explicit metadata (CODEOWNERS file, k8s label `app=payments-api`) → confidence 1.0
+- LLM extraction from ticket text → confidence 0.6–0.9 depending on match quality
+- Fuzzy name match only → confidence 0.5–0.7
+- Confidence < 0.7 on any relationship → stored with `unconfirmed: true`, surfaced in KB view for human confirmation
+
+**What Graph Builder does NOT do:**
+- Respond to users
+- Make write actions on connectors
+- Run on user queries (graph is pre-built, not query-time)
+- Block the query path — graph updates are async, always
 
 ---
 

@@ -121,7 +121,7 @@ countdown() {
 
 run_first() {
   if [[ "$TOOL" == "claude" ]]; then
-    claude --dangerously-skip-permissions --output-format stream-json --print "$PROMPT" 2>&1
+    claude --dangerously-skip-permissions --print "$PROMPT" 2>&1
   else
     opencode run --model "$OPENCODE_MODEL" "$PROMPT" 2>&1
   fi
@@ -131,7 +131,7 @@ run_first() {
 
 run_continue() {
   if [[ "$TOOL" == "claude" ]]; then
-    claude --dangerously-skip-permissions --output-format stream-json --continue --print "continue" 2>&1
+    claude --dangerously-skip-permissions --continue --print "continue" 2>&1
   else
     opencode run --continue --model "$OPENCODE_MODEL" 2>&1
   fi

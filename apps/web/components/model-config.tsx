@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface Provider {
   id: string;
@@ -10,28 +10,29 @@ interface Provider {
   models: string[];
   connected: boolean;
   activeModel?: string;
+  envVar?: string;
 }
 
 const INITIAL_PROVIDERS: Provider[] = [
   {
     id: "anthropic", name: "Anthropic", type: "cloud", icon: "◆", color: "#cc785c",
     models: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-    connected: true, activeModel: "claude-sonnet-4-6",
+    connected: true, activeModel: "claude-sonnet-4-6", envVar: "ANTHROPIC_API_KEY",
   },
   {
     id: "openai", name: "OpenAI", type: "cloud", icon: "○", color: "#10a37f",
     models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o3-mini"],
-    connected: false,
+    connected: false, envVar: "OPENAI_API_KEY",
   },
   {
     id: "groq", name: "Groq", type: "cloud", icon: "⚡", color: "#f55036",
     models: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"],
-    connected: false,
+    connected: false, envVar: "GROQ_API_KEY",
   },
   {
     id: "mistral", name: "Mistral", type: "cloud", icon: "≋", color: "#ff7000",
     models: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
-    connected: false,
+    connected: false, envVar: "MISTRAL_API_KEY",
   },
   {
     id: "ollama", name: "Ollama", type: "local", icon: "◉", color: "#3b82f6",
@@ -50,14 +51,27 @@ type TestState = "idle" | "testing" | "success" | "fail";
 export function ModelConfig() {
   const [providers, setProviders] = useState<Provider[]>(INITIAL_PROVIDERS);
   const [selected, setSelected] = useState("anthropic");
-  const [keys, setKeys] = useState<Record<string, string>>({ anthropic: "sk-ant-••••••••••••••••••••••••" });
   const [endpoints, setEndpoints] = useState<Record<string, string>>({
     ollama: "http://localhost:11434",
     lmstudio: "http://localhost:1234",
   });
   const [testState, setTestState] = useState<Record<string, TestState>>({});
-  const [showKey, setShowKey] = useState<Record<string, boolean>>({});
-  const [discoveredModels, setDiscoveredModels] = useState<Record<string, string[]>>({});
+  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    fetch("/api/providers")
+      .then((r) => r.json())
+      .then((data: { providers: { id: string; configured: boolean }[] }) => {
+        const map: Record<string, boolean> = {};
+        for (const p of data.providers) {
+          map[p.id] = p.configured;
+        }
+        setProviderStatus(map);
+      })
+      .catch(() => {
+        // silently fail — status will stay empty, UI shows unconfigured
+      });
+  }, []);
 
   const provider = providers.find((p) => p.id === selected)!;
 
@@ -82,7 +96,6 @@ export function ModelConfig() {
           const mock = providerId === "ollama"
             ? ["llama3.2:latest", "codellama:7b", "mistral:latest"]
             : ["local-model-7b", "local-model-13b"];
-          setDiscoveredModels((d) => ({ ...d, [providerId]: mock }));
           setProviders((prev) =>
             prev.map((p) => p.id === providerId ? { ...p, models: mock, activeModel: mock[0] } : p)
           );
@@ -161,7 +174,7 @@ export function ModelConfig() {
             )}
           </div>
 
-          {/* Credentials */}
+          {/* Credentials / Connection */}
           <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "10px", overflow: "hidden", marginBottom: "16px" }}>
             <div style={{ padding: "12px 16px", borderBottom: "1px solid #1a1a1a", fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               {provider.type === "cloud" ? "Authentication" : "Connection"}
@@ -169,27 +182,17 @@ export function ModelConfig() {
             <div style={{ padding: "16px" }}>
               {provider.type === "cloud" ? (
                 <div>
-                  <label style={{ fontSize: "11px", color: "#888", display: "block", marginBottom: "6px" }}>API Key</label>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <input
-                      type={showKey[provider.id] ? "text" : "password"}
-                      value={keys[provider.id] ?? ""}
-                      onChange={(e) => setKeys((k) => ({ ...k, [provider.id]: e.target.value }))}
-                      placeholder={`${provider.name} API key`}
-                      style={{ flex: 1, background: "#111", border: "1px solid #2a2a2a", borderRadius: "6px", padding: "8px 12px", color: "#e5e5e5", fontSize: "12px", fontFamily: "monospace", outline: "none" }}
-                    />
-                    <button
-                      onClick={() => setShowKey((s) => ({ ...s, [provider.id]: !s[provider.id] }))}
-                      style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#555", padding: "8px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "11px" }}
-                    >
-                      {showKey[provider.id] ? "Hide" : "Show"}
-                    </button>
-                  </div>
-                  {provider.id === "anthropic" && (
-                    <div style={{ fontSize: "10px", color: "#444", marginTop: "6px" }}>Get your key at console.anthropic.com</div>
-                  )}
-                  {provider.id === "openai" && (
-                    <div style={{ fontSize: "10px", color: "#444", marginTop: "6px" }}>Get your key at platform.openai.com</div>
+                  {providerStatus[provider.id] ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)", borderRadius: "7px" }}>
+                      <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+                      <span style={{ fontSize: "12px", color: "#10b981" }}>Configured via environment variable</span>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "10px 12px", background: "rgba(85,85,85,0.06)", border: "1px solid #1a1a1a", borderRadius: "7px" }}>
+                      <div style={{ fontSize: "12px", color: "#555" }}>
+                        Not configured — set <code style={{ fontFamily: "monospace", color: "#888", background: "#111", padding: "1px 5px", borderRadius: "3px" }}>{provider.envVar}</code> in <code style={{ fontFamily: "monospace", color: "#888", background: "#111", padding: "1px 5px", borderRadius: "3px" }}>.env.local</code>
+                      </div>
+                    </div>
                   )}
                 </div>
               ) : (
@@ -283,11 +286,11 @@ export function ModelConfig() {
           )}
           {testState[provider.id] === "fail" && (
             <div style={{ marginTop: "12px", padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "7px", fontSize: "11px", color: "#ef4444" }}>
-              ✗ Connection failed — check your {provider.type === "cloud" ? "API key" : "endpoint URL and that the server is running"}
+              ✗ Connection failed — check your {provider.type === "cloud" ? "environment variable" : "endpoint URL and that the server is running"}
             </div>
           )}
 
-          {/* Usage note for local */}
+          {/* Setup guide for local providers */}
           {provider.type === "local" && (
             <div style={{ marginTop: "20px", padding: "14px 16px", background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px" }}>
               <div style={{ fontSize: "11px", color: "#555", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Setup</div>

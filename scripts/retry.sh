@@ -104,7 +104,8 @@ for line in sys.stdin:
                     print(b["text"], flush=True)
                 elif b.get("type") == "tool_use":
                     inp = str(b.get("input",""))[:200]
-                    print(f"[tool:{b[\"name\"]}] {inp}", flush=True)
+                    name = b.get("name","")
+                    print(f"[tool:{name}] {inp}", flush=True)
         elif t == "tool_result":
             content = e.get("content","")
             if isinstance(content, list):

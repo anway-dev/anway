@@ -51,6 +51,11 @@ is_rate_limited() {
     "rate.?limit|429|too many requests|quota.?exceed|retry.?after|please try again in|usage limit|you've exceeded|overloaded"
 }
 
+is_transient_error() {
+  echo "$1" | grep -qiE \
+    "socket.*(closed|reset|timeout)|connection.*(closed|reset|refused|timeout)|broken pipe|ECONNRESET|ECONNREFUSED|ETIMEDOUT|network.*error|fetch.*error|502|503|504"
+}
+
 # ── wait time parser ──────────────────────────────────────────────────────────
 
 parse_wait_secs() {
@@ -217,6 +222,13 @@ while true; do
     echo "$raw" | grep -iE "rate.?limit|429|retry|again in|quota" | head -2 \
       | while IFS= read -r line; do warn "  ↳ $line"; done
     countdown "$wait_secs"
+    continue
+  fi
+
+  # Transient network error — short wait + --continue
+  if is_transient_error "$raw"; then
+    warn "Transient error (exit $exit_code) — retrying in 15s"
+    sleep 15
     continue
   fi
 

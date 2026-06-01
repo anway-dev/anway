@@ -53,11 +53,13 @@ run_capture() {
   local tool="$1"
   local prompt="$2"
   local log_file="$3"
-  local output exit_code=0
+  local tmp
+  tmp=$(mktemp)
+  local exit_code=0
 
-  output=$("$RETRY" "$tool" "$prompt" 2>&1) || exit_code=$?
-  echo "$output" >> "$log_file"
-  echo "$output"
+  "$RETRY" "$tool" "$prompt" 2>&1 | tee -a "$log_file" "$tmp" || exit_code=$?
+  cat "$tmp"
+  rm -f "$tmp"
   return $exit_code
 }
 
@@ -89,14 +91,14 @@ run_task() {
 
   # ── step 1: opencode builds ──────────────────────────────────────────────
   log "[$task_id] BUILD via opencode ($OPENCODE_MODEL)"
-  echo "=== BUILD started $(date) ===" >> "$build_log"
+  echo "=== BUILD started $(date) ===" | tee -a "$build_log"
 
-  "$RETRY" opencode "$build_prompt" >> "$build_log" 2>&1 || {
+  "$RETRY" opencode "$build_prompt" 2>&1 | tee -a "$build_log" || {
     err "[$task_id] Build failed — see $build_log"
     exit 1
   }
 
-  echo "=== BUILD done $(date) ===" >> "$build_log"
+  echo "=== BUILD done $(date) ===" | tee -a "$build_log"
 
   # ── step 2: review-fix loop (max MAX_FIX_LOOPS) ──────────────────────────
   local loop=0
@@ -125,7 +127,7 @@ run_task() {
 
     if [[ $loop -lt $MAX_FIX_LOOPS ]]; then
       log "[$task_id] FIX loop $loop via opencode"
-      echo "=== FIX $loop started $(date) ===" >> "$build_log"
+      echo "=== FIX $loop started $(date) ===" | tee -a "$build_log"
 
       "$RETRY" opencode "You are fixing issues found during code review for task $task_id in the Anvay project at $REPO_ROOT.
 
@@ -134,17 +136,17 @@ Read docs/PRODUCT.md and docs/TASKS.md for context on the task requirements.
 Issues to fix (from code review):
 $issues
 
-Fix all issues above. Follow all rules in docs/PRODUCT.md (non-negotiables). Run the acceptance criteria from docs/TASKS.md for $task_id to verify. Commit the fixes." >> "$build_log" 2>&1 || {
+Fix all issues above. Follow all rules in docs/PRODUCT.md (non-negotiables). Run the acceptance criteria from docs/TASKS.md for $task_id to verify. Commit the fixes." 2>&1 | tee -a "$build_log" || {
         warn "[$task_id] Fix call failed — will retry review anyway"
       }
 
-      echo "=== FIX $loop done $(date) ===" >> "$build_log"
+      echo "=== FIX $loop done $(date) ===" | tee -a "$build_log"
     fi
   done
 
   # ── step 3: 3 loops exhausted — claude fixes directly ───────────────────
   warn "[$task_id] $MAX_FIX_LOOPS review loops exhausted — claude fixing directly"
-  echo "=== CLAUDE DIRECT FIX started $(date) ===" >> "$build_log"
+  echo "=== CLAUDE DIRECT FIX started $(date) ===" | tee -a "$build_log"
 
   "$RETRY" claude "You are directly fixing remaining issues for task $task_id in the Anvay project at $REPO_ROOT.
 
@@ -153,12 +155,12 @@ Read docs/PRODUCT.md (non-negotiables) and docs/TASKS.md (acceptance criteria fo
 Outstanding issues after $MAX_FIX_LOOPS opencode fix attempts:
 $issues
 
-Fix every issue above yourself. Do not delegate — implement the fixes directly. Run acceptance criteria to verify. Commit when done." >> "$build_log" 2>&1 || {
+Fix every issue above yourself. Do not delegate — implement the fixes directly. Run acceptance criteria to verify. Commit when done." 2>&1 | tee -a "$build_log" || {
     err "[$task_id] Claude direct fix failed — see $build_log"
     exit 1
   }
 
-  echo "=== CLAUDE DIRECT FIX done $(date) ===" >> "$build_log"
+  echo "=== CLAUDE DIRECT FIX done $(date) ===" | tee -a "$build_log"
   mark_done "$task_id"
 }
 

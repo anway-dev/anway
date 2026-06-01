@@ -114,14 +114,16 @@ export function EditorView() {
 
   useEffect(() => {
     if (state !== "running") return;
-    if (runIndex >= RUN_SEQUENCE.length) { setState("done"); setBottomTab("tests"); return; }
+    if (runIndex >= RUN_SEQUENCE.length) { setTimeout(() => { setState("done"); setBottomTab("tests"); }, 0); return; }
     const { id, result, ms } = RUN_SEQUENCE[runIndex];
-    setActiveTest(id);
     const t = setTimeout(() => {
-      setTestResults((prev) => ({ ...prev, [id]: result }));
-      setActiveTest(null);
-      setRunIndex((i) => i + 1);
-    }, Math.min(ms, 500));
+      setActiveTest(id);
+      setTimeout(() => {
+        setTestResults((prev) => ({ ...prev, [id]: result }));
+        setActiveTest(null);
+        setRunIndex((i) => i + 1);
+      }, Math.min(ms, 500));
+    }, 0);
     return () => clearTimeout(t);
   }, [state, runIndex]);
 
@@ -601,7 +603,7 @@ export function EditorView() {
                 <>
                   {!showFindings && (
                     <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif", padding: "8px 0" }}>
-                      No problems detected. Click "Analyze now" to run AI review.
+                      No problems detected. Click &quot;Analyze now&quot; to run AI review.
                     </div>
                   )}
                   {showFindings && FINDINGS.map(f => (

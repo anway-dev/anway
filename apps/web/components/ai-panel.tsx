@@ -18,15 +18,17 @@ export function AiPanel({ node, action, onClose }: Props) {
 
   useEffect(() => {
     if (!node) return;
-    setLines([]);
-    setDone(false);
-    setInput("");
 
     const key = action && AI_RESPONSES[action] ? action : "default";
     const chunks = AI_RESPONSES[key];
 
     let i = 0;
-    setStreaming(true);
+    const resetTimer = setTimeout(() => {
+      setLines([]);
+      setDone(false);
+      setInput("");
+      setStreaming(true);
+    }, 0);
     const interval = setInterval(() => {
       if (i >= chunks.length) {
         clearInterval(interval);
@@ -47,7 +49,7 @@ export function AiPanel({ node, action, onClose }: Props) {
       i++;
     }, 60);
 
-    return () => clearInterval(interval);
+    return () => { clearTimeout(resetTimer); clearInterval(interval); };
   }, [node, action]);
 
   useEffect(() => {

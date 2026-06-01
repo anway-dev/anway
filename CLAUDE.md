@@ -38,6 +38,63 @@ User → Orchestrator (single entry point)
 - If graph is stale (freshness < 0.5) → inject with staleness flag, agent verifies critical facts from connector
 - Skipping the graph step is a hard violation — audit-logged and surfaced as a system error
 
+### Graph provides coordinates. Connectors provide live data.
+
+Agents call connectors freely. The optimization is in **what** they ask for. Without graph context, agents scatter-gather: query every connector speculatively, get back noise, bloat context, pick the wrong resource. With graph context, every connector call is targeted.
+
+**Without graph coordinates:**
+```
+Agent → Datadog: "find dashboards for payments issues"  → 40 results, read all, wrong one picked
+Agent → K8s: "list all namespaces"                      → 30 namespaces, scan all, context bloated
+Agent → GitHub: "search repos for payments"             → 12 repos, guess which one
+```
+Context bloat. Wrong resources. Rot.
+
+**With graph coordinates:**
+```
+Graph resolves "payments-api" →
+  connectorCoordinates = {
+    github:    { repo: "org/payments" },
+    k8s:       { namespace: "prod", selector: "app=payments-api" },
+    datadog:   { service: "payments-api", dashboard_id: "abc-123" },
+    linear:    { project: "PAYMENTS", team_id: "team-xyz" },
+    argocd:    { app: "payments-api", env: "prod" },
+    pagerduty: { service_id: "SVC-999" }
+  }
+
+Agent → Datadog: getMetrics({ service: "payments-api", window: "1h" })   // targeted
+Agent → GitHub:  getPRs({ repo: "org/payments", limit: 5 })              // targeted
+Agent → K8s:     getPods({ namespace: "prod", selector: "app=payments-api" })  // targeted
+```
+Three calls. Exact data. No bloat.
+
+**The pattern:**
+1. Graph `resolveContext(entity)` → `AgentContext` with `connectorCoordinates`
+2. Agent uses coordinates to make targeted connector calls
+3. If coordinate missing for a connector → agent can still call that connector speculatively, but logs the gap and queues a graph bootstrap to fix it for next time
+4. This is the optimization — agents are not blocked, they are guided
+
+**`connectorCoordinates`** maps connector type → graph-resolved resource identifiers. Bootstrap populates these. Richer bootstrap = more targeted agents = less context bloat.
+
+```typescript
+interface AgentContext {
+  primaryEntity: Entity
+  relatedEntities: Entity[]
+  relationships: Relationship[]
+  recentEpisodes: Episode[]
+  connectorCoordinates: Record<string, ConnectorCoordinates>  // targeted call map
+  groundingSources: GroundingSource[]
+  freshness: number
+}
+
+interface ConnectorCoordinates {
+  connectorType: string
+  resourceIds: Record<string, string>   // { repo: "org/payments", dashboard_id: "abc-123" }
+  resolvedAt: Date
+  confidence: number   // < 0.7 = treat as hint, agent can still use but should verify
+}
+```
+
 User never picks an agent. Never sees the plumbing. One surface.
 
 ---
@@ -870,13 +927,14 @@ interface AgentContext {
   primaryEntity: Entity
   relatedEntities: Entity[]
   relationships: Relationship[]
-  recentEpisodes: Episode[]         // last 24h of temporal facts
+  recentEpisodes: Episode[]                              // last 24h of temporal facts
+  connectorCoordinates: Record<string, ConnectorCoordinates>  // graph-resolved resource IDs per connector
   groundingSources: GroundingSource[]
-  freshness: number                  // min freshness across all sources
+  freshness: number                                      // min freshness across all sources
 }
 ```
 
-`resolveContext` is the single call the orchestrator makes before injecting into any agent prompt. Agents receive a grounded, freshness-scored, relationship-rich context block — not raw connector data.
+`resolveContext` is the single call the orchestrator makes before injecting into any agent prompt. Agents receive a grounded, freshness-scored, relationship-rich context block including graph-resolved connector coordinates. Agents use coordinates to make targeted connector calls — not scatter-gather discovery.
 
 ---
 

@@ -35,8 +35,9 @@ User input
     → classify intent
     → resolve effective role
     → resolve capability envelope (user ∩ connector perimeter)
-    → route to specialist agent(s)
-    → agents read from connectors (scoped to perimeter)
+    → resolveContext(primaryEntity) from Knowledge Graph   ← MANDATORY, NO EXCEPTIONS
+    → inject graph context into specialist agent(s)
+    → agents fill gaps with live L1 connector data only (not as primary source)
     → agents surface: context, root cause, recommended action
     → user confirms (V1: every write action is gated)
     → action executes
@@ -45,6 +46,8 @@ User input
 ```
 
 The user never picks an agent. Never sees routing logic. Never touches a connector directly. One surface.
+
+**Non-negotiable: every investigation, triage, debug, and action starts from the Knowledge Graph.** The graph is not a cache — it is the primary source of org context. Connectors feed the graph. Agents query the graph. This order never reverses.
 
 ---
 
@@ -216,30 +219,56 @@ Code review and editing surface connected to the entire organisational context.
 
 ---
 
-### 4.8 Knowledge Base
+### 4.8 Knowledge Base — Software Intelligence Graph
 
-Company-wide structured knowledge graph with anti-hallucination guarantees.
+Company-wide typed knowledge graph. Every entity in the org (services, repos, teams, tickets, deploys, alerts) is a node. Connectors are the source of truth. The graph evolves continuously as connectors emit events.
+
+**The core product value:** when an agent needs to answer anything about a service — ownership, recent changes, active incidents, related tickets — it queries the graph, not the connectors. Connectors feed the graph; the graph serves agents. This is what makes context resolution fast, grounded, and consistent across all agents.
 
 **Knowledge layers:**
 
 | Layer | What | TTL |
 |-------|------|-----|
-| L1 Live state | Pod health, metric values, CI status | 0 — always fresh |
+| L1 Live state | Pod health, metric values, CI status | 0 — always fresh from connector |
 | L2 Recent events | Deploys, PRs, incidents, alerts | Connector-defined (1–5 min) |
-| L3 Derived knowledge | Architecture maps, root cause summaries | Tagged to source events |
-| L4 Org memory | Decisions, runbooks, team context | Long — stamped + decay signal |
+| L3 Derived knowledge | Architecture maps, root cause summaries | Tagged to source events that invalidate it |
+| L4 Org memory | Decisions, runbooks, team context, oncall history | Long — stamped + decay signal |
+
+**Software Intelligence Graph — key traversals:**
+
+| Question | Graph path |
+|----------|-----------|
+| "Who owns this service?" | Service → OWNED_BY → Team → ONCALL → Engineer |
+| "Which repo is this ticket about?" | Ticket → RELATES_TO → Service → HOSTED_IN → Repo |
+| "What changed before the alert?" | Alert → TRIGGERED_BY → Incident ← CAUSED_BY ← Deploy → INTRODUCED → Commit |
+| "What services does this team own?" | Team ← OWNED_BY ← Service (reverse) |
+| "What broke when we deployed?" | Deploy → DEPLOYED_TO → Service ← AFFECTS ← Incident |
+
+**Connector bootstrap (mandatory):**  
+Every connector registered in Anvay runs a bootstrap agent that crawls the connector and seeds the graph with entities and relationships. No connector ships without a bootstrap implementation. This is what makes existing codebase integration instant — connect GitHub → immediately know all repos, owners, and teams.
+
+**Ever-evolving — event-driven updates:**  
+Graph updates on every connector event. New PR merged → update repo node, create commit entity. PagerDuty oncall rotation → update Team→ONCALL→Engineer edge. Ticket created → extract service mention, create Ticket→RELATES_TO→Service edge. No manual curation required.
+
+**Ticket → service resolution (hard problem, explicit strategy):**
+1. Extract service name mentions from ticket text (cheap model)
+2. Fuzzy match against known Service entity names
+3. Fallback: ticket team label → Team→OWNS→Service lookup
+4. Confidence < 0.7 → store with `unconfirmed: true`, flag for human confirmation
+5. Human confirms/rejects → updates edge, trains future resolution
 
 **Anti-hallucination contract:**  
-Every claim in a response must be grounded in a KB entry with: `source`, `fetched_at`, `ttl`, `confidence`. If the orchestrator cannot ground a claim, it says so explicitly. Confident fabrication is a hard failure.
+Every claim grounded to a KB entry with `source`, `fetched_at`, `ttl`, `confidence`. Ungroundable claims: agent says "I don't have current data on X — last sync Y" — never infers. Confident fabrication is a hard failure.
 
 **Staleness surfacing:**  
-When response uses knowledge below freshness threshold → UI flags: `"Based on data from 3h ago · re-sync recommended"`.
+Response using knowledge below freshness threshold → UI flags: `"Based on data from 3h ago · re-sync recommended"`.
 
 **KB view capabilities:**
-- Browse entities by type (service, feature, incident, engineer, team)
-- See relationship graph per entity
+- Browse entities by type (service, repo, team, engineer, ticket, incident)
+- Relationship graph per entity (visual)
 - Freshness indicators per entry
 - Re-sync trigger per connector
+- Bootstrap status per connector (seeded / pending / failed)
 
 ---
 

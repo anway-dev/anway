@@ -683,6 +683,90 @@ Each connector task follows the same pattern. Implement them simultaneously.
 
 ---
 
+### Wave 4-C — Depends on 4-A complete (parallel with 4-B)
+
+#### M4-T5 `[PARALLEL]`
+**Title:** Software Intelligence Graph — structural schema + Apache AGE
+
+**What to do:**
+- Enable Apache AGE extension on Postgres: `CREATE EXTENSION IF NOT EXISTS age;`
+- Create AGE graph: `SELECT create_graph('anvay_org');`
+- Define vertex labels (entity types) and edge labels (relationship types) matching CLAUDE.md "Software Intelligence Graph" schema
+- `packages/agent/src/kb/structural-graph.ts`:
+  - `StructuralGraph` class — wraps AGE Cypher queries via Postgres driver
+  - `upsertEntity(entity: EntitySpec): Promise<void>` — idempotent, merge on `(id, tenant_id)`
+  - `upsertRelationship(rel: RelationshipSpec): Promise<void>` — idempotent merge
+  - `resolveContext(entityId: string, depth?: number): Promise<AgentContext>` — multi-hop traversal, default depth 3
+  - Key traversal implemented: `Ticket → RELATES_TO → Service → HOSTED_IN → Repo, OWNED_BY → Team → ONCALL → Engineer`
+  - All queries scoped by `tenant_id` — no cross-tenant leakage
+- Add `resolveContext` to `IKnowledgeGraph` interface
+- Unit tests: seed 3 services + 2 teams + 5 tickets, assert `resolveContext(ticketId)` returns correct service + team + engineer
+
+**Ref:** CLAUDE.md "Software Intelligence Graph", PRODUCT.md §4.8 (key traversals table)
+
+**Files:** `packages/agent/src/kb/structural-graph.ts`, `packages/agent/src/interfaces/knowledge-graph.ts`, `apps/gateway/prisma/migrations/0003_age.sql`
+
+**Done when:**
+- `resolveContext('ticket-123')` returns `{ service: payments-api, repo: org/payments, team: payments-team, oncall: alice }` from seeded test data
+- All queries include `tenant_id` filter
+
+---
+
+#### M4-T6 `[PARALLEL]`
+**Title:** Connector bootstrap contract + event-driven graph updates
+
+**What to do:**
+- `packages/agent/src/interfaces/bootstrap.ts`:
+  - `IConnectorBootstrap` interface: `bootstrap(connector: ConnectorConfig): Promise<GraphSeed>`
+  - `GraphSeed`: `{ entities: EntitySpec[], relationships: RelationshipSpec[], episodeHints: string[] }`
+- `packages/agent/src/kb/bootstrap-runner.ts`:
+  - `runBootstrap(connector, bootstrap, graph)`: calls `bootstrap()`, writes all entities + relationships to `StructuralGraph`, emits episodes to Graphiti
+  - Idempotent: re-running bootstrap merges, does not duplicate
+  - Emits `bootstrap:completed` and `bootstrap:failed` events to EventBus
+- Mock bootstrap implementations for testing (GitHub-shaped, Linear-shaped) — real connector bootstraps come with connector packages in M2+
+- Event pipeline `packages/agent/src/kb/graph-updater.ts`:
+  - Subscribes to connector events (Redis Pub/Sub)
+  - Routes each event type to the appropriate graph mutation (see CLAUDE.md "Event-driven graph updates" table)
+  - Ticket entity creation includes service resolution: cheap-model extraction → fuzzy match → confidence scoring → `unconfirmed: true` if < 0.7
+- Register `connector_registered` event → trigger `runBootstrap` automatically
+
+**Ref:** CLAUDE.md "Connector Bootstrap Contract", CLAUDE.md "Event-driven graph updates"
+
+**Files:** `packages/agent/src/interfaces/bootstrap.ts`, `packages/agent/src/kb/bootstrap-runner.ts`, `packages/agent/src/kb/graph-updater.ts`
+
+**Done when:**
+- `runBootstrap` with mock GitHub connector seeds 3 repos + 2 teams + `HOSTED_IN` relationships
+- `connector_registered` event auto-triggers bootstrap
+- `github:push` event updates Repo entity `last_push_at`
+- `linear:ticket_created` event creates Ticket node, attempts service resolution
+
+---
+
+#### M4-T7 `[PARALLEL]`
+**Title:** Agent context injection — orchestrator uses graph before routing
+
+**What to do:**
+- Update `packages/agent/src/orchestrator.ts`:
+  - Before routing to any specialist agent: call `knowledgeGraph.resolveContext(primaryEntityId, depth: 3)`
+  - Inject returned `AgentContext` into specialist agent system prompt as a grounded context block
+  - Format: structured text block with entities, relationships, recent episodes, freshness scores
+  - If `context.freshness < 0.5`: log warning, still inject but mark stale
+  - If `resolveContext` fails or returns empty: agent proceeds with L1 live data only (no hallucination fallback)
+- `packages/agent/src/orchestrator.ts` — add `extractPrimaryEntity(query: string): Promise<string | null>`:
+  - Cheap model call: "what entity is this query about?" → returns entity id if known, null if not
+  - On null: skip graph context injection, proceed with live connector data
+- Unit tests: mock graph returns context for "payments-api" entity, assert context block appears in specialist agent's first message
+
+**Ref:** CLAUDE.md "Agent context injection", PRODUCT.md §4.8 (context injection description)
+
+**Files:** `packages/agent/src/orchestrator.ts`
+
+**Done when:**
+- Query "why is payments-api slow?" → orchestrator resolves `payments-api` entity → injects team + repo + recent deploy context into SRE agent prompt
+- Freshness < 0.5 on any source → warning logged, stale flag in context block
+
+---
+
 ## M5 — Automations
 
 **Goal:** Event triggers and cron monitors running in production.

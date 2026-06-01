@@ -23,11 +23,20 @@ Every connector added = more intelligence for the entire org. Network effect wit
 User → Orchestrator (single entry point)
      → classifies intent + resolves effective role
      → resolves user permission envelope
-     → spins specialist agents within allowed scope
+     → resolveContext(primaryEntity) from Knowledge Graph   ← NON-NEGOTIABLE FIRST STEP
+     → spins specialist agents with graph context pre-injected
+     → agents read live data from connectors only to fill gaps graph doesn't have
      → aggregates across datasources
      → responds + offers follow-up actions
      → full audit logged
 ```
+
+**The Knowledge Graph is the mandatory starting point for every investigation, triage, debug, and action. No agent starts from raw connector data. Always graph first.**
+
+- If entity exists in graph → inject context, then query connectors for live L1 data only
+- If entity not in graph → trigger async bootstrap for that connector, proceed with L1 live data, graph enriches future queries
+- If graph is stale (freshness < 0.5) → inject with staleness flag, agent verifies critical facts from connector
+- Skipping the graph step is a hard violation — audit-logged and surfaced as a system error
 
 User never picks an agent. Never sees the plumbing. One surface.
 
@@ -703,45 +712,194 @@ Org memory          Lives org-wide, long-term
 
 ---
 
-### Knowledge graph, not a document store
+### Software Intelligence Graph — two-layer model
 
-The KB is a **graph of entities and relationships**, not a flat document index:
+The KB is a typed graph of entities and relationships, not a flat document index. Two distinct layers:
+
+#### Layer 1 — Structural Graph (Apache AGE / Cypher on Postgres)
+
+Org topology. Slowly changing. Schema-driven. Seeded by connector bootstrap, updated by connector events.
+
+**Entity types:**
+```
+Service     id, name, language, tier, tenant_id
+Repo        id, url, default_branch, language, tenant_id
+Team        id, name, slack_channel, tenant_id
+Engineer    id, email, name, tenant_id
+Ticket      id, external_id, title, status, severity, source_connector, tenant_id
+Deploy      id, sha, version, env, status, deployed_at, tenant_id
+Incident    id, title, status, severity, started_at, tenant_id
+Alert       id, external_id, title, severity, fired_at, resolved_at, tenant_id
+Pipeline    id, name, provider (github_actions|argocd|jenkins), tenant_id
+Connector   id, type, mode (read|write|read-write), status, registered_at, tenant_id
+```
+
+**Relationship types (directed):**
+```
+(Service)   -[:HOSTED_IN]->    (Repo)
+(Service)   -[:DEPENDS_ON]->   (Service)
+(Service)   -[:OWNED_BY]->     (Team)
+(Service)   -[:DEPLOYED_BY]->  (Pipeline)
+(Service)   -[:MONITORED_BY]-> (Alert)
+(Team)      -[:ONCALL]->       (Engineer)
+(Engineer)  -[:MEMBER_OF]->    (Team)
+(Deploy)    -[:DEPLOYED_TO]->  (Service)
+(Deploy)    -[:INTRODUCED]->   (Commit)
+(Incident)  -[:CAUSED_BY]->    (Deploy)
+(Incident)  -[:AFFECTS]->      (Service)
+(Alert)     -[:TRIGGERED_BY]-> (Incident)
+(Ticket)    -[:RELATES_TO]->   (Service)
+(Ticket)    -[:OWNED_BY]->     (Team)
+(Connector) -[:PROVIDES]->     (Service)    // connector feeds data about this service
+```
+
+**Key traversal: support ticket → triage context (3 hops)**
+```cypher
+MATCH (t:Ticket {id: $ticketId})-[:RELATES_TO]->(s:Service)
+MATCH (s)-[:HOSTED_IN]->(r:Repo)
+MATCH (s)-[:OWNED_BY]->(team:Team)-[:ONCALL]->(eng:Engineer)
+OPTIONAL MATCH (s)<-[:DEPLOYED_TO]-(d:Deploy)
+  WHERE d.deployed_at > datetime() - duration('P7D')
+RETURN s, r, team, eng, collect(d) AS recent_deploys
+```
+
+This is the graph that lets an SRE agent answer "ticket #1234 → which service → which repo → who owns it → what changed recently" without touching a single connector at query time.
+
+**Storage: Apache AGE on Postgres** (already in stack, zero new service). AGE brings Cypher to Postgres via an extension. Handles org-scale graphs (100-1000 services) comfortably. Swap to KùzuDB only when traversal benchmarks as bottleneck.
+
+---
+
+#### Layer 2 — Episodic Graph (Graphiti + Apache AGE)
+
+Temporal facts extracted from connector events. Fast-changing. Every fact has `valid_from`/`valid_to`.
 
 ```
-Service → owns → Endpoint
-Service → depends_on → Service
-Service → deployed_by → Pipeline
-Service → monitored_by → Dashboard
-Incident → caused_by → Deploy
-Deploy → introduced → Commit
-Commit → authored_by → Engineer
-Engineer → oncall_for → Service
+Deploy event        → episode: "payments-api v2.3 deployed to prod at 14:32"
+Alert event         → episode: "error rate spike 8% on payments-api at 14:35"
+PR merged           → episode: "PR#441 merged to payments-api, changed billing logic"
+Ticket created      → episode: "ticket #1234 opened: checkout failures since 14:30"
 ```
 
-Querying "what caused the outage?" traverses the graph: Incident → Deploy → Commit → diff. Not keyword search — relationship traversal.
+Graphiti extracts entities and relationships from these events and populates Layer 1, keeping it current. Agents query Layer 2 for temporal reasoning: "what changed in the last hour before the alert?"
+
+**Cross-language note:** Graphiti is a Python library. Episodic graph writes go through `apps/agent-service` (Python FastAPI). TypeScript orchestrator calls the agent-service HTTP API for episodic queries — not direct DB access.
+
+---
+
+#### Connector Bootstrap Contract
+
+Every connector registered in Anvay MUST provide a bootstrap implementation. This is non-negotiable — no connector ships without it.
+
+**Bootstrap runs on:** `connector_registered` event AND `connector_reconnected` event.
+
+```typescript
+interface IConnectorBootstrap {
+  // Called once on connector registration. Returns extracted entities + relationships.
+  bootstrap(connector: ConnectorConfig): Promise<GraphSeed>
+}
+
+interface GraphSeed {
+  entities: EntitySpec[]
+  relationships: RelationshipSpec[]
+  episodeHints: string[]  // free-text events for Graphiti extraction
+}
+```
+
+**What each connector bootstraps:**
+
+| Connector | Entities extracted | Relationships inferred |
+|-----------|-------------------|----------------------|
+| GitHub | Repo, Engineer (committers), Team (CODEOWNERS) | Service→HOSTED_IN→Repo, Engineer→MEMBER_OF→Team |
+| Linear | Ticket, Team | Ticket→RELATES_TO→Service (from labels/mentions), Ticket→OWNED_BY→Team |
+| PagerDuty | Engineer, Team | Team→ONCALL→Engineer |
+| ArgoCD | Deploy, Pipeline | Deploy→DEPLOYED_TO→Service |
+| Datadog | Alert, Dashboard | Alert→TRIGGERED_BY→Incident, Service→MONITORED_BY→Alert |
+| K8s | Service (running pods) | Service→DEPENDS_ON→Service (from service discovery) |
+
+After bootstrap, connector registers event subscriptions for ongoing graph updates.
+
+---
+
+#### Event-driven graph updates
+
+Graph evolves continuously. Every connector event is a potential graph mutation:
+
+```
+github:push(repo, sha)          → update Repo entity, add Commit episode
+github:pr_merged(repo, pr)      → create/update Deploy relationship chain
+argocd:deploy_completed(app)    → create Deploy entity, Deploy→DEPLOYED_TO→Service
+datadog:alert_fired(service)    → create Alert entity, Alert→TRIGGERED_BY→Incident
+linear:ticket_created(ticket)   → create Ticket entity, resolve Ticket→RELATES_TO→Service
+pagerduty:oncall_change(user)   → update Team→ONCALL→Engineer edge
+connector_added(connector)      → run bootstrap, seed all entities from new connector
+```
+
+Relationship resolution on ticket creation (the hard part):
+1. Extract service mentions from ticket title/description (LLM extraction, cheap model)
+2. Match against known Service entities by name fuzzy match
+3. If no match: fall back to team label on ticket → Team→OWNS→Service lookup
+4. Create `Ticket→RELATES_TO→Service` edge with confidence score
+5. Low confidence (< 0.7): flag for human confirmation, still store with `unconfirmed: true`
+
+---
+
+#### Agent context injection
+
+Agents never query the structural graph directly. The orchestrator resolves context before routing to any specialist agent:
+
+```typescript
+// packages/agent/src/interfaces/knowledge-graph.ts
+
+interface IKnowledgeGraph {
+  // Episode layer (Graphiti)
+  addEpisode(episode: Episode): Promise<void>
+  getFacts(query: string, at?: Date): Promise<Fact[]>
+
+  // Structural layer (AGE / Cypher)
+  getEntity(id: string): Promise<Entity>
+  getRelationships(entityId: string, type?: string): Promise<Relationship[]>
+
+  // Context resolution — multi-hop traversal, returns agent-ready context block
+  resolveContext(entityId: string, depth?: number): Promise<AgentContext>
+
+  // Semantic search across both layers
+  search(query: string, topK: number): Promise<KBEntry[]>
+}
+
+interface AgentContext {
+  primaryEntity: Entity
+  relatedEntities: Entity[]
+  relationships: Relationship[]
+  recentEpisodes: Episode[]         // last 24h of temporal facts
+  groundingSources: GroundingSource[]
+  freshness: number                  // min freshness across all sources
+}
+```
+
+`resolveContext` is the single call the orchestrator makes before injecting into any agent prompt. Agents receive a grounded, freshness-scored, relationship-rich context block — not raw connector data.
 
 ---
 
 ### Storage architecture
 
-Three stores, each matched to a memory layer:
-
 ```
-Session memory    Redis
-                  In-process Map for prototype, Redis in prod.
-                  TTL = session lifetime, auto-evict. No persistence needed.
+Session memory    Redis (TTL = session lifetime, auto-evict)
 
-Project + Org     PostgreSQL + pgvector
-memory            Entities and relationships as tables with FK adjacency.
-                  pgvector column on derived knowledge rows for semantic retrieval.
-                  freshness_score + fetched_at + ttl columns on every KB row.
-                  Redis in front as hot-entry cache (TTL-based, connector sync results).
+Structural graph  Apache AGE on Postgres
+                  Typed entities + relationships (Cypher queries)
+                  Seeded by bootstrap, updated by connector events
+                  KùzuDB as swap target if traversal benchmarks as bottleneck
 
-Knowledge graph   Start in Postgres (adjacency table: entity_id, rel_type, target_id).
-                  Migrate to KùzuDB (MIT, embedded) only when traversal is measured
-                  bottleneck. FalkorDB disqualified (RSAL, not clean OSS). Neo4j
-                  disqualified (AGPL with commercial restrictions).
-                  Postgres handles 2-3 hop queries fine with proper indexes.
+Episodic graph    Graphiti + Apache AGE (same Postgres, different schema)
+                  Temporal facts with valid_from/valid_to
+                  Written via agent-service (Python), read via HTTP from TS orchestrator
+                  FalkorDB disqualified (RSAL). Neo4j disqualified (AGPL + commercial).
+
+Semantic search   pgvector on Postgres (same instance)
+                  HNSW index on kb_entries.embedding
+                  No dedicated vector DB until benchmarks demand it
+
+Cache             Redis (hot graph entries, connector sync results, TTL-based)
 ```
 
 ### Memory systems — locked decisions

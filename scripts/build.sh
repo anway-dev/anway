@@ -64,11 +64,11 @@ Your steps (execute in order, do not skip):
 1. READ: docs/TASKS.md section $task_id — full spec, files to create, acceptance criteria.
    READ: docs/PRODUCT.md — source of truth for all interfaces, decisions, non-negotiables.
 
-2. BUILD: Call opencode to implement the task.
-   Command to run via bash:
-   opencode run --model $OPENCODE_MODEL "<detailed implementation prompt based on what you read in step 1>"
+2. BUILD: Use the opencode skill to implement the task.
+   Invoke it with: /opencode <detailed implementation prompt based on what you read in step 1>
    The implementation prompt must include: working directory, specific files to create/modify,
    exact behaviour required, and the acceptance criteria to verify when done.
+   opencode will use model $OPENCODE_MODEL.
 
 3. REVIEW: Check the implementation against:
    - Every acceptance criterion in docs/TASKS.md § $task_id
@@ -76,7 +76,8 @@ Your steps (execute in order, do not skip):
      API keys server-side only, tests ship with code, no vendor lock-in)
    Run: pnpm typecheck and pnpm lint from $REPO_ROOT
 
-4. FIX LOOP (max 3 rounds): If review finds issues, call opencode again with the specific issues to fix.
+4. FIX LOOP (max 3 rounds): If review finds issues, use the opencode skill again with the specific issues to fix.
+   Invoke: /opencode <fix prompt listing exact issues>
    Re-review after each fix. Stop loop when review passes or 3 rounds exhausted.
 
 5. DIRECT FIX: If still failing after 3 opencode rounds, fix the remaining issues yourself directly.

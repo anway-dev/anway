@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  tier1
+  tier2
+  tier3
+}
+
+enum AgentRole {
+  sre
+  dev
+  pm
+  ba
+  admin
+}
+
+enum ConnectorMode {
+  read
+  write
+  read_write
+}
+
+enum IncidentSeverity {
+  critical
+  high
+  medium
+  low
+}
+
+enum IncidentStatus {
+  active
+  investigating
+  resolved
+}
+
+model Tenant {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                 String
+  slug                 String   @unique
+  plan                 Plan     @default(tier1)
+  token_budget_monthly Int      @default(1000000)
+  connector_limit      Int      @default(3)
+  created_at           DateTime @default(now()) @db.Timestamptz
+
+  users        User[]
+  sessions     Session[]
+  connectors   Connector[]
+  incidents    Incident[]
+  audit_events AuditEvent[]
+
+  @@map("tenants")
+}
+
+model User {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String    @db.Uuid
+  email      String
+  role       AgentRole @default(dev)
+  created_at DateTime  @default(now()) @db.Timestamptz
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  sessions     Session[]
+  audit_events AuditEvent[]
+
+  @@unique([tenant_id, email])
+  @@index([tenant_id])
+  @@map("users")
+}
+
+model Session {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  tenant_id  String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz
+  expires_at DateTime @db.Timestamptz
+
+  user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@index([user_id])
+  @@map("sessions")
+}
+
+model Connector {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String        @db.Uuid
+  name                String
+  type                String
+  mode                ConnectorMode @default(read)
+  config_encrypted    Json          @default("{}")
+  capability_manifest Json          @default("{}")
+  created_at          DateTime      @default(now()) @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@map("connectors")
+}
+
+model AuditEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String   @db.Uuid
+  user_id    String?  @db.Uuid
+  session_id String?  @db.Uuid
+  event_type String
+  payload    Json     @default("{}")
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([tenant_id])
+  @@index([tenant_id, created_at])
+  @@map("audit_events")
+}
+
+model Incident {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id   String           @db.Uuid
+  title       String
+  severity    IncidentSeverity @default(medium)
+  status      IncidentStatus   @default(active)
+  created_at  DateTime         @default(now()) @db.Timestamptz
+  resolved_at DateTime?        @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
+  @@index([tenant_id, status])
+  @@map("incidents")
+}

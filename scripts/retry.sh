@@ -225,14 +225,8 @@ while true; do
     continue
   fi
 
-  # Transient network error — short wait + --continue
-  if is_transient_error "$raw"; then
-    warn "Transient error (exit $exit_code) — retrying in 15s"
-    sleep 15
-    continue
-  fi
-
-  # Other error
-  err "Failed (exit $exit_code) — aborting"
-  exit $exit_code
+  # Any other error — short wait + --continue, never abort
+  warn "Error (exit $exit_code) — retrying in 15s"
+  sleep 15
+  continue
 done

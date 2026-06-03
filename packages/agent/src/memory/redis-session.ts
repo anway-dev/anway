@@ -38,42 +38,41 @@ export class RedisSessionMemory implements ISessionMemory {
   }
 
   async get(sessionId: SessionId): Promise<SessionContext | null> {
-    const [metaRaw, turnsRaw] = await Promise.all([
+    const [metaRaw, turnStrings] = await Promise.all([
       this.redis.get(metaKey(sessionId)),
-      this.redis.get(turnsKey(sessionId)),
+      this.redis.lrange(turnsKey(sessionId), 0, -1),
     ])
 
     if (!metaRaw) return null
 
     const meta = JSON.parse(metaRaw) as SessionMeta
-    const turns: ConversationTurn[] = turnsRaw ? (JSON.parse(turnsRaw) as ConversationTurn[]) : []
+    const turns: ConversationTurn[] = turnStrings.map((s) => JSON.parse(s) as ConversationTurn)
 
     return { ...meta, turns }
   }
 
   async append(sessionId: SessionId, turn: ConversationTurn): Promise<void> {
     const key = turnsKey(sessionId)
-    const raw = await this.redis.get(key)
-    const turns: ConversationTurn[] = raw ? (JSON.parse(raw) as ConversationTurn[]) : []
-
-    turns.push(turn)
+    const encoded = JSON.stringify(turn)
 
     await Promise.all([
-      this.redis.set(key, JSON.stringify(turns), 'EX', SESSION_TTL_SECONDS),
+      this.redis.rpush(key, encoded),
+      this.redis.expire(key, SESSION_TTL_SECONDS),
       this.redis.expire(metaKey(sessionId), SESSION_TTL_SECONDS),
     ])
 
-    if (turns.length > MAX_TURNS_BEFORE_SUMMARISE) {
+    const count = await this.redis.llen(key)
+    if (count > MAX_TURNS_BEFORE_SUMMARISE) {
       await this.summarise(sessionId)
     }
   }
 
   async summarise(sessionId: SessionId): Promise<void> {
     const key = turnsKey(sessionId)
-    const raw = await this.redis.get(key)
-    if (!raw) return
+    const turnStrings = await this.redis.lrange(key, 0, -1)
+    if (turnStrings.length === 0) return
 
-    const turns = JSON.parse(raw) as ConversationTurn[]
+    const turns = turnStrings.map((s) => JSON.parse(s) as ConversationTurn)
 
     if (turns.length <= TURNS_TO_KEEP_AFTER_SUMMARISE) return
 
@@ -112,7 +111,11 @@ export class RedisSessionMemory implements ISessionMemory {
 
     const compressedTurns = [summaryTurn, ...toKeep]
 
-    await this.redis.set(key, JSON.stringify(compressedTurns), 'EX', SESSION_TTL_SECONDS)
+    await this.redis.del(key)
+    for (const turn of compressedTurns) {
+      await this.redis.rpush(key, JSON.stringify(turn))
+    }
+    await this.redis.expire(key, SESSION_TTL_SECONDS)
 
     // Persist summary text into meta for inclusion in SessionContext
     const metaRaw = await this.redis.get(metaKey(sessionId))

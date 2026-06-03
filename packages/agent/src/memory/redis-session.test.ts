@@ -11,10 +11,12 @@ import type { Message } from '@anvay/types'
 
 function makeMockRedis() {
   const store = new Map<string, string>()
+  const lists = new Map<string, string[]>()
   const ttls = new Map<string, number>()
 
   return {
     store,
+    lists,
     ttls,
     get: vi.fn(async (key: string) => store.get(key) ?? null),
     set: vi.fn(async (key: string, value: string, _ex: string, ttl: number) => {
@@ -27,8 +29,22 @@ function makeMockRedis() {
       return 1
     }),
     del: vi.fn(async (...keys: string[]) => {
-      for (const k of keys) store.delete(k)
+      for (const k of keys) {
+        store.delete(k)
+        lists.delete(k)
+      }
       return keys.length
+    }),
+    rpush: vi.fn(async (key: string, value: string) => {
+      const existing = lists.get(key) ?? []
+      lists.set(key, [...existing, value])
+      return (lists.get(key) ?? []).length
+    }),
+    llen: vi.fn(async (key: string) => {
+      return (lists.get(key) ?? []).length
+    }),
+    lrange: vi.fn(async (key: string, _start: number, _end: number) => {
+      return lists.get(key) ?? []
     }),
   }
 }
@@ -142,10 +158,11 @@ describe('RedisSessionMemory.append', () => {
     await mem.initSession(meta)
     await mem.append(meta.sessionId, makeTurn(0))
 
-    // set() called for turns key with EX SESSION_TTL
-    const setCalls = redis.set.mock.calls as Array<[string, string, string, number]>
-    const turnsSetCalls = setCalls.filter(([k]) => k.includes(':turns'))
-    expect(turnsSetCalls.at(-1)![3]).toBe(SESSION_TTL)
+    // expire() called for turns key with SESSION_TTL
+    const turnsExpireCalls = (redis.expire.mock.calls as Array<[string, number]>).filter(
+      ([k]) => k.includes(':turns'),
+    )
+    expect(turnsExpireCalls.at(-1)).toEqual([`session:${meta.sessionId}:turns`, SESSION_TTL])
 
     // expire() called for meta key
     expect(redis.expire).toHaveBeenCalledWith(
@@ -168,7 +185,7 @@ describe('RedisSessionMemory.summarise', () => {
     // We call summarise() directly after manually loading 15 turns
     const turns = Array.from({ length: 15 }, (_, i) => makeTurn(i))
     // Bypass append (would auto-trigger only at >50) — set directly
-    redis.store.set(`session:${meta.sessionId}:turns`, JSON.stringify(turns))
+    redis.lists.set(`session:${meta.sessionId}:turns`, turns.map(t => JSON.stringify(t)))
     redis.store.set(`session:${meta.sessionId}:meta`, JSON.stringify(meta))
 
     await mem.summarise(meta.sessionId)
@@ -190,7 +207,7 @@ describe('RedisSessionMemory.summarise', () => {
 
     await mem.initSession(meta)
     const turns = Array.from({ length: 5 }, (_, i) => makeTurn(i))
-    redis.store.set(`session:${meta.sessionId}:turns`, JSON.stringify(turns))
+    redis.lists.set(`session:${meta.sessionId}:turns`, turns.map(t => JSON.stringify(t)))
 
     await mem.summarise(meta.sessionId)
 
@@ -205,7 +222,7 @@ describe('RedisSessionMemory.summarise', () => {
 
     await mem.initSession(meta)
     const turns = Array.from({ length: 15 }, (_, i) => makeTurn(i))
-    redis.store.set(`session:${meta.sessionId}:turns`, JSON.stringify(turns))
+    redis.lists.set(`session:${meta.sessionId}:turns`, turns.map(t => JSON.stringify(t)))
 
     await mem.summarise(meta.sessionId)
 
@@ -224,7 +241,7 @@ describe('RedisSessionMemory.summarise', () => {
 
     // Pre-load 50 turns directly
     const turns = Array.from({ length: 50 }, (_, i) => makeTurn(i))
-    redis.store.set(`session:${meta.sessionId}:turns`, JSON.stringify(turns))
+    redis.lists.set(`session:${meta.sessionId}:turns`, turns.map(t => JSON.stringify(t)))
 
     // This append pushes count to 51 → auto-summarise fires
     await mem.append(meta.sessionId, makeTurn(50))

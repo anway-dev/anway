@@ -96,7 +96,13 @@ export class AgentPerimeter {
     const scope = this.resolved.get(connectorId)
     if (!scope) return false
 
-    const resource = typeof toolCall.args['resource'] === 'string' ? toolCall.args['resource'] : '*'
+    const resource = typeof toolCall.args['resource'] === 'string' ? toolCall.args['resource'] : null
+
+    if (resource === null) {
+      return isWriteAction(toolCall.name)
+        ? scope.write.includes('*')
+        : scope.read.includes('*')
+    }
 
     if (isWriteAction(toolCall.name)) {
       if (scope.write.length === 0) return false

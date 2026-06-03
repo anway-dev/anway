@@ -28,7 +28,7 @@ dated review pass — newest at the top.
 | Issue | Status |
 |-------|--------|
 | B-1 Perimeter resource defaults to `*` | **FIXED** ✓ (`8b80b2e`) |
-| B-2 Token budget counters never update | OPEN |
+| B-2 Token budget counters never update | **PARTIAL** (`d438253`) — within-request step accumulation fixed; cross-request persistence still missing (see B-2-R below) |
 | B-3 Redis session append race condition | OPEN |
 | B-4 Tool message format wrong for multi-turn | OPEN (acknowledged, deferred to M2) |
 | H-1 Streaming break bug (parallel tool calls) | OPEN |
@@ -48,6 +48,33 @@ dated review pass — newest at the top.
 ---
 
 ### BLOCKING
+
+#### B-2-R — `sessionUsed` resets to 0 on every HTTP request — per-session limit never enforces across messages
+
+**File:** `apps/gateway/src/routes/chat.ts:82–92`, `packages/agent/src/orchestrator.ts`
+
+**Context:** `d438253` fixed within-request step accumulation (budget.sessionUsed now increments after each LLM `done` chunk within a single runSession call). The within-request case is now correct.
+
+**Remaining gap:** `buildTokenBudget()` constructs a new budget object on every POST request with `sessionUsed: 0`. Each user message is a separate HTTP request. After the first message uses 400K tokens, the next request creates a fresh budget — `sessionUsed` is back to 0. `perSessionLimit: 500_000` can be exceeded arbitrarily by sending multiple messages. Same applies to `tenantDailyUsed` and `tenantMonthlyUsed`.
+
+**Fix:**
+```typescript
+// In chatRoutes, load persisted usage from Redis before constructing budget:
+const redisUsageKey = `token-usage:${sessionId}`
+const persistedUsed = await redis.get(redisUsageKey)
+const sessionUsed = persistedUsed ? parseInt(persistedUsed, 10) : 0
+
+const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed)
+
+// After runSession completes, persist updated value:
+await redis.set(redisUsageKey, String(budget.sessionUsed), 'EX', SESSION_TTL_SECONDS)
+```
+
+For tenant daily/monthly usage, load from a `token_usage` Postgres table keyed on `(tenant_id, date)` — Redis is insufficient as it can evict entries.
+
+**Verify:** Send two messages in the same session, each consuming 300K tokens. Assert the second message is blocked by `perSessionLimit: 500_000`. Currently both pass.
+
+---
 
 #### B-5 — connectorScopes hardcodes `read: ['*'], write: ['*']` — perimeter resource enforcement is dead
 

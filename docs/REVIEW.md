@@ -7,6 +7,376 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-04 -->
+## Review — 2026-06-04 | B-1 fix + full re-audit of M0-T1 through M1-T5
+
+**Scope:** All committed code as of this date. New commit since last review: `8b80b2e fix(perimeter): B-1 — resource check defaults to null not wildcard`. Full re-audit of all source files for issues missed or introduced.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 5/10 | ↓1 — real SSE wired but web UI stub, token budget broken, multi-turn tool use broken |
+| Code standards | 6/10 | ↓1 — JWT error leak, tenant isolation absent in InMemory fallback, hardcoded stub IDs |
+| Performance | 6/10 | = — budget still dead, no route timeout |
+| Security | 6/10 | ↑1 — B-1 fixed, but connector perimeter wildcard and JWT error leak are new concerns |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+| Issue | Status |
+|-------|--------|
+| B-1 Perimeter resource defaults to `*` | **FIXED** ✓ (`8b80b2e`) |
+| B-2 Token budget counters never update | OPEN |
+| B-3 Redis session append race condition | OPEN |
+| B-4 Tool message format wrong for multi-turn | OPEN (acknowledged, deferred to M2) |
+| H-1 Streaming break bug (parallel tool calls) | OPEN |
+| H-2 InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 Audit sink drops events silently | OPEN |
+| H-4 Intent classification failure silent | OPEN |
+| H-5 Assistant response stored as placeholder | OPEN |
+| M-1 Empty UUID DB query | PARTIAL — validated before query but still passes empty string to Prisma instead of returning 400 |
+| M-2 Token estimate ignores tool definitions | OPEN |
+| M-3 content_block_stop emits all tool calls | OPEN |
+| M-4 WRITE_SUFFIXES substring false positives | OPEN |
+| M-5 InMemorySessionMemory hardcodes `effectiveRole: 'dev'` | OPEN |
+| L-1 AnthropicProvider re-exports AppError | OPEN |
+| L-2 No request timeout on SSE route | OPEN |
+| L-3 gate.ts status unknown | CLOSED — implemented correctly |
+
+---
+
+### BLOCKING
+
+#### B-5 — connectorScopes hardcodes `read: ['*'], write: ['*']` — perimeter resource enforcement is dead
+
+**File:** `apps/gateway/src/routes/chat.ts:143–148`
+
+**Issue:**
+```typescript
+const connectorScopes: ConnectorScope[] = dbConnectors.map((c) => ({
+  connectorId: c.id,
+  read: ['*'],
+  write: c.mode === 'write' || c.mode === 'read_write' ? ['*'] : [],
+}))
+```
+Every authenticated user gets `read: ['*']` on every connector they have access to, and `write: ['*']` on every write-capable connector. The `intersectScope()` function in the perimeter engine intersects user scope with manifest capabilities — but when user scope is `['*']` and manifest is `['*']`, the result is `['*']`. So no matter what resources a connector manifest declares, every user gets full wildcard access at the resource level.
+
+The entire per-resource scoping system from PRODUCT.md §3 (e.g. `write: ['deployments/app1']` only) is bypassed. A user assigned to `org/repo-a` can write to `org/repo-b`. The perimeter engine correctly enforces what is given to it, but what is given to it is always wildcard.
+
+**Root cause:** There is no `user_permissions` table in the Prisma schema. Connector-level scoping exists, but resource-level user permissions are not persisted.
+
+**Fix:**
+Step 1 — Add `user_connector_permissions` table to Prisma schema:
+```sql
+model UserConnectorPermission {
+  id           String   @id @default(uuid())
+  tenant_id    String
+  user_id      String
+  connector_id String
+  read_scopes  String[] -- e.g. ["*"] or ["org/repo-a"]
+  write_scopes String[] -- e.g. [] or ["deployments/app1"]
+  @@unique([tenant_id, user_id, connector_id])
+}
+```
+Step 2 — Load user's resource-level scopes from this table in `chatRoutes()`:
+```typescript
+const userPermissions = await prisma.userConnectorPermission.findMany({
+  where: { tenant_id: tenantId, user_id: userId }
+})
+const connectorScopes: ConnectorScope[] = userPermissions.map((p) => ({
+  connectorId: p.connector_id,
+  read: p.read_scopes,
+  write: p.write_scopes,
+}))
+```
+Step 3 — Until table exists, fail closed: default `write: []` (read-only) for unknown users. Never default to wildcard write.
+
+**Verify:** Create a user in the system with `write: ['deployments/app1']` only. Call a write tool targeting `deployments/app2`. Assert `allows()` returns false. Currently returns true.
+
+---
+
+#### B-6 — InMemorySessionMemory is a module-level singleton shared across all tenants
+
+**File:** `apps/gateway/src/routes/chat.ts:96`
+
+**Issue:**
+```typescript
+const inMemoryStore = new InMemorySessionMemory()
+```
+Module-level singleton. All requests to this gateway process share one `InMemorySessionMemory` instance. Sessions are keyed by `sessionId` string alone — no tenant namespace. If tenant A and tenant B each start a session with ID `"session-123"` (e.g. both use UUIDs that collide, or a client reuses a session ID across tenant contexts), they share session history. In dev mode where the in-memory store is the default (no Redis), this is the production code path.
+
+**Fix:**
+Key sessions as `${tenantId}:${sessionId}` internally:
+```typescript
+private readonly turns = new Map<string, ConversationTurn[]>()
+
+private key(sessionId: SessionId, tenantId?: TenantId): string {
+  return tenantId ? `${tenantId}:${sessionId}` : sessionId
+}
+```
+Or move InMemorySessionMemory to `packages/agent/src/memory/in-memory-session.ts` and accept a namespace prefix in the constructor (addresses H-2 simultaneously).
+
+**Verify:** Two requests with different `tenantId` but identical `sessionId` string. Assert their turns are independent. Currently they share turns.
+
+---
+
+#### B-7 — JWT `authenticate` decorator leaks raw JWT error to client — sensitive JWT internals exposed
+
+**File:** `apps/gateway/src/plugins/jwt.ts:44–53`
+
+**Issue:**
+```typescript
+app.decorate('authenticate', async function authenticateRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    await request.jwtVerify()
+  } catch (err) {
+    reply.send(err)
+  }
+})
+```
+`@fastify/jwt` throws an error object on verification failure. `reply.send(err)` serializes the raw Error object including its message, stack trace fragments embedded in the JWT error details, and the full `@fastify/jwt` error format. This leaks the JWT algorithm, token structure information, and internal library details to the client.
+
+Beyond the info leak: there is no `return` or `throw` after `reply.send(err)`. With Fastify's async preHandler, once a reply is sent Fastify does stop the route handler. However, any code after `reply.send(err)` in the `authenticate` function continues executing until it returns. If future modifications add code after `reply.send(err)`, there is no safety net.
+
+**Fix:**
+```typescript
+app.decorate('authenticate', async function authenticateRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  try {
+    await request.jwtVerify()
+  } catch {
+    await reply.code(401).send({ error: 'Unauthorized' })
+  }
+})
+```
+
+**Verify:** Send a request with an invalid JWT. Assert response is `{"error":"Unauthorized"}` with status 401 and no JWT internal details. Assert response does not contain stack trace, algorithm name, or `@fastify/jwt` error format.
+
+---
+
+### HIGH
+
+#### H-6 — Auth stub assigns `sub: 'stub-user-id'` to all users — audit trail corrupted
+
+**File:** `apps/gateway/src/routes/auth.ts:23–29`
+
+**Issue:**
+```typescript
+const token = await reply.jwtSign({
+  sub: 'stub-user-id',
+  email,
+  tenantId,
+  role: 'dev',
+})
+```
+Every user who calls `/auth/token` gets a JWT with `sub: 'stub-user-id'` and `role: 'dev'`. All audit events are attributed to `user_id = 'stub-user-id'`. All sessions from different users share the same user ID in session memory. Role-based intent routing always receives `effectiveRole: 'dev'`. This is development scaffolding that must be clearly bounded.
+
+This stub is acceptable for M0/M1 development but must be guarded against accidental production use and must be obviously labeled as temporary.
+
+**Fix:** Add a guard at startup and a clear comment:
+```typescript
+// TODO M7: replace with real SAML/OIDC auth — this stub is DEV ONLY
+if (process.env.NODE_ENV === 'production') {
+  throw new Error('Auth stub must not run in production — implement real auth before deploying')
+}
+```
+Also: generate a per-request pseudo-user-id from the email so audit events are at least distinguishable per user: `sub: `stub:${email}``
+
+**Verify:** Confirm in the audit_events table that different email addresses produce different `user_id` values.
+
+---
+
+#### H-7 — Specialist agent has no token budget enforcement — unlimited spend possible
+
+**File:** `packages/agent/src/specialist-agent.ts:38–136`
+
+**Issue:** `runSpecialist()` calls `createPerimeterMiddleware` but never calls `createTokenMeterMiddleware`. A specialist agent can make unlimited LLM calls with no per-query, per-session, or per-tenant budget check. If a specialist agent enters a tool loop, it will spend tokens without limit until `maxSteps` is hit (default 10) — and even then, 10 unchecked calls on a long-context model could exhaust a tenant's monthly budget in a single session.
+
+**Fix:**
+```typescript
+// In runSpecialist(), add budget parameter to SpecialistAgentConfig:
+export interface SpecialistAgentConfig {
+  ...
+  budget?: TokenBudget
+}
+
+// In runSpecialist() loop, before model.stream():
+const tokenResult = await checkTokens({ estimatedTokens, messages, model: mainModel })
+if ('_tag' in tokenResult && tokenResult._tag === 'TokenHardBlock') {
+  yield makeError('TOKEN_LIMIT_EXCEEDED', tokenResult.reason)
+  return
+}
+```
+
+**Verify:** Create specialist agent with `perQueryHardLimit: 100`. Provide a prompt that would produce >100 estimated tokens. Assert agent yields TOKEN_LIMIT_EXCEEDED error.
+
+---
+
+#### H-8 — `apps/web/app/api/chat/route.ts` is a stub — web UI never reaches real orchestrator
+
+**File:** `apps/web/app/api/chat/route.ts:1–21`
+
+**Issue:**
+```typescript
+export async function POST() {
+  // ... returns hardcoded "stub response"
+}
+```
+The web UI's chat endpoint is a stub that returns a hardcoded text_delta event regardless of the query. All chat messages from the browser hit this stub and never reach the gateway or the real orchestrator. M1-T5 wired the gateway SSE endpoint but M1-T6 (wire OrchestratorChat to real SSE) was not completed.
+
+**Fix:** Implement `apps/web/app/api/chat/route.ts` to proxy to the gateway:
+```typescript
+export async function POST(request: Request) {
+  const gatewayUrl = process.env.GATEWAY_URL ?? 'http://localhost:3001'
+  const body = await request.json()
+  const response = await fetch(`${gatewayUrl}/api/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: request.headers.get('Authorization') ?? '',
+    },
+    body: JSON.stringify(body),
+  })
+  return new Response(response.body, {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' }
+  })
+}
+```
+
+**Verify:** Send a chat message from the browser. Confirm the audit_events table in Postgres shows a `query_received` event. Currently no DB event is created.
+
+---
+
+### MEDIUM
+
+#### M-6 — `isWriteAction` uses `includes()` — false positives on common verb substrings
+
+**File:** `packages/agent/src/perimeter/engine.ts:68–71`
+
+Already noted as M-4 in 2026-06-03 review. Escalating severity: `WRITE_SUFFIXES` contains `'post'`, `'put'`, `'close'`. Tool names like `get_repository_post_count`, `compute_uptime`, and `autocreate_alert` all trigger false write classification. Each false positive forces a write-scope check on what is actually a read operation, potentially blocking legitimate reads.
+
+**Fix (exact from previous review, still unimplemented):**
+```typescript
+function isWriteAction(toolName: string): boolean {
+  const action = toolName.includes('.') ? toolName.split('.').slice(1).join('.') : toolName
+  const parts = action.toLowerCase().split('_')
+  return WRITE_SUFFIXES.some((s) => parts.includes(s))
+}
+```
+
+**Verify:** `isWriteAction('datadog.get_post_count')` → false. `isWriteAction('github.create_pr')` → true. `isWriteAction('k8s.delete_pod')` → true.
+
+---
+
+#### M-7 — `OllamaProvider.chat()` has no request timeout — hangs indefinitely on unresponsive server
+
+**File:** `packages/agent/src/providers/ollama.ts:98–105`
+
+```typescript
+const response = await fetch(`${this.baseURL}/chat/completions`, {
+  method: 'POST',
+  ...
+  body: JSON.stringify(body),
+})
+```
+No `AbortSignal` or timeout. If the Ollama server is slow or unresponsive, the gateway request hangs indefinitely, holding the connection and consuming a thread-equivalent slot. Under load, a single slow Ollama instance can exhaust the gateway's request concurrency.
+
+**Fix:**
+```typescript
+const controller = new AbortController()
+const timeout = setTimeout(() => controller.abort(), 30_000) // 30s
+try {
+  const response = await fetch(url, { ...options, signal: controller.signal })
+  ...
+} finally {
+  clearTimeout(timeout)
+}
+```
+
+**Verify:** Start Ollama provider with a URL that never responds. Assert `chat()` throws/rejects within 35 seconds. Currently it hangs.
+
+---
+
+#### M-8 — `RedisSessionMemory.append()` triggers `summarise()` while still holding the turns state — possible double-compress
+
+**File:** `packages/agent/src/memory/redis-session.ts:54–69`
+
+```typescript
+async append(sessionId: SessionId, turn: ConversationTurn): Promise<void> {
+  const key = turnsKey(sessionId)
+  const raw = await this.redis.get(key)
+  const turns: ConversationTurn[] = raw ? JSON.parse(raw) : []
+  turns.push(turn)
+  await Promise.all([
+    this.redis.set(key, JSON.stringify(turns), 'EX', SESSION_TTL_SECONDS),
+    this.redis.expire(metaKey(sessionId), SESSION_TTL_SECONDS),
+  ])
+  if (turns.length > MAX_TURNS_BEFORE_SUMMARISE) {
+    await this.summarise(sessionId)  // re-reads from Redis
+  }
+}
+```
+`append()` writes 51 turns to Redis, then calls `summarise()` which reads them back and writes compressed turns. This is correct behavior — but note it still uses the get-modify-write pattern (B-3 from previous review). More subtle: if `summarise()` is called concurrently from two requests (both append the 51st turn simultaneously), both call `summarise()`. Both read the same 51 turns, both compress them. Second write wins, but the first write has already removed the canonical state. Result: correctly compressed, but the B-3 race still affects append; `summarise()` itself is idempotent if called twice on the same state.
+
+This is a clarification of B-3, not a new issue. B-3 remains the root problem.
+
+---
+
+### LOW
+
+#### L-4 — `MemoryFactory` not exported from `packages/agent/src/memory/factory.ts` source
+
+**File:** `packages/agent/src/memory/factory.ts`
+
+The chat route imports `MemoryFactory` from `@anvay/agent`. Verify this import exists and the factory correctly instantiates `RedisSessionMemory`. If this factory is missing or doesn't pass the `summariseProvider` option, Redis sessions will use fallback summaries only (no LLM summarisation). Confirm the export chain is complete.
+
+**Verify:** `import { MemoryFactory } from '@anvay/agent'` compiles without error. `MemoryFactory.create({ type: 'redis', redisUrl: '...' })` returns a `RedisSessionMemory` instance.
+
+---
+
+#### L-5 — `apps/web/app/api/providers/route.ts` checks `process.env` at request time — no caching
+
+**File:** `apps/web/app/api/providers/route.ts:1–12`
+
+`process.env` reads are cheap, but this route is called on every UI load (the ModelConfig component checks it). In Next.js server components, the env is already resolved at build time for static data. This is not a correctness issue but a missed optimization — `process.env.ANTHROPIC_API_KEY` in server routes is dynamic (correct), but should be wrapped in `cache()` for the duration of a request if called multiple times.
+
+Minor. Non-blocking. Document as intentional.
+
+---
+
+### Patterns to Watch (Negative Reference — Do Not Repeat)
+
+- **Wildcard perimeter defaults:** Never default to `write: ['*']` when user scope is unknown. Fail closed — default write to `[]`.
+- **Shared module-level state with tenant data:** Module-level singletons that hold per-user or per-session data are a multi-tenancy hazard. Scope all session/user storage by `tenantId:sessionId`.
+- **Swallowing JWT errors without structured response:** Always return a structured error (`{"error":"Unauthorized"}`) on auth failure — never serialize the raw exception.
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status at this review |
+|---------|------|----------------------|
+| Wire OrchestratorChat to real SSE | M1-T6 | Not started — web /api/chat is still a stub |
+| Specialist agent tools | M2 | Not started |
+| Connector implementations | M2 | Not started |
+| `IKnowledgeGraph` + `resolveContext()` | M4-T1, M4-T2, M4-T5 | Not started |
+| Graph Builder Agent | M4-T6 | Not started |
+| Agent context injection | M4-T7 | Not started |
+| Trigger.dev cron jobs | M5 | Not started |
+| User permission DB model | Pre-M2 (required for B-5) | Not started — currently all perimeter resource checks are wildcarded |
+| Real auth (SAML/OIDC) | M7 | Not started — auth stub in production would be catastrophic |
+
+<!-- REVIEW SECTION END — 2026-06-04 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-03 -->
 ## Review — 2026-06-03 | M0-T1 through M1-T5
 

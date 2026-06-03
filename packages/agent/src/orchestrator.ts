@@ -201,6 +201,9 @@ export async function* runSession(
       } else if (chunk.type === 'done') {
         totalInputTokens += chunk.inputTokens
         totalOutputTokens += chunk.outputTokens
+        budget.sessionUsed += chunk.inputTokens + chunk.outputTokens
+        budget.tenantDailyUsed += chunk.inputTokens + chunk.outputTokens
+        budget.tenantMonthlyUsed += chunk.inputTokens + chunk.outputTokens
         // Don't yield done yet — may be more steps
       } else if (chunk.type === 'error') {
         yield chunk

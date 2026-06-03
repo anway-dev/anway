@@ -73,7 +73,7 @@ describe('createTokenMeterMiddleware', () => {
     expect((result as { _tag: string })._tag).toBe('TokenHardBlock')
   })
 
-  it('does not mutate the budget object', async () => {
+  it('does not mutate the budget object from middleware', async () => {
     const budget = makeBudget()
     const meter = createTokenMeterMiddleware(budget)
     await meter(makeReq(500))

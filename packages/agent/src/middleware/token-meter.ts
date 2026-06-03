@@ -5,9 +5,9 @@ export interface TokenBudget {
   readonly perSessionLimit: number
   readonly perTenantDailyLimit: number
   readonly perTenantMonthlyLimit: number
-  readonly sessionUsed: number
-  readonly tenantDailyUsed: number
-  readonly tenantMonthlyUsed: number
+  sessionUsed: number
+  tenantDailyUsed: number
+  tenantMonthlyUsed: number
 }
 
 export interface ModelCallRequest {

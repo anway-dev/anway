@@ -266,7 +266,8 @@ COPY packages/types/package.json packages/types/
 | ID | Severity | File | Short description | Status |
 |----|----------|------|-------------------|--------|
 | B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
-| B-3 | BLOCKING | redis-session.ts | get-modify-write race condition | OPEN |
+| B-3 | BLOCKING | redis-session.ts | get-modify-write race condition | **FIXED** ✓ (`5f053e6`) |
+| B-3-R | LOW | redis-session.ts | `expire` races `rpush` on new key; `summarise()` del+rpush non-atomic (11 round trips, double-summarise duplicates) | OPEN |
 | B-4 | BLOCKING | orchestrator.ts | Tool message format wrong for multi-turn | OPEN (M2) |
 | B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
 | B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
@@ -334,7 +335,7 @@ COPY packages/types/package.json packages/types/
 | B-1 Perimeter resource defaults to `*` | **FIXED** ✓ |
 | B-2 Token budget counters never update | **PARTIAL** ✓ — within-request fixed; cross-request persistence remains (B-2-R) |
 | B-2-R Cross-request sessionUsed reset | OPEN |
-| B-3 Redis session append race condition | OPEN |
+| B-3 Redis session append race condition | **FIXED** ✓ (`5f053e6`) — two LOW residuals remain (B-3-R) |
 | B-4 Tool message format wrong | OPEN (M2 deferred) |
 | B-5 connectorScopes hardcodes wildcards | OPEN |
 | B-6 InMemorySessionMemory shared across tenants | OPEN |

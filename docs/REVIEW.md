@@ -7,6 +7,293 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-05 -->
+## Review — 2026-06-05 | Infrastructure deep-dive: migration, CORS, health, telemetry, factories
+
+**Scope:** No new feature commits since 2026-06-04. Review covers previously unread infrastructure files: `prisma/schema.prisma`, `migrations/0001_initial/migration.sql`, `plugins/cors.ts`, `plugins/request-logger.ts`, `routes/health.ts`, `metrics.ts`, `telemetry.ts`, `server.ts`, `memory/factory.ts`, and all gateway test files. New code-path issues found in existing files confirmed.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 5/10 | = — no new commits |
+| Code standards | 5/10 | ↓1 — RLS never activated, tenant/user IDs never logged, CORS misconfiguration |
+| Performance | 6/10 | = |
+| Security | 4/10 | ↓2 — B-8/B-9 are severe: RLS policy dead in production, audit cascade bypass |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+| Issue | Status |
+|-------|--------|
+| B-1 Perimeter resource defaults to `*` | **FIXED** ✓ |
+| B-2 Token budget counters never update | **PARTIAL** ✓ — within-request fixed; cross-request persistence remains (B-2-R) |
+| B-2-R Cross-request sessionUsed reset | OPEN |
+| B-3 Redis session append race condition | OPEN |
+| B-4 Tool message format wrong | OPEN (M2 deferred) |
+| B-5 connectorScopes hardcodes wildcards | OPEN |
+| B-6 InMemorySessionMemory shared across tenants | OPEN |
+| B-7 JWT error leaked to client | OPEN |
+| H-1 through H-8 | All OPEN |
+| M-1 through M-7 | All OPEN |
+| L-1, L-2, L-4, L-5 | All OPEN |
+
+---
+
+### BLOCKING
+
+#### B-8 — RLS `app.tenant_id` is never set — all tenant isolation is dead in production
+
+**File:** `apps/gateway/src/routes/chat.ts` (all Prisma calls), `apps/gateway/prisma/migrations/0001_initial/migration.sql`
+
+**Issue:** The migration correctly enables RLS on all six tables and creates policies keyed on `current_setting('app.tenant_id', true)`. The migration also runs `FORCE ROW LEVEL SECURITY` which means policies apply even to the table owner. However, nowhere in the application does any code call `SET LOCAL app.tenant_id = ?` before executing Prisma queries.
+
+Two failure modes depending on connection role:
+
+- **App connects as non-superuser (correct setup):** `FORCE ROW LEVEL SECURITY` applies. `app.tenant_id` is never set → `current_setting('app.tenant_id', true)` returns `NULL` → `NULL::uuid` cast → `tenant_id = NULL` is always false → **every Prisma query returns 0 rows**. All `dbConnectors`, `dbTenant` queries silently return empty. Connector perimeters are empty. Budget is default. The application appears to work but has no data.
+
+- **App connects as superuser (likely in dev):** RLS is bypassed entirely for superusers unless `FORCE ROW LEVEL SECURITY` is enforced. Queries return data without tenant filtering — only the application-level `where: { tenant_id: tenantId }` guards apply. This works in practice but provides no defense-in-depth: a bug in application filters = cross-tenant data exposure.
+
+Both scenarios mean the RLS layer is either silently failing or completely inactive. The `schema.test.ts` tests verify the SQL contains the right policy text but do NOT test that the setting is actually applied per-request.
+
+**Fix:** Add a Prisma client extension that sets `app.tenant_id` before each query via `$allOperations` middleware:
+```typescript
+// apps/gateway/src/db.ts
+import { PrismaClient } from '@prisma/client'
+
+export function createPrismaClient(tenantId: string): PrismaClient {
+  return new PrismaClient().$extends({
+    query: {
+      $allOperations({ args, query }) {
+        return prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+          return query(args)
+        })
+      }
+    }
+  })
+}
+```
+Or use a transaction-scoped approach in the route:
+```typescript
+await prisma.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+const connectors = await prisma.connector.findMany({ where: { tenant_id: tenantId } })
+```
+The `set_config(..., true)` third argument makes the setting LOCAL to the current transaction.
+
+**Verify:** In a test with RLS-enforced DB, insert rows for tenant-A. Connect with app credentials (non-superuser). Issue a query without setting `app.tenant_id`. Assert 0 rows returned. Then set `app.tenant_id = tenant-A`. Assert rows returned. Currently: either returns 0 rows always or bypasses RLS entirely.
+
+---
+
+#### B-9 — `audit_events` CASCADE DELETE from tenant bypasses immutability RULE — audit history erasable
+
+**File:** `apps/gateway/prisma/migrations/0001_initial/migration.sql` (lines ~150–165)
+
+**Issue:**
+```sql
+ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_tenant_id_fkey"
+    FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+CREATE RULE no_delete_audit_events AS
+    ON DELETE TO audit_events DO INSTEAD NOTHING;
+```
+PostgreSQL RULES apply to direct SQL statements on the table. They do NOT intercept CASCADE operations triggered by foreign key constraints. Running `DELETE FROM tenants WHERE id = $id` cascades through the FK and deletes all `audit_events` for that tenant, bypassing `no_delete_audit_events` entirely.
+
+PRODUCT.md §7 states: "every event immutably logged." Deleting a tenant erases the entire audit trail. An insider threat or a bug in a tenant-deletion flow would permanently destroy the audit record with no recovery path.
+
+**Fix option A (preferred):** Change the FK to `ON DELETE RESTRICT`. Tenants with audit history cannot be deleted — only deactivated:
+```sql
+FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+```
+Add a `deleted_at` soft-delete column to `tenants` for deactivation.
+
+**Fix option B:** Replace the RULE with a trigger that actively blocks the DELETE:
+```sql
+CREATE OR REPLACE FUNCTION prevent_audit_delete()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_events are immutable — delete not permitted';
+END;$$;
+
+CREATE TRIGGER no_delete_audit_events
+BEFORE DELETE ON audit_events
+FOR EACH ROW EXECUTE FUNCTION prevent_audit_delete();
+```
+Triggers fire on CASCADE operations; RULES do not.
+
+**Verify:** Insert a tenant and audit event. Run `DELETE FROM tenants WHERE id = $tenant_id`. Assert the audit event still exists. Currently it is deleted.
+
+---
+
+### HIGH
+
+#### H-9 — `CORS_ORIGIN=*` with `credentials: true` is a broken configuration — silently fails for credentialed requests
+
+**File:** `apps/gateway/src/plugins/cors.ts:6–11`
+
+**Issue:**
+```typescript
+await app.register(cors, {
+  origin: process.env.CORS_ORIGIN ?? '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id'],
+  credentials: true,
+})
+```
+The `Access-Control-Allow-Credentials: true` header is sent with every response. When `CORS_ORIGIN` is not set (default), the response also sends `Access-Control-Allow-Origin: *`. Browsers reject this combination per the CORS spec — `*` and `credentials: true` cannot coexist. Any cross-origin `fetch` with `credentials: 'include'` will fail with a CORS error. This is the expected production use pattern.
+
+Beyond the functional failure: `credentials: true` on `*` origin means that if a browser somehow accepts the response, it would share cookies with ANY origin — an SSRF/CORS bypass risk.
+
+**Fix:**
+```typescript
+await app.register(cors, {
+  origin: process.env.CORS_ORIGIN?.split(',') ?? false, // false = same-origin only
+  credentials: Boolean(process.env.CORS_ORIGIN), // credentials only when origin is explicit
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id'],
+})
+```
+Require `CORS_ORIGIN` to be set explicitly in production. Default to same-origin (no CORS) when unset.
+
+**Verify:** Without `CORS_ORIGIN` set, make a cross-origin request. Assert `Access-Control-Allow-Origin` header is absent. With `CORS_ORIGIN=https://app.acme.dev`, assert header is present and matches. Currently wildcard header is always present.
+
+---
+
+#### H-10 — `health/ready` always returns 200 — Kubernetes liveness probes never detect DB/Redis failures
+
+**File:** `apps/gateway/src/routes/health.ts:18–21`
+
+**Issue:**
+```typescript
+app.get('/health/ready', async (_request, reply) => {
+  return reply.send({ status: 'ok' })
+})
+```
+The readiness probe unconditionally returns 200. Kubernetes uses this endpoint to decide whether to route traffic to the pod. If Postgres or Redis is down, the gateway is not operationally ready — but Kubernetes will still send traffic to it. Every request will fail with DB errors, yet the pod appears healthy.
+
+The comment says "DB, Redis added in later milestones" but this is in production infrastructure now. The placeholder should at minimum document the expected implementation contract.
+
+**Fix:**
+```typescript
+app.get('/health/ready', async (_request, reply) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    return reply.send({ status: 'ok' })
+  } catch {
+    return reply.code(503).send({ status: 'unavailable', reason: 'db' })
+  }
+})
+```
+Add Redis ping check similarly when Redis is configured.
+
+**Verify:** Stop Postgres. Hit `/health/ready`. Assert 503. Currently returns 200.
+
+---
+
+### MEDIUM
+
+#### M-11 — `request.tenantId` and `request.userId` are declared but never populated — access logs always null
+
+**File:** `apps/gateway/src/plugins/request-logger.ts:6–11`, `apps/gateway/src/routes/chat.ts`
+
+**Issue:**
+```typescript
+declare module 'fastify' {
+  interface FastifyRequest {
+    traceId: string
+    tenantId?: string
+    userId?: string
+  }
+}
+```
+The `onResponse` logger logs `request.tenantId` and `request.userId` — but nothing ever sets these fields. The chat route has `const { sub: userId, tenantId } = request.user` after JWT verification, but does not assign `request.tenantId = tenantId` or `request.userId = userId`. Every response log entry shows `tenantId: null, userId: null`, making per-tenant/per-user query analysis from logs impossible.
+
+**Fix:** In the chat route handler, after JWT fields are extracted:
+```typescript
+const { sub: userId, tenantId, role } = request.user
+request.tenantId = tenantId
+request.userId = userId
+```
+
+**Verify:** Make a chat request. Assert the structured log entry for that request contains the actual `tenantId` and `userId`. Currently both are null.
+
+---
+
+#### M-12 — `X-Trace-Id` header accepted without validation — log injection via uncontrolled traceId
+
+**File:** `apps/gateway/src/plugins/request-logger.ts:15–16`
+
+**Issue:**
+```typescript
+const traceId = (request.headers['x-trace-id'] as string | undefined) ?? randomUUID()
+request.traceId = traceId
+```
+`traceId` is logged as-is in every request log entry. An attacker can inject `"tenantId":"victim-tenant","userId":"admin"` as the `X-Trace-Id` header value. Depending on the log aggregation system (Datadog, Elastic), this can corrupt structured log entries or inject false audit-adjacent signals.
+
+**Fix:**
+```typescript
+const raw = request.headers['x-trace-id'] as string | undefined
+const isValidTraceId = /^[0-9a-f-]{36,64}$/i.test(raw ?? '')
+request.traceId = isValidTraceId ? raw! : randomUUID()
+```
+
+**Verify:** Send a request with `X-Trace-Id: injected-value". Assert log entry shows a generated UUID, not the injected value.
+
+---
+
+### LOW
+
+#### L-6 — `health/ready` probe does not check Redis — pod may receive traffic when session store is down
+
+**File:** `apps/gateway/src/routes/health.ts:18–21`
+
+Supplementary to H-10. Even after DB check is added, Redis unavailability should also return 503 if the gateway is Redis-backed for sessions. If Redis is down, every authenticated chat request will fail (session memory commands throw). Readiness should reflect this.
+
+---
+
+#### L-7 — Schema test `migration.sql` path uses `import.meta.dirname` — will break if test runner changes cwd
+
+**File:** `apps/gateway/src/__tests__/schema.test.ts:57`
+
+```typescript
+join(import.meta.dirname, '../../prisma/migrations/0001_initial/migration.sql')
+```
+`import.meta.dirname` is correct for ESM. If tests are ever run from a different working directory or if the migration file moves, the test silently throws and the RLS invariants go untested. Consider resolving from package root via a workspace-relative path.
+
+---
+
+### Positive Findings — First-Time Assessment
+
+- **Migration SQL quality is high:** RLS enabled AND forced on all tables, append-only enforcement on audit_events, composite indexes on high-cardinality queries, UUID PKs everywhere. Solid foundation.
+- **telemetry.ts:** Correctly no-ops when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset. No mandatory external dependency.
+- **metrics.ts:** `initMetrics()` guard prevents double-registration. Correct singleton pattern.
+- **server.ts:** Graceful SIGTERM/SIGINT shutdown with telemetry flush. Correct.
+- **MemoryFactory:** Exhaustive switch with `_exhaustive: never` compile-time guard. Correct pattern.
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status |
+|---------|------|--------|
+| M0-T1 through M0-T8 | M0 | **COMPLETE** |
+| M1-T1 through M1-T5 | M1 (partial) | **COMPLETE** |
+| Wire OrchestratorChat to real SSE | M1-T6 | NOT STARTED — web /api/chat is stub |
+| Specialist agent tools | M2 | NOT STARTED |
+| Connector implementations | M2 | NOT STARTED |
+| `IKnowledgeGraph` + `resolveContext()` | M4-T1, M4-T2, M4-T5 | NOT STARTED |
+| Graph Builder Agent | M4-T6 | NOT STARTED |
+| Agent context injection | M4-T7 | NOT STARTED |
+| Trigger.dev cron jobs | M5 | NOT STARTED |
+| User permission DB model (required for B-5) | pre-M2 | NOT STARTED |
+| RLS activation at query time (B-8) | pre-M2 | NOT STARTED — security critical |
+| Real auth (SAML/OIDC) (M7) | M7 | NOT STARTED — auth stub is production risk |
+
+<!-- REVIEW SECTION END — 2026-06-05 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-04 -->
 ## Review — 2026-06-04 | B-1 fix + full re-audit of M0-T1 through M1-T5
 

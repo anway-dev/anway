@@ -7,6 +7,299 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07 -->
+## Review — 2026-06-07 | Consolidated status — no new commits since B-3 fix
+
+**Scope:** No new feature commits since `5f053e6` (B-3 Redis session fix, 2026-06-06). This
+section is a consolidation pass — re-evaluating all open issues, reassessing severity after
+three fix cycles, and producing the priority queue for the next build wave.
+
+| Dimension | Rating | Notes |
+|-----------|--------|-------|
+| Feature completeness | 5/10 | M1-T6 (web chat) not started. M2 specialist tools not started. No KG layer yet. |
+| Code standards | 5/10 | Inline memory impl, stub auth, module-level singletons, dead imports remain. |
+| Performance | 6/10 | No change — Redis list ops correct now. summarise() still N round trips. |
+| Security | 4/10 | B-5/B-7/B-8/B-9/B-10 all open. RLS dead, audit erasable, Dockerfile broken. |
+| Readability | 8/10 | Code is readable. Issues are structural/logic, not style. |
+| Clarity and comments | 7/10 | No change. |
+
+---
+
+### Fix cycle recap (B-1 through B-3)
+
+| Bug | Commit | Result |
+|-----|--------|--------|
+| B-1 — perimeter resource defaulted to `'*'` | `8b80b2e` | **FIXED** ✓ — resource arg now correctly defaults to `null`, wildcard bypass closed |
+| B-2 — token budget counters never updated | `d438253` | **PARTIAL** ✓ — within-request step accumulation fixed; `sessionUsed` still resets to 0 each HTTP request (B-2-R) |
+| B-3 — Redis session get-modify-write race | `5f053e6` | **FIXED** ✓ — `RPUSH`/`LRANGE 0 -1` atomic; two LOW residuals remain (B-3-R) |
+
+---
+
+### Priority queue for next build wave
+
+These are the issues that block M2 progress or pose active production risk. Order is strict
+— do not start the next item until the prior one passes its verification step.
+
+#### Priority 1 — B-10: Fix Dockerfile before any container deployment
+
+**File:** `apps/gateway/Dockerfile`
+
+Workspace symlinks `@anvay/agent → ../../../../packages/agent` break in the distroless runner.
+Production image cannot start. Nothing else matters until the container runs.
+
+**Fix:** Replace the manual COPY approach with `pnpm deploy`:
+```dockerfile
+FROM base AS deployer
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+RUN pnpm --filter=anvay-gateway deploy --prod /app/deploy
+
+FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
+WORKDIR /app
+COPY --from=deployer /app/deploy .
+COPY --from=deployer /app/deploy/dist ./dist
+ENV NODE_ENV=production
+EXPOSE 4000
+CMD ["dist/src/server.js"]
+```
+
+**Verify:** `docker build -f apps/gateway/Dockerfile . && docker run --rm anvay-gateway node -e "require('@anvay/agent')"` exits 0.
+
+---
+
+#### Priority 2 — B-8: Set `app.tenant_id` before every Prisma query
+
+**File:** `apps/gateway/src/routes/chat.ts` (and any other route with Prisma calls)
+
+RLS policies exist on all six tables but `current_setting('app.tenant_id', true)` is never set
+at query time → either returns 0 rows (FORCE RLS active) or bypasses isolation entirely
+(superuser connection). Tenant data isolation is structurally dead.
+
+**Fix pattern:**
+```typescript
+// wrap every multi-query block in a transaction that sets the RLS variable first
+await prisma.$transaction(async (tx) => {
+  await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+  const connectors = await tx.connector.findMany({ where: { tenant_id: tenantId } })
+  // ... rest of DB reads
+})
+```
+
+Or create a `createTenantPrismaClient(tenantId)` factory with a `$allOperations` extension
+that wraps every query in this pattern automatically (cleaner for many call sites).
+
+**Verify:** Insert rows for tenant-A. Query with app credentials (non-superuser) without
+setting `app.tenant_id` — assert 0 rows. Set it — assert correct rows returned.
+
+---
+
+#### Priority 3 — B-9: `audit_events` FK must be RESTRICT, not CASCADE
+
+**File:** `apps/gateway/prisma/migrations/0001_initial/migration.sql`
+
+`RULE no_delete_audit_events` is bypassed by FK CASCADE. `DELETE FROM tenants` silently
+wipes the audit trail. Replace the RULE with a BEFORE DELETE trigger (triggers fire on
+cascade; rules do not) and change FK to `ON DELETE RESTRICT`.
+
+```sql
+-- New migration
+ALTER TABLE audit_events
+  DROP CONSTRAINT audit_events_tenant_id_fkey,
+  ADD CONSTRAINT audit_events_tenant_id_fkey
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+    ON DELETE RESTRICT ON UPDATE CASCADE;
+
+DROP RULE IF EXISTS no_delete_audit_events ON audit_events;
+
+CREATE OR REPLACE FUNCTION prevent_audit_delete()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_events are immutable';
+END;$$;
+
+CREATE TRIGGER no_delete_audit_events
+BEFORE DELETE ON audit_events
+FOR EACH ROW EXECUTE FUNCTION prevent_audit_delete();
+```
+
+**Verify:** Insert tenant + audit event. `DELETE FROM tenants WHERE id = $id` → assert
+exception raised AND audit event still exists.
+
+---
+
+#### Priority 4 — B-5: `connectorScopes` must come from DB, not hardcoded wildcards
+
+**File:** `apps/gateway/src/routes/chat.ts:143–148`
+
+Every user gets `read: ['*'], write: ['*']` regardless of provisioned permissions. The
+perimeter engine (fixed in B-1) correctly evaluates scopes — but the scopes fed to it are
+wrong. AgentPerimeter is operating in always-allow mode for every user.
+
+**Prereq:** `UserConnectorPermission` table must exist in the Prisma schema:
+```prisma
+model UserConnectorPermission {
+  id          String   @id @default(cuid())
+  userId      String
+  tenantId    String
+  connectorId String
+  readScopes  String[] // ["org/*", "team-payments/*"]
+  writeScopes String[] // ["org/repo-a"]
+  user        User     @relation(fields: [userId], references: [id])
+  connector   Connector @relation(fields: [connectorId], references: [id])
+}
+```
+
+Then in the chat route, replace the hardcoded perimeter with a DB lookup:
+```typescript
+const userPermissions = await prisma.userConnectorPermission.findMany({
+  where: { userId, tenantId },
+})
+const userPerimeter: UserPerimeter = {
+  userId,
+  connectors: userPermissions.map(p => ({
+    connectorId: p.connectorId,
+    read: p.readScopes,
+    write: p.writeScopes,
+  })),
+}
+```
+
+---
+
+#### Priority 5 — B-7: JWT errors must not leak to client
+
+**File:** `apps/gateway/src/plugins/jwt.ts`
+
+`reply.send(err)` serializes the raw JWT error object including library internals, algorithm
+details, and stack fragments. Replace with a structured 401:
+```typescript
+reply.code(401).send({ error: 'Unauthorized', code: 'JWT_INVALID' })
+```
+
+---
+
+#### Priority 6 — B-6: `InMemorySessionMemory` is a cross-tenant singleton
+
+**File:** `apps/gateway/src/routes/chat.ts:96`
+
+`const inMemoryStore = new InMemorySessionMemory()` at module level — one map shared
+across all tenants, all users, all requests. Switch to `RedisSessionMemory` (already
+implemented at `packages/agent/src/memory/redis-session.ts`):
+```typescript
+import { RedisSessionMemory } from '@anvay/agent'
+const sessionMemory = new RedisSessionMemory(redisClient, modelProvider)
+```
+The in-memory implementation should be deleted from chat.ts; it exists only for dev/test.
+
+---
+
+#### Priority 7 — B-2-R: `sessionUsed` resets to 0 every HTTP request
+
+**File:** `apps/gateway/src/routes/chat.ts` — `buildTokenBudget()` called on every POST
+
+`TokenBudget` is constructed fresh per request with `sessionUsed: 0`. The B-2 fix correctly
+accumulates within a single streaming response, but each new user message starts at 0.
+`perSessionLimit` never enforces across messages.
+
+**Fix:** Store `sessionUsed` in session memory (Redis), load it at request start, pass to
+`buildTokenBudget`. After response: persist updated `sessionUsed` back.
+
+---
+
+#### Priority 8 — H-8: Wire M1-T6 — web chat must call `/api/chat`, not return a stub
+
+**File:** `apps/web/app/api/chat/route.ts`
+
+Returns `"stub response"` hardcoded. This is M1-T6 per TASKS.md — NOT STARTED. The
+`OrchestratorChat` component streams from `/api/chat`. Until this route is implemented,
+the chat UI shows no real AI responses.
+
+**Implementation spec:**
+```typescript
+// apps/web/app/api/chat/route.ts
+export async function POST(req: Request): Promise<Response> {
+  const { message, sessionId, tenantId } = await req.json()
+  // forward to gateway /chat with credentials
+  const upstream = await fetch(`${process.env.GATEWAY_URL}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': req.headers.get('Authorization') ?? '' },
+    body: JSON.stringify({ message, sessionId, tenantId }),
+  })
+  // stream back
+  return new Response(upstream.body, {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+  })
+}
+```
+`GATEWAY_URL` must be in `.env.local`. API key never touches the client.
+
+---
+
+### Remaining HIGH issues (no change since 2026-06-05)
+
+These were documented in full in the 2026-06-05 and 2026-06-06 sections. Status unchanged —
+all still OPEN. Listing for visibility:
+
+| ID | File | Short description |
+|----|------|------------------|
+| H-1 | anthropic.ts:123–126 | Streaming `break` after first tool call — parallel tool calls lose args for call #2+ |
+| H-2 | chat.ts | `InMemorySessionMemory` inline in route file; `summarise()` is no-op |
+| H-3 | postgres-sink.ts | `void prisma...catch(onError)` — audit events silently dropped on DB failure |
+| H-4 | orchestrator.ts:134 | `catch {}` on intent classification — failure silently falls through |
+| H-5 | orchestrator.ts:259–263 | `content: '[streamed response]'` placeholder stored instead of actual text |
+| H-6 | auth.ts | `sub: 'stub-user-id'`, `role: 'dev'` hardcoded for all users |
+| H-7 | specialist-agent.ts | No token budget enforcement — specialist agents are unbounded |
+| H-9 | cors.ts | `origin: '*'` + `credentials: true` browser-rejected combination |
+| H-10 | health.ts | `/health/ready` always 200 — no DB/Redis liveness check |
+| H-11 | metrics.ts | `/metrics` no auth — request rates, routes, error patterns publicly readable |
+| H-12 | seed.ts | `$executeRawUnsafe` string interpolation + `SET LOCAL` in wrong transaction scope |
+
+---
+
+### MEDIUM / LOW — no change
+
+M-1 through M-14 and L-1 through L-10 are documented in prior sections. None resolved this
+cycle. The MEDIUM items that will surface naturally as M2 work starts:
+
+- **M-4** (`isWriteAction` false positives — substring match) — will manifest when specialist tools fire
+- **M-5** (`effectiveRole` hardcoded `'dev'`) — affects role-aware response routing
+- **M-1** (empty string tenantId passed to Prisma) — will cause silent data errors before B-8 fix
+
+---
+
+### Consolidated open issues
+
+| ID | Severity | File | Short description | Status |
+|----|----------|------|-------------------|--------|
+| B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
+| B-3-R | LOW | redis-session.ts | expire races rpush on new key; summarise del+rpush non-atomic | OPEN |
+| B-4 | BLOCKING | orchestrator.ts | Tool message format wrong for multi-turn | OPEN (M2) |
+| B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
+| B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
+| B-7 | BLOCKING | jwt.ts | JWT error leaked to client | OPEN |
+| B-8 | BLOCKING | chat.ts + migration | RLS app.tenant_id never set | OPEN |
+| B-9 | BLOCKING | migration.sql | audit_events CASCADE bypass | OPEN |
+| B-10 | BLOCKING | Dockerfile | Workspace symlinks broken in runner | OPEN |
+| H-1 | HIGH | anthropic.ts | Streaming break — parallel tool calls lose args | OPEN |
+| H-2 | HIGH | chat.ts | InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 | HIGH | postgres-sink.ts | Audit sink silent drop on DB failure | OPEN |
+| H-4 | HIGH | orchestrator.ts | Intent classification failure silent | OPEN |
+| H-5 | HIGH | orchestrator.ts | Streamed response stored as placeholder | OPEN |
+| H-6 | HIGH | auth.ts | Stub hardcodes sub=stub-user-id | OPEN |
+| H-7 | HIGH | specialist-agent.ts | No token budget enforcement | OPEN |
+| H-8 | HIGH | web/api/chat/route.ts | Web chat stub — M1-T6 not started | OPEN |
+| H-9 | HIGH | cors.ts | CORS * + credentials broken combo | OPEN |
+| H-10 | HIGH | health.ts | /health/ready always 200 | OPEN |
+| H-11 | HIGH | metrics.ts | /metrics unauthenticated | OPEN |
+| H-12 | HIGH | seed.ts | $executeRawUnsafe + SET LOCAL wrong scope | OPEN |
+| M-1 through M-14 | MEDIUM | various | (see 2026-06-04 through 2026-06-06 sections) | OPEN |
+| L-1 through L-10 | LOW | various | (see prior sections) | OPEN |
+
+<!-- REVIEW SECTION END — 2026-06-07 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-06 -->
 ## Review — 2026-06-06 | CI, Dockerfiles, docker-compose, seed, smoke-test, remaining infrastructure
 

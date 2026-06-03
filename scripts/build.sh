@@ -47,7 +47,11 @@ err()   { echo -e "${RED}[build]${RESET} $*"; }
 title() { echo -e "\n${BOLD}${CYAN}══ $* ══${RESET}\n"; }
 
 is_done()  { grep -qx "$1" "$STATUS_FILE" 2>/dev/null; }
-mark_done(){ echo "$1" >> "$STATUS_FILE"; ok "$1 done"; }
+mark_done(){
+  echo "$1" >> "$STATUS_FILE"
+  echo "$1" > "$LOG_DIR/review-trigger"   # signals review-watcher.sh
+  ok "$1 done"
+}
 
 # ── orchestration prompt template ─────────────────────────────────────────────
 # Injected into every claude orchestration call.

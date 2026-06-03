@@ -7,6 +7,310 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-06 -->
+## Review — 2026-06-06 | CI, Dockerfiles, docker-compose, seed, smoke-test, remaining infrastructure
+
+**Scope:** No new feature commits since 2026-06-05. Final sweep of unreviewed files: `.github/workflows/ci.yml`, `apps/gateway/Dockerfile`, `apps/web/Dockerfile`, `infra/docker-compose.yml`, `infra/docker-compose.dev.yml`, `scripts/smoke-test.sh`, `apps/gateway/prisma/seed.ts`, `apps/gateway/src/routes/metrics.ts`, `apps/gateway/src/logger.ts`, `apps/web/next.config.ts`. Symlink structure in `node_modules/@anvay/*` confirmed via `ls`.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 5/10 | = |
+| Code standards | 5/10 | = |
+| Performance | 6/10 | = |
+| Security | 4/10 | = — /metrics unauthenticated, seed SQL injection pattern |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+All issues from 2026-06-03 through 2026-06-05 remain open except:
+- B-1: FIXED ✓
+- B-2: PARTIAL ✓ (within-request accumulation fixed; cross-request gap is B-2-R, still open)
+- L-3: CLOSED ✓
+
+---
+
+### BLOCKING
+
+#### B-10 — Gateway production Docker image fails to start — workspace symlinks broken in runner stage
+
+**File:** `apps/gateway/Dockerfile:21–28`
+
+**Issue:** `apps/gateway/node_modules/@anvay/agent` and `@anvay/types` are relative symlinks:
+```
+apps/gateway/node_modules/@anvay/agent → ../../../../packages/agent
+apps/gateway/node_modules/@anvay/types → ../../../../packages/types
+```
+These resolve correctly in the builder stage (`/app/apps/gateway/node_modules/@anvay/agent` → `/app/packages/agent`). In the runner stage, Docker COPY preserves symlinks as-is. After:
+```dockerfile
+COPY --from=builder /app/apps/gateway/node_modules ./node_modules
+```
+The symlink now lives at `/app/node_modules/@anvay/agent → ../../../../packages/agent`, which resolves to `/packages/agent` — a path that does not exist in the distroless image. The gateway process crashes immediately on startup with `Cannot find module '@anvay/agent'`.
+
+Verified: `ls -la apps/gateway/node_modules/@anvay/` confirms the `../../../../packages/agent` relative target.
+
+**Fix — Option A (recommended): use `pnpm deploy`**
+```dockerfile
+FROM base AS deployer
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+RUN pnpm deploy --filter=anvay-gateway --prod /app/deploy
+
+FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
+WORKDIR /app
+COPY --from=deployer /app/deploy ./
+COPY --from=deployer /app/deploy/dist ./dist
+ENV NODE_ENV=production
+EXPOSE 4000
+CMD ["dist/src/server.js"]
+```
+`pnpm deploy` resolves all workspace dependencies and produces a self-contained deployment directory with no broken symlinks.
+
+**Fix — Option B: copy workspace package dist outputs explicitly**
+```dockerfile
+COPY --from=builder /app/apps/gateway/dist ./dist
+COPY --from=builder /app/apps/gateway/node_modules ./node_modules
+COPY --from=builder /app/packages/agent/dist ./packages/agent/dist
+COPY --from=builder /app/packages/agent/package.json ./packages/agent/package.json
+COPY --from=builder /app/packages/types/dist ./packages/types/dist
+COPY --from=builder /app/packages/types/package.json ./packages/types/package.json
+```
+Since the symlink `../../../../packages/agent` from `/app/node_modules/@anvay/agent` now resolves to `/packages/agent`, you also need to adjust the symlink depth or use absolute-path resolution. Option A is cleaner.
+
+**Verify:** Run `docker build -f apps/gateway/Dockerfile .` then `docker run --rm anvay-gateway:ci node -e "require('@anvay/agent')"`. Currently exits with module not found. With fix, exits 0.
+
+---
+
+### HIGH
+
+#### H-11 — `/metrics` endpoint exposed without authentication — operational data publicly readable
+
+**File:** `apps/gateway/src/routes/metrics.ts:4–9`
+
+**Issue:**
+```typescript
+app.get('/metrics', async (_request, reply) => {
+  reply.header('Content-Type', getMetricsContentType())
+  return reply.send(await getMetricsText())
+})
+```
+No `preHandler: [app.authenticate]`. Prometheus metrics include HTTP request rates, error rates, route names, status code distributions, active connections, and all Node.js runtime metrics. An unauthenticated caller can:
+- Enumerate all API routes (`anvay_gateway_http_requests_total` labels include `route`)
+- Detect error spikes, high-traffic periods, and system load patterns
+- Map the internal service topology from metrics labels
+
+In production this endpoint should be restricted to the monitoring network or require a scrape token.
+
+**Fix option A (network restriction):** Do not expose port 4000 publicly; expose only via internal service. Mount `/metrics` on a separate internal port (e.g. 9100) not bound to the external load balancer.
+
+**Fix option B (bearer token):**
+```typescript
+app.get('/metrics', {
+  preHandler: async (request, reply) => {
+    const token = request.headers['authorization']?.replace('Bearer ', '')
+    const expected = process.env.METRICS_SCRAPE_TOKEN
+    if (!expected || token !== expected) {
+      return reply.code(401).send({ error: 'Unauthorized' })
+    }
+  }
+}, async (_request, reply) => {
+  reply.header('Content-Type', getMetricsContentType())
+  return reply.send(await getMetricsText())
+})
+```
+
+**Verify:** Without auth, `GET /metrics` → 401. With correct `Authorization: Bearer $token` → 200 with Prometheus text.
+
+---
+
+#### H-12 — `seed.ts` uses `$executeRawUnsafe` with string interpolation and `SET LOCAL` in wrong scope
+
+**File:** `apps/gateway/prisma/seed.ts:32`
+
+**Issue A — SQL injection pattern:**
+```typescript
+await prisma.$executeRawUnsafe(`SET LOCAL app.tenant_id = '${tenant.id}'`)
+```
+`$executeRawUnsafe` with string interpolation is categorically unsafe. `tenant.id` is a UUID from Prisma in this specific call (safe in isolation), but this establishes a pattern that will be copied with arbitrary string values — ticket titles, connector names, user input — causing SQL injection. All `$executeRaw` calls must use tagged template literals (parameterized).
+
+**Issue B — `SET LOCAL` is transaction-scoped, runs in a separate implicit transaction:**
+`SET LOCAL app.tenant_id = ?` applies only for the duration of the current Postgres transaction. Prisma's `$executeRawUnsafe` runs in its own implicit transaction which commits immediately. The subsequent `prisma.user.upsert` call opens a NEW implicit transaction on a potentially different pool connection where `app.tenant_id` is not set. The intent (to let subsequent writes pass RLS) is correct; the implementation is wrong.
+
+**Fix:**
+```typescript
+// Wrap all seed operations in a single transaction with the RLS variable set:
+await prisma.$transaction(async (tx) => {
+  await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenant.id}, true)`
+
+  await tx.user.upsert({ ... })
+  await tx.connector.create({ ... })
+})
+```
+`set_config(..., true)` is equivalent to `SET LOCAL` but works inside a transaction. All subsequent operations within the same `$transaction` callback share the setting.
+
+**Verify:** In a fresh DB with FORCE RLS, run the seed. Assert `users` and `connectors` tables contain the seeded rows. Currently the RLS-enforced writes fail silently (returning empty results or throwing) because the session variable is set in a separate transaction.
+
+---
+
+### MEDIUM
+
+#### M-13 — CI test job has no Postgres or Redis service — DB-path integration tests impossible
+
+**File:** `.github/workflows/ci.yml:43–57`
+
+**Issue:** The `test` job runs without any `services:` block. Unit tests (agent package, perimeter, token-meter, redis-session with mocked Redis) pass. The `server.test.ts` tests happen to work because none of the test paths execute real Prisma queries (health and auth endpoints don't hit the DB in the test assertions). But any future integration test that exercises `prisma.connector.findMany`, `prisma.tenant.findUnique`, or Redis session operations will fail in CI with a connection error.
+
+**Fix:**
+```yaml
+test:
+  name: Test
+  runs-on: ubuntu-latest
+  services:
+    postgres:
+      image: postgres:16
+      env:
+        POSTGRES_DB: anvay_test
+        POSTGRES_USER: anvay
+        POSTGRES_PASSWORD: test_secret
+      options: >-
+        --health-cmd pg_isready
+        --health-interval 10s
+        --health-timeout 5s
+        --health-retries 5
+    redis:
+      image: redis:7-alpine
+      options: >-
+        --health-cmd "redis-cli ping"
+        --health-interval 10s
+        --health-timeout 5s
+        --health-retries 5
+  env:
+    DATABASE_URL: postgresql://anvay:test_secret@localhost:5432/anvay_test
+    REDIS_URL: redis://localhost:6379
+```
+
+**Verify:** Add one test that calls `prisma.$queryRaw\`SELECT 1\``. Assert it passes in CI. Currently any such test would fail.
+
+---
+
+#### M-14 — `--passWithNoTests` in CI silently accepts packages with zero test coverage
+
+**File:** `.github/workflows/ci.yml:56`
+
+```yaml
+- run: pnpm test -- --passWithNoTests
+```
+
+When a new package is added without any test files, Turbo runs its `test` task which calls Vitest with `--passWithNoTests`. Vitest exits 0. CI passes. An untested package ships with no warning. This flag exists to handle the web package which has no Vitest tests (it uses Next.js testing conventions). The flag is correct for `apps/web` but wrong as a global flag.
+
+**Fix:** Move `--passWithNoTests` to only the web package's vitest config or test script. Remove from the root CI command. Alternatively use `turbo test --filter='!anvay-web'` to exclude the Next.js app from vitest:
+```yaml
+- run: pnpm test -- --passWithNoTests  # keep for web compatibility
+```
+And add a separate lint step that counts test files per package and fails if a TS package has zero `.test.ts` files.
+
+---
+
+### LOW
+
+#### L-8 — `seed.ts` has an unused import
+
+**File:** `apps/gateway/prisma/seed.ts:2`
+
+```typescript
+import { createWriteStream } from 'fs'
+```
+Never used. Dead import. Delete it.
+
+---
+
+#### L-9 — `docker-compose.dev.yml` hardcodes credentials — risk of dev config leaking to staging
+
+**File:** `infra/docker-compose.dev.yml:17, 91`
+
+```yaml
+POSTGRES_PASSWORD: anvay_dev_secret
+GF_SECURITY_ADMIN_PASSWORD: anvay_grafana_dev
+```
+
+The production `docker-compose.yml` correctly requires these via `${POSTGRES_PASSWORD:?must be set}`. The dev variant hardcodes them. Risk: if a staging or CI environment accidentally picks up the dev compose file, it runs with known plaintext credentials. Low risk in a truly local-only context, but document explicitly:
+```yaml
+# WARNING: hardcoded dev credentials — never use this file outside localhost
+```
+
+---
+
+#### L-10 — Gateway Dockerfile: `pnpm install --filter=anvay-gateway...` without copying all `packages/*/package.json` — deps stage may be incomplete
+
+**File:** `apps/gateway/Dockerfile:6–9`
+
+```dockerfile
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY apps/gateway/package.json apps/gateway/
+RUN pnpm install --frozen-lockfile --filter=anvay-gateway...
+```
+
+`pnpm-workspace.yaml` declares `packages: ['packages/*']` but none of the workspace package manifests are copied before install. pnpm with `--frozen-lockfile` reads the lockfile to resolve versions without needing all manifests, so this works. But if a workspace package adds a new dependency that requires a manifest presence check, this stage would silently fail. Safer to copy all package manifests:
+```dockerfile
+COPY packages/agent/package.json packages/agent/
+COPY packages/types/package.json packages/types/
+```
+
+---
+
+### Summary: All Open Issues (Consolidated)
+
+| ID | Severity | File | Short description | Status |
+|----|----------|------|-------------------|--------|
+| B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
+| B-3 | BLOCKING | redis-session.ts | get-modify-write race condition | OPEN |
+| B-4 | BLOCKING | orchestrator.ts | Tool message format wrong for multi-turn | OPEN (M2) |
+| B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
+| B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
+| B-7 | BLOCKING | jwt.ts | JWT error leaked to client | OPEN |
+| B-8 | BLOCKING | chat.ts + migration | RLS app.tenant_id never set | OPEN |
+| B-9 | BLOCKING | migration.sql | audit_events CASCADE bypass | OPEN |
+| B-10 | BLOCKING | Dockerfile | Workspace symlinks broken in runner | OPEN |
+| H-1 | HIGH | anthropic.ts | Streaming break bug parallel tool calls | OPEN |
+| H-2 | HIGH | chat.ts | InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 | HIGH | postgres-sink.ts | Audit sink drops on DB failure | OPEN |
+| H-4 | HIGH | orchestrator.ts | Intent classification failure silent | OPEN |
+| H-5 | HIGH | orchestrator.ts | Assistant response stored as placeholder | OPEN |
+| H-6 | HIGH | auth.ts | Stub hardcodes sub=stub-user-id | OPEN |
+| H-7 | HIGH | specialist-agent.ts | No token budget enforcement | OPEN |
+| H-8 | HIGH | web/api/chat/route.ts | Web chat is still a stub (M1-T6) | OPEN |
+| H-9 | HIGH | cors.ts | CORS * + credentials broken combo | OPEN |
+| H-10 | HIGH | health.ts | /health/ready always 200 | OPEN |
+| H-11 | HIGH | routes/metrics.ts | /metrics unauthenticated | OPEN |
+| H-12 | HIGH | seed.ts | $executeRawUnsafe + SET LOCAL wrong scope | OPEN |
+| M-1 through M-14 | MEDIUM | various | (see previous sections) | OPEN |
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status |
+|---------|------|--------|
+| M0-T1 through M0-T8 | M0 | **COMPLETE** |
+| M1-T1 through M1-T5 | M1 (partial) | **COMPLETE** |
+| Wire OrchestratorChat to real SSE | M1-T6 | NOT STARTED |
+| Specialist agent tools | M2 | NOT STARTED |
+| Connector implementations | M2 | NOT STARTED |
+| IKnowledgeGraph + resolveContext() | M4-T5 | NOT STARTED |
+| Graph Builder Agent | M4-T6 | NOT STARTED |
+| Agent context injection | M4-T7 | NOT STARTED |
+| Trigger.dev cron jobs | M5 | NOT STARTED |
+| User permission DB model (B-5 prereq) | pre-M2 | NOT STARTED |
+| RLS activation at query time (B-8) | pre-M2 | NOT STARTED |
+| Workspace symlink fix in Dockerfile (B-10) | immediate | NOT STARTED |
+
+<!-- REVIEW SECTION END — 2026-06-06 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-05 -->
 ## Review — 2026-06-05 | Infrastructure deep-dive: migration, CORS, health, telemetry, factories
 

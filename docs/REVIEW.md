@@ -7,6 +7,40 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-09 -->
+## Review — 2026-06-09 | No new commits — awaiting opencode task completion
+
+**Scope:** No new commits since `806b01a`. Working tree contains the same 10 uncommitted
+files reviewed in the 2026-06-08 section (ESM migration + SSE wiring). No additional source
+changes to evaluate.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 6/10 | = |
+| Code standards | 5/10 | = |
+| Performance | 6/10 | = |
+| Security | 4/10 | = |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Status
+
+All issues from 2026-06-08 section remain open. Top priorities unchanged:
+
+1. **B-11** (BLOCKING) — `formatToolResult` missing from `AnthropicProvider`, `OpenAIProvider`, `OllamaProvider` → compile fails
+2. **B-10** (BLOCKING) — Dockerfile workspace symlinks broken in runner
+3. **B-8** (BLOCKING) — RLS `app.tenant_id` never set at query time
+4. **B-9** (BLOCKING) — `audit_events` CASCADE bypass
+5. **H-13** (HIGH) — Gate Approve/Reject are no-ops
+
+No updated ratings or new issues to report. Next section will cover the next committed task batch from opencode.
+
+<!-- REVIEW SECTION END — 2026-06-09 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08 -->
 ## Review — 2026-06-08 | ESM migration, SSE wiring, gate UI, provider interface break
 

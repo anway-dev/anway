@@ -7,6 +7,343 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08 -->
+## Review — 2026-06-08 | ESM migration, SSE wiring, gate UI, provider interface break
+
+**Scope:** Uncommitted working-tree changes (opencode in-progress, not yet committed). Files
+reviewed: `apps/gateway/package.json`, `apps/gateway/tsconfig.json`, `apps/gateway/src/app.ts`,
+`apps/gateway/src/routes/metrics.ts`, `apps/gateway/src/server.ts`,
+`apps/gateway/src/__tests__/schema.test.ts`, `apps/gateway/src/__tests__/server.test.ts`,
+`apps/web/components/orchestrator-chat.tsx`, `apps/web/app/api/chat/route.ts`,
+`packages/agent/src/interfaces/provider.ts`.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 6/10 | ↑1 — SSE chat wiring done; gate UI added; ESM migration correct |
+| Code standards | 5/10 | = — new type error in tool_result handler; interface unimplemented |
+| Performance | 6/10 | = |
+| Security | 4/10 | = — B-5 through B-10 all still open |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+| Issue | Status |
+|-------|--------|
+| H-8 — web chat stub | **PARTIAL** ↑ — route now returns proper SSE stream (text_delta + DONE). `sendRealForm` wired and parsing correctly. Still returns a static "stub response" — no real LLM call yet. |
+| B-10 — Dockerfile symlinks | OPEN — workspace deps `@anvay/agent` + `@anvay/types` now declared in gateway `package.json`, which makes the symlink issue more visible but still not fixed. |
+| All others B-2-R through H-12 | OPEN — no change |
+
+---
+
+### BLOCKING
+
+#### B-11 — `IModelProvider.formatToolResult` added to interface but not implemented in any provider — compile fails
+
+**File:** `packages/agent/src/interfaces/provider.ts:46`
+
+```typescript
+export interface IModelProvider {
+  chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse>
+  stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncGenerator<StreamChunk>
+  formatToolResult(toolCallId: string, result: unknown): Message   // ← added
+}
+```
+
+`AnthropicProvider`, `OpenAIProvider`, and `OllamaProvider` all `implements IModelProvider`
+but none has a `formatToolResult` method. TypeScript compile fails for the entire
+`@anvay/agent` package — every downstream consumer (gateway chat route, orchestrator, all tests)
+fails to build.
+
+**Fix:** Implement `formatToolResult` on all three providers. The Anthropic format requires
+a `tool` role message; OpenAI/Ollama use a `tool` role with `tool_call_id`:
+
+```typescript
+// In AnthropicProvider (packages/agent/src/providers/anthropic.ts)
+formatToolResult(toolCallId: string, result: unknown): Message {
+  return {
+    role: 'tool',
+    content: typeof result === 'string' ? result : JSON.stringify(result),
+    tool_call_id: toolCallId,
+  }
+}
+
+// OpenAIProvider and OllamaProvider — same shape (both use OpenAI message format)
+formatToolResult(toolCallId: string, result: unknown): Message {
+  return {
+    role: 'tool',
+    content: typeof result === 'string' ? result : JSON.stringify(result),
+    tool_call_id: toolCallId,
+  }
+}
+```
+
+Note: The `Message` type in `packages/agent/src/interfaces/provider.ts` must support
+`role: 'tool'` and `tool_call_id: string`. If the current `Message` type only allows
+`user | assistant | system`, add `tool` as a valid role and the `tool_call_id` field.
+
+**Verify:** `pnpm --filter @anvay/agent typecheck` exits 0. `pnpm --filter @anvay/agent build`
+exits 0. All three provider classes satisfy the interface.
+
+---
+
+### HIGH
+
+#### H-13 — Gate Approve/Reject are UI-only no-ops — no backend signal sent
+
+**File:** `apps/web/components/orchestrator-chat.tsx:~807–819`
+
+```tsx
+<button onClick={() => setGateRequired(null)}>Approve</button>
+<button onClick={() => setGateRequired(null)}>Reject</button>
+```
+
+Both buttons dismiss the gate UI by clearing state. Neither sends any signal to the backend.
+If the orchestrator suspends execution waiting for gate approval, this leaves the request
+hanging indefinitely. If the orchestrator doesn't wait (fire-and-forget), the gate is purely
+cosmetic and provides no actual safety enforcement.
+
+This is a V1 correctness failure — the gate is the trust mechanism per `CLAUDE.md §V1 Trust
+Principle`. A gate that doesn't actually gate is worse than no gate: it shows the user a
+confirm dialog that does nothing.
+
+**Fix:** Add a `gateToken` to the gate event payload from the server. On Approve/Reject, POST
+to `/api/chat/gate` with the token:
+
+```tsx
+// In the gate_required event handler:
+setGateRequired({ action, resource, reason, token: event.gateToken });
+
+// Approve handler:
+onClick={async () => {
+  await fetch('/api/chat/gate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gateToken: gateRequired.token, decision: 'approved' }),
+  });
+  setGateRequired(null);
+}}
+
+// Reject handler — same but decision: 'rejected'
+```
+
+The orchestrator's suspend/resume mechanism must be implemented to match. Gate is deferred
+to M2 per TASKS.md — until then, remove the gate UI entirely rather than ship a non-functional
+confirmation dialog.
+
+**Verify:** Trigger a gated action (any write op). Assert the backend receives the approval
+decision. Assert the write executes only after explicit approval, not before.
+
+---
+
+#### H-14 — `tool_result` event handler references `event.toolName` — field doesn't exist on `tool_result` type
+
+**File:** `apps/web/components/orchestrator-chat.tsx:421`
+
+```tsx
+} else if (event.type === 'tool_result') {
+  const resultStr = typeof event.result === 'string' ? event.result : JSON.stringify(event.result).slice(0, 100);
+  pushLog({ actor: "TOOL", actorColor: "#555", text: `→ ${resultStr}...`, status: 'done', ms: 0 });
+  setAgentStates(prev => prev.map(a => a.name === event.toolName ? { ...a, currentStatus: 'done' } : a));
+  //                                                   ^^^^^^^^^^^^ does not exist on tool_result
+}
+```
+
+The local `StreamEvent` union defines `tool_result` as:
+```typescript
+{ type: "tool_result"; toolCallId: string; result: unknown }
+```
+
+There is no `toolName` field. TypeScript should flag `event.toolName` as `Property 'toolName'
+does not exist on type '{ type: "tool_result"; toolCallId: string; result: unknown }'`.
+At runtime, `event.toolName` is `undefined` — the `setAgentStates` map predicate
+`a.name === undefined` never matches → agent activity states are never cleared when a tool
+call completes. The activity panel keeps showing all agents as `running` even after they
+finish.
+
+**Fix:** Track `toolCallId → toolName` in `toolNamesRef` (already declared but unused) when
+a `tool_call` event arrives. Use it to look up the name on `tool_result`:
+
+```tsx
+} else if (event.type === 'tool_call') {
+  toolNamesRef.current.set(event.toolCallId, event.toolName);
+  // ... existing agent state update ...
+
+} else if (event.type === 'tool_result') {
+  const toolName = toolNamesRef.current.get(event.toolCallId) ?? '';
+  const resultStr = typeof event.result === 'string' ? event.result : JSON.stringify(event.result).slice(0, 100);
+  pushLog({ actor: "TOOL", actorColor: "#555", text: `→ ${resultStr}...`, status: 'done', ms: 0 });
+  setAgentStates(prev => prev.map(a => a.name === toolName ? { ...a, currentStatus: 'done' } : a));
+}
+```
+
+This also makes `toolNamesRef` purposeful rather than dead (fixes M-15 below).
+
+**Verify:** Send a message that triggers a tool call. Assert the agent activity indicator
+transitions from `running` to `done` after the result arrives.
+
+---
+
+### MEDIUM
+
+#### M-15 — `toolNamesRef` declared but never read
+
+**File:** `apps/web/components/orchestrator-chat.tsx:317`
+
+```tsx
+const toolNamesRef = useRef(new Map<string, string>());
+```
+
+Declared but neither populated nor consumed. Dead state. Resolved by the H-14 fix above —
+see that fix for the correct usage pattern.
+
+---
+
+#### M-16 — Confidence hardcoded to `0.9` in SSE `done` handler
+
+**File:** `apps/web/components/orchestrator-chat.tsx:~453`
+
+```tsx
+} else if (event.type === 'done') {
+  // ...
+  setConfidence(0.9);  // always 0.90 regardless of actual confidence
+```
+
+The `done` `StreamEvent` type has `inputTokens` and `outputTokens` but no `confidence`
+field. The orchestrator does compute a confidence score internally (used by the gate). Surface
+it on the `done` chunk:
+
+```typescript
+// In orchestrator StreamEvent 'done':
+{ type: 'done'; inputTokens: number; outputTokens: number; confidence?: number }
+
+// In UI:
+setConfidence(event.confidence ?? 0);
+```
+
+Until the orchestrator emits real confidence, show nothing rather than a false `0.90`.
+
+---
+
+#### M-17 — Follow-ups hardcoded in SSE `done` handler — same 3 chips every query
+
+**File:** `apps/web/components/orchestrator-chat.tsx:~460`
+
+```tsx
+setFollowUps(['Show active blockers', 'View payments incident', 'What should I fix first?']);
+```
+
+Three follow-up suggestions hardcoded for every query regardless of content. A user asking
+about Cloud costs or an SLO burn gets "View payments incident". Either:
+1. Return suggested follow-ups from the backend in the `done` event: `{ type: 'done', ..., followUps?: string[] }`
+2. Clear `setFollowUps([])` until backend sends real suggestions
+
+For now: `setFollowUps([])` — empty is less misleading than wrong.
+
+---
+
+### LOW
+
+#### L-11 — `useCallback` imported but never used
+
+**File:** `apps/web/components/orchestrator-chat.tsx:2`
+
+```tsx
+import { useState, useEffect, useRef, useCallback } from "react";
+```
+
+`useCallback` is never used in the component body. Dead import. Delete it. If a linter runs
+with `no-unused-vars`, this fails the lint step.
+
+**Fix:** Remove `useCallback` from the import.
+
+---
+
+### What these changes accomplish (positive)
+
+**ESM migration (gateway):** `"type": "module"` + `module: NodeNext` + `.js` extensions on
+all internal imports is the correct approach. `__dirname` → `import.meta.dirname` in tests
+is the right ESM-compatible replacement. This unblocks the `@anvay/agent` workspace
+dependency working correctly at runtime (imports via package `exports` field rather than
+CJS path hacking). Neutral risk — no logic changed, mechanical correctness improvement.
+
+**`apps/web/app/api/chat/route.ts`:** Now returns a proper SSE stream with a `text_delta`
+event and `[DONE]` terminator. `sendRealForm` can parse this correctly — user sees "stub
+response" text streamed in. This is the first end-to-end SSE path working in the UI,
+even if the content is still fake. H-8 moves from OPEN to PARTIAL.
+
+**Gate UI in `OrchestratorChat`:** Visual gate panel with amber styling, action/resource
+display, Approve/Reject buttons is structurally correct and follows the design language.
+Incomplete (H-13) but the skeleton is right.
+
+**`sessionIdRef`:** Stable `session-${Date.now()}-${Math.random()}` per component mount.
+Correct pattern for session continuity across messages within one page load. Will need to
+persist across refreshes (e.g. `sessionStorage`) but acceptable for now.
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status |
+|---------|------|--------|
+| M0-T1 through M0-T8 | M0 | **COMPLETE** |
+| M1-T1 through M1-T5 | M1 (partial) | **COMPLETE** |
+| Wire OrchestratorChat to real SSE | M1-T6 | **PARTIAL** — SSE client wired, route returns stub |
+| Gateway ESM migration | — | **COMPLETE** (this cycle) |
+| Gate UI (visual) | — | **PARTIAL** — display works, approval signal missing |
+| `formatToolResult` on IModelProvider | — | **BROKEN** — interface updated, implementations missing |
+| Specialist agent tools | M2 | NOT STARTED |
+| Connector implementations | M2 | NOT STARTED |
+| IKnowledgeGraph + resolveContext() | M4-T5 | NOT STARTED |
+| Graph Builder Agent | M4-T6 | NOT STARTED |
+| Trigger.dev cron jobs | M5 | NOT STARTED |
+| User permission DB model (B-5 prereq) | pre-M2 | NOT STARTED |
+| RLS activation at query time (B-8) | pre-M2 | NOT STARTED |
+| Workspace symlink fix in Dockerfile (B-10) | immediate | NOT STARTED |
+
+---
+
+### Consolidated open issues (updated)
+
+| ID | Severity | File | Short description | Status |
+|----|----------|------|-------------------|--------|
+| B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
+| B-3-R | LOW | redis-session.ts | expire races rpush; summarise del+rpush non-atomic | OPEN |
+| B-4 | BLOCKING | orchestrator.ts | Tool message format wrong for multi-turn | OPEN (M2) |
+| B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
+| B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
+| B-7 | BLOCKING | jwt.ts | JWT error leaked to client | OPEN |
+| B-8 | BLOCKING | chat.ts + migration | RLS app.tenant_id never set | OPEN |
+| B-9 | BLOCKING | migration.sql | audit_events CASCADE bypass | OPEN |
+| B-10 | BLOCKING | Dockerfile | Workspace symlinks broken in runner | OPEN |
+| B-11 | BLOCKING | provider.ts | formatToolResult not implemented in any provider | **NEW** |
+| H-1 | HIGH | anthropic.ts | Streaming break — parallel tool calls lose args | OPEN |
+| H-2 | HIGH | chat.ts | InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 | HIGH | postgres-sink.ts | Audit sink silent drop on DB failure | OPEN |
+| H-4 | HIGH | orchestrator.ts | Intent classification failure silent | OPEN |
+| H-5 | HIGH | orchestrator.ts | Streamed response stored as placeholder | OPEN |
+| H-6 | HIGH | auth.ts | Stub hardcodes sub=stub-user-id | OPEN |
+| H-7 | HIGH | specialist-agent.ts | No token budget enforcement | OPEN |
+| H-8 | HIGH | web/api/chat/route.ts | Web chat stub — SSE format correct, content still fake | **PARTIAL** |
+| H-9 | HIGH | cors.ts | CORS * + credentials broken combo | OPEN |
+| H-10 | HIGH | health.ts | /health/ready always 200 | OPEN |
+| H-11 | HIGH | metrics.ts | /metrics unauthenticated | OPEN |
+| H-12 | HIGH | seed.ts | $executeRawUnsafe + SET LOCAL wrong scope | OPEN |
+| H-13 | HIGH | orchestrator-chat.tsx | Gate Approve/Reject are no-ops — no backend signal | **NEW** |
+| H-14 | HIGH | orchestrator-chat.tsx | tool_result handler references nonexistent event.toolName | **NEW** |
+| M-1 through M-14 | MEDIUM | various | (see 2026-06-04 through 2026-06-06 sections) | OPEN |
+| M-15 | MEDIUM | orchestrator-chat.tsx | toolNamesRef declared but never used | **NEW** (resolved by H-14 fix) |
+| M-16 | MEDIUM | orchestrator-chat.tsx | Confidence hardcoded 0.9 in done handler | **NEW** |
+| M-17 | MEDIUM | orchestrator-chat.tsx | Follow-ups hardcoded in done handler | **NEW** |
+| L-1 through L-10 | LOW | various | (see prior sections) | OPEN |
+| L-11 | LOW | orchestrator-chat.tsx | useCallback imported but unused | **NEW** |
+
+<!-- REVIEW SECTION END — 2026-06-08 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-07 -->
 ## Review — 2026-06-07 | Consolidated status — no new commits since B-3 fix
 

@@ -7,6 +7,33 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10 -->
+## Review — 2026-06-10 | No new commits — build cycle stalled
+
+**Scope:** No commits from opencode since `806b01a` (2026-06-08 review). Working tree
+unchanged — identical 10-file diff reviewed in 2026-06-08 section. Nothing new to evaluate.
+
+| Dimension | Rating | Δ |
+|-----------|--------|---|
+| Feature completeness | 6/10 | = |
+| Code standards | 5/10 | = |
+| Performance | 6/10 | = |
+| Security | 4/10 | = |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+**Top blockers for next commit (priority order):**
+
+1. **B-11** — `formatToolResult` not implemented in any provider → compile fails — fix first
+2. **B-10** — Dockerfile workspace symlinks → production image won't start
+3. **B-8** — `app.tenant_id` never set → RLS dead
+4. **H-14** — `tool_result` handler references `event.toolName` (doesn't exist on type)
+5. **H-13** — Gate Approve/Reject are no-ops
+
+<!-- REVIEW SECTION END — 2026-06-10 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-09 -->
 ## Review — 2026-06-09 | No new commits — awaiting opencode task completion
 

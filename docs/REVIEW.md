@@ -7,6 +7,275 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-12 -->
+## Review — 2026-06-12 | `formatToolResult` implemented — three new defects introduced
+
+**Scope:** Working-tree changes vs last commit (`4bc2d31`). New files in diff since 2026-06-11:
+`packages/agent/src/providers/anthropic.ts`, `openai.ts`, `ollama.ts` — `formatToolResult`
+added to all three providers. B-11 "missing method" compile error resolved. Three new issues
+introduced.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 6/10 | = — formatToolResult present but semantically broken for two providers |
+| Code standards | 5/10 | = — compile error in Anthropic, wrong API format in OpenAI/Ollama |
+| Performance | 6/10 | = |
+| Security | 4/10 | = |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+| Issue | Status |
+|-------|--------|
+| B-11 — `formatToolResult` missing from all providers | **PARTIAL** — method exists now; Anthropic still causes compile error (B-11-R below) |
+
+---
+
+### BLOCKING
+
+#### B-11-R — `AnthropicProvider.formatToolResult` returns array content — `Message.content` is `string` — compile error
+
+**File:** `packages/agent/src/providers/anthropic.ts:159–167`
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  return {
+    role: 'user',
+    content: [{          // ← TypeScript error: array not assignable to string
+      type: 'tool_result',
+      tool_use_id: toolCallId,
+      content,
+    }],
+  }
+}
+```
+
+`Message.content` is `readonly content: string` in `@anvay/types/src/index.ts:85`. Array
+content is the correct Anthropic API wire format but violates the `Message` type. TypeScript
+rejects: `Type '{ type: string; tool_use_id: string; content: string; }[]' is not assignable
+to type 'string'`.
+
+Root cause: `Message` was designed for simple text turns. Tool results in the Anthropic API
+require a content-block array wrapped in a `user` role message — a fundamentally different
+shape. The `Message` type must be widened, or the Anthropic provider must serialize the
+content block to a string and reconstruct it before sending.
+
+**Fix — Option A (recommended): widen `Message` type in `@anvay/types`**
+
+```typescript
+// packages/types/src/index.ts
+
+export type AnthropicContentBlock = {
+  readonly type: 'tool_result'
+  readonly tool_use_id: string
+  readonly content: string
+}
+
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+
+export interface Message {
+  readonly role: MessageRole
+  readonly content: string | AnthropicContentBlock[]
+  readonly tool_call_id?: string   // OpenAI/Ollama tool result messages need this
+}
+```
+
+Then update `AnthropicProvider.formatToolResult` — no change needed, it's already correct.
+
+Update `OpenAIProvider` / `OllamaProvider` to use `role: 'tool'` + `tool_call_id` (see B-12/B-13).
+
+**Fix — Option B: serialize in provider, reconstruct before send**
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  // Store as JSON string — AnthropicProvider.chat() unpacks before sending to SDK
+  return {
+    role: 'user',
+    content: JSON.stringify({ _anthropic_tool_result: true, tool_use_id: toolCallId, content }),
+  }
+}
+```
+
+Option A is cleaner — it models the actual wire format in the type system. Option B is a
+workaround that hides the type mismatch behind a runtime convention.
+
+**Verify:** `pnpm --filter @anvay/agent typecheck` exits 0. `pnpm --filter @anvay/types build`
+exits 0. No TS2322 errors on `content` assignment.
+
+---
+
+#### B-12 — `OpenAIProvider.formatToolResult` ignores `toolCallId` and uses wrong role — multi-turn tool calls broken
+
+**File:** `packages/agent/src/providers/openai.ts:156–162`
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  return {
+    role: 'user',        // ← wrong — must be 'tool'
+    content: String(content),
+    // toolCallId never used ← multi-turn association broken
+  }
+}
+```
+
+OpenAI's chat completions API requires tool results as:
+```json
+{ "role": "tool", "tool_call_id": "<id from the assistant's tool_call>", "content": "<result>" }
+```
+
+Without `role: "tool"` the API cannot distinguish this message from a normal user turn. Without
+`tool_call_id` the API cannot associate the result with the tool call that requested it.
+OpenAI returns `400 invalid_request_error` for malformed tool result sequences. Multi-turn
+tool use (the orchestrator's agentic loop) is completely broken.
+
+**Fix:** Add `'tool'` to `MessageRole` in `@anvay/types` and `tool_call_id?: string` to
+`Message` (same change as B-11-R Option A), then:
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  return {
+    role: 'tool',
+    content,
+    tool_call_id: toolCallId,
+  }
+}
+```
+
+**Verify:** In a test, call `formatToolResult('call_abc', 'ok')`. Assert returned message has
+`role === 'tool'` and `tool_call_id === 'call_abc'`. Pass the result to `openai.chat()` with
+a prior assistant message containing a tool call — assert no 400 from API.
+
+---
+
+#### B-13 — `OllamaProvider.formatToolResult` same wrong format as B-12
+
+**File:** `packages/agent/src/providers/ollama.ts:258–264`
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  return {
+    role: 'user',        // ← wrong — must be 'tool' (Ollama uses OpenAI-compatible format)
+    content: String(content),
+    // toolCallId never used ← same defect as B-12
+  }
+}
+```
+
+Ollama implements the OpenAI-compatible `/v1/chat/completions` API. Same format requirement,
+same failure mode as B-12.
+
+**Fix:** Identical to B-12 — `role: 'tool'` + `tool_call_id: toolCallId`. Apply after
+`MessageRole` and `Message` type are widened per B-11-R.
+
+**Verify:** Same test pattern as B-12 but targeting `OllamaProvider`.
+
+---
+
+### LOW
+
+#### L-12 — `String(content)` is a redundant no-op in OpenAI and Ollama formatToolResult
+
+**File:** `packages/agent/src/providers/openai.ts:159`, `packages/agent/src/providers/ollama.ts:261`
+
+```typescript
+const content = typeof result === 'string' ? result : JSON.stringify(result)
+return {
+  // ...
+  content: String(content),   // ← String() on a value that is already string
+}
+```
+
+`content` is always `string` after the ternary — `String(content)` is a no-op. Delete the
+`String()` wrapper and use `content` directly. This is cosmetic but signals unclear intent.
+
+---
+
+### Root cause: `Message` type too narrow
+
+B-11-R, B-12, B-13 share a common root: `Message` in `@anvay/types` was designed for
+simple user/assistant/system text turns. The agentic loop requires a fourth message shape
+(tool results) that has a different role (`tool`), an additional field (`tool_call_id`), and
+optionally structured content. The type was not extended when `formatToolResult` was added to
+the interface.
+
+**Correct fix sequence:**
+1. Extend `Message` in `@anvay/types`: add `'tool'` to `MessageRole`, add optional
+   `tool_call_id?: string`, widen `content` to `string | AnthropicContentBlock[]`
+2. Fix `AnthropicProvider` — already correct shape, just needs type to match
+3. Fix `OpenAIProvider.formatToolResult` — `role: 'tool'`, `tool_call_id`
+4. Fix `OllamaProvider.formatToolResult` — same as OpenAI
+5. Run `pnpm typecheck` — all three providers should pass
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status |
+|---------|------|--------|
+| M0-T1 through M0-T8 | M0 | **COMPLETE** |
+| M1-T1 through M1-T5 | M1 (partial) | **COMPLETE** |
+| Wire OrchestratorChat to real SSE | M1-T6 | **PARTIAL** — SSE client wired, stub response |
+| `formatToolResult` on all providers | — | **PARTIAL** — present but B-11-R/B-12/B-13 broken |
+| Gateway ESM migration | — | **COMPLETE** |
+| Gate UI (visual) | — | **PARTIAL** — display only, H-13 unresolved |
+| Specialist agent tools | M2 | NOT STARTED |
+| Connector implementations | M2 | NOT STARTED |
+| IKnowledgeGraph + resolveContext() | M4-T5 | NOT STARTED |
+| Graph Builder Agent | M4-T6 | NOT STARTED |
+| Trigger.dev cron jobs | M5 | NOT STARTED |
+| User permission DB model (B-5 prereq) | pre-M2 | NOT STARTED |
+| RLS activation at query time (B-8) | pre-M2 | NOT STARTED |
+| Workspace symlink fix in Dockerfile (B-10) | immediate | NOT STARTED |
+
+---
+
+### Consolidated open issues (updated)
+
+| ID | Severity | File | Short description | Status |
+|----|----------|------|-------------------|--------|
+| B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
+| B-4 | BLOCKING | orchestrator.ts | Tool message format wrong for multi-turn | OPEN (M2) |
+| B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
+| B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
+| B-7 | BLOCKING | jwt.ts | JWT error leaked to client | OPEN |
+| B-8 | BLOCKING | chat.ts + migration | RLS app.tenant_id never set | OPEN |
+| B-9 | BLOCKING | migration.sql | audit_events CASCADE bypass | OPEN |
+| B-10 | BLOCKING | Dockerfile | Workspace symlinks broken in runner | OPEN |
+| B-11 | BLOCKING | provider.ts / anthropic.ts | AnthropicProvider returns array content, Message.content is string | **PARTIAL→B-11-R** |
+| B-11-R | BLOCKING | anthropic.ts | array content not assignable to Message.content:string | **NEW** |
+| B-12 | BLOCKING | openai.ts | formatToolResult wrong role + ignores toolCallId | **NEW** |
+| B-13 | BLOCKING | ollama.ts | formatToolResult wrong role + ignores toolCallId | **NEW** |
+| B-3-R | LOW | redis-session.ts | expire races rpush; summarise del+rpush non-atomic | OPEN |
+| H-1 | HIGH | anthropic.ts | Streaming break — parallel tool calls lose args | OPEN |
+| H-2 | HIGH | chat.ts | InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 | HIGH | postgres-sink.ts | Audit sink silent drop on DB failure | OPEN |
+| H-4 | HIGH | orchestrator.ts | Intent classification failure silent | OPEN |
+| H-5 | HIGH | orchestrator.ts | Streamed response stored as placeholder | OPEN |
+| H-6 | HIGH | auth.ts | Stub hardcodes sub=stub-user-id | OPEN |
+| H-7 | HIGH | specialist-agent.ts | No token budget enforcement | OPEN |
+| H-8 | HIGH | web/api/chat/route.ts | Web chat SSE stub — not real LLM | PARTIAL |
+| H-9 | HIGH | cors.ts | CORS * + credentials broken combo | OPEN |
+| H-10 | HIGH | health.ts | /health/ready always 200 | OPEN |
+| H-11 | HIGH | metrics.ts | /metrics unauthenticated | OPEN |
+| H-12 | HIGH | seed.ts | $executeRawUnsafe + SET LOCAL wrong scope | OPEN |
+| H-13 | HIGH | orchestrator-chat.tsx | Gate Approve/Reject are no-ops | OPEN |
+| H-14 | HIGH | orchestrator-chat.tsx | tool_result handler references nonexistent event.toolName | OPEN |
+| M-1 through M-17 | MEDIUM | various | (see prior sections) | OPEN |
+| L-1 through L-11 | LOW | various | (see prior sections) | OPEN |
+| L-12 | LOW | openai.ts, ollama.ts | String(content) redundant no-op | **NEW** |
+
+<!-- REVIEW SECTION END — 2026-06-12 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11 -->
 ## Review — 2026-06-11 | No new commits
 

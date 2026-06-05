@@ -7,6 +7,28 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-16 -->
+## Review — 2026-06-16 | No new commits
+
+**Scope:** No commits from opencode since `47726f2`. Uncommitted working tree: gateway ESM
+migration only (already reviewed 2026-06-08). Nothing new to evaluate.
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 6/10 |
+| Code standards | 6/10 |
+| Performance | 6/10 |
+| Security | 4/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+Priority queue unchanged from 2026-06-15: H-15/H-16 (tool message encoding), B-12/B-13
+(OpenAI/Ollama formatToolResult), B-10 (Dockerfile), B-8 (RLS), B-5 (connector scopes).
+
+<!-- REVIEW SECTION END — 2026-06-16 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-15 -->
 ## Review — 2026-06-15 | B-4 partial fix — tool results via formatToolResult, assistant side still text-encoded
 

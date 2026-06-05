@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { SCENARIOS, OrchestratorScenario, AgentActivity } from "@/lib/mock";
 
 export interface OrchestratorContext {
@@ -7,6 +7,14 @@ export interface OrchestratorContext {
   title: string;
   source: string;
 }
+
+type StreamEvent =
+  | { type: "text_delta"; content: string }
+  | { type: "tool_call"; toolCallId: string; toolName: string; args: Record<string, unknown> }
+  | { type: "tool_result"; toolCallId: string; result: unknown }
+  | { type: "gate_required"; action: string; resource: string; reason: string }
+  | { type: "done"; inputTokens: number; outputTokens: number }
+  | { type: "error"; code: string; message: string };
 
 interface Message {
   id: string;
@@ -18,6 +26,8 @@ interface Message {
   durationMs?: number;
   sources?: string[];
   confidence?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 interface LogLine {
@@ -150,6 +160,11 @@ function MessageBlock({ message }: { message: Message }) {
         )}
         {message.durationMs && (
           <span style={{ fontSize: "9px", color: "#333", fontFamily: "monospace" }}>{(message.durationMs / 1000).toFixed(1)}s</span>
+        )}
+        {message.inputTokens !== undefined && message.outputTokens !== undefined && (
+          <span style={{ fontSize: "9px", color: "#222", fontFamily: "monospace" }}>
+            {message.inputTokens + message.outputTokens}t
+          </span>
         )}
         {message.sources && message.sources.length > 0 && (
           <div style={{ display: "flex", gap: "3px" }}>
@@ -293,10 +308,13 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const [currentInferredRole, setCurrentInferredRole] = useState("dev");
   const [contextSource, setContextSource] = useState<{ title: string; source: string } | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
+  const [gateRequired, setGateRequired] = useState<{ action: string; resource: string; reason: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const firedInitialContext = useRef(false);
+  const sessionIdRef = useRef<string>(`session-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const toolNamesRef = useRef(new Map<string, string>());
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logLines]);
@@ -306,7 +324,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     if (initialContext && !firedInitialContext.current) {
       firedInitialContext.current = true;
       setContextSource({ title: initialContext.title, source: initialContext.source });
-      sendFreeForm(initialContext.query);
+      sendRealForm(initialContext.query);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialContext]);
@@ -319,6 +337,141 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
 
   function pushLog(line: Omit<LogLine, "id" | "ts">) {
     setLogLines(prev => [...prev, { ...line, id: `log-${Date.now()}-${Math.random()}`, ts: now() }]);
+  }
+
+  async function sendRealForm(text: string) {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    setFollowUps([]);
+    setLogLines([]);
+    setConfidence(null);
+    setIsThinking(true);
+    setGateRequired(null);
+    setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: "user", content: text }]);
+
+    const respId = `resp-${Date.now()}`;
+    const startTime = Date.now();
+    setMessages(prev => [...prev, {
+      id: respId, role: "assistant", content: "", streaming: true,
+    }]);
+    setAgentStates([{ id: "orchestrator", name: "orchestrator", status: "running", detail: "analyzing", startDelay: 0, duration: 0, currentStatus: "running" }]);
+    pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" });
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: text, sessionId: sessionIdRef.current }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: "resolving envelope", status: "running" });
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+
+          let event: StreamEvent;
+          try {
+            event = JSON.parse(data) as StreamEvent;
+          } catch {
+            continue;
+          }
+
+          if (event.type === 'text_delta') {
+            setMessages(prev => prev.map(m =>
+              m.id === respId
+                ? { ...m, content: (m.content || '') + event.content }
+                : m
+            ));
+          } else if (event.type === 'tool_call') {
+            toolNamesRef.current.set(event.toolCallId, event.toolName);
+            const label = event.toolName.replace('-agent', '').toUpperCase().slice(0, 6);
+            const color = AGENT_COLORS[event.toolName] || "#888";
+            setAgentStates(prev => [...prev.filter(a => a.name !== event.toolName), {
+              id: event.toolName,
+              name: event.toolName,
+              status: 'running',
+              detail: event.toolName,
+              startDelay: 0,
+              duration: 0,
+              currentStatus: 'running',
+            }]);
+            pushLog({ actor: label, actorColor: color, text: `${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`, status: 'running' });
+          } else if (event.type === 'tool_result') {
+            const toolName = toolNamesRef.current.get(event.toolCallId) ?? 'TOOL';
+            const resultStr = typeof event.result === 'string' ? event.result : JSON.stringify(event.result).slice(0, 100);
+            pushLog({ actor: "TOOL", actorColor: "#555", text: `→ ${resultStr}...`, status: 'done', ms: 0 });
+            setAgentStates(prev => prev.map(a => a.name === toolName ? { ...a, currentStatus: 'done' } : a));
+          } else if (event.type === 'gate_required') {
+            setGateRequired({ action: event.action, resource: event.resource, reason: event.reason });
+            pushLog({ actor: "GATE", actorColor: "#f59e0b", text: `${event.action} on ${event.resource} — awaiting approval`, status: 'running' });
+          } else if (event.type === 'error') {
+            pushLog({ actor: "ERROR", actorColor: "#ef4444", text: `${event.code}: ${event.message}`, status: 'error' });
+            setMessages(prev => prev.map(m =>
+              m.id === respId
+                ? { ...m, content: (m.content || '') + `\n[Error: ${event.message}]`, streaming: false }
+                : m
+            ));
+          } else if (event.type === 'done') {
+            setAgentStates(prev => prev.map(a => ({ ...a, currentStatus: 'done' })));
+            setMessages(prev => prev.map(m =>
+              m.id === respId
+                ? {
+                    ...m,
+                    streaming: false,
+                    durationMs: Date.now() - startTime,
+                    inputTokens: event.inputTokens,
+                    outputTokens: event.outputTokens,
+                  }
+                : m
+            ));
+            setConfidence(0.9);
+            pushLog({ actor: "CONF", actorColor: "#10b981", text: "0.90", status: 'done' });
+            pushLog({ actor: "AUDIT", actorColor: "#333", text: `tokens:${event.inputTokens + event.outputTokens} · logged`, status: 'info' });
+            pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "complete", status: 'done' });
+            setFollowUps(['Show active blockers', 'View payments incident', 'What should I fix first?']);
+          }
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'connection error';
+      pushLog({ actor: "ERROR", actorColor: "#ef4444", text: msg, status: 'error' });
+      setMessages(prev => prev.map(m =>
+        m.id === respId
+          ? { ...m, content: `Connection error: ${msg}`, streaming: false }
+          : m
+      ));
+    } finally {
+      setIsThinking(false);
+    }
+  }
+
+  function handleSend() {
+    if (!input.trim() || isThinking) return;
+    const t = input.trim(); setInput(""); sendRealForm(t);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }
 
   function runScenario(scenario: OrchestratorScenario) {
@@ -392,59 +545,6 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     }, maxTime + 480);
   }
 
-  function sendFreeForm(text: string) {
-    setFollowUps([]);
-    setLogLines([]);
-    setConfidence(null);
-    setIsThinking(true);
-    setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: "user", content: text }]);
-    setAgentStates([{ id: "orchestrator", name: "orchestrator", status: "running", detail: "analyzing", startDelay: 0, duration: 1200, currentStatus: "running" }]);
-
-    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" }), 80);
-    addTimeout(() => pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: "7 connectors in scope", status: "done" }), 550);
-    addTimeout(() => {
-      setAgentStates([
-        { id: "orchestrator", name: "orchestrator", status: "done", detail: "", startDelay: 0, duration: 0, currentStatus: "done" },
-        { id: "datadog-agent", name: "datadog-agent", status: "running", detail: "", startDelay: 0, duration: 0, currentStatus: "running" },
-        { id: "github-agent", name: "github-agent", status: "running", detail: "", startDelay: 0, duration: 0, currentStatus: "running" },
-      ]);
-      pushLog({ actor: "DATADOG", actorColor: "#7c3aed", text: "querying metrics + APM", status: "running" });
-      pushLog({ actor: "GITHUB", actorColor: "#aaa", text: "reading CI state", status: "running" });
-    }, 900);
-    addTimeout(() => {
-      setAgentStates(prev => prev.map(a => ({ ...a, currentStatus: "done" })));
-      pushLog({ actor: "DATADOG", actorColor: "#7c3aed", text: "complete", status: "done", ms: 847 });
-      pushLog({ actor: "GITHUB", actorColor: "#aaa", text: "complete", status: "done", ms: 1103 });
-      const conf = 0.91;
-      setConfidence(conf);
-      pushLog({ actor: "CONF", actorColor: "#10b981", text: conf.toFixed(2), status: "done" });
-      pushLog({ actor: "AUDIT", actorColor: "#333", text: `evt-${Math.floor(Math.random() * 900 + 100)} · logged`, status: "info" });
-      setIsThinking(false);
-      const respId = `resp-${Date.now()}`;
-      setMessages(prev => [...prev, { id: respId, role: "assistant", content: "", streaming: true, sources: ["datadog", "github"], confidence: conf }]);
-      const resp = "Analyzing across connected sources: GitHub, Datadog, Linear, ArgoCD.\n\n**2 active blockers** in payments pipeline and **1 ongoing incident** in SRE queue.\n\nMost urgent: TC-005 idempotency failure blocking staging deploy. Confidence: 0.91.\n\nWhat do you want to dig into?";
-      const words = resp.split(" ");
-      let acc = "";
-      words.forEach((w, i) => {
-        addTimeout(() => {
-          acc += (i === 0 ? "" : " ") + w;
-          const done = i === words.length - 1;
-          setMessages(prev => prev.map(m => m.id === respId ? { ...m, content: acc, streaming: !done } : m));
-          if (done) setFollowUps(["Show active blockers", "View payments incident", "What should I fix first?"]);
-        }, i * 40);
-      });
-    }, 2300);
-  }
-
-  function handleSend() {
-    if (!input.trim() || isThinking) return;
-    const t = input.trim(); setInput(""); sendFreeForm(t);
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  }
-
   const isEmpty = messages.length === 0;
 
   return (
@@ -515,7 +615,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
                   {followUps.map(chip => (
                     <button
                       key={chip}
-                      onClick={() => { setFollowUps([]); sendFreeForm(chip); }}
+                      onClick={() => { setFollowUps([]); sendRealForm(chip); }}
                       style={{
                         background: "#080808", border: "1px solid #111", color: "#555",
                         padding: "4px 10px", borderRadius: "4px", fontSize: "10px",
@@ -670,6 +770,46 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Gate required */}
+        {gateRequired && (
+          <div style={{
+            padding: "10px 14px", borderTop: "1px solid #080808",
+            background: "rgba(245, 158, 11, 0.05)",
+          }}>
+            <div style={{ fontSize: "9px", color: "#f59e0b", fontFamily: "monospace", marginBottom: "6px", fontWeight: 700 }}>
+              ✦ GATE REQUIRED
+            </div>
+            <div style={{ fontSize: "10px", color: "#888", fontFamily: "monospace", marginBottom: "4px" }}>
+              {gateRequired.action} on {gateRequired.resource}
+            </div>
+            <div style={{ fontSize: "9px", color: "#444", fontFamily: "monospace" }}>
+              {gateRequired.reason}
+            </div>
+            <div style={{ display: "flex", gap: "6px", marginTop: "8px" }}>
+              <button
+                style={{
+                  flex: 1, background: "rgba(245, 158, 11, 0.15)", border: "1px solid rgba(245, 158, 11, 0.3)",
+                  color: "#f59e0b", padding: "5px 8px", borderRadius: "3px", fontSize: "9px",
+                  cursor: "pointer", fontFamily: "monospace",
+                }}
+                onClick={() => setGateRequired(null)}
+              >
+                Approve
+              </button>
+              <button
+                style={{
+                  flex: 1, background: "transparent", border: "1px solid #111",
+                  color: "#444", padding: "5px 8px", borderRadius: "3px", fontSize: "9px",
+                  cursor: "pointer", fontFamily: "monospace",
+                }}
+                onClick={() => setGateRequired(null)}
+              >
+                Reject
+              </button>
+            </div>
           </div>
         )}
       </div>

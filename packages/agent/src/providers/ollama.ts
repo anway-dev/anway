@@ -255,4 +255,12 @@ export class OllamaProvider implements IModelProvider {
       reader.releaseLock()
     }
   }
+
+  formatToolResult(toolCallId: string, result: unknown): Message {
+    const content = typeof result === 'string' ? result : JSON.stringify(result)
+    return {
+      role: 'user',
+      content: String(content),
+    }
+  }
 }

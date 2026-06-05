@@ -215,7 +215,7 @@ export async function* runSession(
     if (!hasToolCalls) break // Conversation complete — no more tool calls
 
     // Run perimeter check + execute each tool call
-    const toolResultParts: string[] = []
+    const toolResultMessages: Message[] = []
 
     for (const toolCall of collectedToolCalls) {
       const perimResult = await checkPerimeter(toolCall)
@@ -223,9 +223,7 @@ export async function* runSession(
       if ('_tag' in perimResult && perimResult._tag === 'HardBlock') {
         // Emit an error event to the caller but continue with other tools
         yield makeError('FORBIDDEN', perimResult.reason)
-        toolResultParts.push(
-          `Tool "${toolCall.name}" blocked: ${perimResult.reason}`,
-        )
+        toolResultMessages.push(model.formatToolResult(toolCall.id, `Tool "${toolCall.name}" blocked: ${perimResult.reason}`))
         continue
       }
 
@@ -244,18 +242,17 @@ export async function* runSession(
       }
 
       yield { type: 'tool_result', toolCallId: toolCall.id, result }
-      toolResultParts.push(`${toolCall.name}(${JSON.stringify(toolCall.args)}) → ${JSON.stringify(result)}`)
+      toolResultMessages.push(model.formatToolResult(toolCall.id, result))
     }
 
     // Append this round's exchange to messages for the next step.
-    // We serialise tool calls and results as text to stay within the simple Message type.
-    // Provider-specific formatting (Anthropic tool_use blocks, OpenAI tool role) is deferred
-    // to M2 when we extend the message contract.
     const assistantContent = collectedToolCalls
       .map((tc) => `[tool_call id="${tc.id}" name="${tc.name}"] ${JSON.stringify(tc.args)}`)
       .join('\n')
     messages.push({ role: 'assistant', content: assistantContent })
-    messages.push({ role: 'user', content: toolResultParts.join('\n') })
+    for (const msg of toolResultMessages) {
+      messages.push(msg)
+    }
   }
 
   // Persist assistant turn summary

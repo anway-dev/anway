@@ -70,6 +70,10 @@ class MockProvider implements IModelProvider {
     yield { type: 'text_delta', content: 'world' }
     yield { type: 'done', inputTokens: 10, outputTokens: 5 }
   }
+
+  formatToolResult(_toolCallId: string, result: unknown): Message {
+    return { role: 'user', content: JSON.stringify(result) }
+  }
 }
 
 describe('IModelProvider contract via MockProvider', () => {

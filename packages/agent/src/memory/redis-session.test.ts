@@ -68,6 +68,10 @@ class MockSummariseProvider implements IModelProvider {
   async *stream(_messages: Message[], _tools: ToolDefinition[], _opts: InferenceOptions) {
     yield { type: 'done' as const, inputTokens: 0, outputTokens: 0 }
   }
+
+  formatToolResult(_toolCallId: string, result: unknown): Message {
+    return { role: 'user', content: JSON.stringify(result) }
+  }
 }
 
 // ---------------------------------------------------------------------------

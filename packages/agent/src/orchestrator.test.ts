@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SessionId, TenantId, UserId } from '@anvay/types'
+import { SessionId, TenantId, UserId, Message } from '@anvay/types'
 import type { StreamEvent } from '@anvay/types'
 import type { IAuditSink, AuditEvent } from './interfaces/audit.js'
 import type { IModelProvider, ChatResponse } from './interfaces/provider.js'
@@ -101,6 +101,9 @@ function makeTextOnlyProvider(): IModelProvider {
       yield { type: 'text_delta', content: 'Hello from mock!' }
       yield { type: 'done', inputTokens: 20, outputTokens: 10 }
     },
+    formatToolResult(_toolCallId: string, result: unknown): Message {
+      return { role: 'user', content: JSON.stringify(result) }
+    },
   }
 }
 
@@ -123,6 +126,9 @@ function makeToolCallProvider(toolName: string): IModelProvider {
         yield { type: 'text_delta', content: 'Tool executed successfully.' }
         yield { type: 'done', inputTokens: 40, outputTokens: 15 }
       }
+    },
+    formatToolResult(_toolCallId: string, result: unknown): Message {
+      return { role: 'user', content: JSON.stringify(result) }
     },
   }
 }
@@ -311,6 +317,9 @@ describe('runSession', () => {
         callCount++
         yield { type: 'tool_call', toolName: 'test-connector.action', toolCallId: `call-${callCount}`, args: { resource: 'test-connector/x' } }
         yield { type: 'done', inputTokens: 10, outputTokens: 5 }
+      },
+      formatToolResult(_toolCallId: string, result: unknown): Message {
+        return { role: 'user', content: JSON.stringify(result) }
       },
     }
 

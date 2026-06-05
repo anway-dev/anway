@@ -156,6 +156,14 @@ export class AnthropicProvider implements IModelProvider {
       yield { type: 'error', code: 'UPSTREAM_ERROR', message }
     }
   }
+
+  formatToolResult(toolCallId: string, result: unknown): Message {
+    const content = typeof result === 'string' ? result : JSON.stringify(result)
+    return {
+      role: 'user',
+      content: `[tool_result id="${toolCallId}"] ${content}`,
+    }
+  }
 }
 
 export { AppError }

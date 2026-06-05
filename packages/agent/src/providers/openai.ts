@@ -153,4 +153,12 @@ export class OpenAIProvider implements IModelProvider {
       yield { type: 'error', code: 'UPSTREAM_ERROR', message }
     }
   }
+
+  formatToolResult(toolCallId: string, result: unknown): Message {
+    const content = typeof result === 'string' ? result : JSON.stringify(result)
+    return {
+      role: 'user',
+      content: String(content),
+    }
+  }
 }

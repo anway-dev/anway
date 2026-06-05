@@ -7,6 +7,27 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-13 -->
+## Review — 2026-06-13 | No new commits
+
+**Scope:** No commits from opencode since `3629fe2`. Working tree identical to 2026-06-12 review.
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 6/10 |
+| Code standards | 5/10 |
+| Performance | 6/10 |
+| Security | 4/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+All issues from 2026-06-12 open. Next commit must fix B-11-R/B-12/B-13 together — all three
+require widening `Message` type in `@anvay/types` first.
+
+<!-- REVIEW SECTION END — 2026-06-13 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-12 -->
 ## Review — 2026-06-12 | `formatToolResult` implemented — three new defects introduced
 

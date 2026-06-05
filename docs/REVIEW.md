@@ -7,6 +7,25 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-14 -->
+## Review — 2026-06-14 | No new commits
+
+**Scope:** No commits from opencode since `3629fe2`. Working tree identical to 2026-06-12/13.
+Ratings and open issues unchanged. B-11-R/B-12/B-13 remain top priority.
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 6/10 |
+| Code standards | 5/10 |
+| Performance | 6/10 |
+| Security | 4/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+<!-- REVIEW SECTION END — 2026-06-14 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-13 -->
 ## Review — 2026-06-13 | No new commits
 

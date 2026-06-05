@@ -7,6 +7,258 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-15 -->
+## Review — 2026-06-15 | B-4 partial fix — tool results via formatToolResult, assistant side still text-encoded
+
+**Scope:** Two commits — `45153ab` ("B-4: use formatToolResult; fix test mocks") and
+`47726f2` ("M1-T6: fix tool_result handler — use toolNamesRef to track tool call IDs").
+Files changed: `orchestrator.ts`, `orchestrator.test.ts`, `redis-session.test.ts`,
+`provider.test.ts`, `interfaces/provider.ts`, `providers/anthropic.ts`, `providers/openai.ts`,
+`providers/ollama.ts`, `apps/web/components/orchestrator-chat.tsx`.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 6/10 | = — formatToolResult wired into orchestrator; assistant side still broken |
+| Code standards | 6/10 | ↑1 — compile error resolved, tests updated |
+| Performance | 6/10 | = |
+| Security | 4/10 | = |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+| Issue | Status |
+|-------|--------|
+| B-4 — tool message format wrong for multi-turn | **PARTIAL** — result side now uses `formatToolResult`; assistant tool_call messages still text-encoded (see H-15) |
+| B-11-R — AnthropicProvider array content compile error | **FIXED** ✓ — now returns `role: 'user', content: "[tool_result id=...] ..."` string |
+| B-12 — OpenAIProvider wrong role + ignores toolCallId | OPEN |
+| B-13 — OllamaProvider wrong role + ignores toolCallId | OPEN |
+| H-14 — `tool_result` handler references `event.toolName` | **FIXED** ✓ (`47726f2`) — `toolNamesRef.current.set(toolCallId, toolName)` in `tool_call` handler; `toolNamesRef.current.get(toolCallId)` in `tool_result` handler |
+| M-15 — `toolNamesRef` declared but never used | **FIXED** ✓ (resolved by H-14 fix) |
+
+---
+
+### HIGH
+
+#### H-15 — Orchestrator assistant message still text-encoded — both sides of tool exchange are wrong for real provider APIs
+
+**File:** `packages/agent/src/orchestrator.ts:249–255`
+
+```typescript
+const assistantContent = collectedToolCalls
+  .map((tc) => `[tool_call id="${tc.id}" name="${tc.name}"] ${JSON.stringify(tc.args)}`)
+  .join('\n')
+messages.push({ role: 'assistant', content: assistantContent })
+for (const msg of toolResultMessages) {
+  messages.push(msg)
+}
+```
+
+The result side now uses `model.formatToolResult()` — correct direction. But the assistant
+message for tool calls is still plain text: `[tool_call id="call_1" name="my-tool"] {...}`.
+
+**What providers require:**
+
+| Provider | Required assistant message format |
+|----------|----------------------------------|
+| Anthropic | `{ role: 'assistant', content: [{ type: 'tool_use', id: '...', name: '...', input: {...} }] }` |
+| OpenAI / Ollama | `{ role: 'assistant', tool_calls: [{ id: '...', type: 'function', function: { name: '...', arguments: '...' } }] }` |
+
+Neither provider receives a properly structured assistant turn. The Anthropic model receives
+plain text that looks like `[tool_call id="..."]` — it treats this as a regular assistant
+text response, not a `tool_use` block. The follow-up user message with `[tool_result id="..."]`
+is also plain text. The model has no semantic understanding that a tool was called and returned.
+
+**Impact:** Multi-turn tool use is currently theatre — the conversation history is sent to the
+provider but is not understood as a tool exchange. The model will respond as if it never used
+a tool. Any reasoning that depends on tool results (e.g., "Based on the K8s pod status I just
+fetched...") will hallucinate because the tool result is not injected in a way the model
+processes.
+
+**Fix:** Add `formatToolCall(toolCalls: ToolCall[]): Message` to `IModelProvider` (companion
+to `formatToolResult`), then:
+
+```typescript
+// In orchestrator.ts — replace the text-encoded assistant push:
+const toolCallMsg = model.formatToolCall(collectedToolCalls)
+messages.push(toolCallMsg)
+for (const msg of toolResultMessages) {
+  messages.push(msg)
+}
+```
+
+Provider implementations:
+```typescript
+// AnthropicProvider
+formatToolCall(toolCalls: ToolCall[]): Message {
+  return {
+    role: 'assistant',
+    content: toolCalls.map(tc => ({
+      type: 'tool_use',
+      id: tc.id,
+      name: tc.name,
+      input: tc.args,
+    })),
+  }
+}
+
+// OpenAIProvider / OllamaProvider
+formatToolCall(toolCalls: ToolCall[]): Message {
+  return {
+    role: 'assistant',
+    tool_calls: toolCalls.map(tc => ({
+      id: tc.id,
+      type: 'function',
+      function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+    })),
+  }
+}
+```
+
+This also requires widening `Message` in `@anvay/types` to support the assistant tool-call
+shape (same root as B-11-R/B-12/B-13 — the `Message` type is the blocker).
+
+**Verify:** Send a query that triggers a tool call. Capture the messages array after the
+tool exchange. Assert `messages[n]` is the correct provider-format assistant message (content
+block array for Anthropic, `tool_calls` array for OpenAI). Assert `messages[n+1]` is the
+correct tool result message.
+
+---
+
+#### H-16 — `AnthropicProvider.formatToolResult` text encoding not recognized by Anthropic API
+
+**File:** `packages/agent/src/providers/anthropic.ts:159–165`
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  return {
+    role: 'user',
+    content: `[tool_result id="${toolCallId}"] ${content}`,
+  }
+}
+```
+
+This avoids the compile error (good) but is semantically wrong for the Anthropic API. The
+Anthropic SDK expects tool results as a user message with a `tool_result` content block:
+
+```json
+{
+  "role": "user",
+  "content": [{
+    "type": "tool_result",
+    "tool_use_id": "toolu_abc123",
+    "content": "result text"
+  }]
+}
+```
+
+When the orchestrator feeds `[tool_result id="..."] ...` as a plain user string to the
+Anthropic SDK, the API accepts it (valid message) but Claude does not interpret it as a
+tool result. Claude's reasoning will not incorporate the tool output, defeating the purpose
+of tool use entirely.
+
+**Relationship to H-15:** Both issues stem from `Message.content: string` being too narrow.
+The correct fix requires widening `Message` to support content block arrays (already
+identified in B-11-R Option A). Once `Message` supports arrays, `formatToolResult` can
+return the proper Anthropic content block and the compile check passes.
+
+**Fix:** Widen `Message` in `@anvay/types` first (same as B-11-R Option A fix), then:
+
+```typescript
+formatToolResult(toolCallId: string, result: unknown): Message {
+  const content = typeof result === 'string' ? result : JSON.stringify(result)
+  return {
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: toolCallId, content }],
+  }
+}
+```
+
+**Verify:** In a test that calls Anthropic SDK with a tool call followed by the
+`formatToolResult` output, assert the SDK receives a message with `content[0].type ===
+'tool_result'` and `content[0].tool_use_id === toolCallId`. With the current implementation,
+`content` is a plain string.
+
+---
+
+### What changed (positive)
+
+**B-4 result side:** `toolResultParts: string[]` → `toolResultMessages: Message[]` with
+`model.formatToolResult()`. Individual messages per tool result (not concatenated into one
+user message). Structurally correct — each result is its own message. Content encoding still
+wrong per provider but the architecture is right.
+
+**B-11-R resolved:** `AnthropicProvider.formatToolResult` now returns `string` content —
+compile error gone. String encoding is a workaround; proper fix is H-16 above.
+
+**Mock providers:** All four test mock providers (`makeTextOnlyProvider`, `makeToolCallProvider`,
+anonymous mock in `runSession` test, `MockSummariseProvider`, `MockProvider`) now implement
+`formatToolResult`. Tests will compile and run. Mock returns `{ role: 'user', content: JSON.stringify(result) }` — acceptable for test purposes.
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status |
+|---------|------|--------|
+| M0-T1 through M0-T8 | M0 | **COMPLETE** |
+| M1-T1 through M1-T5 | M1 (partial) | **COMPLETE** |
+| Wire OrchestratorChat to real SSE | M1-T6 | **PARTIAL** — SSE client wired, stub response |
+| `formatToolResult` on all providers | — | **PARTIAL** — present everywhere; Anthropic/OpenAI/Ollama still semantically wrong for real API |
+| B-4 tool message format fix | — | **PARTIAL** — result side wired; assistant tool_call messages text-encoded (H-15) |
+| Gateway ESM migration | — | **COMPLETE** (uncommitted) |
+| Gate UI (visual) | — | **PARTIAL** — display only, H-13 unresolved |
+| Specialist agent tools | M2 | NOT STARTED |
+| Connector implementations | M2 | NOT STARTED |
+| IKnowledgeGraph + resolveContext() | M4-T5 | NOT STARTED |
+| Graph Builder Agent | M4-T6 | NOT STARTED |
+| User permission DB model (B-5 prereq) | pre-M2 | NOT STARTED |
+| RLS activation at query time (B-8) | pre-M2 | NOT STARTED |
+| Dockerfile symlink fix (B-10) | immediate | NOT STARTED |
+
+---
+
+### Consolidated open issues (updated)
+
+| ID | Severity | File | Short description | Status |
+|----|----------|------|-------------------|--------|
+| B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
+| B-4 | BLOCKING | orchestrator.ts | Assistant tool_call messages still text-encoded | **PARTIAL** |
+| B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
+| B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
+| B-7 | BLOCKING | jwt.ts | JWT error leaked to client | OPEN |
+| B-8 | BLOCKING | chat.ts + migration | RLS app.tenant_id never set | OPEN |
+| B-9 | BLOCKING | migration.sql | audit_events CASCADE bypass | OPEN |
+| B-10 | BLOCKING | Dockerfile | Workspace symlinks broken in runner | OPEN |
+| B-11-R | BLOCKING | anthropic.ts | formatToolResult text encoding; see H-16 | **DOWNGRADED→H-16** |
+| B-12 | BLOCKING | openai.ts | formatToolResult wrong role + ignores toolCallId | OPEN |
+| B-13 | BLOCKING | ollama.ts | formatToolResult wrong role + ignores toolCallId | OPEN |
+| H-1 | HIGH | anthropic.ts | Streaming break — parallel tool calls lose args | OPEN |
+| H-2 | HIGH | chat.ts | InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 | HIGH | postgres-sink.ts | Audit sink silent drop on DB failure | OPEN |
+| H-4 | HIGH | orchestrator.ts | Intent classification failure silent | OPEN |
+| H-5 | HIGH | orchestrator.ts | Streamed response stored as placeholder | OPEN |
+| H-6 | HIGH | auth.ts | Stub hardcodes sub=stub-user-id | OPEN |
+| H-7 | HIGH | specialist-agent.ts | No token budget enforcement | OPEN |
+| H-8 | HIGH | web/api/chat/route.ts | Web chat SSE stub — not real LLM | PARTIAL |
+| H-9 | HIGH | cors.ts | CORS * + credentials broken combo | OPEN |
+| H-10 | HIGH | health.ts | /health/ready always 200 | OPEN |
+| H-11 | HIGH | metrics.ts | /metrics unauthenticated | OPEN |
+| H-12 | HIGH | seed.ts | $executeRawUnsafe + SET LOCAL wrong scope | OPEN |
+| H-13 | HIGH | orchestrator-chat.tsx | Gate Approve/Reject are no-ops | OPEN |
+| H-14 | HIGH | orchestrator-chat.tsx | tool_result handler references nonexistent event.toolName | **FIXED** ✓ `47726f2` |
+| H-15 | HIGH | orchestrator.ts | Assistant tool_call messages text-encoded — providers can't process | **NEW** |
+| H-16 | HIGH | anthropic.ts | formatToolResult text encoding not recognized by Anthropic API | **NEW** |
+| M-1 through M-17 | MEDIUM | various | (see prior sections) | OPEN |
+| L-1 through L-12 | LOW | various | (see prior sections) | OPEN |
+
+<!-- REVIEW SECTION END — 2026-06-15 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-14 -->
 ## Review — 2026-06-14 | No new commits
 
@@ -725,7 +977,7 @@ persist across refreshes (e.g. `sessionStorage`) but acceptable for now.
 | H-13 | HIGH | orchestrator-chat.tsx | Gate Approve/Reject are no-ops — no backend signal | **NEW** |
 | H-14 | HIGH | orchestrator-chat.tsx | tool_result handler references nonexistent event.toolName | **NEW** |
 | M-1 through M-14 | MEDIUM | various | (see 2026-06-04 through 2026-06-06 sections) | OPEN |
-| M-15 | MEDIUM | orchestrator-chat.tsx | toolNamesRef declared but never used | **NEW** (resolved by H-14 fix) |
+| M-15 | MEDIUM | orchestrator-chat.tsx | toolNamesRef declared but never used | **FIXED** ✓ (resolved by H-14 fix) |
 | M-16 | MEDIUM | orchestrator-chat.tsx | Confidence hardcoded 0.9 in done handler | **NEW** |
 | M-17 | MEDIUM | orchestrator-chat.tsx | Follow-ups hardcoded in done handler | **NEW** |
 | L-1 through L-10 | LOW | various | (see prior sections) | OPEN |

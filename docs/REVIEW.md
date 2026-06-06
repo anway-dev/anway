@@ -7,6 +7,318 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-21 -->
+## Review — 2026-06-21 | Major fixes land: H-1/H-4/H-5/B-12/B-13/H-15/H-16 resolved — test file broken
+
+**Scope:** Uncommitted working-tree changes vs `06e54bf`. New files vs prior review:
+`packages/types/src/index.ts`, `packages/agent/src/interfaces/provider.ts`,
+`packages/agent/src/providers/anthropic.ts`, `packages/agent/src/providers/openai.ts`,
+`packages/agent/src/providers/ollama.ts`, `packages/agent/src/orchestrator.ts`,
+`packages/agent/src/orchestrator.test.ts`. Gateway ESM files unchanged from prior reviews.
+
+| Dimension | Rating | Δ from last review |
+|-----------|--------|-------------------|
+| Feature completeness | 7/10 | ↑1 — H-1/H-4/H-5 fixed; proper tool message formatting end-to-end for Anthropic |
+| Code standards | 5/10 | ↓1 — test file severely broken (see B-14/B-15) |
+| Performance | 6/10 | = |
+| Security | 4/10 | = |
+| Readability | 8/10 | = |
+| Clarity and comments | 7/10 | = |
+
+---
+
+### Previous Issues — Status Update
+
+| Issue | Status |
+|-------|--------|
+| H-1 — Anthropic parallel tool calls lose args | **FIXED** ✓ — `partialToolCalls` now keyed by `event.index` (content block index), not tool call ID |
+| H-4 — Intent classification failure silent | **FIXED** ✓ — catch yields `error` event and returns |
+| H-5 — Streamed response stored as `'[streamed response]'` | **FIXED** ✓ — `accumulatedText` accumulates all `text_delta` chunks, persisted to session memory |
+| H-15 — Assistant tool_call messages text-encoded | **FIXED** ✓ — `messages.push(model.formatToolCall(collectedToolCalls))` |
+| H-16 — Anthropic formatToolResult text encoding | **FIXED** ✓ — returns proper `[{ type: 'tool_result', tool_use_id, content }]` block |
+| B-11-R — array content not assignable to Message.content | **FIXED** ✓ — `Message.content` widened to `string \| AnthropicContentBlock[]` |
+| B-12 — OpenAI formatToolResult wrong role + ignores toolCallId | **FIXED** ✓ — `role: 'tool'`, `tool_call_id: toolCallId` |
+| B-13 — Ollama formatToolResult same defect | **FIXED** ✓ — same fix as B-12 |
+
+---
+
+### BLOCKING
+
+#### B-14 — `orchestrator.test.ts` mock providers missing required interface methods — compile fails
+
+**File:** `packages/agent/src/orchestrator.test.ts:95–133`
+
+```typescript
+function makeTextOnlyProvider(): IModelProvider {
+  return {
+    // ... chat, stream ...
+    formatToolCall(...): Message { ... },
+    // formatToolResult MISSING — IModelProvider requires it
+  }
+}
+
+function makeToolCallProvider(toolName: string): IModelProvider {
+  return {
+    // ... chat, stream ...
+    formatToolCall(...): Message { ... },
+    // formatToolResult MISSING — IModelProvider requires it
+  }
+}
+```
+
+`IModelProvider` now requires both `formatToolResult` and `formatToolCall`. Both mocks only
+implement `formatToolCall` — they no longer implement `formatToolResult`. TypeScript compile
+fails: `Property 'formatToolResult' is missing in type '...' but required in type
+'IModelProvider'`.
+
+**Fix:**
+```typescript
+// Add to both makeTextOnlyProvider and makeToolCallProvider:
+formatToolResult(_toolCallId: string, result: unknown): Message {
+  return { role: 'user', content: JSON.stringify(result) }
+},
+```
+
+---
+
+#### B-15 — `orchestrator.test.ts` lines 136–175 are module-level code outside any test wrapper
+
+**File:** `packages/agent/src/orchestrator.test.ts:136–175`
+
+```typescript
+let callCount = 0
+const loopingProvider: IModelProvider = { ... }   // module-level variable
+const execTool: ExecutableTool = { ... }
+const orch = createOrchestrator({ ... })           // runs on module load
+const events = await collectEvents(...)            // top-level await outside test
+expect(callCount).toBeLessThanOrEqual(3)           // expect outside it()
+```
+
+The body of `it('caps the agentic loop at maxSteps...')` was kept but the `it(` wrapper
+was removed. The `})` at lines 174–175 close the surrounding `describe` block correctly
+(the test suite), but everything on lines 136–174 executes at module import time, not
+inside a test case. Vitest will not register these as tests. The `expect()` calls fire
+during module initialisation — if they pass, they pass silently outside any test; if they
+fail, they crash the entire test file load.
+
+Additionally, `loopingProvider` at line 137 implements `formatToolResult` but not
+`formatToolCall` — compile error on that object too.
+
+**Fix:** Wrap lines 136–174 back in a `describe`/`it` block and add `formatToolCall` to
+`loopingProvider`:
+
+```typescript
+describe('runSession', () => {
+  it('caps the agentic loop at maxSteps to prevent infinite loops', async () => {
+    let callCount = 0
+    const loopingProvider: IModelProvider = {
+      async chat(): Promise<ChatResponse> { ... },
+      async *stream() { ... },
+      formatToolResult(_id, result): Message { return { role: 'user', content: JSON.stringify(result) } },
+      formatToolCall(_toolCalls): Message { return { role: 'assistant', content: '' } },
+    }
+    // ... rest of test body ...
+    expect(callCount).toBeLessThanOrEqual(3)
+    expect(doneEvents).toHaveLength(1)
+  })
+})
+```
+
+**Verify:** `pnpm --filter @anvay/agent test` shows at least 1 test in orchestrator.test.ts.
+`pnpm --filter @anvay/agent typecheck` exits 0.
+
+Note: In the fix, all the previously deleted test cases (text_delta+done, audit events,
+perimeter middleware, tool_result emission, token budget exhausted, perimeter blocks) should
+be restored. Deleting passing tests that cover critical agentic loop behaviour is a regression
+regardless of the reason. These tests protected against regressions in the exact code that
+was just heavily modified.
+
+---
+
+### HIGH
+
+#### H-17 — `OpenAIProvider.mapMessages` drops `tool_call_id` and `tool_calls` — multi-turn tool use broken at mapping layer
+
+**File:** `packages/agent/src/providers/openai.ts:24–32`
+
+```typescript
+function mapMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
+  return messages.map((m) => {
+    const content = Array.isArray(m.content) ? JSON.stringify(m.content) : m.content
+    return {
+      role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+      content,
+      // tool_call_id NOT included — tool result messages lose their association
+      // tool_calls NOT included — assistant tool call messages lose their call list
+    }
+  })
+}
+```
+
+Two missing fields:
+
+1. **`tool_call_id`** — `formatToolResult` sets `tool_call_id: toolCallId` on `Message`. But
+   `mapMessages` only copies `role` and `content`. OpenAI API requires `tool_call_id` on every
+   `role: 'tool'` message — without it, the API returns `400 invalid_request_error: Missing
+   required parameter: 'tool_call_id'`.
+
+2. **`tool_calls`** — `formatToolCall` returns `Message & { tool_calls: [...] }` (cast). The
+   `tool_calls` field is not in `Message` so `mapMessages` cannot see it. OpenAI API requires
+   `tool_calls` on the assistant message to associate results. Without it, the subsequent
+   `role: 'tool'` messages are orphaned — OpenAI API returns `400: Each 'tool' message must
+   correspond to a previous tool call`.
+
+**Fix:** Include `tool_call_id` and spread any additional fields through `mapMessages`. First
+add `tool_calls` to `Message` type (see M-18), then:
+
+```typescript
+function mapMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
+  return messages.map((m) => {
+    const content = Array.isArray(m.content) ? JSON.stringify(m.content) : (m.content ?? null)
+    const base = { role: m.role as 'user' | 'assistant' | 'system' | 'tool', content }
+    if (m.tool_call_id) return { ...base, tool_call_id: m.tool_call_id }
+    if (m.tool_calls) return { ...base, content: undefined, tool_calls: m.tool_calls }
+    return base
+  }) as OpenAI.ChatCompletionMessageParam[]
+}
+```
+
+**Verify:** Run a two-turn conversation with a tool call. Assert the messages array sent to
+OpenAI SDK contains the assistant message with `tool_calls` and the tool result message with
+`tool_call_id`. Currently neither field reaches the SDK.
+
+---
+
+#### H-18 — `OllamaProvider.mapMessages` same defect as H-17
+
+**File:** `packages/agent/src/providers/ollama.ts:63–68`
+
+Identical missing `tool_call_id` + `tool_calls` fields. Same fix as H-17, applied to
+`OllamaCompatMessage` mapping.
+
+---
+
+### MEDIUM
+
+#### M-18 — `Message` type missing `tool_calls` field — OpenAI/Ollama `formatToolCall` uses an unsafe cast
+
+**File:** `packages/types/src/index.ts:83–88`
+
+`formatToolCall` in `OpenAIProvider` and `OllamaProvider` returns:
+```typescript
+return {
+  role: 'assistant',
+  content: '',
+  tool_calls: [...],
+} as Message & { tool_calls: OpenAI.ChatCompletionMessageToolCall[] }
+```
+
+The `tool_calls` field is not in the `Message` interface — it's cast in. This means:
+- TypeScript type-checks it at the cast site but loses the information everywhere `Message`
+  is consumed (e.g., `mapMessages` can't see `tool_calls` without casting back)
+- Any code that copies `Message` objects via spread loses `tool_calls`
+
+**Fix:** Add `tool_calls` to `Message` in `@anvay/types`:
+```typescript
+export type OpenAIToolCall = {
+  readonly id: string
+  readonly type: 'function'
+  readonly function: { readonly name: string; readonly arguments: string }
+}
+
+export interface Message {
+  readonly role: MessageRole
+  readonly content?: string | AnthropicContentBlock[]
+  readonly tool_call_id?: string
+  readonly tool_calls?: readonly OpenAIToolCall[]
+}
+```
+
+Then remove the casts from `formatToolCall` in OpenAI and Ollama providers.
+
+---
+
+### What these changes accomplish (positive)
+
+**H-1 fix (critical correctness):** Anthropic streaming now keyed by `event.index` — the
+content block index from the Anthropic streaming API. This is the correct identifier for
+tracking which tool call a delta belongs to. Previously keyed by tool call ID (which only
+exists after `content_block_start`, making the key assignment non-deterministic). Parallel
+tool calls now fully correct.
+
+**H-4 fix:** Intent classification errors now surface as proper error events. The orchestrator
+no longer silently swallows failures that could produce incorrect routing.
+
+**H-5 fix:** Session memory now stores real text. Follow-up queries can reason about prior
+responses. Multi-turn conversations now have actual context.
+
+**H-15 + H-16 + Anthropic `formatToolCall`:** Complete and correct for Anthropic API. Assistant
+messages contain `tool_use` content blocks; tool results contain `tool_result` content blocks.
+Anthropic multi-turn tool use is now correctly structured end-to-end.
+
+**B-12 + B-13:** OpenAI/Ollama `formatToolResult` now correct (`role: 'tool'` + `tool_call_id`).
+Still broken at `mapMessages` level (H-17/H-18) but the Message object is now correct.
+
+---
+
+### Pending Features (Updated Status)
+
+| Feature | Task | Status |
+|---------|------|--------|
+| M0-T1 through M0-T8 | M0 | **COMPLETE** |
+| M1-T1 through M1-T5 | M1 (partial) | **COMPLETE** |
+| Wire OrchestratorChat to real SSE | M1-T6 | **PARTIAL** — SSE client wired, stub response |
+| H-1 parallel tool calls fix | — | **FIXED** ✓ |
+| H-4 intent classification error surface | — | **FIXED** ✓ |
+| H-5 real text in session memory | — | **FIXED** ✓ |
+| H-15/H-16 proper Anthropic tool message format | — | **FIXED** ✓ |
+| B-12/B-13 OpenAI/Ollama formatToolResult | — | **FIXED** ✓ (mapMessages still broken, H-17/H-18) |
+| B-11-R Message type widened | — | **FIXED** ✓ |
+| Gateway ESM migration | — | **COMPLETE** (uncommitted) |
+| formatToolCall on all providers | — | **COMPLETE** — present, Anthropic correct; OpenAI/Ollama blocked by H-17/H-18 |
+| Specialist agent tools | M2 | NOT STARTED |
+| Connector implementations | M2 | NOT STARTED |
+| IKnowledgeGraph + resolveContext() | M4-T5 | NOT STARTED |
+| User permission DB model (B-5 prereq) | pre-M2 | NOT STARTED |
+| RLS activation at query time (B-8) | pre-M2 | NOT STARTED |
+| Dockerfile symlink fix (B-10) | immediate | NOT STARTED |
+
+---
+
+### Consolidated open issues (updated)
+
+| ID | Severity | File | Short description | Status |
+|----|----------|------|-------------------|--------|
+| B-2-R | BLOCKING | chat.ts | sessionUsed resets to 0 each request | OPEN |
+| B-4 | BLOCKING | orchestrator.ts | Assistant messages: formatToolCall used ✓; OpenAI/Ollama mapMessages drops tool_calls | PARTIAL |
+| B-5 | BLOCKING | chat.ts | connectorScopes wildcards all users | OPEN |
+| B-6 | BLOCKING | chat.ts | InMemorySessionMemory shared across tenants | OPEN |
+| B-7 | BLOCKING | jwt.ts | JWT error leaked to client | OPEN |
+| B-8 | BLOCKING | chat.ts + migration | RLS app.tenant_id never set | OPEN |
+| B-9 | BLOCKING | migration.sql | audit_events CASCADE bypass | OPEN |
+| B-10 | BLOCKING | Dockerfile | Workspace symlinks broken in runner | OPEN |
+| B-14 | BLOCKING | orchestrator.test.ts | Mock providers missing formatToolResult — compile fails | **NEW** |
+| B-15 | BLOCKING | orchestrator.test.ts | Module-level code outside test wrapper; deleted tests | **NEW** |
+| H-2 | HIGH | chat.ts | InMemorySessionMemory inline, summarise no-op | OPEN |
+| H-3 | HIGH | postgres-sink.ts | Audit sink silent drop on DB failure | OPEN |
+| H-6 | HIGH | auth.ts | Stub hardcodes sub=stub-user-id | OPEN |
+| H-7 | HIGH | specialist-agent.ts | No token budget enforcement | OPEN |
+| H-8 | HIGH | web/api/chat/route.ts | Web chat SSE stub — not real LLM | PARTIAL |
+| H-9 | HIGH | cors.ts | CORS * + credentials broken combo | OPEN |
+| H-10 | HIGH | health.ts | /health/ready always 200 | OPEN |
+| H-11 | HIGH | metrics.ts | /metrics unauthenticated | OPEN |
+| H-12 | HIGH | seed.ts | $executeRawUnsafe + SET LOCAL wrong scope | OPEN |
+| H-13 | HIGH | orchestrator-chat.tsx | Gate Approve/Reject are no-ops | OPEN |
+| H-17 | HIGH | openai.ts | mapMessages drops tool_call_id and tool_calls | **NEW** |
+| H-18 | HIGH | ollama.ts | mapMessages drops tool_call_id and tool_calls | **NEW** |
+| M-1 through M-17 | MEDIUM | various | (see prior sections) | OPEN |
+| M-18 | MEDIUM | types/index.ts | Message missing tool_calls field — unsafe cast workaround | **NEW** |
+| L-1 through L-12 | LOW | various | (see prior sections) | OPEN |
+
+<!-- REVIEW SECTION END — 2026-06-21 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-20 -->
 ## Review — 2026-06-20 | No new commits
 

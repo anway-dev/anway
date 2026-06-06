@@ -7,6 +7,27 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-22 -->
+## Review — 2026-06-22 | No new commits
+
+No commits from opencode since last review. Working tree identical to 2026-06-21.
+Ratings and open issues unchanged. B-14/B-15 (broken test file) must be fixed before
+anything else — compile will fail until both mocks have both interface methods and the
+module-level code is wrapped in a test block.
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 7/10 |
+| Code standards | 5/10 |
+| Performance | 6/10 |
+| Security | 4/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+<!-- REVIEW SECTION END — 2026-06-22 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-21 -->
 ## Review — 2026-06-21 | Major fixes land: H-1/H-4/H-5/B-12/B-13/H-15/H-16 resolved — test file broken
 

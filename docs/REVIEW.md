@@ -7,6 +7,67 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-28 -->
+## Review — 2026-06-28 | 58da43d (duplicate type — already logged)
+
+No new feature code from opencode. `58da43d` introduced duplicate `OpenAIToolCall` (L-6, already in
+2026-06-27 section + BRIDGE.md correction sent). `90575bf` is reviewer bridge message. Working tree clean.
+
+Opus deep analysis completed this session — full gap analysis and 25-task execution plan written to
+`docs/BRIDGE.md` style prompt. No new code issues to add beyond those already open.
+
+### Still open (priority order for next agent run)
+| Issue | Severity | File | Notes |
+|-------|----------|------|-------|
+| L-6 | LOW | `packages/types/src/index.ts:108` | Duplicate OpenAIToolCall — delete lines 108–115 |
+| H-2 | HIGH | `gateway/routes/chat.ts:46` | InMemorySessionMemory.get returns fake UserId('unknown') |
+| B-2-R | MEDIUM | `gateway/routes/chat.ts:110` | sessionUsed resets to 0 per request |
+| B-5 | MEDIUM | `gateway/routes/chat.ts:174` | connectorScopes hardcodes wildcard |
+| B-8 | MEDIUM | `gateway/routes/chat.ts` | RLS set_config never called |
+| B-9 | MEDIUM | `prisma/migrations/0001_initial` | audit_events FK is CASCADE not RESTRICT |
+| B-10 | MEDIUM | `apps/gateway/Dockerfile` | workspace symlinks broken in distroless |
+| L-2 | LOW | `orchestrator.ts:134` | INTENT_CLASSIFICATION_FAILED hard-fails, should be best-effort |
+| L-4 | LOW | `gateway/__tests__/chat.test.ts:270` | `as never` cast |
+| L-5 | LOW | `providers/ollama.ts:mapMessages` | `content: ''` should be `null` |
+
+### Architecture gaps (from Opus analysis, not in any prior section)
+| Gap | Notes |
+|-----|-------|
+| No AbortSignal thread-through | Client disconnect burns tokens; needs signal in InferenceOptions + providers |
+| No env validation at boot | Misconfigured process fails on first request, not at startup |
+| No `trace_id` in audit events | Requests unattributable across audit rows |
+| `InMemorySessionMemory.get` returns fake identity | Returns `UserId('unknown')` instead of `null` — breaks audit attribution |
+| Mastra not integrated | TASKS.md M1-T4 requires Mastra lifecycle hooks; code rolls own loop instead |
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 8/10 |
+| Code standards | 7/10 |
+| Performance | 6/10 |
+| Security | 5/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+### Pending Features (docs/TASKS.md)
+| Task | Status |
+|------|--------|
+| M0 Foundation | ✓ Complete |
+| M1 Agent harness + all providers | ✓ Complete |
+| M1 Orchestrator runSession | ✓ Complete |
+| M1 RedisSessionMemory | ✓ Complete |
+| M1 TokenBudget middleware | ⚠ Partial — B-2-R |
+| M1 Audit sink | ⚠ Partial — B-9, no trace_id |
+| M1 Gateway chatRoutes + SSE | ⚠ Partial — B-5, B-8, H-2 |
+| M1-T6 Wire web OrchestratorChat to real /api/chat | ✗ Not started |
+| M2 Connectors (GitHub/Datadog/Linear/ArgoCD) | ✗ Not started |
+| M3 Incident War Room | ✗ Not started |
+| M4 Knowledge Graph + Graph Builder | ✗ Not started |
+| M5 Automations + Scheduler | ✗ Not started |
+
+<!-- REVIEW SECTION END — 2026-06-28 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-27 -->
 ## Review — 2026-06-27 | No new commits
 

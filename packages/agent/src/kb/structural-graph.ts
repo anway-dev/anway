@@ -120,19 +120,21 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
-    const rows = await this.pool.query(
+    const result = await this.pool.query(
       `SELECT id FROM entities WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
       [tenantId, name],
     )
+    const rows = result.rows as Record<string, unknown>[]
     if (rows.length === 0) return null
     return this.resolveContext(rows[0]!.id as string, tenantId, depth)
   }
 
   async getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null> {
-    const rows = await this.pool.query(
+    const result = await this.pool.query(
       `SELECT id FROM entities WHERE tenant_id = $1 AND metadata->>'externalId' = $2 LIMIT 1`,
       [tenantId, externalId],
     )
+    const rows = result.rows as Record<string, unknown>[]
     return (rows[0]?.id as string) ?? null
   }
 }

@@ -1,76 +1,67 @@
-import { PrismaClient } from '@prisma/client'
+import { withTenant } from '../db/prisma.js'
 import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anvay/types'
 import type { ExecutableTool } from '@anvay/agent'
+import { GitHubConnector, makeGitHubTools } from '@anvay/connector-github'
+import { LinearConnector, makeLinearTools } from '@anvay/connector-linear'
+import { ArgoCDConnector, makeArgoCDTools } from '@anvay/connector-argocd'
+import { DatadogConnector, makeDatadogTools } from '@anvay/connector-datadog'
+import type { PrismaClient } from '@prisma/client'
 
-// Registry cache per tenant
-const registryCache = new Map<string, IConnector[]>()
-
-function clearCache(): void {
-  registryCache.clear()
+type ConnectorRow = {
+  id: string
+  type: string
+  mode: string
+  capability_manifest: unknown
 }
 
-async function loadConnectors(prisma: PrismaClient, tenantId: string): Promise<IConnector[]> {
-  const rows = await prisma.connector.findMany({ where: { tenant_id: tenantId } })
-  return rows.map((row) => {
-    const manifest = row.capability_manifest as CapabilityManifest | null
-    return {
-      id: row.id,
-      capabilities: manifest ?? { read: ['*'], write: [] },
-      async read(query: ConnectorQuery): Promise<ConnectorResult> {
-        return {
-          source: `connector:${row.type}:${row.id}`,
-          fetched_at: new Date(),
-          ttl: 120,
-          freshness_score: 1.0,
-          data: { message: `Connector ${row.type} read not implemented — returning mock`, query },
-        }
-      },
-      async write(action: ConnectorAction): Promise<ConnectorResult> {
-        return {
-          source: `connector:${row.type}:${row.id}`,
-          fetched_at: new Date(),
-          ttl: 120,
-          freshness_score: 1.0,
-          data: { message: `Connector ${row.type} write not implemented — returning mock`, action },
-        }
-      },
-      async health(): Promise<HealthStatus> {
-        return { status: 'healthy', lastChecked: new Date() }
-      },
-    }
-  })
-}
-
-export async function getConnectorsForTenant(
-  prisma: PrismaClient,
-  tenantId: string,
-): Promise<IConnector[]> {
-  if (!registryCache.has(tenantId)) {
-    const connectors = await loadConnectors(prisma, tenantId)
-    registryCache.set(tenantId, connectors)
+function createMockConnector(row: ConnectorRow, capabilities: CapabilityManifest): IConnector {
+  return {
+    id: row.id,
+    capabilities,
+    async read(_query: ConnectorQuery): Promise<ConnectorResult> {
+      return { source: `connector:${row.type}:${row.id}`, fetched_at: new Date(), ttl: 120, freshness_score: 1.0, data: { message: `mock ${row.type} response` } }
+    },
+    async write(_action: ConnectorAction): Promise<ConnectorResult> {
+      return { source: `connector:${row.type}:${row.id}`, fetched_at: new Date(), ttl: 120, freshness_score: 1.0, data: { message: `mock ${row.type} write` } }
+    },
+    async health(): Promise<HealthStatus> {
+      return { status: 'healthy', lastChecked: new Date() }
+    },
   }
-  return registryCache.get(tenantId)!
+}
+
+function createConnectorWithTools(row: ConnectorRow): { connector: IConnector; tools: ExecutableTool[] } {
+  const raw = row.capability_manifest as { capabilities?: { read?: string[]; write?: string[] } } | null
+  const capabilities: CapabilityManifest = {
+    read: raw?.capabilities?.read ?? ['*'],
+    write: raw?.capabilities?.write ?? [],
+  }
+
+  switch (row.type) {
+    case 'github': {
+      const c = new GitHubConnector(row.id)
+      return { connector: c, tools: makeGitHubTools(c) }
+    }
+    case 'linear': {
+      const c = new LinearConnector(row.id)
+      return { connector: c, tools: makeLinearTools(c) }
+    }
+    case 'argocd': {
+      const c = new ArgoCDConnector(row.id)
+      return { connector: c, tools: makeArgoCDTools(c) }
+    }
+    case 'datadog': {
+      const c = new DatadogConnector(row.id, process.env['DATADOG_API_KEY'] ?? '', process.env['DATADOG_APP_KEY'] ?? '')
+      return { connector: c, tools: makeDatadogTools(c) }
+    }
+    default:
+      return { connector: createMockConnector(row, capabilities), tools: [] }
+  }
 }
 
 export async function getToolsForTenant(prisma: PrismaClient, tenantId: string): Promise<ExecutableTool[]> {
-  const connectors = await getConnectorsForTenant(prisma, tenantId)
-  return connectors.map((c) => {
-    const prefix = c.id.replace(/[^a-zA-Z0-9_-]/g, '_')
-    return {
-      name: `${prefix}.read`,
-      description: `Read from connector ${c.id}`,
-      parameters: {
-        type: 'object',
-        properties: {
-          type: { type: 'string', description: 'Query type to execute' },
-        },
-      },
-      async run(args: Record<string, unknown>): Promise<unknown> {
-        const result = await c.read(args as ConnectorQuery)
-        return result.data
-      },
-    }
-  })
+  const connectors = await withTenant(prisma, tenantId, (tx) =>
+    tx.connector.findMany({ where: { tenant_id: tenantId } })
+  )
+  return (connectors as unknown as ConnectorRow[]).flatMap(row => createConnectorWithTools(row).tools)
 }
-
-export { clearCache }

@@ -20,6 +20,18 @@ importers:
       '@anvay/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@anvay/connector-argocd':
+        specifier: workspace:*
+        version: link:../../connectors/argocd
+      '@anvay/connector-datadog':
+        specifier: workspace:*
+        version: link:../../connectors/datadog
+      '@anvay/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
+      '@anvay/connector-linear':
+        specifier: workspace:*
+        version: link:../../connectors/linear
       '@anvay/types':
         specifier: workspace:*
         version: link:../../packages/types

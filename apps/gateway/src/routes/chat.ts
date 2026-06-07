@@ -187,6 +187,10 @@ export async function chatRoutes(app: FastifyInstance) {
     },
   }, async (request, reply) => {
     const { sub: userId, tenantId, role } = request.user
+    // Validate tenantId is a UUID
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId)) {
+      return reply.code(400).send({ error: 'Invalid tenantId' })
+    }
     const { query, sessionId, model: modelOverride } = request.body
 
     // Resolve provider config — request body takes precedence over env

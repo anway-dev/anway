@@ -205,10 +205,12 @@ export async function* runSession(
 
   for (let step = 0; step < maxSteps; step++) {
     // Estimate tokens for budget check (rough: 1 token ≈ 4 chars + overhead)
-    const estimatedTokens = messages.reduce((acc, m) => {
+    const msgTokens = messages.reduce((acc, m) => {
       const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
       return acc + Math.ceil(content.length / 4)
-    }, 0) + 500
+    }, 0)
+    const toolTokens = toolDefs.reduce((acc, t) => acc + Math.ceil(JSON.stringify(t).length / 4), 0)
+    const estimatedTokens = msgTokens + toolTokens + 500
 
     const tokenResult = await checkTokens({
       estimatedTokens,

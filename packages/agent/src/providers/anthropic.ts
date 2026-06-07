@@ -1,5 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { AppError } from '@anvay/types'
 import type {
   ChatResponse,
   IModelProvider,
@@ -179,5 +178,3 @@ export class AnthropicProvider implements IModelProvider {
     }
   }
 }
-
-export { AppError }

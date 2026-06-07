@@ -66,8 +66,8 @@ const WRITE_SUFFIXES = [
 ]
 
 function isWriteAction(toolName: string): boolean {
-  const action = toolName.includes('.') ? toolName.split('.').slice(1).join('.') : toolName
-  return WRITE_SUFFIXES.some((s) => action.toLowerCase().includes(s))
+  const actionParts = toolName.split(/[._-]/)
+  return WRITE_SUFFIXES.some(s => actionParts.includes(s))
 }
 
 function connectorIdFromTool(toolName: string): string {

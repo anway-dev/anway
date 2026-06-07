@@ -7,6 +7,266 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08 -->
+## Review — 2026-06-08 | Final acceptance — 24504df (wget fix) + overall state
+
+### Commits reviewed since last review (6be7482)
+
+| Commit | Description | Verdict |
+|--------|-------------|---------|
+| `24504df` | fix(infra): gateway healthcheck use curl not wget | LGTM ✓ |
+| `366cf19` | bridge: Codex I-7 status (no code change) | N/A |
+
+### 24504df — gateway healthcheck curl fix | infra/docker-compose.yml
+
+Single line change: `wget -q --spider` → `curl -fs`. Correct. `curl` is retained in the
+runtime image after S-0 purges `wget`. Fix is exact. ✓
+
+---
+
+### Final acceptance review — all 26 COMPLETION-PLAN tasks
+
+Codebase examined end-to-end. Issues below are **new findings** not captured in prior review passes.
+
+---
+
+#### BLOCKING — S-0 | apps/gateway/Dockerfile line 44
+
+**Issue:** Runtime stage missing `package.json` copy. Gateway package.json has `"type": "module"`.
+Without it in the runtime image working directory, Node defaults to CommonJS and fails on the
+first `import` statement in `dist/src/server.js`.
+
+```dockerfile
+# Runtime stage — node:22-slim AS runtime
+WORKDIR /app
+...
+COPY --from=builder /app/deploy/node_modules ./node_modules   # line 44 — present
+# MISSING: COPY --from=builder /app/deploy/package.json ./package.json
+```
+
+`pnpm deploy` places `package.json` + `node_modules` into `/app/deploy/` in the builder stage.
+Only `node_modules` is copied to runtime. Node cannot determine module type → ESM fails.
+
+**Fix:**
+```dockerfile
+COPY --from=builder /app/deploy/node_modules ./node_modules
+COPY --from=builder /app/deploy/package.json ./package.json   # ADD THIS LINE
+```
+
+**Verify:** `docker compose build && docker compose up gateway` → no `ERR_REQUIRE_ESM` error,
+gateway logs "Server listening" on port 4000.
+
+---
+
+#### MEDIUM — S-0 | apps/gateway/Dockerfile line 35
+
+**Issue:** `gh_2.62.0_linux_amd64.deb` hardcoded. ARM hosts (Apple Silicon CI runners, Raspberry Pi)
+will fail with `dpkg: error processing package`.
+
+```dockerfile
+&& wget -qO /tmp/gh.deb https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_amd64.deb \
+```
+
+**Fix:**
+```dockerfile
+&& ARCH=$(dpkg --print-architecture) \
+&& wget -qO /tmp/gh.deb "https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_${ARCH}.deb" \
+```
+
+**Verify:** Build on ARM host — image builds without dpkg error.
+
+---
+
+#### MEDIUM — S-1 | connectors/github/src/connector.ts line 44
+
+**Issue:** `args.push('--since', since)` in `list_commits` case. `gh api repos/{owner}/{repo}/commits`
+accepts `since` as a **URL query parameter**, not a CLI flag. `--since` is valid only for
+`gh run list`, not `gh api`. Result: `gh` ignores the flag silently → returns all commits regardless
+of date range → context bloat + wrong data.
+
+```typescript
+// line 42-45:
+const since = query.since as string ?? ''
+// ...
+if (since) args.push('--since', since)   // WRONG — gh api doesn't accept --since flag
+```
+
+**Fix:**
+```typescript
+case 'list_commits': {
+  const { owner, repo, branch = 'main', since } = query as Record<string, string>
+  const qs = since ? `?sha=${encodeURIComponent(branch)}&since=${encodeURIComponent(since)}` : `?sha=${encodeURIComponent(branch)}`
+  const endpoint = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits${qs}`
+  return JSON.parse(this.runCli('gh', ['api', endpoint]))
+}
+```
+
+**Verify:** Call `list_commits` with a `since` date in the past — result set is filtered to that range.
+
+---
+
+#### MEDIUM — I-4 | apps/gateway/src/routes/automations.ts line 50-53
+
+**Issue:** `$queryRaw` with `SELECT *` returns Postgres snake_case column names (`event_type`,
+`tenant_id`). `TriggerRule` interface uses camelCase (`eventType`, `tenantId`). The cast
+`rules as any[]` hides the mismatch. Inside `TriggerEngine.evaluate()`:
+
+```typescript
+if (rule.eventType !== eventType) continue  // rule.eventType is always undefined → skip all rules
+```
+
+Result: `evaluate()` always returns 0 matched actions. Automations trigger engine is broken at runtime
+despite passing typecheck (any cast).
+
+```typescript
+// automations.ts line 50:
+tx.$queryRaw`SELECT * FROM trigger_rules WHERE tenant_id = ${tenantId}::uuid AND enabled = true`
+// Returns: [{ event_type: 'alert_fired', tenant_id: '...', ... }]  ← snake_case
+
+// engine.ts line 27:
+if (rule.eventType !== eventType) continue  // rule.eventType = undefined → always skips
+```
+
+**Fix — automations.ts line 50:**
+```typescript
+tx.$queryRaw<TriggerRule[]>`
+  SELECT
+    id,
+    tenant_id AS "tenantId",
+    event_type AS "eventType",
+    condition,
+    actions,
+    enabled
+  FROM trigger_rules
+  WHERE tenant_id = ${tenantId}::uuid AND enabled = true
+`
+```
+
+Apply the same fix to the GET `/api/automations/triggers` query at line 13.
+
+**Verify:** POST to `/api/automations/evaluate` with a matching `eventType` → response
+has `matched > 0` and correct actions array.
+
+---
+
+#### LOW — CL-4 | packages/agent/src/providers/ollama.ts line 79
+
+**Issue (carried from prior review — still unresolved):** `formatToolCall` emits
+`content: ''` (empty string) for assistant+tool_calls messages.
+OpenAI-compatible spec requires `content: null` when `tool_calls` is present.
+Some Ollama model deployments reject empty string and return 422.
+
+```typescript
+// line 77-79:
+if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+  return {
+    content: typeof m.content === 'string' ? m.content : '',  // WRONG — should be null
+```
+
+**Fix:**
+```typescript
+content: typeof m.content === 'string' ? m.content : null,
+```
+
+**Verify:** Tool call round-trip with Ollama model — no 422 error, assistant message accepted.
+
+---
+
+#### LOW — M5-T2 | apps/gateway/src/jobs/cron-monitors.ts
+
+**Issue:** All cron monitor classes return hardcoded stubs. `ServiceHealthSweep`,
+`SloBurnCheck`, and `OncallMorningBrief` return fixed `{ status: 'ok' }` — no real
+connector queries. `DeployHealthReport` queries the incidents table (wrong model)
+instead of a deploy model. No scheduler is wired up — these classes are never called.
+
+This is a scope gap: M5-T2 (CronEngine) in TASKS.md requires a durable scheduler
+(Trigger.dev or BullMQ per PRODUCT.md) and real connector reads per job type.
+The current stubs pass typecheck but deliver zero value at runtime.
+
+**Not a COMPLETION-PLAN task** — cron monitors were not in the S-0→CL-5 scope.
+Flag for next milestone work. Not blocking I-7.
+
+---
+
+#### I-7 DOCKER STATUS
+
+Opencode reports Docker daemon unavailable in agent environment. All acceptance criteria
+pass except the Docker smoke test:
+
+- `pnpm typecheck` — 14/14 packages, 0 errors ✓
+- `@anvay/agent test` — 53/53 ✓
+- `anvay-gateway test` — 23/23 ✓
+- `@anvay/web test` — 8/8 ✓
+- `grep execSync connectors/` — 0 results ✓
+- Docker build/up — ❌ daemon not available in agent environment
+
+**The S-0 package.json BLOCKING issue means Docker would fail even with daemon available.**
+Fix S-0 package.json first (above), then run I-7 smoke test locally.
+
+---
+
+### Dimension ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| Feature completeness | 7/10 | All 26 COMPLETION-PLAN tasks coded; CronEngine stubs; Docker untested |
+| Code standards | 8/10 | TypeScript strict, spawnSync used, withTenant applied; `as any[]` in automations hides type bug |
+| Performance | 8/10 | Token estimation, StructuralGraph $queryRawUnsafe batched; TriggerEngine O(n) rules scan acceptable |
+| Security | 9/10 | No execSync, GraphQL variables, withTenant RLS — solid; S-0 arch-specific binary is low risk |
+| Readability | 8/10 | IModelProvider + IKnowledgeGraph interfaces clean; automations `as any[]` is a readability smell |
+| Clarity and comments | 7/10 | Interfaces well-named; TriggerEngine camelCase mismatch not commented — silent bug |
+
+---
+
+### Pending features vs TASKS.md
+
+| Task | Description | Status |
+|------|-------------|--------|
+| M0-T1 | pnpm workspaces + turborepo | ✅ Done |
+| M0-T2 | Docker Compose dev stack | ✅ Done (I-2 curl fix) |
+| M0-T3 | Postgres + Redis health | ✅ Done |
+| M0-T4 | Auth (JWT middleware) | ✅ Done |
+| M0-T5 | Prisma schema + migrations | ✅ Done (B-1) |
+| M0-T6 | Next.js app shell | ✅ Done |
+| M0-T7 | Fastify gateway | ✅ Done |
+| M0-T8 | E2E Docker smoke test | ⛔ BLOCKED — Dockerfile missing package.json (ESM) |
+| M1-T1 | IModelProvider + providers | ✅ Done |
+| M1-T2 | ISessionMemory + RedisSessionMemory | ✅ Done |
+| M1-T3 | PerimeterEngine (deterministic ACL) | ✅ Done |
+| M1-T4 | Orchestrator core (runSession) | ✅ Done |
+| M1-T5 | Gateway /api/chat SSE + web proxy | ✅ Done (I-1) |
+| M1-T6 | Token meter middleware | ✅ Done (CL-5) |
+| M2-T1 | GitHub connector (spawnSync) | ✅ Done — MEDIUM: list_commits --since flag |
+| M2-T2 | Linear connector (GraphQL vars) | ✅ Done |
+| M2-T3 | Datadog connector (HTTP API) | ✅ Done |
+| M2-T4 | ArgoCD connector (spawnSync) | ✅ Done |
+| M2-T5 | Connector registry dispatch | ✅ Done (C-3) |
+| M3-T1 | IncidentService (withTenant RLS) | ✅ Done (B-7) |
+| M3-T2 | Incident routes (404, pagination) | ✅ Done |
+| M3-T3 | SREAgent (real model IDs) | ✅ Done (B-5) |
+| M3-T4 | War Room integration | ✅ Done |
+| M4-T1 | KB schema + UNIQUE constraints | ✅ Done (B-1) |
+| M4-T2 | IKnowledgeGraph + resolveContextByName | ✅ Done (B-2) |
+| M4-T3 | StructuralGraph (Prisma queryFn) | ✅ Done (B-3) |
+| M4-T4 | Graph Builder Agent (FK UUIDs) | ✅ Done (B-4) |
+| M4-T5 | KB context injection in orchestrator | ✅ Done (B-3) |
+| M4-T6 | Service catalog routes + seed | ✅ Done (I-3) |
+| M4-T7 | KB seed bootstrap | ✅ Done (I-3) |
+| M5-T1 | TriggerEngine | ✅ Done — MEDIUM: camelCase mismatch (I-4) |
+| M5-T2 | CronEngine (Trigger.dev / BullMQ) | ⚠️ STUB — classes exist, no real impl, no scheduler wired |
+| M5-T3 | Automations routes | ✅ Done |
+| M5-T4 | Automations integration | ✅ Done |
+
+**Blocking Opus review:**
+1. Fix S-0 `apps/gateway/Dockerfile` — add `COPY --from=builder /app/deploy/package.json ./package.json`
+2. Fix I-4 `apps/gateway/src/routes/automations.ts` — add column aliases to both `$queryRaw` calls
+
+After those two: Opus review and Docker smoke test.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-08 -->
+
 <!-- REVIEW SECTION START — 2026-06-07o -->
 ## Review — 2026-06-07 | CL-1,2,3,5 (47efedc)
 

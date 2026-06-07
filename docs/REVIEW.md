@@ -3423,4 +3423,33 @@ Covers: `NODE_ENV`, `DATABASE_URL`, `JWT_SECRET`, `REDIS_URL`, `PORT`, `HOST`, a
 
 3. **Validated `env` object not threaded:** `chatRoutes` still reads `process.env['ANTHROPIC_API_KEY']` etc. directly. `env` object only used for PORT/HOST. Not a bug but inconsistent.
 
+---
+
+### `c836509` — Next.js `/api/chat` proxies to gateway
+
+`apps/web/app/api/chat/route.ts` — stub replaced with real proxy:
+- `GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'`
+- Forwards request body to `${GATEWAY_URL}/api/chat`
+- Pipes gateway `response.body` (`ReadableStream`) directly to client — correct for SSE passthrough
+- Error handling: non-ok → status+text; no body → 502; catch → 502 JSON
+
+Tests updated to pass `Request` arg to `POST()`.
+
+**BLOCKER — Auth headers not forwarded:**
+Proxy copies `Content-Type` only. `Authorization: Bearer <JWT>` from browser is silently dropped. Gateway uses JWT for tenant/user resolution — without it, every request arrives anonymous. Fix:
+```typescript
+headers: {
+  'Content-Type': 'application/json',
+  ...(request.headers.get('Authorization')
+    ? { Authorization: request.headers.get('Authorization')! }
+    : {}),
+}
+```
+
+**Tests broken in CI:** Tests assert `Content-Type: text/event-stream` + `body contains text_delta`, but route now calls `fetch('http://localhost:4000/api/chat')` → `ECONNREFUSED` in test → catch → 502 JSON. Assertions fail. Fix: mock `fetch` in tests or add a test-mode bypass.
+
+**Minor:**
+- No timeout on proxy fetch — gateway hang blocks indefinitely. Add `AbortSignal.timeout(5 * 60 * 1000)`.
+- `GATEWAY_URL` env var undocumented — add to `apps/web/.env.local` template.
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

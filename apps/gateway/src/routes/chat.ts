@@ -15,6 +15,7 @@ import type {
   ConnectorScope,
   TokenBudget,
   ISessionMemory,
+  SessionMeta,
   ConversationTurn,
   SessionContext,
 } from '@anvay/agent'
@@ -36,18 +37,23 @@ interface ChatBody {
 // Used when REDIS_URL is not configured. Suitable for dev and single-instance deploys.
 export class InMemorySessionMemory implements ISessionMemory {
   private readonly turns = new Map<string, ConversationTurn[]>()
+  private readonly metas = new Map<string, SessionMeta>()
 
   async get(sessionId: SessionId): Promise<SessionContext | null> {
     const stored = this.turns.get(sessionId)
+    const meta = this.metas.get(sessionId)
     if (!stored) return null
-    // Minimal context — runSession only uses `turns` from memory; identity comes from ctx param
     return {
       sessionId,
-      userId: UserId('unknown'),
-      tenantId: TenantId('unknown'),
-      effectiveRole: 'dev' as AgentRole,
+      userId: meta?.userId ?? UserId('unknown'),
+      tenantId: meta?.tenantId ?? TenantId('unknown'),
+      effectiveRole: meta?.effectiveRole ?? ('dev' as AgentRole),
       turns: stored,
     }
+  }
+
+  async initSession(meta: SessionMeta): Promise<void> {
+    this.metas.set(meta.sessionId, meta)
   }
 
   async append(sessionId: SessionId, turn: ConversationTurn): Promise<void> {
@@ -59,6 +65,7 @@ export class InMemorySessionMemory implements ISessionMemory {
 
   async clear(sessionId: SessionId): Promise<void> {
     this.turns.delete(sessionId)
+    this.metas.delete(sessionId)
   }
 }
 
@@ -138,6 +145,11 @@ const prisma = new PrismaClient()
 const inMemoryStore = new InMemorySessionMemory()
 
 export async function chatRoutes(app: FastifyInstance) {
+  // Production requires Redis — in-memory is dev-only
+  if (process.env['NODE_ENV'] === 'production' && !process.env['REDIS_URL']) {
+    throw new Error('Production requires REDIS_URL environment variable')
+  }
+
   // Build session memory — Redis if REDIS_URL configured, in-process fallback otherwise
   let sessionMemory: ISessionMemory = inMemoryStore
 

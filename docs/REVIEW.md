@@ -7,6 +7,49 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07o -->
+## Review — 2026-06-07 | CL-1,2,3,5 (47efedc)
+
+### CL-1 — WRITE_SUFFIXES whole-word | perimeter/engine.ts
+
+`split(/[._-]/)` then `actionParts.includes(s)` — exact segment match. `autocreate` no longer
+false-positive triggers write block. ✓ Tool names are always lowercase so no case issue.
+
+### CL-2 — UUID validation | chat.ts
+
+Inline regex correct — matches UUID v4 format with `i` flag. Works. ✓
+
+**LOW — duplicates existing `isValidUUID` function at bottom of `chat.ts`**
+```typescript
+// Already exists at line ~336:
+function isValidUUID(s: string): boolean {
+  return /^[0-9a-f]{8}-...$/.test(s)
+}
+// CL-2 added inline regex instead of calling it
+```
+Use `if (!isValidUUID(tenantId)) { ... }` instead of the duplicate regex.
+Fix inline when next touching `chat.ts`.
+
+### CL-3 — Remove AppError re-export | anthropic.ts
+
+`import { AppError }` and `export { AppError }` both removed. ✓
+
+### CL-5 — Tool defs in token estimation | orchestrator.ts
+
+`toolTokens = toolDefs.reduce(...)` + `msgTokens + toolTokens + 500`. ✓ Estimation
+now accounts for tool schema tokens which can be substantial with many tools.
+
+**Note — CL-4 (Ollama null content) skipped.**
+`content: ''` → `content: null` for assistant+tool_calls messages in `providers/ollama.ts`
+still pending. Ollama users with tool calls will get malformed message objects. Do CL-4 before
+I-7 if Ollama is used in smoke test; otherwise post-demo fix is acceptable.
+
+No blocking issues. Move to I-1 and I-7. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07o -->
+
 <!-- REVIEW SECTION START — 2026-06-07n -->
 ## Review — 2026-06-07 | I-5/I-6 followup (63e34f7)
 

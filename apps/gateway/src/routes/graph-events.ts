@@ -1,11 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import type { GraphEvent } from '@anvay/agent'
-import { GraphBuilderAgent, StructuralGraph } from '@anvay/agent'
+import { GraphBuilderAgent } from '@anvay/agent'
 import { ProviderFactory } from '@anvay/agent'
 import type { IModelProvider, ProviderConfig } from '@anvay/agent'
-import { prisma } from '../db/client.js'
-import { withTenant } from '../db/prisma.js'
 import type { TenantId } from '@anvay/types'
+import { createKnowledgeGraph } from '../kb/index.js'
 
 const CONNECTOR_API_KEYS = new Set(
   (process.env['CONNECTOR_API_KEYS'] ?? '')
@@ -46,23 +45,10 @@ function providerConfigFromEnv(type: ProviderConfig['type']): ProviderConfig | n
 }
 
 export async function graphEventRoutes(app: FastifyInstance) {
-  // Build graph builder singleton (best-effort — no provider = no LLM extraction)
-  let builder: GraphBuilderAgent | null = null
-  try {
-    const provider = resolveGraphBuilderProvider()
-    if (provider) {
-      const kg = new StructuralGraph(
-        (sql: string, params?: unknown[]) =>
-          withTenant(prisma, '00000000-0000-0000-0000-000000000000' as TenantId, (tx) =>
-            tx.$queryRawUnsafe(sql, ...(params ?? [])),
-          ),
-      )
-      builder = new GraphBuilderAgent(kg, provider, 'claude-haiku-3-5-20251001')
-    } else {
-      app.log.warn('GraphBuilderAgent: no LLM provider configured — extraction disabled')
-    }
-  } catch (err) {
-    app.log.warn({ err }, 'GraphBuilderAgent init failed')
+  // Provider is a module-level singleton (expensive to build — auth clients cached inside)
+  const provider = resolveGraphBuilderProvider()
+  if (!provider) {
+    app.log.warn('GraphBuilderAgent: no LLM provider configured — extraction disabled')
   }
 
   app.post<{ Body: GraphEvent }>('/api/graph/events', {
@@ -86,12 +72,16 @@ export async function graphEventRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const event = request.body
 
-    if (!builder) {
+    if (!provider) {
       return reply.code(503).send({ error: 'GraphBuilderAgent not configured — no LLM provider' })
     }
 
+    // KG is cheap — create per request so withTenant sets correct tenant_id GUC
+    const kg = createKnowledgeGraph(event.tenantId as TenantId)
+    const agent = new GraphBuilderAgent(kg, provider, 'claude-haiku-3-5-20251001', app.log)
+
     try {
-      await builder.handle(event)
+      await agent.handle(event)
       return { ok: true }
     } catch (err) {
       request.log.error({ err, eventType: event.type }, 'GraphBuilderAgent event handling failed')

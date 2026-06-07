@@ -198,7 +198,19 @@ describe('GraphBuilderAgent', () => {
   })
 
   describe('error handling', () => {
-    it('does not throw when kg throws — swallows and logs', async () => {
+    it('does not throw when kg throws — logs and swallows', async () => {
+      const mockLogger = { error: vi.fn(), warn: vi.fn() }
+      const badKg = { ...kg, upsertEntity: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as IKnowledgeGraph
+      const resilient = new GraphBuilderAgent(badKg, model, 'cheap-model', mockLogger)
+
+      await expect(resilient.handle(PR_MERGED_EVENT)).resolves.toBeUndefined()
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error), eventType: 'pr_merged' }),
+        'GraphBuilderAgent event handling failed',
+      )
+    })
+
+    it('works without logger (backwards compatible)', async () => {
       const badKg = { ...kg, upsertEntity: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as IKnowledgeGraph
       const resilient = new GraphBuilderAgent(badKg, model, 'cheap-model')
 

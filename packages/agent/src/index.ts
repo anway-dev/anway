@@ -58,4 +58,5 @@ export { createPostgresQueryFn } from './kb/postgres-query.js'
 
 // Graph Builder Agent
 export type { GraphEvent } from './graph-builder/events.js'
+export type { GraphBuilderLogger } from './graph-builder/builder.js'
 export { GraphBuilderAgent } from './graph-builder/builder.js'

@@ -3,6 +3,11 @@ import type { IModelProvider, Message } from '../interfaces/provider.js'
 import type { IKnowledgeGraph } from '../interfaces/knowledge-graph.js'
 import type { GraphEvent } from './events.js'
 
+export interface GraphBuilderLogger {
+  error(obj: unknown, msg?: string): void
+  warn(obj: unknown, msg?: string): void
+}
+
 /** Cheap-model service name extraction. Returns null if no service found. */
 const EXTRACT_PROMPT =
   'Extract the primary service or software component name from this text. ' +
@@ -14,6 +19,7 @@ export class GraphBuilderAgent {
     private readonly kg: IKnowledgeGraph,
     private readonly model: IModelProvider,
     private readonly cheapModel: string,
+    private readonly logger?: GraphBuilderLogger,
   ) {}
 
   /** Route event to correct handler. Never throws — failures are caught and logged. */
@@ -33,7 +39,7 @@ export class GraphBuilderAgent {
       }
     } catch (err) {
       // Log + swallow — graph builder errors must not break the event pipeline
-      console.error('[GraphBuilderAgent] event handling failed:', err instanceof Error ? err.message : err)
+      this.logger?.error({ err, eventType: event.type }, 'GraphBuilderAgent event handling failed')
     }
   }
 

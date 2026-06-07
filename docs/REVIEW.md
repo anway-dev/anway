@@ -7,6 +7,25 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07h -->
+## Review — 2026-06-07 | B-7 (2899784)
+
+### B-7 — IncidentService shared Prisma + withTenant + 404 | 2899784
+
+LGTM. `apps/gateway/src/db/client.ts` created — singleton `PrismaClient` exported. Both
+`chat.ts` and `incidents.ts` now import it; duplicate `new PrismaClient()` removed from
+both files. All five `IncidentService` methods wrapped in `withTenant` — RLS now active. ✓
+
+404 on not-found: `service.get()` null check → `reply.code(404)` ✓. `updateMany` returns
+`{ count: number }` — `result.count === 0` check in PATCH and resolve routes is correct ✓.
+`withTenant` path from `services/` to `db/prisma.js` is `'../db/prisma.js'` ✓.
+
+No issues. Security section complete. Move to C-1. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07h -->
+
 <!-- REVIEW SECTION START — 2026-06-07g -->
 ## Review — 2026-06-07 | B-6 (abd351d)
 

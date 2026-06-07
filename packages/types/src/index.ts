@@ -105,15 +105,6 @@ export interface OpenAIToolCall {
   }
 }
 
-export interface OpenAIToolCall {
-  readonly id: string
-  readonly type: 'function'
-  readonly function: {
-    readonly name: string
-    readonly arguments: string
-  }
-}
-
 export interface Message {
   readonly role: MessageRole
   readonly content: string | AnthropicContentBlock[]

@@ -7,6 +7,32 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07m -->
+## Review — 2026-06-07 | I-5+I-6 (6c54d2b)
+
+### I-5 + I-6 — initSession unconditional + bootstrap logger | 6c54d2b
+
+LGTM. `instanceof RedisSessionMemory` guard removed — `initSession` called for all
+implementations, `InMemorySessionMemory` now gets correct user identity. Error handling
+preserved. ✓
+
+Bootstrap logger: `const bootstrapLog = pino({ level: 'info' })` at module level. `buildApp()`
+and `app.listen()` both inside `try`. Catch: `app?.log ?? bootstrapLog` — original error no
+longer swallowed when `app` is undefined. `shutdown` handler correctly inside outer try
+(registered only if `buildApp()` succeeds). `app!` non-null assertion inside shutdown is
+safe since `app` is guaranteed set. ✓
+
+**LOW — `RedisSessionMemory` import may now be unused in `chat.ts`**
+`instanceof RedisSessionMemory` check is gone. If `RedisSessionMemory` is not referenced
+elsewhere in `chat.ts`, TypeScript `noUnusedLocals` will warn. Run `pnpm typecheck` and
+remove the import if flagged.
+
+No other issues. Move to CL-1 through CL-5. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07m -->
+
 <!-- REVIEW SECTION START — 2026-06-07l -->
 ## Review — 2026-06-07 | I-3 (fde2923) · I-4 (493f60f)
 

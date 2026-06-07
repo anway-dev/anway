@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { RedisSessionMemory } from './redis-session.js'
 import { SessionId, UserId, TenantId, AgentRole } from '@anvay/types'
 import type { SessionMeta, ConversationTurn } from '../interfaces/memory.js'
-import type { IModelProvider, ChatResponse, InferenceOptions, ToolDefinition } from '../interfaces/provider.js'
+import type { IModelProvider, ChatResponse, InferenceOptions, ToolCall, ToolDefinition } from '../interfaces/provider.js'
 import type { Message } from '@anvay/types'
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,8 @@ class MockSummariseProvider implements IModelProvider {
   readonly lastPrompt: string[] = []
 
   async chat(messages: Message[], _tools: ToolDefinition[], _opts: InferenceOptions): Promise<ChatResponse> {
-    this.lastPrompt.push(messages[messages.length - 1]?.content ?? '')
+    const content = messages[messages.length - 1]?.content ?? ''
+    this.lastPrompt.push(typeof content === 'string' ? content : JSON.stringify(content))
     return {
       content: 'MOCK SUMMARY',
       toolCalls: [],
@@ -71,6 +72,10 @@ class MockSummariseProvider implements IModelProvider {
 
   formatToolResult(_toolCallId: string, result: unknown): Message {
     return { role: 'user', content: JSON.stringify(result) }
+  }
+
+  formatToolCall(_toolCalls: ToolCall[]): Message {
+    return { role: 'assistant', content: '' }
   }
 }
 

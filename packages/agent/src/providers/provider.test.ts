@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { IModelProvider, ChatResponse, StreamChunk, InferenceOptions, ToolDefinition } from '../interfaces/provider.js'
+import type { IModelProvider, ChatResponse, StreamChunk, InferenceOptions, ToolCall, ToolDefinition } from '../interfaces/provider.js'
 import { ProviderFactory } from './factory.js'
 import type { Message } from '@anvay/types'
 
@@ -73,6 +73,10 @@ class MockProvider implements IModelProvider {
 
   formatToolResult(_toolCallId: string, result: unknown): Message {
     return { role: 'user', content: JSON.stringify(result) }
+  }
+
+  formatToolCall(_toolCalls: ToolCall[]): Message {
+    return { role: 'assistant', content: '' }
   }
 }
 

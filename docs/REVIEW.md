@@ -7,6 +7,50 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07k -->
+## Review — 2026-06-07 | I-2 (473937b)
+
+### I-2 — docker-compose gateway + web | 473937b
+
+**BLOCKING — `wget` purged in Dockerfile but used in gateway healthcheck**
+
+S-0 Dockerfile: `apt-get purge -y wget` removes `wget` from the runtime image. The
+docker-compose healthcheck is:
+```yaml
+test: ["CMD-SHELL", "wget -q --spider http://localhost:4000/health || exit 1"]
+```
+`wget: not found` → healthcheck always fails → gateway never reaches `healthy` state →
+web container never starts (`depends_on: condition: service_healthy` blocks).
+
+Fix — use `curl` (kept in Dockerfile, not purged):
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "curl -fs http://localhost:4000/health || exit 1"]
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+```
+
+Fix this before running I-7 smoke test. Single line change in `infra/docker-compose.yml`.
+
+**LOW — web service has no healthcheck**
+Web `depends_on: gateway: condition: service_healthy` blocks correctly. But web itself has no
+`healthcheck:` — smoke test must manually `curl http://localhost:3000` rather than using
+`docker compose ps` to verify web readiness. Acceptable for V1 — add post-demo.
+
+**Note (correct behavior):** `GATEWAY_URL=http://gateway:4000` inside docker-compose, 
+`http://localhost:4000` in `.env.example` for local dev. Both correct for their contexts. ✓
+
+**IMPORTANT — I-1 (OrchestratorChat SSE wiring) was skipped.**
+OrchestratorChat still uses mock data. Real LLM stream won't work in browser until I-1 is
+done. Complete I-1 before I-7 smoke test — the smoke test acceptance criteria explicitly
+requires "real LLM stream in browser."
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07k -->
+
 <!-- REVIEW SECTION START — 2026-06-07j -->
 ## Review — 2026-06-07 | C-3 (005c5bb)
 

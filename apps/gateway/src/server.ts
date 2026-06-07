@@ -5,15 +5,14 @@ startTelemetry()
 
 import { buildApp } from './app.js'
 import { initMetrics } from './metrics.js'
-import pino from 'pino'
-
-const port = Number(process.env.PORT ?? 4000)
-const host = process.env.HOST ?? '0.0.0.0'
-
-// Bootstrap logger used before the Fastify app is ready
-const bootstrapLog = pino({ level: process.env.LOG_LEVEL ?? 'info' })
+import { validateEnv } from './config/env.js'
 
 async function main() {
+  // Validate environment before any other setup
+  const env = validateEnv()
+  const port = env.PORT
+  const host = env.HOST
+
   initMetrics()
 
   const app = await buildApp()
@@ -38,7 +37,7 @@ async function main() {
     await app.listen({ port, host })
     app.log.info({ port, host }, 'gateway server started')
   } catch (err) {
-    bootstrapLog.error({ err }, 'failed to start server')
+    app.log.error({ err }, 'failed to start server')
     process.exit(1)
   }
 }

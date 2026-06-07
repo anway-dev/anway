@@ -7,6 +7,61 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-27 -->
+## Review — 2026-06-27 | No new commits
+
+No opencode commits since `0914a0f`. Working tree has one stale artifact.
+
+### Issues found
+
+**LOW — L-6** `packages/types/src/index.ts:105–114` (working tree only, not committed)  
+Duplicate `OpenAIToolCall` interface declaration. Stale copy from prior Claude Code session
+that wasn't cleaned when `fa7d3fa` committed the canonical version. TypeScript merges identical
+interfaces silently — compiles fine — but dead code confuses readers.  
+**Fix:** Remove lines 105–114 (the second copy). The identical interface already exists at ~line 96.  
+**Verify:** `pnpm typecheck` clean. `grep -c "export interface OpenAIToolCall" packages/types/src/index.ts` returns `1`.
+
+### Still open (Wave 3 of CODEX-PLAN.md)
+| Issue | Severity | File | Notes |
+|-------|----------|------|-------|
+| B-2-R | MEDIUM | `gateway/routes/chat.ts:82` | sessionUsed resets per request |
+| B-5 | MEDIUM | `gateway/routes/chat.ts:144` | connectorScopes hardcodes `['*']` |
+| B-8 | MEDIUM | `gateway/routes/chat.ts` | RLS set_config never called before queries |
+| B-9 | MEDIUM | `prisma/migrations/0001_initial` | audit_events CASCADE bypasses immutability |
+| B-10 | MEDIUM | `apps/gateway/Dockerfile` | workspace symlinks broken in distroless |
+| H-2 | HIGH | `gateway/routes/chat.ts:96` | InMemorySessionMemory fallback loses history across processes |
+| L-4 | LOW | `gateway/__tests__/chat.test.ts:261` | `as never` cast in test |
+| L-5 | LOW | `providers/ollama.ts:mapMessages` | `content: ''` should be `null` for tool_calls assistant messages |
+| L-6 | LOW | `packages/types/src/index.ts:105` | Duplicate OpenAIToolCall (working tree, uncommitted) |
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 8/10 |
+| Code standards | 7/10 |
+| Performance | 6/10 |
+| Security | 5/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+### Pending Features (docs/TASKS.md)
+| Task | Status |
+|------|--------|
+| M0 Foundation | ✓ Complete |
+| M1 Agent harness + all providers | ✓ Complete |
+| M1 Orchestrator runSession | ✓ Complete |
+| M1 RedisSessionMemory | ✓ Complete |
+| M1 TokenBudget middleware | ⚠ Partial — B-2-R open |
+| M1 Audit sink | ⚠ Partial — B-9 open |
+| M1 Gateway chatRoutes + SSE | ✓ Complete |
+| Wave 3 medium fixes | ✗ Not started |
+| M2 Knowledge Graph | ✗ Not started |
+| M2 Bootstrap Agent | ✗ Not started |
+| M3+ Specialist agents | ✗ Not started |
+
+<!-- REVIEW SECTION END — 2026-06-27 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-26 -->
 ## Review — 2026-06-26 | fa7d3fa 7e9f92d 0c7c209 bfd468f 0952f49 0914a0f
 

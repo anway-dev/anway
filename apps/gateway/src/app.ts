@@ -8,6 +8,7 @@ import { metricsRoutes } from './routes/metrics.js'
 import { authRoutes } from './routes/auth.js'
 import { chatRoutes } from './routes/chat.js'
 import { incidentRoutes } from './routes/incidents.js'
+import { automationsRoutes } from './routes/automations.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -42,6 +43,7 @@ export async function buildApp() {
   await app.register(authRoutes)
   await app.register(chatRoutes)
   await app.register(incidentRoutes)
+  await app.register(automationsRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

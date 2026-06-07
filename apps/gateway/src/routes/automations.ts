@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { TriggerEngine } from '../triggers/engine.js'
-import type { TriggerAction } from '../triggers/engine.js'
+import type { TriggerAction, TriggerRule } from '../triggers/engine.js'
 
 export async function automationsRoutes(app: FastifyInstance) {
   app.get('/api/automations/triggers', {
@@ -10,7 +10,18 @@ export async function automationsRoutes(app: FastifyInstance) {
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const rules = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw`SELECT * FROM trigger_rules WHERE tenant_id = ${tenantId}::uuid AND enabled = true`
+      tx.$queryRaw<TriggerRule[]>`
+        SELECT
+          id,
+          tenant_id     AS "tenantId",
+          event_type    AS "eventType",
+          condition,
+          actions,
+          enabled,
+          created_at    AS "createdAt"
+        FROM trigger_rules
+        WHERE tenant_id = ${tenantId}::uuid AND enabled = true
+      `
     )
     return rules
   })
@@ -32,10 +43,17 @@ export async function automationsRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const { eventType, condition, actions } = request.body
     const rule = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw`
+      tx.$queryRaw<TriggerRule[]>`
         INSERT INTO trigger_rules (tenant_id, event_type, condition, actions)
         VALUES (${tenantId}::uuid, ${eventType}, ${JSON.stringify(condition ?? {})}::jsonb, ${JSON.stringify(actions)}::jsonb)
-        RETURNING *
+        RETURNING
+          id,
+          tenant_id     AS "tenantId",
+          event_type    AS "eventType",
+          condition,
+          actions,
+          enabled,
+          created_at    AS "createdAt"
       `
     )
     return rule
@@ -47,10 +65,21 @@ export async function automationsRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const { eventType, payload } = request.body
     const rules = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw`SELECT * FROM trigger_rules WHERE tenant_id = ${tenantId}::uuid AND enabled = true`
+      tx.$queryRaw<TriggerRule[]>`
+        SELECT
+          id,
+          tenant_id     AS "tenantId",
+          event_type    AS "eventType",
+          condition,
+          actions,
+          enabled,
+          created_at    AS "createdAt"
+        FROM trigger_rules
+        WHERE tenant_id = ${tenantId}::uuid AND enabled = true
+      `
     )
     const engine = new TriggerEngine()
-    engine.loadRules(rules as any[])
+    engine.loadRules(rules)
     const actions = await engine.evaluate(eventType, payload)
     return { matched: actions.length, actions }
   })

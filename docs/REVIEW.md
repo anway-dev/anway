@@ -7,6 +7,38 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07j -->
+## Review — 2026-06-07 | C-3 (005c5bb)
+
+### C-3 — Registry real connector dispatch | 005c5bb
+
+LGTM. All four connector workspace deps added to `gateway/package.json` + `pnpm-lock.yaml`.
+`getToolsForTenant` now uses `withTenant` — RLS active for connector load (previous version
+bypassed RLS entirely). Nested `capability_manifest` format parsed correctly via
+`raw?.capabilities?.read`. `DatadogConnector` receives API keys from `process.env`. ✓
+`clearCache` + `getConnectorsForTenant` removed — clean slate.
+
+**LOW — unknown connector type falls through to mock silently**
+`default: return { connector: createMockConnector(...), tools: [] }` — no warning emitted.
+If `pagerduty` is in seed, tools = [], LLM gets no PagerDuty tools, user gets confusing
+"I don't have that tool" response. Add a `console.warn` or `app.log.warn` at minimum.
+Fix inline when next touching `registry.ts`.
+
+**Note — ArgoCD MEDIUM still applies**
+`ArgoCDConnector.runCli('argocd', ...)` → `ENOENT` if `argocd` not in gateway image.
+Decide before I-7 smoke test: remove ArgoCD from seed (easiest) or install CLI in Dockerfile.
+See C-1/C-2 review above.
+
+**Note — connector load is per-request (no cache)**
+Old registry had in-memory cache (now removed). Each chat request does one DB roundtrip for
+`connector.findMany`. Acceptable for V1 — add Redis TTL cache post-launch if load warrants.
+
+Move to I-1. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07j -->
+
 <!-- REVIEW SECTION START — 2026-06-07i -->
 ## Review — 2026-06-07 | C-1+C-2 (d5504a9)
 

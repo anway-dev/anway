@@ -7,6 +7,111 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07 -->
+## Review — 2026-06-07 | S-0 (83bfe2b) · S-1 (1fe3fa3) · S-2 (7fd840a)
+
+### S-0 — `apps/gateway/Dockerfile` | 83bfe2b
+
+**BLOCKING — Missing `package.json` in runtime stage**
+
+Gateway has `"type": "module"` in `package.json`. Node resolves `.js` imports as ESM only when
+`package.json` with `"type":"module"` exists in a parent directory at startup. Runtime stage
+copies `dist/` and `node_modules/` but NOT `package.json`. Node defaults to CJS → `import`
+statements → `SyntaxError: Cannot use import statement in a module`. Server won't start.
+
+Fix — add to runtime stage BEFORE the `ENV NODE_ENV=production` line:
+```dockerfile
+COPY --from=builder /app/apps/gateway/package.json ./package.json
+```
+
+Also copy prisma schema for migrations:
+```dockerfile
+COPY --from=builder /app/apps/gateway/prisma ./prisma
+```
+(already present — confirmed ✓)
+
+**MEDIUM — `amd64` hardcoded in gh download URL**
+
+`gh_2.62.0_linux_amd64.deb` fails on ARM hosts (CI runners, Graviton EC2, Apple Silicon via
+Rosetta emulation breaks on native ARM). Fix — detect arch at build time:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates \
+  && ARCH=$(dpkg --print-architecture) \
+  && wget -qO /tmp/gh.deb "https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_${ARCH}.deb" \
+  && dpkg -i /tmp/gh.deb \
+  && rm /tmp/gh.deb \
+  && apt-get purge -y wget \
+  && rm -rf /var/lib/apt/lists/*
+```
+
+**Fix S-0 issues in the next commit before moving to S-3.**
+
+---
+
+### S-1 — CLI connectors shell injection fix | 1fe3fa3
+
+LGTM overall. `execSync` removed from both `github/src/connector.ts` and `argocd/src/connector.ts`.
+`runCli(binary, args[])` with `spawnSync` is correct — no shell invoked.
+`list_prs` structured params (`state` enum + `limit` number) correct — raw `filters` string removed.
+
+**MEDIUM — `list_commits` — `--since` as CLI flag is invalid for `gh api`**
+
+Current code:
+```typescript
+const args: string[] = ['api', `repos/${repo}/commits?sha=${branch}`]
+if (since) args.push('--since', since)
+stdout = this.runCli('gh', args)
+```
+
+`gh api` does not accept a `--since` flag. It will throw: `unknown flag: --since`. The `since`
+parameter is a GitHub REST API query param — must be embedded in the URL.
+
+Fix:
+```typescript
+const encodedSince = since ? `&since=${encodeURIComponent(since)}` : ''
+const args: string[] = ['api', `repos/${repo}/commits?sha=${branch}${encodedSince}`]
+stdout = this.runCli('gh', args)
+```
+
+Fix in the S-0 bug-fix commit or as a standalone fix before S-3.
+
+**Verification passed:**
+```
+grep -rn "execSync(" connectors/github/src/ connectors/argocd/src/  # 0 results ✓
+```
+`connectors/linear/src/` covered by S-2. ✓
+
+---
+
+### S-2 — Linear HTTP API + GraphQL variables | 7fd840a
+
+LGTM. `execSync` fully removed. All four query types use proper GraphQL variable syntax — no
+string interpolation into query bodies. `LINEAR_API_KEY` (+ `DATADOG_API_KEY/APP_KEY`) added
+to env Zod schema. `health()` error message now includes actual error string.
+
+**LOW — `as string ?? ''` makes nullish fallback unreachable**
+
+```typescript
+{ team: query.team as string ?? '', first: 50 }
+```
+`as string` widens the type to `string`, stripping `undefined`. The `?? ''` never fires.
+TypeScript strict mode may warn; not a runtime bug since the value is already whatever
+it was — the fallback just silently doesn't apply if it was `undefined`.
+
+Fix (all four query switch cases):
+```typescript
+{ team: (query.team as string | undefined) ?? '', first: 50 }
+{ id: (query.issue_id as string | undefined) ?? '' }
+{ team: (query.team as string | undefined) ?? '', first: 50 }
+{ id: (query.project_id as string | undefined) ?? '' }
+```
+Fix inline when next touching `connectors/linear/src/connector.ts`.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07 -->
+
 <!-- REVIEW SECTION START — 2026-06-28 -->
 ## Review — 2026-06-28 | 58da43d (duplicate type — already logged)
 

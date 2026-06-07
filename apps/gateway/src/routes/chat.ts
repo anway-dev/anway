@@ -101,16 +101,35 @@ export function resolveProviderConfig(override?: ClientModelConfig): ProviderCon
   return null
 }
 
-function buildTokenBudget(monthlyLimit = 1_000_000): TokenBudget {
+function buildTokenBudget(monthlyLimit = 1_000_000, sessionUsed = 0): TokenBudget {
   return {
     perQueryHardLimit: 100_000,
     perSessionLimit: 500_000,
     perTenantDailyLimit: Math.ceil(monthlyLimit / 30),
     perTenantMonthlyLimit: monthlyLimit,
-    sessionUsed: 0,
+    sessionUsed,
     tenantDailyUsed: 0,
     tenantMonthlyUsed: 0,
   }
+}
+
+// Module-level session token usage tracking (clears on process restart — acceptable for V1)
+const sessionTokenUsage = new Map<string, { used: number; lastSeen: number }>()
+const SESSION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000
+
+function getSessionUsed(sessionId: string): number {
+  const entry = sessionTokenUsage.get(sessionId)
+  if (!entry) return 0
+  if (Date.now() - entry.lastSeen > SESSION_TOKEN_TTL_MS) {
+    sessionTokenUsage.delete(sessionId)
+    return 0
+  }
+  return entry.used
+}
+
+function recordSessionUsed(sessionId: string, tokens: number): void {
+  const prev = getSessionUsed(sessionId)
+  sessionTokenUsage.set(sessionId, { used: prev + tokens, lastSeen: Date.now() })
 }
 
 // Module-level singletons — one per gateway process
@@ -224,7 +243,8 @@ export async function chatRoutes(app: FastifyInstance) {
     const auditSink = new PostgresAuditSink(prisma, (err) => {
       request.log.error({ err }, 'audit write failed')
     })
-    const budget = buildTokenBudget(dbTenant?.token_budget_monthly)
+    const sessionUsed = getSessionUsed(sessionId)
+    const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed)
 
     const orchestrator = createOrchestrator({
       model: provider,
@@ -244,9 +264,11 @@ export async function chatRoutes(app: FastifyInstance) {
 
     // Agent loop runs in background; client disconnect does NOT cancel it in V1
     void (async () => {
+      let totalTokens = 0
       try {
         for await (const event of runSession(orchestrator, query, sessionCtx)) {
           if (event.type === 'done') {
+            totalTokens = event.inputTokens + event.outputTokens
             void auditSink.append({
               id: crypto.randomUUID(),
               tenantId: TenantId(tenantId),
@@ -256,7 +278,7 @@ export async function chatRoutes(app: FastifyInstance) {
               payload: {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
-                totalTokens: event.inputTokens + event.outputTokens,
+                totalTokens,
               },
               createdAt: new Date(),
             })
@@ -273,6 +295,7 @@ export async function chatRoutes(app: FastifyInstance) {
         }
         stream.push(`data: ${JSON.stringify(errPayload)}\n\n`)
       } finally {
+        if (totalTokens > 0) recordSessionUsed(sessionId, totalTokens)
         stream.push(null)
       }
     })()

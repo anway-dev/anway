@@ -3641,4 +3641,29 @@ All Prisma calls go without `withTenant`. Fix: wrap each in `withTenant(this.pri
 
 **`SREAgent` connector data empty:** `relatedDeploys: []`, `relatedPRs: []` — connectors not wired. Acceptable skeleton for now.
 
+---
+
+### `285b2e7` — TriggerEngine, cron monitors, automations routes
+
+`TriggerEngine` — event matching with exact key-value condition check. REST routes: list/create triggers, evaluate event. Four cron monitor stubs. Clean interfaces.
+
+**SECURITY — tenant isolation missing in `evaluate` and `GET /triggers`:**
+`activeTriggers` is a module-level array shared across all tenants. `POST /automations/evaluate` evaluates rules from all tenants — tenant A's event triggers tenant B's rules. `GET /triggers` returns all triggers for all tenants.
+Fix: filter by `tenantId` before evaluate and in list route.
+
+**`activeTriggers` not persisted — lost on restart:**
+In-process array. Triggers are lost on every deploy/restart. Needs DB persistence for production. Document clearly or add DB-backed store.
+
+**`DeployHealthReport` queries wrong table:**
+```typescript
+const deploys = await this.prisma.incident.findMany(...)
+return { status: 'ok', deploys: deploys.length }
+```
+Queries `incidents` table, labels result as `deploys`. Wrong. Should query a deploys table or connector data.
+
+**Cron monitors not scheduled:**
+Classes exist, nothing schedules them. Per CLAUDE.md, use Trigger.dev or BullMQ — not `setInterval`. Currently dead code.
+
+**`id: \`trigger-${Date.now()}\``** — collision risk on concurrent creates. Use `crypto.randomUUID()`.
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

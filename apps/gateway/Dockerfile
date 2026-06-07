@@ -23,12 +23,26 @@ RUN pnpm build
 WORKDIR /app
 RUN pnpm deploy --filter=anvay-gateway /app/deploy --prod
 
-# Production image — distroless, non-root
-FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
+# Runtime stage — node:22-slim for CLI tools
+FROM node:22-slim AS runtime
 WORKDIR /app
-COPY --from=builder /app/deploy/node_modules ./node_modules
+
+# Install gh CLI (GitHub's official package)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    ca-certificates \
+  && wget -qO /tmp/gh.deb https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_amd64.deb \
+  && dpkg -i /tmp/gh.deb \
+  && rm /tmp/gh.deb \
+  && apt-get purge -y wget \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy built output from builder
 COPY --from=builder /app/apps/gateway/dist ./dist
 COPY --from=builder /app/apps/gateway/prisma ./prisma
+COPY --from=builder /app/deploy/node_modules ./node_modules
 ENV NODE_ENV=production
+USER node
 EXPOSE 4000
-CMD ["dist/src/server.js"]
+CMD ["node", "dist/src/server.js"]

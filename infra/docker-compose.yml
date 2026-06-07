@@ -102,6 +102,53 @@ services:
     networks:
       - anvay-dev
 
+  gateway:
+    build:
+      context: ..
+      dockerfile: apps/gateway/Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-anvay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-anvay_dev}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      DATADOG_API_KEY: ${DATADOG_API_KEY:-}
+      DATADOG_APP_KEY: ${DATADOG_APP_KEY:-}
+      PORT: "4000"
+      HOST: "0.0.0.0"
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:4000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - anvay-dev
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      GATEWAY_URL: http://gateway:4000
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - anvay-dev
+
 volumes:
   postgres_data:
   redis_data:

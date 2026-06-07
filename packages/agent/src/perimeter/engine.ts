@@ -48,15 +48,21 @@ interface ResolvedScope {
   write: string[]
 }
 
+function intersectResourceLists(userList: string[], manifestList: string[]): string[] {
+  // Manifest permits everything — user scope is the ceiling
+  if (manifestList.includes('*')) return userList
+  // User wants everything — manifest scope is the ceiling
+  if (userList.includes('*')) return manifestList
+  // Both specific — keep user resources that the manifest explicitly covers
+  return userList.filter((r) => manifestList.some((m) => matchesResource(m, r)))
+}
+
 // Intersection of user scope and connector manifest capabilities for one connector.
 function intersectScope(userScope: ConnectorScope, manifest: ConnectorManifest): ResolvedScope {
-  const read = userScope.read.filter((r) =>
-    manifest.capabilities.read.some((m) => matchesResource(m, r) || matchesResource(r, m) || r === m || m === '*'),
-  )
-  const write = userScope.write.filter((r) =>
-    manifest.capabilities.write.some((m) => matchesResource(m, r) || matchesResource(r, m) || r === m || m === '*'),
-  )
-  return { read, write }
+  return {
+    read: intersectResourceLists(userScope.read, manifest.capabilities.read),
+    write: intersectResourceLists(userScope.write, manifest.capabilities.write),
+  }
 }
 
 // Write action suffixes — if a tool name contains any of these, it is treated as a write action.

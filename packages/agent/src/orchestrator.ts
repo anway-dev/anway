@@ -171,6 +171,13 @@ export async function* runSession(
             const toName = context.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
             parts.push(`  ${rel.relType}: ${fromName} → ${toName}`)
           }
+          const coords = context.connectorCoordinates
+          if (Object.keys(coords).length > 0) {
+            parts.push('Connector coordinates (use for targeted calls):')
+            for (const [connType, coord] of Object.entries(coords)) {
+              parts.push(`  ${connType}: ${JSON.stringify(coord.resourceIds)}`)
+            }
+          }
           if (context.freshness < 0.5) parts.push('  [STALE] Verify critical facts from live source.')
           graphContext = parts.join('\n')
         }

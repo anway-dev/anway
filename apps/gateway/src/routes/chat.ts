@@ -273,7 +273,8 @@ export async function chatRoutes(app: FastifyInstance) {
     const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed)
 
     const knowledgeGraph: IKnowledgeGraph = new StructuralGraph(
-      (sql: string, params?: unknown[]) => prisma.$queryRawUnsafe(sql, ...(params ?? [])),
+      (sql: string, params?: unknown[]) =>
+        withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
     const orchestrator = createOrchestrator({

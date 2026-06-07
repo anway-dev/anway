@@ -1,5 +1,6 @@
 import type { AuditEvent, IAuditSink } from '@anvay/agent'
 import type { PrismaClient } from '@prisma/client'
+import { withTenant } from '../db/prisma.js'
 
 function isUUID(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
@@ -17,8 +18,8 @@ export class PostgresAuditSink implements IAuditSink {
   ) {}
 
   append(event: AuditEvent): Promise<void> {
-    void this.prisma.auditEvent
-      .create({
+    void withTenant(this.prisma, event.tenantId, (tx) =>
+      tx.auditEvent.create({
         data: {
           id: event.id,
           tenant_id: event.tenantId,
@@ -29,9 +30,9 @@ export class PostgresAuditSink implements IAuditSink {
           created_at: event.createdAt,
         },
       })
-      .catch((err: unknown) => {
-        this.onError?.(err)
-      })
+    ).catch((err: unknown) => {
+      this.onError?.(err)
+    })
     return Promise.resolve()
   }
 }

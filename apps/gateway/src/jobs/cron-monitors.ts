@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { withTenant } from '../db/prisma.js'
 
 export interface CronJob {
   id: string
@@ -24,9 +25,11 @@ export class DeployHealthReport {
   constructor(private readonly prisma: PrismaClient) {}
 
   async run(tenantId: string): Promise<{ status: string; deploys: number }> {
-    const deploys = await this.prisma.incident.findMany({
-      where: { tenant_id: tenantId, created_at: { gte: new Date(Date.now() - 86400000) } },
-    })
+    const deploys = await withTenant(this.prisma, tenantId, (tx) =>
+      tx.incident.findMany({
+        where: { tenant_id: tenantId, created_at: { gte: new Date(Date.now() - 86400000) } },
+      })
+    )
     return { status: 'ok', deploys: deploys.length }
   }
 }

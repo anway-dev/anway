@@ -8,10 +8,11 @@ dated review pass — newest at the top.
 ---
 
 <!-- REVIEW SECTION START — 2026-06-26 -->
-## Review — 2026-06-26 | fa7d3fa 7e9f92d 0c7c209 bfd468f 0952f49
+## Review — 2026-06-26 | fa7d3fa 7e9f92d 0c7c209 bfd468f 0952f49 0914a0f
 
-5 commits from MiniMax via opencode. Wave 1 + Wave 2 of CODEX-PLAN.md complete.
+6 commits from MiniMax via opencode. Wave 1 + Wave 2 of CODEX-PLAN.md complete.
 All BLOCKING and HIGH issues from prior reviews resolved in this batch.
+`0914a0f` — L-3 fixed: `.js` extensions added to `metrics.ts` and `server.ts`. ESM migration now complete across all gateway files.
 
 ### Commits reviewed
 | SHA | Message |

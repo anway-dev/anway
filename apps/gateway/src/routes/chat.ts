@@ -24,6 +24,7 @@ import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { withTenant } from '../db/prisma.js'
+import { getToolsForTenant } from '../connectors/registry.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
 
@@ -268,9 +269,10 @@ export async function chatRoutes(app: FastifyInstance) {
     const sessionUsed = getSessionUsed(sessionId)
     const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed)
 
+    const connectorTools = await getToolsForTenant(prisma, tenantId)
     const orchestrator = createOrchestrator({
       model: provider,
-      tools: [],  // Specialist agent tools injected in M2+
+      tools: connectorTools,
       perimeter,
       auditSink,
       sessionMemory,

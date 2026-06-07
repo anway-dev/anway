@@ -161,3 +161,44 @@ export type StreamEvent =
   | GateRequiredEvent
   | DoneEvent
   | ErrorEvent
+
+// ---------------------------------------------------------------------------
+// Connector
+// ---------------------------------------------------------------------------
+
+export interface CapabilityManifest {
+  readonly read?: string[]
+  readonly write?: string[]
+}
+
+export interface ConnectorResult {
+  readonly source: string
+  readonly fetched_at: Date
+  readonly ttl: number
+  readonly freshness_score: number
+  readonly data: unknown
+}
+
+export interface HealthStatus {
+  readonly status: 'healthy' | 'degraded' | 'unhealthy'
+  readonly message?: string
+  readonly lastChecked: Date
+}
+
+export interface ConnectorQuery {
+  readonly type: string
+  readonly [key: string]: unknown
+}
+
+export interface ConnectorAction {
+  readonly type: string
+  readonly [key: string]: unknown
+}
+
+export interface IConnector {
+  readonly id: string
+  readonly capabilities: CapabilityManifest
+  read(query: ConnectorQuery): Promise<ConnectorResult>
+  write(action: ConnectorAction): Promise<ConnectorResult>
+  health(): Promise<HealthStatus>
+}

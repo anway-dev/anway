@@ -24,6 +24,7 @@ export const ErrorCode = {
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',
   RATE_LIMITED: 'RATE_LIMITED',
   TOKEN_LIMIT_EXCEEDED: 'TOKEN_LIMIT_EXCEEDED',
+  INTENT_CLASSIFICATION_FAILED: 'INTENT_CLASSIFICATION_FAILED',
 } as const
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
@@ -78,11 +79,37 @@ export type ConnectorMode = (typeof ConnectorMode)[keyof typeof ConnectorMode]
 // Message
 // ---------------------------------------------------------------------------
 
-export type MessageRole = 'user' | 'assistant' | 'system'
+export type AnthropicToolUseBlock = {
+  readonly type: 'tool_use'
+  readonly id: string
+  readonly name: string
+  readonly input: Record<string, unknown>
+}
+
+export type AnthropicToolResultBlock = {
+  readonly type: 'tool_result'
+  readonly tool_use_id: string
+  readonly content: string
+}
+
+export type AnthropicContentBlock = AnthropicToolUseBlock | AnthropicToolResultBlock
+
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+
+export interface OpenAIToolCall {
+  readonly id: string
+  readonly type: 'function'
+  readonly function: {
+    readonly name: string
+    readonly arguments: string
+  }
+}
 
 export interface Message {
   readonly role: MessageRole
-  readonly content: string
+  readonly content: string | AnthropicContentBlock[]
+  readonly tool_call_id?: string
+  readonly tool_calls?: readonly OpenAIToolCall[]
 }
 
 // ---------------------------------------------------------------------------

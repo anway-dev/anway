@@ -92,7 +92,7 @@ export class StructuralGraph implements IKnowledgeGraph {
         if (!visited.has(otherId)) nextSet.add(otherId)
       }
       for (const eid of toVisit) visited.add(eid)
-      toVisit = [...nextSet]
+      toVisit = [...nextSet].filter(eid => !visited.has(eid))
       currentDepth++
       if (toVisit.length > 0) {
         const entities = await this.getEntitiesBatch(toVisit, tenantId)

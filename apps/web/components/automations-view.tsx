@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AUTOMATION_TRIGGERS, CRON_MONITORS, TriggerStatus, CronStatus, CronResultStatus } from "@/lib/mock";
 
 const TRIGGER_STATUS_COLOR: Record<TriggerStatus, string> = {
@@ -59,6 +59,22 @@ type Tab = "triggers" | "crons";
 
 export function AutomationsView() {
   const [tab, setTab] = useState<Tab>("triggers");
+  const [triggers, setTriggers] = useState<typeof AUTOMATION_TRIGGERS>([]);
+  const [monitors, setMonitors] = useState<typeof CRON_MONITORS>([]);
+
+  useEffect(() => {
+    fetch('/api/automations/triggers').then(r => r.json()).then(setTriggers).catch(() => setTriggers([]))
+    fetch('/api/automations/monitors').then(r => r.json()).then(setMonitors).catch(() => setMonitors([]))
+  }, [])
+
+  async function toggleTrigger(id: string, enabled: boolean) {
+    await fetch(`/api/automations/triggers/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+    setTriggers(prev => prev.map((t: any) => t.id === id ? { ...t, enabled } : t))
+  }
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", overflow: "hidden" }}>
@@ -72,8 +88,8 @@ export function AutomationsView() {
       {/* Tabs */}
       <div style={{ display: "flex", gap: "0", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         {([
-          { id: "triggers", label: "Event Triggers", count: AUTOMATION_TRIGGERS.filter(t => t.status === "active").length },
-          { id: "crons",    label: "Cron Monitors",  count: CRON_MONITORS.filter(c => c.status === "active").length },
+          { id: "triggers", label: "Event Triggers", count: triggers.filter((t: any) => t.enabled).length },
+          { id: "crons",    label: "Cron Monitors",  count: monitors.filter((c: any) => c.enabled).length },
         ] as { id: Tab; label: string; count: number }[]).map(t => (
           <button
             key={t.id}

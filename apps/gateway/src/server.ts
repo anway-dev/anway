@@ -7,6 +7,7 @@ import { buildApp } from './app.js'
 import { initMetrics } from './metrics.js'
 import { validateEnv } from './config/env.js'
 import pino from 'pino'
+import { startTriggerSubscriber } from './triggers/subscriber.js'
 
 const bootstrapLog = pino({ level: 'info' })
 
@@ -39,6 +40,12 @@ async function main() {
 
     await app.listen({ port, host })
     app.log.info({ port, host }, 'gateway server started')
+    // Start trigger subscriber (non-blocking — fails gracefully without Redis)
+    try {
+      await startTriggerSubscriber(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+    } catch (err) {
+      app.log.warn({ err }, 'Trigger subscriber not started — Redis may be unavailable')
+    }
   } catch (err) {
     const log = app?.log ?? bootstrapLog
     log.error({ err }, 'failed to start server')

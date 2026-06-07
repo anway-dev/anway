@@ -83,4 +83,27 @@ export async function automationsRoutes(app: FastifyInstance) {
     const actions = await engine.evaluate(eventType, payload)
     return { matched: actions.length, actions }
   })
+
+  app.patch<{ Params: { id: string }; Body: Partial<{ enabled: boolean; condition: Record<string, unknown>; actions: TriggerAction[] }> }>('/api/automations/triggers/:id', {
+    preHandler: [app.authenticate],
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    const { enabled, condition, actions } = request.body
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`UPDATE trigger_rules SET enabled = ${enabled} WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid`
+    )
+    return { updated: true }
+  })
+
+  app.delete<{ Params: { id: string } }>('/api/automations/triggers/:id', {
+    preHandler: [app.authenticate],
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`DELETE FROM trigger_rules WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid`
+    )
+    return { deleted: true }
+  })
 }

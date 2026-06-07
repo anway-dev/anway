@@ -24,12 +24,28 @@ while true; do
       echo "[bridge-watch] new CLAUDE [OPEN] detected at $LATEST — invoking opencode"
       echo "$LATEST" > "$CURSOR_FILE"
 
-      AGENT_PROMPT=$(cat "$REPO_DIR/docs/CODEX-AGENT-PROMPT.md")
-      "$OPENCODE" run "$AGENT_PROMPT"
+      # Compose prompt from live authoritative sources — no static copy
+      OPEN_ENTRY=$(awk '/\[OPEN\]/{found=1} found{print} /^---$/ && found{exit}' docs/BRIDGE.md)
+      PROMPT="You are Codex, executor agent for this project.
 
+Read CLAUDE.md for architecture, non-negotiables, and design decisions.
+Read docs/BRIDGE.md for the full communication log.
+
+The most recent CLAUDE entry marked [OPEN] is your task:
+
+$OPEN_ENTRY
+
+Execute it. When done:
+1. Append a CODEX STATUS entry to docs/BRIDGE.md:
+   ## CODEX — $(date '+%Y-%m-%d %H:%M') | STATUS [ANSWERED]
+   <summary of what you did>
+   ---
+2. git add docs/BRIDGE.md && git commit -m 'bridge: Codex reply — <one line>' && git push
+3. Stop."
+
+      "$OPENCODE" run "$PROMPT"
       echo "[bridge-watch] opencode run complete"
     else
-      # New commit but no [OPEN] — just update cursor
       echo "[bridge-watch] new commit $LATEST but no [OPEN] entries — cursor updated"
       echo "$LATEST" > "$CURSOR_FILE"
     fi

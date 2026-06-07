@@ -38,6 +38,25 @@ export class StructuralGraph implements IKnowledgeGraph {
     return rows[0] ?? null
   }
 
+  private async getRelationshipsBatch(entityIds: string[], tenantId: TenantId): Promise<Relationship[]> {
+    if (entityIds.length === 0) return []
+    return this.query<Relationship>(
+      `SELECT id, tenant_id AS "tenantId", from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId", metadata
+       FROM relationships
+       WHERE (from_entity_id = ANY($1::uuid[]) OR to_entity_id = ANY($1::uuid[]))
+         AND tenant_id = $2`,
+      [entityIds, tenantId],
+    )
+  }
+
+  private async getEntitiesBatch(ids: string[], tenantId: TenantId): Promise<Entity[]> {
+    if (ids.length === 0) return []
+    return this.query<Entity>(
+      'SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities WHERE id = ANY($1::uuid[]) AND tenant_id = $2',
+      [ids, tenantId],
+    )
+  }
+
   async getRelationships(entityId: string, tenantId: TenantId, relType?: string): Promise<Relationship[]> {
     let sql = `SELECT id, tenant_id AS "tenantId", from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId", metadata
                FROM relationships WHERE (from_entity_id = $1 OR to_entity_id = $1) AND tenant_id = $2`
@@ -57,31 +76,27 @@ export class StructuralGraph implements IKnowledgeGraph {
     const entity = await this.getEntity(entityId, tenantId)
     if (!entity) throw new Error(`Entity ${entityId} not found`)
 
-    const visited = new Set<string>()
+    const visited = new Set<string>([entityId])
     const relatedEntitiesMap = new Map<string, Entity>()
     const allRelationships: Relationship[] = []
     let currentDepth = 0
     let toVisit = [entityId]
 
     while (toVisit.length > 0 && currentDepth < depth) {
-      const nextBatch: string[] = []
-      for (const eid of toVisit) {
-        if (visited.has(eid)) continue
-        visited.add(eid)
-        const rels = await this.getRelationships(eid, tenantId)
-        for (const rel of rels) {
-          allRelationships.push(rel)
-          const otherId = rel.fromEntityId === eid ? rel.toEntityId : rel.fromEntityId
-          if (!visited.has(otherId)) nextBatch.push(otherId)
-        }
+      const rels = await this.getRelationshipsBatch(toVisit, tenantId)
+      const nextSet = new Set<string>()
+      for (const rel of rels) {
+        allRelationships.push(rel)
+        const otherId = rel.fromEntityId === toVisit.find(eid => eid === rel.fromEntityId || eid === rel.toEntityId)
+          ? rel.toEntityId : rel.fromEntityId
+        if (!visited.has(otherId)) nextSet.add(otherId)
       }
-      toVisit = nextBatch
+      for (const eid of toVisit) visited.add(eid)
+      toVisit = [...nextSet]
       currentDepth++
-      for (const eid of toVisit) {
-        if (!relatedEntitiesMap.has(eid)) {
-          const e = await this.getEntity(eid, tenantId)
-          if (e) relatedEntitiesMap.set(eid, e)
-        }
+      if (toVisit.length > 0) {
+        const entities = await this.getEntitiesBatch(toVisit, tenantId)
+        for (const e of entities) relatedEntitiesMap.set(e.id, e)
       }
     }
 

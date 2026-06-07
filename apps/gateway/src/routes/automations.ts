@@ -90,8 +90,16 @@ export async function automationsRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
     const { enabled, condition, actions } = request.body
+    const sets: string[] = []
+    const params: unknown[] = []
+    let idx = 1
+    if (enabled !== undefined) { sets.push(`enabled = $${idx++}`); params.push(enabled) }
+    if (condition !== undefined) { sets.push(`condition = $${idx++}::jsonb`); params.push(JSON.stringify(condition)) }
+    if (actions !== undefined) { sets.push(`actions = $${idx++}::jsonb`); params.push(JSON.stringify(actions)) }
+    if (sets.length === 0) return { updated: false }
+    params.push(id, tenantId)
     await withTenant(prisma, tenantId, (tx) =>
-      tx.$executeRaw`UPDATE trigger_rules SET enabled = ${enabled} WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid`
+      tx.$executeRawUnsafe(`UPDATE trigger_rules SET ${sets.join(', ')} WHERE id = $${idx}::uuid AND tenant_id = $${idx + 1}::uuid`, ...params)
     )
     return { updated: true }
   })

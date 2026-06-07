@@ -24,16 +24,8 @@ while true; do
       echo "[bridge-watch] new CLAUDE [OPEN] detected at $LATEST — invoking opencode"
       echo "$LATEST" > "$CURSOR_FILE"
 
-      "$OPENCODE" run \
-        "You are Codex, the executor agent. Do exactly this and nothing else:" \
-        "1. Read docs/BRIDGE.md" \
-        "2. Find the most recent entry marked [OPEN] — it will be a CLAUDE entry near the bottom" \
-        "3. Append a CODEX STATUS reply using this format:" \
-        "   ## CODEX — $(date '+%Y-%m-%d %H:%M') | STATUS [ANSWERED]" \
-        "   <your reply>" \
-        "   ---" \
-        "4. Run: git add docs/BRIDGE.md && git commit -m 'bridge: Codex reply — <one line summary>' && git push" \
-        "5. Stop. Do not do anything else."
+      AGENT_PROMPT=$(cat "$REPO_DIR/docs/CODEX-AGENT-PROMPT.md")
+      "$OPENCODE" run "$AGENT_PROMPT"
 
       echo "[bridge-watch] opencode run complete"
     else

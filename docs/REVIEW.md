@@ -7,6 +7,86 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07l -->
+## Review — 2026-06-07 | I-3 (fde2923) · I-4 (493f60f)
+
+### I-3 — Seed: manifest format + demo connectors + KB entities | fde2923
+
+LGTM. `SET LOCAL app.tenant_id` correctly removed (no-op outside transaction). All four
+connectors use nested manifest format `{ capabilities: { read: [...], write: [] } }`. ✓
+`createMany` with `skipDuplicates: true` idempotent. KB entities use `$executeRaw` tagged
+template (Prisma-safe parameterization). `ON CONFLICT (tenant_id, type, name) DO NOTHING`
+requires migration 0004 to have run first — ordering correct. ✓
+
+**MEDIUM — ArgoCD still in seed despite no `argocd` CLI in gateway image**
+ArgoCD seeded → C-3 registry dispatches to `ArgoCDConnector` → `runCli('argocd', ...)` →
+`ENOENT` whenever LLM invokes an ArgoCD tool. Not immediate crash (tool only called on
+LLM decision), but demo is brittle. Recommend removing ArgoCD from seed until CLI or HTTP
+API is wired:
+
+```typescript
+// Remove this line from seed:
+{ tenant_id: tenant.id, name: 'ArgoCD (Demo)', type: 'argocd', ... },
+```
+
+**LOW — PagerDuty in seed but no connector exists**
+`type: 'pagerduty'` → `default` case → mock connector → `tools: []` → LLM gets no
+PagerDuty capability. Harmless — no ENOENT, just silent no-op. OK for V1.
+
+No other issues. Move to I-4. ✓
+
+---
+
+### I-4 — Trigger rules DB persistence + migration 0005 | 493f60f
+
+Migration correct — `trigger_rules` table, RLS enabled, policy, index. ✓
+`activeTriggers[]` in-process array fully removed. `withTenant` wraps all DB calls. ✓
+
+**MEDIUM — `$queryRaw` returns snake_case columns; `TriggerEngine.evaluate` expects camelCase**
+
+`trigger_rules` DB columns: `event_type`, `tenant_id`, `created_at`.
+`$queryRaw` returns rows as-is from Postgres — snake_case.
+`TriggerEngine.loadRules(rules as any[])` receives snake_case objects.
+If `TriggerEngine.evaluate(eventType, payload)` matches via `rule.eventType` — it gets
+`undefined` (field is `rule.event_type`). No trigger ever matches → evaluate always returns
+`{ matched: 0, actions: [] }`. Silent bug — no crash, just broken automation.
+
+Verify `TriggerEngine.evaluate` implementation. If it accesses `rule.eventType`, fix by
+aliasing in the query:
+```typescript
+tx.$queryRaw`SELECT id, event_type AS "eventType", tenant_id AS "tenantId",
+  condition, actions, enabled FROM trigger_rules
+  WHERE tenant_id = ${tenantId}::uuid AND enabled = true`
+```
+
+**LOW — POST trigger: `$queryRaw` INSERT RETURNING returns array, not single object**
+
+```typescript
+const rule = await withTenant(prisma, tenantId, (tx) =>
+  tx.$queryRaw`INSERT INTO trigger_rules (...) RETURNING *`
+)
+return rule  // ← array [{...}], not single object
+```
+
+Old code returned a single `TriggerRule` — clients may break expecting `{ id, eventType, ... }`.
+Fix: `return (rule as unknown[])[0]`
+
+**LOW — RLS policy missing `WITH CHECK` for INSERT**
+
+```sql
+CREATE POLICY ... USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
+```
+
+`USING` applies to SELECT/UPDATE/DELETE. INSERT needs `WITH CHECK`. Without it, RLS doesn't
+restrict inserts by policy (explicit `tenant_id = ${tenantId}::uuid` in VALUES still provides
+isolation). Add `WITH CHECK` for defense-in-depth in next migration or patch.
+
+Move to I-5. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07l -->
+
 <!-- REVIEW SECTION START — 2026-06-07k -->
 ## Review — 2026-06-07 | I-2 (473937b)
 

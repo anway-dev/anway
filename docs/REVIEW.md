@@ -3371,4 +3371,28 @@ await sessionMemory.initSession({ sessionId: ..., userId: ..., tenantId: ..., ef
 | L-3 | `packages/agent/src/gate.ts` | `createGate` implementation unknown — verify or mark TODO |
 | L-5 | `packages/agent/src/providers/ollama.ts` | `content: ''` should be `null` for assistant+tool_calls |
 
+---
+
+### `722fe28` — AbortSignal on client disconnect
+
+`InferenceOptions.signal?: AbortSignal` added. Propagated through:
+- `runSession(orchestrator, input, ctx, signal?)` — new optional param
+- `model.chat()` (intent classification) — signal passed
+- `model.stream()` (main loop) — signal passed
+- All three providers: Anthropic (`messages.create`/`messages.stream`), OpenAI (`chat.completions.create`), Ollama (`fetch`) — all pass `signal` to underlying SDK/fetch call
+
+Gateway wiring: `AbortController` created per request, `request.raw.on('close', () => abortController.abort())` fires on disconnect.
+
+**Observations:**
+
+1. `request.raw.on('close', ...)` fires on both client disconnect AND normal completion. On normal completion, the generator is already exhausted and `stream.push(null)` already called — abort is a no-op. No double-close risk.
+
+2. `AbortError` propagates up to the catch block in the void IIFE. Current catch handler emits an SSE error event to the client — but on disconnect the client is gone, so the write is silently dropped. Benign.
+
+3. Tool execution (`execTool.run(toolCall.args)`) does not receive the signal — a blocked tool call will run to completion after disconnect. Acceptable for V1 where tools are expected to be short-lived.
+
+4. Only three providers exist (anthropic, openai, ollama) — all updated. When Groq/Mistral are added, remember to wire `opts.signal`.
+
+**L-2 RESOLVED.**
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

@@ -82,6 +82,7 @@ export async function* runSession(
   orchestrator: Orchestrator,
   input: string,
   ctx: SessionContext,
+  signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const { config } = orchestrator
   const { model, tools, perimeter, auditSink, sessionMemory } = config
@@ -128,6 +129,7 @@ export async function* runSession(
       model: cheapModel,
       maxTokens: 100,
       temperature: 0,
+      ...(signal ? { signal } : {}),
     })
     const parsed = JSON.parse(intentResp.content) as { intent?: unknown }
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
@@ -191,7 +193,7 @@ export async function* runSession(
     const collectedToolCalls: ToolCall[] = []
     let hasToolCalls = false
 
-    for await (const chunk of model.stream(messages, toolDefs, { model: mainModel })) {
+    for await (const chunk of model.stream(messages, toolDefs, { model: mainModel, ...(signal ? { signal } : {}) })) {
       if (chunk.type === 'text_delta') {
         accumulatedText += chunk.content
         yield chunk

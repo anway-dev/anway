@@ -60,7 +60,7 @@ export class AnthropicProvider implements IModelProvider {
       ...(opts.stopSequences && opts.stopSequences.length > 0 ? { stop_sequences: opts.stopSequences } : {}),
     }
 
-    const response = await this.client.messages.create(params)
+    const response = await this.client.messages.create(params, { signal: opts.signal })
 
     const content = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
@@ -104,7 +104,7 @@ export class AnthropicProvider implements IModelProvider {
     let outputTokens = 0
 
     try {
-      const stream = this.client.messages.stream(params)
+      const stream = this.client.messages.stream(params, { signal: opts.signal })
 
       for await (const event of stream) {
         if (event.type === 'content_block_start') {

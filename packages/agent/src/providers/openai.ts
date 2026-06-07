@@ -66,7 +66,7 @@ export class OpenAIProvider implements IModelProvider {
       ...(opts.stopSequences && opts.stopSequences.length > 0 ? { stop: opts.stopSequences } : {}),
     }
 
-    const response = await this.client.chat.completions.create(params)
+    const response = await this.client.chat.completions.create(params, { signal: opts.signal })
     const choice = response.choices[0]
 
     const content = choice?.message.content ?? ''
@@ -113,7 +113,7 @@ export class OpenAIProvider implements IModelProvider {
     let outputTokens = 0
 
     try {
-      const stream = await this.client.chat.completions.create(params)
+      const stream = await this.client.chat.completions.create(params, { signal: opts.signal })
 
       for await (const chunk of stream) {
         const choice = chunk.choices[0]

@@ -127,6 +127,7 @@ export class OllamaProvider implements IModelProvider {
         ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {}),
       },
       body: JSON.stringify(body),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     })
 
     if (!response.ok) {
@@ -181,6 +182,7 @@ export class OllamaProvider implements IModelProvider {
           ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {}),
         },
         body: JSON.stringify(body),
+        ...(opts.signal ? { signal: opts.signal } : {}),
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Ollama connection failed'

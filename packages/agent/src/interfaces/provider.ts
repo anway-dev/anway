@@ -24,6 +24,7 @@ export interface InferenceOptions {
   temperature?: number
   maxTokens?: number
   stopSequences?: string[]
+  signal?: AbortSignal
 }
 
 // Non-streaming response shape

@@ -284,11 +284,15 @@ export async function chatRoutes(app: FastifyInstance) {
     reply.header('Connection', 'keep-alive')
     reply.header('X-Accel-Buffering', 'no')
 
-    // Agent loop runs in background; client disconnect does NOT cancel it in V1
+    // Create abort controller for client disconnect
+    const abortController = new AbortController()
+    request.raw.on('close', () => abortController.abort())
+
+    // Agent loop runs in background; aborted on client disconnect
     void (async () => {
       let totalTokens = 0
       try {
-        for await (const event of runSession(orchestrator, query, sessionCtx)) {
+        for await (const event of runSession(orchestrator, query, sessionCtx, abortController.signal)) {
           if (event.type === 'done') {
             totalTokens = event.inputTokens + event.outputTokens
             void auditSink.append({

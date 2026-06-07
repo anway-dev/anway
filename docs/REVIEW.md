@@ -3395,4 +3395,32 @@ Gateway wiring: `AbortController` created per request, `request.raw.on('close', 
 
 **L-2 RESOLVED.**
 
+---
+
+## Review — 2026-06-07 (continued)
+
+**Commit:** `19b61ac`
+**Author:** DeepSeek V4 Flash (via Codex)
+
+### `19b61ac` — Boot-time env validation with Zod
+
+New `apps/gateway/src/config/env.ts` — Zod v4 schema, `validateEnv()` called first in `server.ts` before `initMetrics()` or `buildApp()`. `PORT`/`HOST` now come from typed schema defaults.
+
+Covers: `NODE_ENV`, `DATABASE_URL`, `JWT_SECRET`, `REDIS_URL`, `PORT`, `HOST`, all provider keys.
+
+**Issues:**
+
+1. **`bootstrapLog` removal creates gap:** catch block now uses `app.log.error`. If `buildApp()` throws, `app` is undefined → `app.log.error` throws `TypeError` → original error swallowed. Fix:
+   ```typescript
+   } catch (err) {
+     const logger = app?.log ?? pino({ level: 'info' })
+     logger.error({ err }, 'failed to start server')
+     process.exit(1)
+   }
+   ```
+
+2. **`REDIS_URL` production guard duplicated:** `chatRoutes` still has a runtime check for `NODE_ENV === 'production' && !REDIS_URL`. Zod schema marks `REDIS_URL` optional — doesn't enforce production constraint. Move to `.superRefine()` in schema and remove route-level guard, or leave both. Current: redundant.
+
+3. **Validated `env` object not threaded:** `chatRoutes` still reads `process.env['ANTHROPIC_API_KEY']` etc. directly. `env` object only used for PORT/HOST. Not a bug but inconsistent.
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

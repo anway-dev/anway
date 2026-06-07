@@ -1,10 +1,10 @@
 // Telemetry must be started before other imports so auto-instrumentation patches modules at load time
-import { startTelemetry, shutdownTelemetry } from './telemetry'
+import { startTelemetry, shutdownTelemetry } from './telemetry.js'
 
 startTelemetry()
 
-import { buildApp } from './app'
-import { initMetrics } from './metrics'
+import { buildApp } from './app.js'
+import { initMetrics } from './metrics.js'
 import pino from 'pino'
 
 const port = Number(process.env.PORT ?? 4000)

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { getMetricsText, getMetricsContentType } from '../metrics'
+import { getMetricsText, getMetricsContentType } from '../metrics.js'
 
 export async function metricsRoutes(app: FastifyInstance) {
   app.get('/metrics', async (_request, reply) => {

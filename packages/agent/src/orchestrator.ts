@@ -2,6 +2,7 @@ import type { ErrorCode, Message, StreamEvent } from '@anvay/types'
 import type { IAuditSink } from './interfaces/audit.js'
 import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
 import type { IModelProvider, ToolCall, ToolDefinition } from './interfaces/provider.js'
+import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
 import { createPerimeterMiddleware } from './middleware/perimeter.js'
 import type { PerimeterCtx } from './middleware/perimeter.js'
 import { createTokenMeterMiddleware } from './middleware/token-meter.js'
@@ -28,6 +29,8 @@ export interface OrchestratorConfig {
   budget?: TokenBudget
   /** Maximum tool-call round-trips per runSession call (default: 10) */
   maxSteps?: number
+  /** Knowledge Graph for context injection */
+  knowledgeGraph?: IKnowledgeGraph
 }
 
 /** Opaque handle returned by createOrchestrator. Contains no Mastra types. */
@@ -148,6 +151,32 @@ export async function* runSession(
     createdAt: new Date(),
   })
 
+  // Try to inject knowledge graph context
+  let graphContext = ''
+  if (config.knowledgeGraph) {
+    try {
+      const entityResp = await model.chat([
+        { role: 'system', content: 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.' },
+        { role: 'user', content: input },
+      ], [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+      const entityName = entityResp.content.trim()
+      if (entityName) {
+        const context = await config.knowledgeGraph.resolveContext(entityName, ctx.tenantId, 2)
+        if (context && context.primaryEntity) {
+          const parts = [`Graph context for "${context.primaryEntity.name}":`]
+          if (context.primaryEntity) parts.push(`  Primary: ${context.primaryEntity.type} / ${context.primaryEntity.name}`)
+          for (const rel of context.relationships.slice(0, 10)) {
+            parts.push(`  ${rel.relType}: ${rel.fromEntityId} → ${rel.toEntityId}`)
+          }
+          if (context.freshness < 0.5) parts.push('  [STALE] Some data may be outdated — verify from live source')
+          graphContext = parts.join('\n')
+        }
+      }
+    } catch {
+      // Non-blocking — proceed without graph context
+    }
+  }
+
   // Tool definitions for the LLM (run function stripped)
   const toolDefs: ToolDefinition[] = tools.map(({ name, description, parameters }) => ({
     name,
@@ -156,7 +185,7 @@ export async function* runSession(
   }))
 
   // Build message list from history + current turn
-  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.`
+  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${graphContext ? '\n\n' + graphContext : ''}`
   const messages: Message[] = [
     { role: 'system', content: systemPrompt },
     ...history.map(

@@ -3425,6 +3425,31 @@ Covers: `NODE_ENV`, `DATABASE_URL`, `JWT_SECRET`, `REDIS_URL`, `PORT`, `HOST`, a
 
 ---
 
+### `a6c0231` — IConnector types + connector registry
+
+New types in `@anvay/types`: `IConnector`, `CapabilityManifest`, `ConnectorResult`, `ConnectorQuery`, `ConnectorAction`, `HealthStatus`. Clean interface contracts.
+
+`apps/gateway/src/connectors/registry.ts` — loads connectors from DB per tenant, caches in module-level Map, converts to `ExecutableTool[]` via `getToolsForTenant()`. Orchestrator now receives real tools instead of `[]`.
+
+**SECURITY — `loadConnectors` missing `withTenant`:**
+Direct `prisma.connector.findMany()` without `set_config('app.tenant_id', ...)`. If RLS is enforced on `connectors` table, this leaks all tenants' connectors. Fix:
+```typescript
+return withTenant(prisma, tenantId, (tx) =>
+  tx.connector.findMany({ where: { tenant_id: tenantId } })
+)
+```
+
+**Type mismatch — `CapabilityManifest` vs DB shape:**
+New type is `{ read?: string[]; write?: string[] }`. But DB `capability_manifest` column stores `{ read: { scope: [...] }, write: {} }` (as seen in `seed.ts` and prior `3d9f8e7` code which reads `raw.capabilities?.read`). The registry casts `row.capability_manifest as CapabilityManifest | null` directly — this silently gives `capabilities: { read: undefined, write: undefined }` because the DB object has no top-level `read`/`write` arrays. Result: every connector defaults to `{ read: ['*'], write: [] }` regardless of DB content. Fix: normalize at DB read time or update `CapabilityManifest` to match the actual DB schema.
+
+**Cache never invalidated:**
+`registryCache` is module-level, cleared only by `clearCache()` which is exported but never called. Connector add/update/remove won't be reflected until process restart. Acceptable for V1 static setup, but document the limitation.
+
+**Only `.read` tool exposed per connector:**
+`getToolsForTenant` creates `${prefix}.read` only. Write actions require a separate `.write` tool. Acceptable for V1 read-only mode.
+
+---
+
 ### `c836509` — Next.js `/api/chat` proxies to gateway
 
 `apps/web/app/api/chat/route.ts` — stub replaced with real proxy:

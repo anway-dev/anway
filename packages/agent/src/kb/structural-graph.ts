@@ -118,4 +118,21 @@ export class StructuralGraph implements IKnowledgeGraph {
     )
     return result.rows[0]?.id as string ?? ''
   }
+
+  async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
+    const rows = await this.pool.query(
+      `SELECT id FROM entities WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+      [tenantId, name],
+    )
+    if (rows.length === 0) return null
+    return this.resolveContext(rows[0]!.id as string, tenantId, depth)
+  }
+
+  async getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null> {
+    const rows = await this.pool.query(
+      `SELECT id FROM entities WHERE tenant_id = $1 AND metadata->>'externalId' = $2 LIMIT 1`,
+      [tenantId, externalId],
+    )
+    return (rows[0]?.id as string) ?? null
+  }
 }

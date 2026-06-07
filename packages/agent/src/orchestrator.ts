@@ -161,14 +161,17 @@ export async function* runSession(
       ], [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
       const entityName = entityResp.content.trim()
       if (entityName) {
-        const context = await config.knowledgeGraph.resolveContext(entityName, ctx.tenantId, 2)
-        if (context && context.primaryEntity) {
-          const parts = [`Graph context for "${context.primaryEntity.name}":`]
-          if (context.primaryEntity) parts.push(`  Primary: ${context.primaryEntity.type} / ${context.primaryEntity.name}`)
+        const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 2)
+        if (context?.primaryEntity) {
+          const parts = [`Graph context for "${context.primaryEntity.name}" (${context.primaryEntity.type}):`]
           for (const rel of context.relationships.slice(0, 10)) {
-            parts.push(`  ${rel.relType}: ${rel.fromEntityId} → ${rel.toEntityId}`)
+            const fromName = rel.fromEntityId === context.primaryEntity.id
+              ? context.primaryEntity.name
+              : context.relatedEntities.find(e => e.id === rel.fromEntityId)?.name ?? rel.fromEntityId
+            const toName = context.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
+            parts.push(`  ${rel.relType}: ${fromName} → ${toName}`)
           }
-          if (context.freshness < 0.5) parts.push('  [STALE] Some data may be outdated — verify from live source')
+          if (context.freshness < 0.5) parts.push('  [STALE] Verify critical facts from live source.')
           graphContext = parts.join('\n')
         }
       }

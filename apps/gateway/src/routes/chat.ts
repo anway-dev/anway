@@ -22,6 +22,7 @@ import type { ProviderConfig, ProviderType } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
+import { withTenant } from '../db/prisma.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
 
@@ -182,19 +183,28 @@ export async function chatRoutes(app: FastifyInstance) {
 
     // Load connectors + tenant in parallel — both are best-effort
     const [connectorsResult, tenantResult] = await Promise.allSettled([
-      prisma.connector.findMany({ where: { tenant_id: tenantId } }),
-      prisma.tenant.findUnique({ where: { id: isValidUUID(tenantId) ? tenantId : '' } }),
+      withTenant(prisma, tenantId, (tx) =>
+        tx.connector.findMany({ where: { tenant_id: tenantId } }),
+      ),
+      withTenant(prisma, tenantId, (tx) =>
+        tx.tenant.findUnique({ where: { id: isValidUUID(tenantId) ? tenantId : '' } }),
+      ),
     ])
 
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
     // Build perimeter from connector config
-    const connectorScopes: ConnectorScope[] = dbConnectors.map((c) => ({
-      connectorId: c.id,
-      read: ['*'],
-      write: c.mode === 'write' || c.mode === 'read_write' ? ['*'] : [],
-    }))
+    const connectorScopes: ConnectorScope[] = dbConnectors.map((c) => {
+      const raw = c.capability_manifest as {
+        capabilities?: { read?: string[]; write?: string[] }
+      }
+      return {
+        connectorId: c.id,
+        read: raw.capabilities?.read ?? ['*'],
+        write: c.mode === 'write' || c.mode === 'read_write' ? (raw.capabilities?.write ?? ['*']) : [],
+      }
+    })
 
     const userPerimeter: UserPerimeter = {
       userId: UserId(userId),

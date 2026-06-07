@@ -131,9 +131,9 @@ export async function* runSession(
     })
     const parsed = JSON.parse(intentResp.content) as { intent?: unknown }
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
-  } catch (err) {
-    yield makeError('INTENT_CLASSIFICATION_FAILED', err instanceof Error ? err.message : 'intent classification failed')
-    return
+  } catch {
+    // Best-effort — continue with default intent on failure
+    classifiedIntent = 'general'
   }
 
   await auditSink.append({

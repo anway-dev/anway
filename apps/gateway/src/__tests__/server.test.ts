@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { buildApp } from '../app'
-import { initMetrics } from '../metrics'
+import { buildApp } from '../app.js'
+import { initMetrics } from '../metrics.js'
 
 let app: Awaited<ReturnType<typeof buildApp>>
 

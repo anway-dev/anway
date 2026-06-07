@@ -2,6 +2,7 @@
   "name": "anvay-gateway",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
@@ -13,6 +14,8 @@
     "db:generate": "prisma generate"
   },
   "dependencies": {
+    "@anvay/agent": "workspace:*",
+    "@anvay/types": "workspace:*",
     "@fastify/cors": "^11.0.0",
     "@fastify/jwt": "^9.0.0",
     "@fastify/sensible": "^6.0.4",

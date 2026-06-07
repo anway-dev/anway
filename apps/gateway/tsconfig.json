@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -11,6 +11,10 @@
     "declaration": true,
     "composite": true
   },
+  "references": [
+    { "path": "../../packages/agent" },
+    { "path": "../../packages/types" }
+  ],
   "include": ["src/**/*", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]
 }

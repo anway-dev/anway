@@ -54,7 +54,7 @@ describe('Migration SQL invariants', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const sql = readFileSync(
-      join(__dirname, '../../prisma/migrations/0001_initial/migration.sql'),
+      join(import.meta.dirname, '../../prisma/migrations/0001_initial/migration.sql'),
       'utf8',
     )
 
@@ -72,7 +72,7 @@ describe('Migration SQL invariants', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const sql = readFileSync(
-      join(__dirname, '../../prisma/migrations/0001_initial/migration.sql'),
+      join(import.meta.dirname, '../../prisma/migrations/0001_initial/migration.sql'),
       'utf8',
     )
     expect(sql).toContain('no_delete_audit_events')
@@ -84,7 +84,7 @@ describe('Migration SQL invariants', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const sql = readFileSync(
-      join(__dirname, '../../prisma/migrations/0001_initial/migration.sql'),
+      join(import.meta.dirname, '../../prisma/migrations/0001_initial/migration.sql'),
       'utf8',
     )
     expect(sql).toContain('ENABLE ROW LEVEL SECURITY')
@@ -100,7 +100,7 @@ describe('Migration SQL invariants', () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
     const sql = readFileSync(
-      join(__dirname, '../../prisma/migrations/0001_initial/migration.sql'),
+      join(import.meta.dirname, '../../prisma/migrations/0001_initial/migration.sql'),
       'utf8',
     )
     expect(sql).toContain("current_setting('app.tenant_id', true)")

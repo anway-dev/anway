@@ -1,12 +1,13 @@
 import Fastify from 'fastify'
 import sensible from '@fastify/sensible'
-import corsPlugin from './plugins/cors'
-import jwtPlugin from './plugins/jwt'
-import requestLoggerPlugin from './plugins/request-logger'
-import { healthRoutes } from './routes/health'
-import { metricsRoutes } from './routes/metrics'
-import { authRoutes } from './routes/auth'
-import { httpRequestDuration, httpRequestsTotal } from './metrics'
+import corsPlugin from './plugins/cors.js'
+import jwtPlugin from './plugins/jwt.js'
+import requestLoggerPlugin from './plugins/request-logger.js'
+import { healthRoutes } from './routes/health.js'
+import { metricsRoutes } from './routes/metrics.js'
+import { authRoutes } from './routes/auth.js'
+import { chatRoutes } from './routes/chat.js'
+import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -38,6 +39,7 @@ export async function buildApp() {
   await app.register(healthRoutes)
   await app.register(metricsRoutes)
   await app.register(authRoutes)
+  await app.register(chatRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
 import {
   createOrchestrator,
   runSession,
@@ -14,10 +14,27 @@ import type {
   ToolDefinition,
   InferenceOptions,
   ChatResponse,
+  ToolCall,
 } from '@anvay/agent'
 import type { StreamChunk } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { Message } from '@anvay/types'
+import { resolveProviderConfig } from '../routes/chat.js'
+
+const providerEnvKeys = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'OLLAMA_ENDPOINT',
+  'LMSTUDIO_ENDPOINT',
+] as const
+
+afterEach(() => {
+  for (const key of providerEnvKeys) {
+    delete process.env[key]
+  }
+})
 
 // ---- Test doubles ----
 
@@ -64,6 +81,12 @@ function makeMockProvider(chunks: StreamChunk[]): IModelProvider {
       for (const chunk of chunks) {
         yield chunk
       }
+    },
+    formatToolResult(_toolCallId: string, result: unknown): Message {
+      return { role: 'user', content: JSON.stringify(result) }
+    },
+    formatToolCall(_toolCalls: ToolCall[]): Message {
+      return { role: 'assistant', content: '' }
     },
   }
 }
@@ -233,5 +256,31 @@ describe('runSession — streaming and audit', () => {
     // tool_call_blocked must appear in audit log
     const blocked = auditSink.events.filter((e) => e.eventType === 'tool_call_blocked')
     expect(blocked.length).toBeGreaterThan(0)
+  })
+})
+
+describe('chat provider config resolution', () => {
+  it('uses server-side API keys and ignores client-supplied secrets', () => {
+    process.env['ANTHROPIC_API_KEY'] = 'server-key'
+
+    const config = resolveProviderConfig({
+      type: 'anthropic',
+      defaultModel: 'claude-test',
+      apiKey: 'client-key',
+    } as never)
+
+    expect(config).toMatchObject({
+      type: 'anthropic',
+      apiKey: 'server-key',
+      defaultModel: 'claude-test',
+    })
+  })
+
+  it('returns null when the requested provider is not configured server-side', () => {
+    process.env['ANTHROPIC_API_KEY'] = 'server-key'
+
+    const config = resolveProviderConfig({ type: 'openai' })
+
+    expect(config).toBeNull()
   })
 })

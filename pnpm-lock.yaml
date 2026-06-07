@@ -17,6 +17,12 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@anvay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.2.0

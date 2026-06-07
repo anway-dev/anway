@@ -18,15 +18,17 @@ import type {
   ConversationTurn,
   SessionContext,
 } from '@anvay/agent'
-import type { ProviderConfig } from '@anvay/agent'
+import type { ProviderConfig, ProviderType } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 
+type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
+
 interface ChatBody {
   query: string
   sessionId: string
-  model?: ProviderConfig
+  model?: ClientModelConfig
 }
 
 // In-process session memory — no cross-process persistence.
@@ -59,22 +61,42 @@ export class InMemorySessionMemory implements ISessionMemory {
   }
 }
 
-function resolveProviderConfig(override?: ProviderConfig): ProviderConfig | null {
-  if (override) return override
-  if (process.env['ANTHROPIC_API_KEY']) {
+export function providerConfigFromEnv(type: ProviderType): ProviderConfig | null {
+  if (type === 'anthropic' && process.env['ANTHROPIC_API_KEY']) {
     return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
   }
-  if (process.env['OPENAI_API_KEY']) {
+  if (type === 'openai' && process.env['OPENAI_API_KEY']) {
     return { type: 'openai', apiKey: process.env['OPENAI_API_KEY'] }
   }
-  if (process.env['GROQ_API_KEY']) {
+  if (type === 'groq' && process.env['GROQ_API_KEY']) {
     return { type: 'groq', apiKey: process.env['GROQ_API_KEY'] }
   }
-  if (process.env['MISTRAL_API_KEY']) {
+  if (type === 'mistral' && process.env['MISTRAL_API_KEY']) {
     return { type: 'mistral', apiKey: process.env['MISTRAL_API_KEY'] }
   }
-  if (process.env['OLLAMA_ENDPOINT']) {
+  if (type === 'ollama' && process.env['OLLAMA_ENDPOINT']) {
     return { type: 'ollama', baseURL: process.env['OLLAMA_ENDPOINT'] }
+  }
+  if (type === 'lmstudio' && process.env['LMSTUDIO_ENDPOINT']) {
+    return { type: 'lmstudio', baseURL: process.env['LMSTUDIO_ENDPOINT'] }
+  }
+  return null
+}
+
+function withDefaultModel(config: ProviderConfig, defaultModel?: string): ProviderConfig {
+  return defaultModel ? { ...config, defaultModel } : config
+}
+
+export function resolveProviderConfig(override?: ClientModelConfig): ProviderConfig | null {
+  if (override) {
+    const config = providerConfigFromEnv(override.type)
+    return config ? withDefaultModel(config, override.defaultModel) : null
+  }
+
+  const providerOrder: ProviderType[] = ['anthropic', 'openai', 'groq', 'mistral', 'ollama', 'lmstudio']
+  for (const type of providerOrder) {
+    const config = providerConfigFromEnv(type)
+    if (config) return config
   }
   return null
 }
@@ -117,7 +139,15 @@ export async function chatRoutes(app: FastifyInstance) {
         properties: {
           query: { type: 'string', minLength: 1 },
           sessionId: { type: 'string', minLength: 1 },
-          model: { type: 'object' },
+          model: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type'],
+            properties: {
+              type: { type: 'string', enum: ['anthropic', 'openai', 'ollama', 'groq', 'mistral', 'lmstudio'] },
+              defaultModel: { type: 'string', minLength: 1 },
+            },
+          },
         },
       },
     },
@@ -216,6 +246,21 @@ export async function chatRoutes(app: FastifyInstance) {
     void (async () => {
       try {
         for await (const event of runSession(orchestrator, query, sessionCtx)) {
+          if (event.type === 'done') {
+            void auditSink.append({
+              id: crypto.randomUUID(),
+              tenantId: TenantId(tenantId),
+              userId: UserId(userId),
+              sessionId: SessionId(sessionId),
+              eventType: 'session_end',
+              payload: {
+                inputTokens: event.inputTokens,
+                outputTokens: event.outputTokens,
+                totalTokens: event.inputTokens + event.outputTokens,
+              },
+              createdAt: new Date(),
+            })
+          }
           stream.push(`data: ${JSON.stringify(event)}\n\n`)
         }
         stream.push('data: [DONE]\n\n')

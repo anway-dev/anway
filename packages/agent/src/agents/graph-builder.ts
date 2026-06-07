@@ -1,4 +1,4 @@
-import type { IKnowledgeGraph, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
+import type { IKnowledgeGraph, EntitySpec } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anvay/types'
 
 interface ConnectorBootstrapPayload {
@@ -50,28 +50,20 @@ export class GraphBuilderAgent {
     const tenant = tenantId as TenantId
 
     const ticketEntity: EntitySpec = {
-      id: ticketId,
       type: 'Ticket',
       name: title,
-      metadata: { description, labels, source: 'linear' },
+      metadata: { externalId: ticketId, description, labels, source: 'linear' },
     }
-    await this.kg.upsertEntity(ticketEntity, tenant)
+    const dbTicketId = await this.kg.upsertEntity(ticketEntity, tenant)
 
-    // If labels contain a service name, try resolving it
     const serviceName = this.extractServiceName(title, description, labels)
-    if (serviceName) {
-      const serviceEntity: EntitySpec = {
-        type: 'Service',
-        name: serviceName,
-      }
-      const serviceId = await this.kg.upsertEntity(serviceEntity, tenant)
+    if (serviceName && dbTicketId) {
+      const serviceId = await this.kg.upsertEntity({ type: 'Service', name: serviceName }, tenant)
       if (serviceId) {
-        await this.kg.upsertRelationship({
-          fromEntityId: ticketId,
-          relType: 'RELATES_TO',
-          toEntityId: serviceId,
-          metadata: { confidence: 0.7 },
-        }, tenant)
+        await this.kg.upsertRelationship(
+          { fromEntityId: dbTicketId, relType: 'RELATES_TO', toEntityId: serviceId, metadata: { confidence: 0.7 } },
+          tenant,
+        )
       }
     }
   }
@@ -80,27 +72,24 @@ export class GraphBuilderAgent {
     const { repo, tenantId, commitSha, commitMessage, author } = payload
     const tenant = tenantId as TenantId
 
-    const commitEntity: EntitySpec = {
-      type: 'Commit',
-      name: commitSha.slice(0, 7),
-      metadata: { repo, author, message: commitMessage },
-    }
-    const commitId = await this.kg.upsertEntity(commitEntity, tenant)
+    const commitId = await this.kg.upsertEntity(
+      { type: 'Commit', name: commitSha.slice(0, 7), metadata: { repo, author, message: commitMessage } },
+      tenant,
+    )
 
-    // Parse "fixes #N" or "closes #N" from commit message
     const ticketMatch = commitMessage.match(/(?:fixes|closes|resolves)\s+#(\d+)/i)
     if (ticketMatch && commitId) {
-      await this.kg.upsertRelationship({
-        fromEntityId: commitId,
-        relType: 'FIXES',
-        toEntityId: ticketMatch[1]!,
-        metadata: { confidence: 0.9 },
-      }, tenant)
+      const ticketEntityId = await this.kg.getEntityByExternalRef(ticketMatch[1]!, tenant)
+      if (ticketEntityId) {
+        await this.kg.upsertRelationship(
+          { fromEntityId: commitId, relType: 'FIXES', toEntityId: ticketEntityId, metadata: { confidence: 0.9 } },
+          tenant,
+        )
+      }
     }
   }
 
   private extractServiceName(title: string, _description: string, labels?: string[]): string | null {
-    // Try labels first
     if (labels) {
       for (const label of labels) {
         if (label.includes('service:') || label.includes('svc:')) {
@@ -108,7 +97,6 @@ export class GraphBuilderAgent {
         }
       }
     }
-    // Fall back: simple name extraction from title
     const match = title.match(/\b([a-z]+-[a-z]+-api)\b/i)
     return match?.[1]?.toLowerCase() ?? null
   }

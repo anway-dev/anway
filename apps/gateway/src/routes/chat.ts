@@ -1,6 +1,5 @@
 import { Readable } from 'node:stream'
 import type { FastifyInstance } from 'fastify'
-import { PrismaClient } from '@prisma/client'
 import {
   createOrchestrator,
   runSession,
@@ -22,6 +21,7 @@ import type {
 import type { ProviderConfig, ProviderType } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
+import { prisma } from '../db/client.js'
 import { StructuralGraph } from '@anvay/agent'
 import type { IKnowledgeGraph } from '@anvay/agent'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
@@ -144,7 +144,6 @@ function recordSessionUsed(sessionId: string, tokens: number): void {
 }
 
 // Module-level singletons — one per gateway process
-const prisma = new PrismaClient()
 const inMemoryStore = new InMemorySessionMemory()
 
 export async function chatRoutes(app: FastifyInstance) {

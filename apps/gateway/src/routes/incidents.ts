@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import { PrismaClient, IncidentSeverity, IncidentStatus } from '@prisma/client'
+import { IncidentSeverity, IncidentStatus } from '@prisma/client'
 import { IncidentService } from '../services/incident.js'
-
-const prisma = new PrismaClient()
+import { prisma } from '../db/client.js'
 
 export async function incidentRoutes(app: FastifyInstance) {
   const service = new IncidentService(prisma)
@@ -26,11 +25,11 @@ export async function incidentRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/incidents/:id', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
     const incident = await service.get(id, tenantId)
-    if (!incident) return { error: 'Incident not found' }
+    if (!incident) { reply.code(404); return { error: 'Incident not found' } }
     return incident
   })
 
@@ -55,20 +54,22 @@ export async function incidentRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: { id: string }; Body: { status?: IncidentStatus } }>('/api/incidents/:id', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
     const updates = request.body
-    await service.update(id, tenantId, updates)
+    const result = await service.update(id, tenantId, updates)
+    if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
     return { ok: true }
   })
 
   app.post<{ Params: { id: string } }>('/api/incidents/:id/resolve', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
-    await service.resolve(id, tenantId)
+    const result = await service.resolve(id, tenantId)
+    if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
     return { ok: true }
   })
 }

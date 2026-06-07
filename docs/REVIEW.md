@@ -3515,6 +3515,46 @@ if (row.type === 'github') return new GitHubConnector(row.id)
 
 ---
 
+### `8d223e3` — Graph Builder Agent + orchestrator KB context injection
+
+**Architecture correct:** `GraphBuilderAgent` is event-driven, never user-facing. Handles `connector_registered`, `ticket_created`, `pr_merged`. `knowledgeGraph?: IKnowledgeGraph` optional on `OrchestratorConfig` — no breaking change. Context injection is best-effort with silent fallback.
+
+**BLOCKER — `resolveContext` called with entity name, not entity ID:**
+```typescript
+const context = await config.knowledgeGraph.resolveContext(entityName, ctx.tenantId, 2)
+```
+`resolveContext(entityId: string, ...)` does `WHERE id = $1` — lookup by UUID. `entityName` is a string like `"payments-api"`, not a UUID. Always returns null (entity never found). Graph context is never injected.
+
+Fix: add `resolveContextByName(name: string, tenantId)` to `IKnowledgeGraph`, or add a `search`-based path: find entity by name then resolve by ID.
+
+**BLOCKER — `handleTicketCreated` uses external ticket ID as FK:**
+```typescript
+await this.kg.upsertRelationship({
+  fromEntityId: ticketId,   // Linear external ID, not a graph entity UUID
+  toEntityId: serviceId,    // correct DB UUID
+})
+```
+`upsertEntity` returns a DB-generated UUID but the relationship uses the original `ticketId` (raw Linear ID like `"LIN-123"`). FK `from_entity_id → entities(id)` will fail.
+
+Fix:
+```typescript
+const dbTicketId = await this.kg.upsertEntity(ticketEntity, tenant)
+await this.kg.upsertRelationship({ fromEntityId: dbTicketId, ... })
+```
+
+**BLOCKER — `handlePrMerged` uses raw issue number as `toEntityId`:**
+```typescript
+toEntityId: ticketMatch[1]!  // e.g. "123" — not a UUID
+```
+FK `to_entity_id → entities(id)` will fail — "123" is not a UUID. Fix: look up ticket entity in graph by external ID, use returned UUID.
+
+**Minor:**
+- Graph context string emits raw UUID IDs in relationship lines — useless to LLM. Resolve to entity names.
+- `extractServiceName` regex `[a-z]+-[a-z]+-api` misses `payments-api`, `auth-service`, single-word names.
+- `EntitySpec.id` field set in `handleTicketCreated` but `upsertEntity` ignores it (uses `gen_random_uuid()` in INSERT).
+
+---
+
 ### `3e7347e` — KB schema + IKnowledgeGraph + StructuralGraph
 
 **Migration `0003_kb`:** `entities`, `relationships`, `kb_entries` tables. RLS enabled on all three. HNSW index on `embedding vector_cosine_ops`. Indexes on traversal + freshness. Correct structure per CLAUDE.md KB spec.

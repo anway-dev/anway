@@ -53,3 +53,5 @@ export { createGate } from './gate.js'
 // Knowledge Graph
 export type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph.js'
 export { StructuralGraph } from './kb/structural-graph.js'
+export type { PgPoolLike } from './kb/postgres-query.js'
+export { createPostgresQueryFn } from './kb/postgres-query.js'

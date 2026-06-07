@@ -7,6 +7,47 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-25 -->
+## Review — 2026-06-25 | No new commits
+
+No commits from opencode since `47726f2`. Working tree unchanged from 2026-06-21.
+B-14/B-15 remain top priority — compile blocked until fixed.
+
+| Dimension | Rating |
+|-----------|--------|
+| Feature completeness | 7/10 |
+| Code standards | 5/10 |
+| Performance | 6/10 |
+| Security | 4/10 |
+| Readability | 8/10 |
+| Clarity and comments | 7/10 |
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| M0 Foundation | Complete | Monorepo, Docker Compose, auth, DB |
+| M1-T1 Agent harness + IModelProvider | Complete | `packages/agent` |
+| M1-T2 Anthropic provider | Complete | H-1 streaming fix pending commit |
+| M1-T3 OpenAI provider | Complete | H-17 mapMessages gap open |
+| M1-T4 Ollama provider | Complete | H-18 mapMessages gap open |
+| M1-T5 AgentPerimeter engine | Complete | B-5 wildcard scope open |
+| M1-T6 Orchestrator runSession | Complete | H-4/H-5/H-15 fix pending commit |
+| M1-T7 RedisSessionMemory | Complete | B-3 fixed, 2 LOW residuals |
+| M1-T8 TokenBudget middleware | Complete | B-2-R (sessionUsed reset) open |
+| M1-T9 Audit sink | Complete | B-9 CASCADE bypass open |
+| M2+ Knowledge Graph, Bootstrap Agent | Not started | |
+| B-8 RLS set_config | Not fixed | Postgres row-level security unused |
+| B-10 Dockerfile pnpm deploy | Not fixed | Workspace symlinks broken in distroless |
+| B-14/B-15 orchestrator.test.ts | Not fixed | **BLOCKING** — compile fails |
+| H-2 RedisSessionMemory in chat.ts | Not fixed | InMemorySessionMemory used in prod path |
+| H-17/H-18 mapMessages tool fields | Not fixed | OpenAI/Ollama tool turns broken |
+| M-18 Message.tool_calls field | Not fixed | Missing from @anvay/types |
+
+<!-- REVIEW SECTION END — 2026-06-25 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-24 -->
 ## Review — 2026-06-24 | No new commits
 

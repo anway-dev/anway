@@ -11,6 +11,9 @@ const envSchema = z.object({
   OLLAMA_ENDPOINT: z.string().optional(),
   LMSTUDIO_ENDPOINT: z.string().optional(),
   REDIS_URL: z.string().optional(),
+  LINEAR_API_KEY: z.string().optional(),
+  DATADOG_API_KEY: z.string().optional(),
+  DATADOG_APP_KEY: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
 })

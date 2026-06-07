@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process'
 import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anvay/types'
 
 export class LinearConnector implements IConnector {
@@ -9,36 +8,65 @@ export class LinearConnector implements IConnector {
     this.id = id
   }
 
+  private async graphql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+    const token = process.env['LINEAR_API_KEY']
+    if (!token) throw new Error('LINEAR_API_KEY not set')
+    const resp = await fetch('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token,
+      },
+      body: JSON.stringify({ query, variables }),
+    })
+    if (!resp.ok) throw new Error(`Linear API ${resp.status}: ${await resp.text()}`)
+    const json = await resp.json() as { data?: unknown; errors?: unknown[] }
+    if (json.errors?.length) throw new Error(`Linear GraphQL error: ${JSON.stringify(json.errors)}`)
+    return json.data
+  }
+
   async read(query: ConnectorQuery): Promise<ConnectorResult> {
     let data: unknown
 
-    const linearQuery = (graphql: string) => {
-      const json = JSON.stringify({ query: graphql })
-      const out = execSync(`linear api --json '${json}'`, { encoding: 'utf-8' })
-      return JSON.parse(out)
-    }
-
     switch (query.type) {
       case 'list_issues': {
-        const team = query.team as string ?? ''
-        const filters = query.filters as string ?? ''
-        const q = `{ issues(first:50,filter:{team:{name:{eq:\"${team}\"}}}${filters ? ','+filters : ''}) { nodes { id title description state { name } priority assignee { name } createdAt } } }`
-        data = linearQuery(q)
+        data = await this.graphql(
+          `query ListIssues($team: String!, $first: Int) {
+            issues(first: $first, filter: { team: { name: { eq: $team } } }) {
+              nodes { id title description state { name } priority assignee { name } createdAt }
+            }
+          }`,
+          { team: query.team as string ?? '', first: 50 },
+        )
         break
       }
       case 'get_issue': {
-        const id = query.issue_id as string ?? ''
-        data = linearQuery(`{ issue(id:\"${id}\") { id title description state { name } priority assignee { name } team { name } createdAt } }`)
+        data = await this.graphql(
+          `query GetIssue($id: String!) {
+            issue(id: $id) { id title description state { name } priority assignee { name } team { name } createdAt }
+          }`,
+          { id: query.issue_id as string ?? '' },
+        )
         break
       }
       case 'list_projects': {
-        const team = query.team as string ?? ''
-        data = linearQuery(`{ projects(first:50,filter:{team:{name:{eq:\"${team}\"}}}) { nodes { id name description state { name } startDate targetDate } } }`)
+        data = await this.graphql(
+          `query ListProjects($team: String!, $first: Int) {
+            projects(first: $first, filter: { team: { name: { eq: $team } } }) {
+              nodes { id name description state { name } startDate targetDate }
+            }
+          }`,
+          { team: query.team as string ?? '', first: 50 },
+        )
         break
       }
       case 'get_project': {
-        const id = query.project_id as string ?? ''
-        data = linearQuery(`{ project(id:\"${id}\") { id name description state { name } startDate targetDate teams { name } } }`)
+        data = await this.graphql(
+          `query GetProject($id: String!) {
+            project(id: $id) { id name description state { name } startDate targetDate teams { nodes { name } } }
+          }`,
+          { id: query.project_id as string ?? '' },
+        )
         break
       }
       default:
@@ -60,11 +88,10 @@ export class LinearConnector implements IConnector {
 
   async health(): Promise<HealthStatus> {
     try {
-      const out = execSync('linear api --json \'{"query":"{ viewer { id } }"}\'', { encoding: 'utf-8' })
-      JSON.parse(out)
+      await this.graphql('{ viewer { id } }', {})
       return { status: 'healthy', lastChecked: new Date() }
-    } catch {
-      return { status: 'unhealthy', message: 'Linear API unreachable', lastChecked: new Date() }
+    } catch (err) {
+      return { status: 'unhealthy', message: String(err), lastChecked: new Date() }
     }
   }
 }

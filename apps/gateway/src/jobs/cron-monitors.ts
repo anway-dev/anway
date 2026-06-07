@@ -1,17 +1,21 @@
-import { PrismaClient } from '@prisma/client'
-import { withTenant } from '../db/prisma.js'
+import { prisma } from '../db/client.js'
 
-export interface CronJob {
+export interface CronJobRecord {
   id: string
-  schedule: string
   name: string
-  tenantId: string
+  schedule: string
+  job_type: string
   enabled: boolean
+  last_run_at: Date | null
+  last_result: Record<string, unknown> | null
 }
 
 export class ServiceHealthSweep {
-  async run(_tenantId: string): Promise<{ status: string; findings: number }> {
-    return { status: 'ok', findings: 0 }
+  async run(tenantId: string): Promise<{ status: string; findings: number }> {
+    const connectors = await prisma.$queryRaw<{ id: string; type: string }[]>`
+      SELECT id, type FROM connectors WHERE tenant_id = ${tenantId}::uuid
+    `
+    return { status: 'ok', findings: connectors.length }
   }
 }
 
@@ -22,23 +26,16 @@ export class SloBurnCheck {
 }
 
 export class DeployHealthReport {
-  constructor(private readonly prisma: PrismaClient) {}
-
   async run(tenantId: string): Promise<{ status: string; deploys: number }> {
-    const deploys = await withTenant(this.prisma, tenantId, (tx) =>
-      tx.incident.findMany({
-        where: { tenant_id: tenantId, created_at: { gte: new Date(Date.now() - 86400000) } },
-      })
-    )
-    return { status: 'ok', deploys: deploys.length }
+    const deploys = await prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*) as count FROM incidents WHERE tenant_id = ${tenantId}::uuid AND created_at >= NOW() - INTERVAL '1 day'
+    `
+    return { status: 'ok', deploys: Number(deploys[0]?.count ?? 0) }
   }
 }
 
 export class OncallMorningBrief {
   async run(_tenantId: string): Promise<{ status: string; brief: string }> {
-    return {
-      status: 'ok',
-      brief: 'No active incidents overnight.',
-    }
+    return { status: 'ok', brief: 'No active incidents overnight.' }
   }
 }

@@ -106,4 +106,24 @@ export async function automationsRoutes(app: FastifyInstance) {
     )
     return { deleted: true }
   })
+
+  app.get('/api/automations/monitors', { preHandler: [app.authenticate] }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    return withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`
+        SELECT id, name, schedule, job_type AS "jobType", enabled, last_run_at AS "lastRunAt", last_result AS "lastResult"
+        FROM cron_jobs WHERE tenant_id = ${tenantId}::uuid ORDER BY name
+      `
+    )
+  })
+
+  app.patch<{ Params: { id: string }; Body: { enabled: boolean } }>('/api/automations/monitors/:id', {
+    preHandler: [app.authenticate],
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`UPDATE cron_jobs SET enabled = ${request.body.enabled} WHERE id = ${request.params.id}::uuid AND tenant_id = ${tenantId}::uuid`
+    )
+    return { updated: true }
+  })
 }

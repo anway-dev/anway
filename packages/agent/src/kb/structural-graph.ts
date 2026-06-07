@@ -127,7 +127,8 @@ export class StructuralGraph implements IKnowledgeGraph {
     const rows = await this.query<{ id: string }>(
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
        VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (from_entity_id, rel_type, to_entity_id) DO NOTHING
+       ON CONFLICT (tenant_id, from_entity_id, rel_type, to_entity_id)
+	       DO UPDATE SET metadata = EXCLUDED.metadata
        RETURNING id`,
       [tenantId, rel.fromEntityId, rel.relType, rel.toEntityId, JSON.stringify(rel.metadata ?? {})],
     )

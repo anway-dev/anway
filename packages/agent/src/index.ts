@@ -55,3 +55,7 @@ export type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph
 export { StructuralGraph } from './kb/structural-graph.js'
 export type { PgPoolLike } from './kb/postgres-query.js'
 export { createPostgresQueryFn } from './kb/postgres-query.js'
+
+// Graph Builder Agent
+export type { GraphEvent } from './graph-builder/events.js'
+export { GraphBuilderAgent } from './graph-builder/builder.js'

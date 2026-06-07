@@ -12,7 +12,8 @@ export function makeGitHubTools(connector: GitHubConnector) {
         type: 'object',
         properties: {
           repo: { type: 'string', description: 'Repository name (e.g. owner/repo)' },
-          filters: { type: 'string', description: 'Optional gh CLI filter flags like --state open --limit 5' },
+          state: { type: 'string', enum: ['open', 'closed', 'merged', 'all'], default: 'open' },
+          limit: { type: 'number', default: 20 },
         },
       },
     },

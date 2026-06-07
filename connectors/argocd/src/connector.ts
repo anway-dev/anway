@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anvay/types'
 
 export class ArgoCDConnector implements IConnector {
@@ -9,8 +9,14 @@ export class ArgoCDConnector implements IConnector {
     this.id = id
   }
 
-  private runArgocd(args: string[]): string {
-    return execSync(`argocd ${args.join(' ')}`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })
+  private runCli(binary: string, args: string[]): string {
+    const result = spawnSync(binary, args, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+    })
+    if (result.error) throw new Error(`${binary} spawn failed: ${result.error.message}`)
+    if (result.status !== 0) throw new Error(`${binary} exited ${result.status}: ${result.stderr}`)
+    return result.stdout
   }
 
   async read(query: ConnectorQuery): Promise<ConnectorResult> {
@@ -18,25 +24,25 @@ export class ArgoCDConnector implements IConnector {
 
     switch (query.type) {
       case 'list_applications': {
-        const out = this.runArgocd(['app', 'list', '-o', 'json'])
+        const out = this.runCli('argocd', ['app', 'list', '-o', 'json'])
         data = JSON.parse(out)
         break
       }
       case 'get_application': {
         const name = query.name as string ?? ''
-        const out = this.runArgocd(['app', 'get', name, '-o', 'json'])
+        const out = this.runCli('argocd', ['app', 'get', name, '-o', 'json'])
         data = JSON.parse(out)
         break
       }
       case 'get_application_history': {
         const name = query.name as string ?? ''
-        const out = this.runArgocd(['app', 'history', name, '-o', 'json'])
+        const out = this.runCli('argocd', ['app', 'history', name, '-o', 'json'])
         data = JSON.parse(out)
         break
       }
       case 'get_sync_status': {
         const name = query.name as string ?? ''
-        const out = this.runArgocd(['app', 'get', name, '-o', 'json'])
+        const out = this.runCli('argocd', ['app', 'get', name, '-o', 'json'])
         const app = JSON.parse(out)
         data = { name, syncStatus: app.status?.sync?.status, healthStatus: app.status?.health?.status }
         break
@@ -61,7 +67,7 @@ export class ArgoCDConnector implements IConnector {
 
   async health(): Promise<HealthStatus> {
     try {
-      this.runArgocd(['app', 'list'])
+      this.runCli('argocd', ['app', 'list'])
       return { status: 'healthy', lastChecked: new Date() }
     } catch {
       return { status: 'unhealthy', message: 'ArgoCD API unreachable', lastChecked: new Date() }

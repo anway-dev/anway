@@ -3477,4 +3477,40 @@ headers: {
 - No timeout on proxy fetch — gateway hang blocks indefinitely. Add `AbortSignal.timeout(5 * 60 * 1000)`.
 - `GATEWAY_URL` env var undocumented — add to `apps/web/.env.local` template.
 
+---
+
+### `f809f9b` — GitHub connector via gh CLI
+
+New `connectors/github` package (`@anvay/connector-github`). `GitHubConnector implements IConnector` — 5 read operations (list_prs, get_pr, list_commits, get_workflow_run, search_code) via `gh` CLI. `makeGitHubTools(connector)` returns `ExecutableTool[]`. Correct strategy per CLAUDE.md (CLI before SDK). `pnpm-workspace.yaml` updated to include `connectors/*`.
+
+**SECURITY — Shell injection via `execSync(string)` — fix before any real use:**
+```typescript
+const cmd = `gh ${args.join(' ')}`
+execSync(cmd, ...)
+```
+`args` contains LLM-produced values (`repo`, `prNumber`, `filters`). String join + shell execution → injection. `repo = "org/repo; rm -rf /"` executes both commands. `filters` is a raw flag string directly in args — same risk.
+
+**Fix — `spawnSync` with array, no shell:**
+```typescript
+import { spawnSync } from 'node:child_process'
+
+private runGh(args: string[]): string {
+  const result = spawnSync('gh', args, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })
+  if (result.error) throw new Error(`gh spawn failed: ${result.error.message}`)
+  if (result.status !== 0) throw new Error(`gh exited ${result.status}: ${result.stderr}`)
+  return result.stdout
+}
+```
+Also replace `filters: string` param with structured `{ state?, limit?, author? }` — never accept raw flag strings from LLM.
+
+**Connector not wired to registry:** `getConnectorsForTenant` still returns mock connectors for all DB rows. Add type dispatch:
+```typescript
+if (row.type === 'github') return new GitHubConnector(row.id)
+```
+
+**Other:**
+- No tests.
+- Not in `turbo.json` pipeline — won't build from root.
+- `list_commits` interpolates `branch` into URL string — sanitize.
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

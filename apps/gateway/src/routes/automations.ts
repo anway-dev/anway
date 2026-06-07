@@ -8,13 +8,11 @@ const activeTriggers: TriggerRule[] = []
 export async function automationsRoutes(app: FastifyInstance) {
   app.get('/api/automations/triggers', {
     preHandler: [app.authenticate],
-  }, async () => {
-    return activeTriggers.map(t => ({
-      id: t.id,
-      eventType: t.eventType,
-      enabled: t.enabled,
-      actionCount: t.actions.length,
-    }))
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    return activeTriggers
+      .filter(t => t.tenantId === tenantId)
+      .map(t => ({ id: t.id, eventType: t.eventType, enabled: t.enabled, actionCount: t.actions.length }))
   })
 
   app.post<{ Body: { eventType: string; condition: Record<string, unknown>; actions: TriggerAction[] } }>('/api/automations/triggers', {
@@ -34,7 +32,7 @@ export async function automationsRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const { eventType, condition, actions } = request.body
     const rule: TriggerRule = {
-      id: `trigger-${Date.now()}`,
+      id: crypto.randomUUID(),
       tenantId,
       eventType,
       condition: condition ?? {},
@@ -49,8 +47,11 @@ export async function automationsRoutes(app: FastifyInstance) {
   app.post<{ Body: { eventType: string; payload: Record<string, unknown> } }>('/api/automations/evaluate', {
     preHandler: [app.authenticate],
   }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
     const { eventType, payload } = request.body
-    const actions = await engine.evaluate(eventType, payload)
+    const tenantEngine = new TriggerEngine()
+    tenantEngine.loadRules(activeTriggers.filter(t => t.tenantId === tenantId))
+    const actions = await tenantEngine.evaluate(eventType, payload)
     return { matched: actions.length, actions }
   })
 }

@@ -3515,6 +3515,45 @@ if (row.type === 'github') return new GitHubConnector(row.id)
 
 ---
 
+### `3e7347e` — KB schema + IKnowledgeGraph + StructuralGraph
+
+**Migration `0003_kb`:** `entities`, `relationships`, `kb_entries` tables. RLS enabled on all three. HNSW index on `embedding vector_cosine_ops`. Indexes on traversal + freshness. Correct structure per CLAUDE.md KB spec.
+
+**`IKnowledgeGraph` interface:** Clean — matches CLAUDE.md contract. All required methods present. `AgentContext`, `ConnectorCoordinates`, `GroundingSource` types defined correctly.
+
+**`StructuralGraph` implementation — two broken SQL patterns:**
+
+1. **`upsertEntity` ON CONFLICT clause never fires:**
+   ```sql
+   INSERT INTO entities (tenant_id, type, name, metadata)
+   VALUES ($1,$2,$3,$4)
+   ON CONFLICT (id) DO UPDATE SET ...
+   ```
+   `id` has `DEFAULT gen_random_uuid()` and is not in the INSERT. A new UUID is generated each call — conflict on `id` is impossible. Every `upsertEntity` call creates a new row. Fix: add `UNIQUE (tenant_id, type, name)` to migration and use:
+   ```sql
+   ON CONFLICT (tenant_id, type, name) DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = NOW()
+   ```
+
+2. **`upsertRelationship` ON CONFLICT without column list — Postgres error:**
+   ```sql
+   INSERT INTO relationships ... ON CONFLICT DO NOTHING
+   ```
+   Postgres requires `ON CONFLICT (col_list) DO NOTHING` or a named constraint. Without a column list this throws `ERROR: ON CONFLICT DO NOTHING requires inference specification`. Fix: add `UNIQUE (from_entity_id, rel_type, to_entity_id)` to migration and use that in the conflict clause.
+
+Both upserts are broken in current state — migration needs two UNIQUE constraints added.
+
+**`StructuralGraph` requires `pg.Pool`, not Prisma:**
+`DbPool.query(sql, params)` matches the `pg` package API, not Prisma (`$queryRaw`). Gateway uses Prisma exclusively — `pg` is not in gateway deps. Either add `pg` + raw pool alongside Prisma, or rewrite `StructuralGraph` to use `prisma.$queryRawUnsafe`. Former is cleaner for graph queries; latter avoids a new dependency. Either way, wiring is currently missing.
+
+**`resolveContext` N+1 queries:**
+BFS calls `getRelationships(eid)` and `getEntity(eid)` individually per entity per hop. At depth 3 on a 20-entity graph: ~60 DB round trips per `resolveContext` call. Acceptable for V1 prototype but flag for future batching via `WHERE id = ANY($1)`.
+
+**`search` and episodic methods throw:** Clearly marked not implemented. Correct — document Graphiti + pgvector as the next milestone.
+
+**`embedding VECTOR(1536)`** — hardcoded to OpenAI dimension. Flag if non-OpenAI embeddings are used.
+
+---
+
 ### `71a2a33` — Datadog, Linear, ArgoCD connectors
 
 Three new connector packages. Same structure as GitHub connector. Same `execSync(string)` shell injection problem — fix all with `spawnSync(array)` per the GitHub review.

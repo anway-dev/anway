@@ -7,6 +7,48 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07i -->
+## Review — 2026-06-07 | C-1+C-2 (d5504a9)
+
+### C-1 + C-2 — ArgoCD / Linear / Datadog tool builders | d5504a9
+
+LGTM overall. All three `make*Tools` functions follow identical pattern. `def.name.split('.')[1]`
+correctly extracts query type — matches connector switch cases for all three. Exported from
+each package's `index.ts`. ✓
+
+**LOW — `filters: string` in Linear `list_issues` tool definition**
+
+```typescript
+{ name: 'linear.list_issues', parameters: { properties: {
+  team: { type: 'string' },
+  filters: { type: 'string', description: 'Additional filter criteria' },  // ← dead param
+}}}
+```
+
+`LinearConnector.read()` case `'list_issues'` uses only `query.team` — ignores `query.filters`.
+LLM may populate `filters` → silently dropped. Remove `filters` from tool params to avoid
+misleading the LLM. Fix inline when next touching `connectors/linear/src/tools.ts`.
+
+**MEDIUM — ArgoCD connector requires `argocd` CLI — not installed in gateway Dockerfile**
+
+S-0 Dockerfile installs `gh` only. `argocd` CLI is not installed. `ArgoCDConnector.runCli('argocd', ...)`
+→ `ENOENT` at runtime. The demo seed (I-3) adds ArgoCD as a demo connector — once C-3 wires
+it into the registry, every chat request that invokes an ArgoCD tool will throw.
+
+Options — pick one before I-7 smoke test:
+1. Install `argocd` CLI in `apps/gateway/Dockerfile` (same pattern as `gh`)
+2. Remove ArgoCD from the demo seed in I-3 (simplest for V1 demo)
+3. Convert ArgoCD connector to HTTP API (v2.6+ has REST API — no CLI needed)
+
+Recommend option 2 for now (remove from seed) — defers ArgoCD HTTP API to post-demo.
+Post to BRIDGE.md if blocked on this decision.
+
+Move to C-3. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07i -->
+
 <!-- REVIEW SECTION START — 2026-06-07h -->
 ## Review — 2026-06-07 | B-7 (2899784)
 

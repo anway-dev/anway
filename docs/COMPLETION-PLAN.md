@@ -13,6 +13,8 @@
 - `pnpm typecheck` clean, all tests green
 - All security issues resolved
 
+> **Opus review verdict: APPROVED WITH COMMENTS** — 3 blockers fixed below (Dockerfile CLI, B-3 before B-2 ordering, StructuralGraph RLS). See full review notes inline.
+
 ---
 
 ## Part 0 — Rules
@@ -29,6 +31,52 @@
 ---
 
 ## SECURITY — Execute first, no exceptions
+
+### S-0 — Gateway Dockerfile: install `gh` CLI (distroless has no CLI tools)
+
+**File:** `apps/gateway/Dockerfile`
+
+Current base is `gcr.io/distroless/nodejs22-debian12` — no shell, no package manager, no `gh`, no `argocd`. GitHub and ArgoCD connectors use these CLIs. Every connector call throws `ENOENT` at runtime.
+
+**Fix — switch runtime stage to `node:22-slim` and install `gh`:**
+
+```dockerfile
+# Build stage (unchanged)
+FROM node:22-slim AS builder
+WORKDIR /app
+# ... existing build steps ...
+
+# Runtime stage — switch from distroless to node:22-slim
+FROM node:22-slim AS runtime
+WORKDIR /app
+
+# Install gh CLI (GitHub's official package)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    ca-certificates \
+  && wget -qO /tmp/gh.deb https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_amd64.deb \
+  && dpkg -i /tmp/gh.deb \
+  && rm /tmp/gh.deb \
+  && apt-get purge -y wget \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy built output from builder
+COPY --from=builder /app/apps/gateway/dist ./apps/gateway/dist
+COPY --from=builder /app/node_modules ./node_modules
+# ... rest of COPY steps ...
+
+USER node
+CMD ["node", "apps/gateway/dist/server.js"]
+```
+
+Note: `argocd` CLI install is optional for V1 — ArgoCD connector can be wired to HTTP API instead (recommended). Do not add large CLIs (kubectl, aws, gcloud) — those are infra tooling, not gateway dependencies.
+
+**Verify:** `docker build -t anvay-gateway -f apps/gateway/Dockerfile . && docker run --rm anvay-gateway gh --version`
+
+**Commit:** `fix(gateway): switch runtime to node:22-slim; install gh CLI`
+
+---
 
 ### S-1 — Shell injection in CLI connectors
 
@@ -419,59 +467,7 @@ async upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<str
 
 ---
 
-### B-2 — `StructuralGraph` uses `pg.Pool` — gateway has only Prisma
-
-**File:** `packages/agent/src/kb/structural-graph.ts`
-
-`DbPool.query(sql, params)` matches the `pg` npm package API, not Prisma. `pg` is not in gateway deps.
-
-**Fix — use `prisma.$queryRawUnsafe` instead:**
-
-```typescript
-import type { PrismaClient } from '@prisma/client'
-import type { TenantId } from '@anvay/types'
-import type { IKnowledgeGraph, Entity, Relationship, KBEntry, Episode, Fact, AgentContext, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
-
-export class StructuralGraph implements IKnowledgeGraph {
-  constructor(private readonly prisma: PrismaClient) {}
-
-  private async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
-    return this.prisma.$queryRawUnsafe<T[]>(sql, ...params)
-  }
-
-  // All other methods unchanged — replace this.pool.query with this.query
-}
-```
-
-Remove the `DbPool` type. Remove the `pool` constructor parameter.
-
-Wire in `apps/gateway/src/routes/chat.ts`:
-```typescript
-import { StructuralGraph } from '@anvay/agent'
-
-// In chatRoutes, after prisma is defined:
-const knowledgeGraph = new StructuralGraph(prisma)
-
-// In createOrchestrator call:
-const orchestrator = createOrchestrator({
-  model: provider,
-  tools: connectorTools,
-  perimeter,
-  auditSink,
-  sessionMemory,
-  knowledgeGraph,   // ADD THIS
-  budget,
-  maxSteps: 10,
-})
-```
-
-Export `StructuralGraph` from `packages/agent/src/index.ts` (or wherever the package exports).
-
-**Commit:** `fix(kb): StructuralGraph uses Prisma $queryRawUnsafe; wire into orchestrator`
-
----
-
-### B-3 — `resolveContext` called with entity name, not entity ID
+### B-2 — `resolveContext` called with entity name, not entity ID (do this BEFORE B-3)
 
 **Files:** `packages/agent/src/orchestrator.ts`, `packages/agent/src/kb/structural-graph.ts`, `packages/agent/src/interfaces/knowledge-graph.ts`
 
@@ -518,6 +514,61 @@ if (entityName) {
 ```
 
 **Commit:** `fix(kb): resolveContextByName — name lookup; fix UUID leakage in context string`
+
+---
+
+### B-3 — `StructuralGraph` uses `pg.Pool` — gateway has only Prisma (do after B-2)
+
+**File:** `packages/agent/src/kb/structural-graph.ts`
+
+`DbPool.query(sql, params)` matches the `pg` npm package API, not Prisma. `pg` is not in gateway deps.
+
+**Fix — use `prisma.$queryRawUnsafe` instead:**
+
+```typescript
+import type { PrismaClient } from '@prisma/client'
+import type { TenantId } from '@anvay/types'
+import type { IKnowledgeGraph, Entity, Relationship, KBEntry, Episode, Fact, AgentContext, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
+import { withTenant } from '../../apps/gateway/src/db/prisma.js'  // or pass prisma from gateway
+
+export class StructuralGraph implements IKnowledgeGraph {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  private async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+    return this.prisma.$queryRawUnsafe<T[]>(sql, ...params)
+  }
+
+  // All other methods unchanged — replace this.pool.query with this.query
+}
+```
+
+> **RLS note:** `StructuralGraph` methods already filter by `tenant_id = $1` in every SQL query, so data is isolated even without RLS policy enforcement. For defense-in-depth, calls from `chat.ts` should eventually wrap in `withTenant`, but for V1 the explicit filter is sufficient.
+
+Remove the `DbPool` type. Remove the `pool` constructor parameter.
+
+Wire in `apps/gateway/src/routes/chat.ts`:
+```typescript
+import { StructuralGraph } from '@anvay/agent'
+
+// In chatRoutes, after prisma is defined:
+const knowledgeGraph = new StructuralGraph(prisma)
+
+// In createOrchestrator call:
+const orchestrator = createOrchestrator({
+  model: provider,
+  tools: connectorTools,
+  perimeter,
+  auditSink,
+  sessionMemory,
+  knowledgeGraph,   // ADD THIS
+  budget,
+  maxSteps: 10,
+})
+```
+
+Export `StructuralGraph` from `packages/agent/src/index.ts`.
+
+**Commit:** `fix(kb): StructuralGraph uses Prisma $queryRawUnsafe; wire into orchestrator`
 
 ---
 
@@ -1230,11 +1281,13 @@ const estimatedTokens = msgTokens + toolTokens + 500
 ## Execution Order
 
 ```
-Security:     S-1 → S-2 → S-3 → S-4 → S-5
+Security:     S-0 → S-1 → S-2 → S-3 → S-4 → S-5
 Broken fixes: B-1 → B-2 → B-3 → B-4 → B-5 → B-6 → B-7
+              ↑ B-2 (resolveContextByName) MUST come before B-3 (wire knowledgeGraph)
+              ↑ Do NOT wire knowledgeGraph into orchestrator until B-2 interface is complete
 Connectors:   C-1 → C-2 → C-3
 Integration:  I-1 → I-2 → I-3 → I-4 → I-5 → I-6 → I-7
 Cleanup:      CL-1 → CL-2 → CL-3 → CL-4 → CL-5
 ```
 
-**Total: 25 tasks.** Work in order. Do not skip.
+**Total: 26 tasks.** Work in order. Do not skip.

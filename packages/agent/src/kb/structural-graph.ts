@@ -100,7 +100,8 @@ export class StructuralGraph implements IKnowledgeGraph {
     const result = await this.pool.query(
       `INSERT INTO entities (tenant_id, type, name, metadata)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET name = $3, metadata = $4, updated_at = NOW()
+       ON CONFLICT (tenant_id, type, name) DO UPDATE
+         SET metadata = EXCLUDED.metadata, updated_at = NOW()
        RETURNING id`,
       [tenantId, entity.type, entity.name, JSON.stringify(entity.metadata ?? {})],
     )
@@ -111,7 +112,7 @@ export class StructuralGraph implements IKnowledgeGraph {
     const result = await this.pool.query(
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
        VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT DO NOTHING
+       ON CONFLICT (from_entity_id, rel_type, to_entity_id) DO NOTHING
        RETURNING id`,
       [tenantId, rel.fromEntityId, rel.relType, rel.toEntityId, JSON.stringify(rel.metadata ?? {})],
     )

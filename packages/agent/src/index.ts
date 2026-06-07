@@ -49,3 +49,7 @@ export { createSpecialistAgent } from './specialist-agent.js'
 // Gate
 export type { GateConfig, GateDecision, Gate } from './gate.js'
 export { createGate } from './gate.js'
+
+// Knowledge Graph
+export type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph.js'
+export { StructuralGraph } from './kb/structural-graph.js'

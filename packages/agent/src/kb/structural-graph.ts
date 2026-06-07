@@ -13,12 +13,14 @@ import type {
   ConnectorCoordinates,
 } from '../interfaces/knowledge-graph.js'
 
-type DbPool = {
-  query: (sql: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>
-}
+type QueryFn = (sql: string, params?: unknown[]) => Promise<unknown[]>
 
 export class StructuralGraph implements IKnowledgeGraph {
-  constructor(private readonly pool: DbPool) {}
+  constructor(private readonly queryFn: QueryFn) {}
+
+  private async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+    return this.queryFn(sql, params) as Promise<T[]>
+  }
 
   async addEpisode(_episode: Episode): Promise<void> {
     throw new Error('Episodic layer not implemented — use Graphiti')
@@ -29,12 +31,11 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async getEntity(id: string, tenantId: TenantId): Promise<Entity | null> {
-    const result = await this.pool.query(
+    const rows = await this.query<Entity>(
       'SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities WHERE id = $1 AND tenant_id = $2',
       [id, tenantId],
     )
-    if (result.rows.length === 0) return null
-    return result.rows[0] as unknown as Entity
+    return rows[0] ?? null
   }
 
   async getRelationships(entityId: string, tenantId: TenantId, relType?: string): Promise<Relationship[]> {
@@ -45,8 +46,7 @@ export class StructuralGraph implements IKnowledgeGraph {
       sql += ' AND rel_type = $3'
       params.push(relType)
     }
-    const result = await this.pool.query(sql, params)
-    return result.rows as unknown as Relationship[]
+    return this.query<Relationship>(sql, params)
   }
 
   async search(_query: string, _tenantId: TenantId, _topK: number): Promise<KBEntry[]> {
@@ -97,7 +97,7 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string> {
-    const result = await this.pool.query(
+    const rows = await this.query<{ id: string }>(
       `INSERT INTO entities (tenant_id, type, name, metadata)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (tenant_id, type, name) DO UPDATE
@@ -105,36 +105,34 @@ export class StructuralGraph implements IKnowledgeGraph {
        RETURNING id`,
       [tenantId, entity.type, entity.name, JSON.stringify(entity.metadata ?? {})],
     )
-    return result.rows[0]!.id as string
+    return rows[0]!.id
   }
 
   async upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<string> {
-    const result = await this.pool.query(
+    const rows = await this.query<{ id: string }>(
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (from_entity_id, rel_type, to_entity_id) DO NOTHING
        RETURNING id`,
       [tenantId, rel.fromEntityId, rel.relType, rel.toEntityId, JSON.stringify(rel.metadata ?? {})],
     )
-    return result.rows[0]?.id as string ?? ''
+    return rows[0]?.id ?? ''
   }
 
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
-    const result = await this.pool.query(
+    const rows = await this.query<{ id: string }>(
       `SELECT id FROM entities WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
       [tenantId, name],
     )
-    const rows = result.rows as Record<string, unknown>[]
     if (rows.length === 0) return null
-    return this.resolveContext(rows[0]!.id as string, tenantId, depth)
+    return this.resolveContext(rows[0]!.id, tenantId, depth)
   }
 
   async getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null> {
-    const result = await this.pool.query(
+    const rows = await this.query<{ id: string }>(
       `SELECT id FROM entities WHERE tenant_id = $1 AND metadata->>'externalId' = $2 LIMIT 1`,
       [tenantId, externalId],
     )
-    const rows = result.rows as Record<string, unknown>[]
-    return (rows[0]?.id as string) ?? null
+    return rows[0]?.id ?? null
   }
 }

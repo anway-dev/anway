@@ -22,6 +22,8 @@ import type {
 import type { ProviderConfig, ProviderType } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
+import { StructuralGraph } from '@anvay/agent'
+import type { IKnowledgeGraph } from '@anvay/agent'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
@@ -269,6 +271,9 @@ export async function chatRoutes(app: FastifyInstance) {
     const sessionUsed = getSessionUsed(sessionId)
     const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed)
 
+    const knowledgeGraph: IKnowledgeGraph = new StructuralGraph(
+      (sql: string, params?: unknown[]) => prisma.$queryRawUnsafe(sql, ...(params ?? [])),
+    )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
     const orchestrator = createOrchestrator({
       model: provider,
@@ -276,6 +281,7 @@ export async function chatRoutes(app: FastifyInstance) {
       perimeter,
       auditSink,
       sessionMemory,
+      knowledgeGraph,
       budget,
     })
 

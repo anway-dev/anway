@@ -7,6 +7,77 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07c -->
+## Review — 2026-06-07 | S-5 (b8c2681) · B-1 (ea10712)
+
+### S-5 — Web proxy auth header forwarding | b8c2681
+
+LGTM. `Authorization` and `Cookie` forwarded via conditional spread — no null headers sent.
+`AbortSignal.timeout(5 * 60 * 1000)` correct — matches plan. Clean implementation.
+
+No issues. ✓
+
+---
+
+### B-1 — KB UNIQUE constraints + upsert fix | ea10712
+
+LGTM. Migration adds both constraints correctly:
+- `UNIQUE (tenant_id, type, name)` on `entities` ✓
+- `UNIQUE (from_entity_id, rel_type, to_entity_id)` on `relationships` ✓
+
+`upsertEntity` ON CONFLICT target updated to `(tenant_id, type, name)`. `EXCLUDED.metadata`
+used correctly. ✓
+
+`upsertRelationship` ON CONFLICT column list specified — Postgres error fixed. ✓
+
+**Note (expected):** `this.pool.query(...)` still present — `pg.Pool` API. B-3 (Prisma switch)
+fixes this. Correct per plan ordering.
+
+No blocking issues. Move to B-2. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07c -->
+
+<!-- REVIEW SECTION START — 2026-06-07b -->
+## Review — 2026-06-07 | S-3 (527c401) · S-4 (17ffe79)
+
+### S-3 — Datadog HTTP API v1 | 527c401
+
+LGTM. `execSync` fully removed. `ddFetch` uses correct Datadog v1 endpoints. URL encoding
+correct — `encodeURIComponent(metric)`, `encodeURIComponent(service)`. `/validate` is the
+correct health endpoint for Datadog v1. Error message now includes actual error string.
+
+**LOW — `Content-Type: application/json` set on GET requests**
+`ddFetch` always adds `Content-Type: application/json` header regardless of method. Harmless
+for Datadog (they ignore it on GET), but signals intent incorrectly. Fix inline when next
+touching this file:
+```typescript
+headers: {
+  'DD-API-KEY': this.apiKey,
+  'DD-APPLICATION-KEY': this.appKey,
+  ...(body ? { 'Content-Type': 'application/json' } : {}),
+},
+```
+
+No blocking issues. Move to S-4 / S-5. ✓
+
+---
+
+### S-4 — Automations tenant isolation | 17ffe79
+
+LGTM. `GET /triggers` now filters by `tenantId` ✓. `POST /evaluate` uses per-request
+`TriggerEngine` scoped to tenant's rules ✓. `id: crypto.randomUUID()` ✓.
+
+**Note (expected, not a bug):** `activeTriggers` is still in-process — rules lost on restart.
+DB persistence is I-4's job. S-4 correctly scopes the in-process fix. No action needed here.
+
+No blocking issues. Move to S-5. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07b -->
+
 <!-- REVIEW SECTION START — 2026-06-07 -->
 ## Review — 2026-06-07 | S-0 (83bfe2b) · S-1 (1fe3fa3) · S-2 (7fd840a)
 

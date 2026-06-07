@@ -1,5 +1,23 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "./route";
+
+const encoder = new TextEncoder()
+
+beforeEach(() => {
+  const mockStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"type":"text_delta","content":"stub response"}\n\n'))
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+      controller.close()
+    },
+  })
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+    new Response(mockStream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    })
+  ))
+})
 
 function mockRequest(body?: unknown): Request {
   return new Request('http://localhost:3000/api/chat', {

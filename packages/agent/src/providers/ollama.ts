@@ -14,7 +14,7 @@ const DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
 interface OpenAICompatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
-  content: string
+  content: string | null
   tool_call_id?: string
   tool_calls?: OpenAICompatToolCall[]
 }
@@ -76,7 +76,7 @@ function mapMessages(messages: Message[]): OpenAICompatMessage[] {
     if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
       return {
         role: 'assistant',
-        content: typeof m.content === 'string' ? m.content : '',
+        content: typeof m.content === 'string' ? m.content : null,
         tool_calls: m.tool_calls.map(tc => ({
           id: tc.id,
           type: tc.type,

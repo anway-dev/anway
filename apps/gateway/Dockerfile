@@ -32,7 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     ca-certificates \
-  && wget -qO /tmp/gh.deb https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_amd64.deb \
+  && ARCH=$(dpkg --print-architecture) \
+  && wget -qO /tmp/gh.deb "https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_${ARCH}.deb" \
   && apt-get install -y /tmp/gh.deb \
   && rm /tmp/gh.deb \
   && apt-get purge -y wget \

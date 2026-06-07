@@ -40,9 +40,10 @@ export class GitHubConnector implements IConnector {
         const repo = query.repo as string ?? ''
         const branch = query.branch as string ?? 'main'
         const since = query.since as string ?? ''
-        const args: string[] = ['api', `repos/${repo}/commits?sha=${branch}`]
-        if (since) args.push('--since', since)
-        stdout = this.runCli('gh', args)
+        const endpoint = since
+          ? `repos/${repo}/commits?sha=${encodeURIComponent(branch)}&since=${encodeURIComponent(since)}`
+          : `repos/${repo}/commits?sha=${encodeURIComponent(branch)}`
+        stdout = this.runCli('gh', ['api', endpoint])
         break
       }
       case 'get_workflow_run': {

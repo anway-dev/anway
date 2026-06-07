@@ -1,18 +1,18 @@
 import type { FastifyInstance } from 'fastify'
+import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 import { TriggerEngine } from '../triggers/engine.js'
-import type { TriggerRule, TriggerAction } from '../triggers/engine.js'
-
-const engine = new TriggerEngine()
-const activeTriggers: TriggerRule[] = []
+import type { TriggerAction } from '../triggers/engine.js'
 
 export async function automationsRoutes(app: FastifyInstance) {
   app.get('/api/automations/triggers', {
     preHandler: [app.authenticate],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
-    return activeTriggers
-      .filter(t => t.tenantId === tenantId)
-      .map(t => ({ id: t.id, eventType: t.eventType, enabled: t.enabled, actionCount: t.actions.length }))
+    const rules = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`SELECT * FROM trigger_rules WHERE tenant_id = ${tenantId}::uuid AND enabled = true`
+    )
+    return rules
   })
 
   app.post<{ Body: { eventType: string; condition: Record<string, unknown>; actions: TriggerAction[] } }>('/api/automations/triggers', {
@@ -31,16 +31,13 @@ export async function automationsRoutes(app: FastifyInstance) {
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const { eventType, condition, actions } = request.body
-    const rule: TriggerRule = {
-      id: crypto.randomUUID(),
-      tenantId,
-      eventType,
-      condition: condition ?? {},
-      actions,
-      enabled: true,
-    }
-    activeTriggers.push(rule)
-    engine.loadRules(activeTriggers)
+    const rule = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`
+        INSERT INTO trigger_rules (tenant_id, event_type, condition, actions)
+        VALUES (${tenantId}::uuid, ${eventType}, ${JSON.stringify(condition ?? {})}::jsonb, ${JSON.stringify(actions)}::jsonb)
+        RETURNING *
+      `
+    )
     return rule
   })
 
@@ -49,9 +46,12 @@ export async function automationsRoutes(app: FastifyInstance) {
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const { eventType, payload } = request.body
-    const tenantEngine = new TriggerEngine()
-    tenantEngine.loadRules(activeTriggers.filter(t => t.tenantId === tenantId))
-    const actions = await tenantEngine.evaluate(eventType, payload)
+    const rules = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`SELECT * FROM trigger_rules WHERE tenant_id = ${tenantId}::uuid AND enabled = true`
+    )
+    const engine = new TriggerEngine()
+    engine.loadRules(rules as any[])
+    const actions = await engine.evaluate(eventType, payload)
     return { matched: actions.length, actions }
   })
 }

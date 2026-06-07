@@ -7,6 +7,34 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07n -->
+## Review — 2026-06-07 | I-5/I-6 followup (63e34f7)
+
+### I-5/I-6 interface fix — `initSession` optional | 63e34f7
+
+`ISessionMemory.initSession` made optional (`initSession?:`). `chat.ts` uses `initSession?.()`.
+Likely driven by a typecheck error on an `ISessionMemory` implementation missing `initSession`.
+Technically correct — optional chaining is safe, existing implementations that have `initSession`
+still called.
+
+**LOW — optional `initSession` weakens the interface contract**
+Any future `ISessionMemory` implementation that omits `initSession` will silently skip session
+identity setup → `userId: 'unknown'`, wrong `effectiveRole`. Hard to debug. Consider instead
+providing a default no-op in `InMemorySessionMemory` and keeping the method required:
+```typescript
+// ISessionMemory — keep required:
+initSession(meta: SessionMeta): Promise<void>
+// Implementations that need no-op:
+async initSession(_meta: SessionMeta): Promise<void> {}
+```
+Post-V1 improvement. No action needed now.
+
+No blocking issues. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07n -->
+
 <!-- REVIEW SECTION START — 2026-06-07m -->
 ## Review — 2026-06-07 | I-5+I-6 (6c54d2b)
 

@@ -243,7 +243,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     // Initialize session identity for all memory implementations
     try {
-      await sessionMemory.initSession({
+      await sessionMemory.initSession?.({
         sessionId: SessionId(sessionId),
         userId: UserId(userId),
         tenantId: TenantId(tenantId),

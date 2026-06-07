@@ -24,6 +24,7 @@ export interface ISessionMemory {
   append(sessionId: SessionId, turn: ConversationTurn): Promise<void>
   summarise(sessionId: SessionId): Promise<void>
   clear(sessionId: SessionId): Promise<void>
+  initSession?(meta: SessionMeta): Promise<void>
 }
 
 export interface MemoryConfig {

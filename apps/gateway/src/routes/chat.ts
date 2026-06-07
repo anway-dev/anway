@@ -241,18 +241,16 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const perimeter = AgentPerimeter.resolveCapabilities(userPerimeter, manifests)
 
-    // Initialize Redis session with user context if using Redis memory
-    if (sessionMemory instanceof RedisSessionMemory) {
-      try {
-        await sessionMemory.initSession({
-          sessionId: SessionId(sessionId),
-          userId: UserId(userId),
-          tenantId: TenantId(tenantId),
-          effectiveRole: (role as AgentRole) ?? 'dev',
-        })
-      } catch (err) {
-        request.log.warn({ err, sessionId }, 'Redis initSession failed, history disabled for this request')
-      }
+    // Initialize session identity for all memory implementations
+    try {
+      await sessionMemory.initSession({
+        sessionId: SessionId(sessionId),
+        userId: UserId(userId),
+        tenantId: TenantId(tenantId),
+        effectiveRole: (role as AgentRole) ?? 'dev',
+      })
+    } catch (err) {
+      request.log.warn({ err, sessionId }, 'initSession failed — session identity may be incomplete')
     }
 
     const sessionCtx: SessionContext = {

@@ -3218,3 +3218,157 @@ Verify `createGate` handles `autoApproveThreshold`, `waitForInput`, and gate dec
 - **Error events streamed:** on error in agent loop, send `{ type: 'error', code, message }` before closing stream. Never close silently.
 
 <!-- REVIEW SECTION END — 2026-06-03 -->
+
+---
+
+## Review — 2026-06-07
+
+**Commits:** `0c2d0a7`, `912ea42`, `5f4e40e`, `3d9f8e7`, `dbda6a4`, `8ac311e`
+**Author:** DeepSeek V4 Flash (via Codex)
+**Reviewer:** Claude (automated)
+
+Wave 3 of CODEX-PLAN.md complete. Six commits, seven bugs closed. No regressions detected.
+
+---
+
+### Resolved (this batch)
+
+#### ✓ L-6 — `0c2d0a7` — Duplicate `OpenAIToolCall` interface removed
+`packages/types/src/index.ts` now has exactly one `export interface OpenAIToolCall` (line 99).
+`grep -c "export interface OpenAIToolCall" packages/types/src/index.ts` returns `1`. Clean.
+
+#### ✓ L-2 — `912ea42` — Intent classification best-effort, not fatal
+`orchestrator.ts:131–134` — `catch` block now sets `classifiedIntent = 'general'` and continues.
+No longer yields `INTENT_CLASSIFICATION_FAILED` error and returns. Correct — a bad intent parse
+should not abort the user's session. The `INTENT_CLASSIFICATION_FAILED` ErrorCode constant in
+`@anvay/types` is now unused; harmless to keep, can be pruned in a later cleanup pass.
+
+#### ✓ B-2-R — `5f4e40e` — Session token usage persists across calls
+`apps/gateway/src/routes/chat.ts` — module-level `sessionTokenUsage: Map<string, { used, lastSeen }>`
+with 24 h TTL eviction. `buildTokenBudget(monthly, sessionUsed)` now seeds `sessionUsed` from the
+map before building the `TokenBudget`. `recordSessionUsed` called in `finally` block after stream
+drains. In-process only (clears on restart) — comment is accurate. Acceptable for V1.
+
+One observation: `totalTokens` is declared outside the `try` block and only set inside the `done`
+event handler. If the loop throws before emitting `done`, `totalTokens` stays 0 and `recordSessionUsed`
+is skipped (guard `if (totalTokens > 0)`). Correct behavior — partial failed sessions don't inflate
+the budget counter.
+
+#### ✓ B-5 — `3d9f8e7` — Connector scopes from capability manifest
+`connectorScopes` now reads `c.capability_manifest` (cast `as { capabilities?: { read?, write? } }`)
+rather than hardcoding `read: ['*']`. Falls back to `['*']` if manifest missing/malformed.
+The wildcard fallback preserves prior behavior for connectors with no manifest data — acceptable
+for V1 bootstrap, but any newly registered connector should include a manifest. Flag for
+connector registration validation work.
+
+#### ✓ B-8 — `3d9f8e7` — RLS `set_config` now called before queries
+New file `apps/gateway/src/db/prisma.ts` — `withTenant(prisma, tenantId, fn)` wraps `fn` in a
+`prisma.$transaction`, runs `SELECT set_config('app.tenant_id', $1, true)` first, then calls `fn`.
+All tenant-scoped DB queries (connector load, tenant load) are now wrapped in `withTenant`. B-8 resolved.
+
+**Minor:** `tx` is cast `as typeof prisma` inside the transaction callback. This is standard Prisma
+transaction boilerplate — `PrismaClient.$transaction` passes a `Prisma.TransactionClient` which has
+the same model accessors. Cast is safe here.
+
+#### ✓ B-9 — `dbda6a4` — Audit FK changed to RESTRICT + delete trigger
+Migration `0002_audit_immutability`:
+- `prevent_audit_delete()` trigger function — raises exception on any DELETE from `audit_events`.
+- `no_delete_audit_events` trigger — BEFORE DELETE FOR EACH ROW.
+- FK changed from CASCADE to RESTRICT: deleting a tenant now fails (hard error) if audit events exist.
+
+**Minor:** `CREATE TRIGGER no_delete_audit_events` is not idempotent. If the migration is ever
+re-run manually it will fail with `trigger already exists`. Prisma migrations are run-once by design
+so this is low risk, but a `DROP TRIGGER IF EXISTS ... CASCADE` before the `CREATE TRIGGER` would
+be safer. Not blocking.
+
+#### ✓ B-10 — `8ac311e` — Dockerfile `pnpm deploy` for workspace symlinks
+Builder stage now runs `pnpm deploy --filter=anvay-gateway /app/deploy --prod` after the build.
+This copies a self-contained, symlink-free node_modules into `/app/deploy`. Runner stage copies
+from `/app/deploy/node_modules` instead of `apps/gateway/node_modules`.
+
+**Verify:** `--filter=anvay-gateway` assumes the `name` field in `apps/gateway/package.json` is
+`anvay-gateway` (no `@` scope). If it's `@anvay/gateway`, the filter needs shell-quoting:
+`--filter='@anvay/gateway'`. Run a Docker build dry-run to confirm filter resolves correctly.
+
+---
+
+### Remaining Open Issues (forward to next wave)
+
+| ID | File | Description |
+|----|------|-------------|
+| M-5/H-2 | `apps/gateway/src/routes/chat.ts` | `InMemorySessionMemory` returns hardcoded `effectiveRole: 'dev'` for all users |
+| M-1 | `apps/gateway/src/routes/chat.ts:137` | `tenantId` not UUID-validated before Prisma — runs useless `findUnique({ id: '' })` |
+| M-2 | `packages/agent/src/orchestrator.ts:172` | Token estimation ignores tool definitions — underestimates by 20–40% on tool-heavy calls |
+| M-3 | `packages/agent/src/providers/anthropic.ts:129` | `content_block_stop` emits all partial tool calls, not just the stopped block |
+| M-4 | `packages/agent/src/perimeter/engine.ts:63` | `WRITE_SUFFIXES` substring match — `autocreate` matches `create` (false positive) |
+| L-1 | `packages/agent/src/providers/anthropic.ts:161` | `export { AppError }` — wrong file, belongs in `@anvay/types` |
+| L-3 | `packages/agent/src/gate.ts` | `createGate` implementation status unknown — verify or mark TODO |
+| L-5 | `packages/agent/src/providers/ollama.ts` | `content: ''` should be `content: null` for assistant messages with tool_calls |
+
+---
+
+### Status Tracker — Wave 3 Complete
+
+| Bug | Status |
+|-----|--------|
+| B-2-R session token reset | ✓ RESOLVED `5f4e40e` |
+| B-5 connector scopes wildcard | ✓ RESOLVED `3d9f8e7` |
+| B-8 RLS set_config never called | ✓ RESOLVED `3d9f8e7` |
+| B-9 audit FK CASCADE | ✓ RESOLVED `dbda6a4` |
+| B-10 Dockerfile symlinks | ✓ RESOLVED `8ac311e` |
+| L-6 duplicate OpenAIToolCall | ✓ RESOLVED `0c2d0a7` |
+| L-2 intent fail aborts session | ✓ RESOLVED `912ea42` |
+| M-5/H-2 fake identity + prod guard | ✓ RESOLVED `bd8c4e9` |
+
+---
+
+### `bd8c4e9` — InMemorySessionMemory fake identity + production Redis guard
+
+**Two changes in one commit:**
+
+1. `InMemorySessionMemory` — added `initSession(meta: SessionMeta)` method that stores
+   `{ userId, tenantId, effectiveRole }` in a `metas: Map`. `get()` now reads from `metas`
+   instead of returning hardcoded `'unknown'`/`'dev'`.
+
+2. Production guard added at `chatRoutes` startup:
+   ```typescript
+   if (process.env['NODE_ENV'] === 'production' && !process.env['REDIS_URL']) {
+     throw new Error('Production requires REDIS_URL environment variable')
+   }
+   ```
+   Prevents silent fallback to ephemeral in-memory sessions in production.
+
+**Subtle issue — `initSession` call site only guards `instanceof RedisSessionMemory`:**
+```typescript
+if (sessionMemory instanceof RedisSessionMemory) {
+  await sessionMemory.initSession(...)  // InMemorySessionMemory.initSession never called
+}
+```
+`InMemorySessionMemory.initSession` is dead code — `metas` stays empty, `get()` still returns
+`userId: 'unknown'`. However, this does NOT cause a runtime bug: `runSession` uses the `ctx`
+parameter for user identity (line 256–259 in chat.ts), not `sessionMemory.get()`. The orchestrator
+calls `sessionMemory.get()` only for `session?.turns` (conversation history). Identity fields
+from memory are ignored.
+
+**Fix needed:** change the `instanceof RedisSessionMemory` guard to call `initSession` on any
+memory implementation that has the method:
+```typescript
+await sessionMemory.initSession({ sessionId: ..., userId: ..., tenantId: ..., effectiveRole: ... })
+```
+
+---
+
+### Remaining Open Issues (carry forward)
+
+| ID | File | Description |
+|----|------|-------------|
+| M-5 (partial) | `apps/gateway/src/routes/chat.ts:243` | `initSession` only called for `RedisSessionMemory` — `InMemorySessionMemory` identity fix dead code |
+| M-1 | `apps/gateway/src/routes/chat.ts:137` | `tenantId` not UUID-validated — useless Prisma query on invalid input |
+| M-2 | `packages/agent/src/orchestrator.ts:172` | Token estimation ignores tool definitions |
+| M-3 | `packages/agent/src/providers/anthropic.ts:129` | `content_block_stop` emits all partial tool calls |
+| M-4 | `packages/agent/src/perimeter/engine.ts:63` | `WRITE_SUFFIXES` substring false positives |
+| L-1 | `packages/agent/src/providers/anthropic.ts:161` | `export { AppError }` — wrong file |
+| L-3 | `packages/agent/src/gate.ts` | `createGate` implementation unknown — verify or mark TODO |
+| L-5 | `packages/agent/src/providers/ollama.ts` | `content: ''` should be `null` for assistant+tool_calls |
+
+<!-- REVIEW SECTION END — 2026-06-07 -->

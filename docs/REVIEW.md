@@ -3513,4 +3513,33 @@ if (row.type === 'github') return new GitHubConnector(row.id)
 - Not in `turbo.json` pipeline — won't build from root.
 - `list_commits` interpolates `branch` into URL string — sanitize.
 
+---
+
+### `71a2a33` — Datadog, Linear, ArgoCD connectors
+
+Three new connector packages. Same structure as GitHub connector. Same `execSync(string)` shell injection problem — fix all with `spawnSync(array)` per the GitHub review.
+
+**Datadog — CLI doesn't exist as written:**
+`execSync('datadog api metrics/query ...')` — there is no official `datadog` CLI that accepts `api metrics/query`. Datadog tools are: `datadog-ci` (CI/CD pipeline only), `ddtrace` (APM tracing), Python CLI `dog` (deprecated). None match this interface. The connector will throw `ENOENT` or similar on every call. **Needs a real implementation** — use the Datadog HTTP API directly with `fetch` and an API key, or wait for an official MCP server.
+
+**Linear — GraphQL injection:**
+`team` and `issue_id` are interpolated directly into GraphQL query strings:
+```typescript
+const q = `{ issues(...filter:{team:{name:{eq:\"${team}\"}}}...) }`
+```
+Malicious `team` value rewrites the query. Fix: use GraphQL variables:
+```typescript
+const query = `query($team: String!) { issues(filter:{team:{name:{eq:$team}}}) { ... } }`
+const variables = { team }
+const payload = JSON.stringify({ query, variables })
+```
+
+**Linear — `linear api` CLI existence uncertain:**
+`execSync("linear api --json '{...}'")` — Linear doesn't ship a well-known CLI with this interface. Verify `linear` CLI exists and accepts this syntax, or replace with direct HTTP to `https://api.linear.app/graphql` using `fetch`.
+
+**ArgoCD — no tool builder:**
+`ArgoCD` index exports only `ArgoCDConnector` — no `makeArgoCDTools()`. Inconsistent with GitHub pattern. Registry can't auto-build tools without it.
+
+**All three — not wired to registry, no tests.**
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

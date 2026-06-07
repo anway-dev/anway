@@ -7,6 +7,45 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07d -->
+## Review — 2026-06-07 | B-2 (b80f356)
+
+### B-2 — `resolveContextByName` + orchestrator fix | b80f356
+
+LGTM overall. Interface additions correct — both methods added to `IKnowledgeGraph` ✓.
+Orchestrator now calls `resolveContextByName` instead of `resolveContext` ✓. Entity names
+resolved from `relatedEntities` array — UUIDs no longer leaked into context string ✓.
+
+**MEDIUM — `pool.query()` returns `QueryResult`, not array — `resolveContextByName` uses wrong API**
+
+`this.pool.query()` is `pg.Pool` API — returns `QueryResult<T>` with `.rows: T[]`. But the
+new `resolveContextByName` and `getEntityByExternalRef` treat the result as an array directly:
+
+```typescript
+const rows = await this.pool.query(...)  // rows = QueryResult, NOT T[]
+if (rows.length === 0)                   // QueryResult has no .length — this is always falsy
+return this.resolveContext(rows[0]!.id as string, ...)  // rows[0] = undefined → TypeError
+```
+
+Existing methods use `result.rows[0]?.id` correctly (e.g. `upsertEntity`). The new methods
+skip `.rows` — they are broken on the current `pg.Pool` path.
+
+**This is acceptable because:** B-3 replaces `this.pool.query()` with a private `query<T>()`
+wrapper returning `T[]` directly (via `prisma.$queryRawUnsafe`). Both new methods will be
+correct after B-3. The orchestrator won't wire `knowledgeGraph` until B-3, so no runtime
+breakage before the fix lands.
+
+**Update — ce097ad self-corrected immediately:**
+Added `const rows = result.rows as Record<string, unknown>[]` in both methods. ✓ Correct.
+`as Record<string, unknown>[]` is loose typing but safe since `SELECT id` is the only column.
+B-3 will tighten to typed `query<T>()` helper. No further action needed.
+
+Move to B-3. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07d -->
+
 <!-- REVIEW SECTION START — 2026-06-07c -->
 ## Review — 2026-06-07 | S-5 (b8c2681) · B-1 (ea10712)
 

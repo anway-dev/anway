@@ -134,7 +134,46 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@20.19.41)(lightningcss@1.32.0)
 
+  connectors/argocd:
+    dependencies:
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  connectors/datadog:
+    dependencies:
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   connectors/github:
+    dependencies:
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  connectors/linear:
     dependencies:
       '@anvay/types':
         specifier: workspace:*

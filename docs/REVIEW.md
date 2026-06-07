@@ -7,6 +7,90 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-07g -->
+## Review — 2026-06-07 | B-6 (abd351d)
+
+### B-6 — Web route test fetch mock | abd351d
+
+LGTM. `vi.stubGlobal('fetch', ...)` in `beforeEach` — mocks global fetch before each test,
+prevents ECONNREFUSED in CI. `ReadableStream` produces valid SSE format (`data: {...}\n\n`
+followed by `data: [DONE]\n\n`). Mock returns `200` with `Content-Type: text/event-stream`.
+Existing test cases unchanged. ✓
+
+No issues. Move to B-7. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07g -->
+
+<!-- REVIEW SECTION START — 2026-06-07f -->
+## Review — 2026-06-07 | B-4 (0f67fa1) · B-5 (dab9a2a)
+
+### B-4 — Graph Builder FK violations fixed | 0f67fa1
+
+LGTM. `ticketId` (external Linear string) no longer used as FK. DB UUID captured from
+`upsertEntity` return value → used as `fromEntityId`. `externalId` stored in metadata for
+`getEntityByExternalRef` lookup. `handlePrMerged` correctly resolves ticket DB UUID before
+creating `FIXES` relationship. `RelationshipSpec` unused import removed. ✓
+
+**LOW — `extractServiceName` regex too narrow**
+`/\b([a-z]+-[a-z]+-api)\b/i` requires exactly 3 hyphen-segments ending in `-api` (e.g.
+`payments-service-api`). Won't match `payments-api` (2 segments) or `auth-service` (no `-api`).
+V1 demo data uses seeded entities — won't impact smoke test. Fix post-launch.
+
+No blocking issues. Move to B-5. ✓
+
+---
+
+### B-5 — SREAgent real model IDs | dab9a2a
+
+LGTM. `cheapModelId = 'claude-haiku-3-5-20251001'` and `mainModelId = 'claude-sonnet-4-6'`
+match orchestrator defaults. Constructor params with defaults — overridable at instantiation.
+Unused `ToolCall` import removed. ✓
+
+No issues. Move to B-6. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07f -->
+
+<!-- REVIEW SECTION START — 2026-06-07e -->
+## Review — 2026-06-07 | B-3 (d8b0a27)
+
+### B-3 — StructuralGraph Prisma wiring | d8b0a27
+
+LGTM. `DbPool` → `QueryFn` abstraction is clean. Private `query<T>()` helper correctly
+typed. All `this.pool.query(...)` calls replaced — `result.rows` workarounds from B-2 gone.
+`chat.ts` wiring via lambda: `(sql, params?) => prisma.$queryRawUnsafe(sql, ...(params ?? []))`.
+`IKnowledgeGraph`, `AgentContext`, `StructuralGraph` all exported from `index.ts`. ✓
+
+**LOW — `StructuralGraph` instantiated per-request**
+`new StructuralGraph(...)` inside the `app.post` handler = new instance every chat request.
+Stateless, so safe. Move to module level (after `const prisma = ...`) to avoid repeated allocation:
+```typescript
+// module level, after prisma singleton:
+const knowledgeGraph = new StructuralGraph(
+  (sql: string, params?: unknown[]) => prisma.$queryRawUnsafe(sql, ...(params ?? [])),
+)
+```
+Fix inline when next touching `chat.ts`.
+
+**Note — RLS bypass expected and acceptable for V1**
+`$queryRawUnsafe` runs outside `withTenant` → `app.tenant_id` not set → RLS policy inactive.
+All KB queries have `WHERE tenant_id = $1` — explicit filter provides isolation. No data leak.
+Plan acknowledged this. No action required for V1.
+
+**Note — `$queryRawUnsafe` with static SQL is safe**
+All SQL strings are compile-time literals. `params` array carries user data as parameterized
+values. Not injection-vulnerable despite the "unsafe" name (refers to Prisma type-checking,
+not parameterization).
+
+Move to B-4. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-07e -->
+
 <!-- REVIEW SECTION START — 2026-06-07d -->
 ## Review — 2026-06-07 | B-2 (b80f356)
 

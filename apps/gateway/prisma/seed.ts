@@ -1,15 +1,11 @@
 import { PrismaClient } from '@prisma/client'
-import { createWriteStream } from 'fs'
 
 const prisma = new PrismaClient()
-
 const log = (msg: string) => process.stdout.write(`[seed] ${msg}\n`)
 
 async function main() {
   log('Starting seed...')
 
-  // tenants table uses FORCE ROW LEVEL SECURITY — superuser still bypasses by default
-  // but we set the context variable anyway so the seed works in both modes
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'demo' },
     update: {},
@@ -22,9 +18,6 @@ async function main() {
     },
   })
   log(`Tenant: ${tenant.slug} (${tenant.id})`)
-
-  // Set RLS session variable so subsequent writes pass the tenant_isolation policy
-  await prisma.$executeRawUnsafe(`SET LOCAL app.tenant_id = '${tenant.id}'`)
 
   const user = await prisma.user.upsert({
     where: {
@@ -42,20 +35,28 @@ async function main() {
   })
   log(`User: ${user.email} (role=${user.role})`)
 
-  const connector = await prisma.connector.create({
-    data: {
-      tenant_id: tenant.id,
-      name: 'GitHub (Demo)',
-      type: 'github',
-      mode: 'read',
-      config_encrypted: {},
-      capability_manifest: {
-        read: { scope: ['org/*'] },
-        write: {},
-      },
-    },
+  // Seed connectors with correct nested capability_manifest format
+  await prisma.connector.createMany({
+    skipDuplicates: true,
+    data: [
+      { tenant_id: tenant.id, name: 'GitHub (Demo)', type: 'github', mode: 'read', config_encrypted: {}, capability_manifest: { capabilities: { read: ['org/*'], write: [] } } },
+      { tenant_id: tenant.id, name: 'Linear (Demo)', type: 'linear', mode: 'read', config_encrypted: {}, capability_manifest: { capabilities: { read: ['*'], write: [] } } },
+      { tenant_id: tenant.id, name: 'PagerDuty (Demo)', type: 'pagerduty', mode: 'read', config_encrypted: {}, capability_manifest: { capabilities: { read: ['*'], write: [] } } },
+      { tenant_id: tenant.id, name: 'ArgoCD (Demo)', type: 'argocd', mode: 'read', config_encrypted: {}, capability_manifest: { capabilities: { read: ['*'], write: [] } } },
+    ],
   })
-  log(`Connector: ${connector.name} (mode=${connector.mode})`)
+  log('Connectors seeded.')
+
+  // Seed KB entities so resolveContextByName has something to resolve
+  await prisma.$executeRaw`
+    INSERT INTO entities (tenant_id, type, name, metadata)
+    VALUES
+      (${tenant.id}::uuid, 'Service', 'payments-api', '{"language":"TypeScript","tier":"critical"}'::jsonb),
+      (${tenant.id}::uuid, 'Service', 'auth-service', '{"language":"Go","tier":"critical"}'::jsonb),
+      (${tenant.id}::uuid, 'Team', 'platform', '{"slack":"#platform"}'::jsonb)
+    ON CONFLICT (tenant_id, type, name) DO NOTHING
+  `
+  log('KB entities seeded.')
 
   log('Seed complete.')
 }

@@ -7,6 +7,97 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-26 -->
+## Review — 2026-06-26 | fa7d3fa 7e9f92d 0c7c209 bfd468f 0952f49
+
+5 commits from MiniMax via opencode. Wave 1 + Wave 2 of CODEX-PLAN.md complete.
+All BLOCKING and HIGH issues from prior reviews resolved in this batch.
+
+### Commits reviewed
+| SHA | Message |
+|-----|---------|
+| `fa7d3fa` | feat(types): widen Message type — Anthropic content blocks, tool_call_id |
+| `7e9f92d` | fix(providers): add formatToolCall to IModelProvider; fix H-1/H-16/H-17/H-18 |
+| `0c7c209` | fix(orchestrator): surface intent error, accumulate text, use formatToolCall |
+| `bfd468f` | fix(tests): add formatToolCall/formatToolResult to mock providers |
+| `0952f49` | feat(gateway): ESM migration (NodeNext), register chatRoutes with SSE streaming |
+
+### Issues resolved this pass
+| Issue | File | Status |
+|-------|------|--------|
+| H-1 | `providers/anthropic.ts` | ✓ Fixed — index-keyed streaming map |
+| H-4 | `orchestrator.ts:134` | ✓ Fixed — INTENT_CLASSIFICATION_FAILED yielded + return |
+| H-5 | `orchestrator.ts` | ✓ Fixed — accumulatedText persisted as real content |
+| H-15 | `orchestrator.ts:254` | ✓ Fixed — model.formatToolCall used instead of string encode |
+| H-16 | `providers/anthropic.ts` | ✓ Fixed — proper tool_result content block |
+| H-17 | `providers/openai.ts:mapMessages` | ✓ Fixed — tool_call_id + tool_calls forwarded |
+| H-18 | `providers/ollama.ts:mapMessages` | ✓ Fixed — tool_call_id + tool_calls forwarded |
+| M-18 | `packages/types/src/index.ts` | ✓ Fixed — OpenAIToolCall + tool_calls on Message |
+| B-14 | `orchestrator.test.ts` | ✓ Fixed — both mocks have both interface methods |
+| B-15 | `orchestrator.test.ts` | ✓ Fixed — module-level code wrapped in it() block |
+
+### New issues found
+
+**LOW — L-3** `apps/gateway/src/routes/metrics.ts:2` and `apps/gateway/src/server.ts:1-4`  
+ESM migration incomplete — `.js` extension missing on 4 imports across these 2 files. Committed
+gateway batch (`0952f49`) missed them. Files sit in working tree unchanged.  
+**Fix:** Add `.js` to each bare import and commit. Two-line change per file.  
+**Verify:** `pnpm --filter anvay-gateway build` exits 0.
+
+**LOW — L-4** `apps/gateway/src/__tests__/chat.test.ts:261`  
+`as never` cast used to pass invalid type to `resolveProviderConfig` in test. Confirms security
+behavior (client apiKey ignored) but the cast is a code smell.  
+**Fix:** Create a separate type-unsafe test util or use `satisfies` + `Omit`. Not blocking.
+
+**LOW — L-5** `apps/gateway/src/providers/ollama.ts` — `mapMessages` assistant branch  
+Assistant messages with `tool_calls` get `content: ''` (empty string). OpenAI spec says `null`.
+Most Ollama models tolerate this but it's spec-incorrect.  
+**Fix:** `content: (typeof m.content === 'string' ? m.content : null) as string`  
+**Verify:** Ollama integration test passes with tool call round-trip.
+
+### Still open (from prior reviews)
+| Issue | Severity | File | Notes |
+|-------|----------|------|-------|
+| B-2-R | MEDIUM | `gateway/routes/chat.ts:buildTokenBudget` | sessionUsed resets per request |
+| B-5 | MEDIUM | `gateway/routes/chat.ts:144` | connectorScopes hardcodes `['*']` |
+| B-8 | MEDIUM | `gateway/routes/chat.ts` | RLS set_config never called |
+| B-9 | MEDIUM | `prisma/migrations/0001_initial` | audit_events CASCADE bypasses immutability |
+| B-10 | MEDIUM | `apps/gateway/Dockerfile` | workspace symlinks broken in distroless |
+| H-2 | HIGH | `gateway/routes/chat.ts:96` | InMemorySessionMemory used if REDIS_URL absent |
+| L-3 | LOW | `gateway/routes/metrics.ts`, `server.ts` | ESM `.js` extension missing (uncommitted) |
+
+### Ratings
+| Dimension | Rating | Change |
+|-----------|--------|--------|
+| Feature completeness | 8/10 | +1 — gateway SSE wired, all provider paths correct |
+| Code standards | 7/10 | +2 — B-14/B-15 fixed, mapMessages correct, no casts |
+| Performance | 6/10 | — |
+| Security | 5/10 | +1 — client API key rejection enforced in chat.ts; B-5/B-8/B-9 still open |
+| Readability | 8/10 | — |
+| Clarity and comments | 7/10 | — |
+
+### Pending Features (docs/TASKS.md)
+| Task | Status |
+|------|--------|
+| M0 Foundation | ✓ Complete |
+| M1-T1 Agent harness + IModelProvider | ✓ Complete |
+| M1-T2 Anthropic provider | ✓ Complete (H-1/H-16 fixed) |
+| M1-T3 OpenAI provider | ✓ Complete (H-17 fixed) |
+| M1-T4 Ollama provider | ✓ Complete (H-18 fixed) |
+| M1-T5 AgentPerimeter engine | ✓ Complete |
+| M1-T6 Orchestrator runSession | ✓ Complete (H-4/H-5/H-15 fixed) |
+| M1-T7 RedisSessionMemory | ✓ Complete |
+| M1-T8 TokenBudget middleware | ⚠ Partial — B-2-R open |
+| M1-T9 Audit sink | ⚠ Partial — B-9 open |
+| M1 Gateway chatRoutes | ✓ Complete (0952f49) |
+| Wave 3 medium fixes (B-2-R/B-5/B-8/B-9/B-10) | ✗ Not started |
+| M2 Knowledge Graph | ✗ Not started |
+| M2 Bootstrap Agent | ✗ Not started |
+
+<!-- REVIEW SECTION END — 2026-06-26 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-25 -->
 ## Review — 2026-06-25 | No new commits
 

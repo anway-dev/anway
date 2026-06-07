@@ -24,10 +24,26 @@ function mapTools(tools: ToolDefinition[]): OpenAI.ChatCompletionTool[] {
 }
 
 function mapMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
-  return messages.map((m) => ({
-    role: m.role as 'user' | 'assistant' | 'system',
-    content: m.content,
-  }))
+  return messages.map((m) => {
+    if (m.role === 'tool') {
+      return {
+        role: 'tool' as const,
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        tool_call_id: m.tool_call_id ?? '',
+      }
+    }
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+      return {
+        role: 'assistant' as const,
+        content: typeof m.content === 'string' ? m.content : null,
+        tool_calls: m.tool_calls as OpenAI.ChatCompletionMessageToolCall[],
+      }
+    }
+    return {
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    }
+  })
 }
 
 export class OpenAIProvider implements IModelProvider {
@@ -157,8 +173,21 @@ export class OpenAIProvider implements IModelProvider {
   formatToolResult(toolCallId: string, result: unknown): Message {
     const content = typeof result === 'string' ? result : JSON.stringify(result)
     return {
-      role: 'user',
-      content: String(content),
+      role: 'tool',
+      content,
+      tool_call_id: toolCallId,
+    }
+  }
+
+  formatToolCall(toolCalls: ToolCall[]): Message {
+    return {
+      role: 'assistant',
+      content: '',
+      tool_calls: toolCalls.map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+      })),
     }
   }
 }

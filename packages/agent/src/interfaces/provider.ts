@@ -44,6 +44,7 @@ export interface IModelProvider {
   chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse>
   stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncGenerator<StreamChunk>
   formatToolResult(toolCallId: string, result: unknown): Message
+  formatToolCall(toolCalls: ToolCall[]): Message
 }
 
 // Embedding provider for KB semantic retrieval

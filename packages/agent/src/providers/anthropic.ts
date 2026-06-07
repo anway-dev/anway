@@ -24,17 +24,18 @@ function mapTools(tools: ToolDefinition[]): Anthropic.Tool[] {
   }))
 }
 
+function extractSystem(messages: Message[]): string | undefined {
+  return messages.find((m) => m.role === 'system')?.content as string | undefined
+}
+
 function mapMessages(messages: Message[]): Anthropic.MessageParam[] {
   return messages
     .filter((m) => m.role !== 'system')
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }))
-}
-
-function extractSystem(messages: Message[]): string | undefined {
-  return messages.find((m) => m.role === 'system')?.content
+    .map((m) => {
+      const role = m.role === 'tool' ? 'user' : (m.role as 'user' | 'assistant')
+      const content = m.content
+      return { role, content } as Anthropic.MessageParam
+    })
 }
 
 export class AnthropicProvider implements IModelProvider {
@@ -97,8 +98,8 @@ export class AnthropicProvider implements IModelProvider {
       ...(opts.stopSequences && opts.stopSequences.length > 0 ? { stop_sequences: opts.stopSequences } : {}),
     }
 
-    // Track partial tool call args per index
-    const partialToolCalls = new Map<string, { name: string; argsJson: string }>()
+    // Track partial tool call args per content block index
+    const partialToolCalls = new Map<number, { id: string; name: string; argsJson: string }>()
     let inputTokens = 0
     let outputTokens = 0
 
@@ -108,7 +109,8 @@ export class AnthropicProvider implements IModelProvider {
       for await (const event of stream) {
         if (event.type === 'content_block_start') {
           if (event.content_block.type === 'tool_use') {
-            partialToolCalls.set(event.content_block.id, {
+            partialToolCalls.set(event.index, {
+              id: event.content_block.id,
               name: event.content_block.name,
               argsJson: '',
             })
@@ -117,18 +119,14 @@ export class AnthropicProvider implements IModelProvider {
           if (event.delta.type === 'text_delta') {
             yield { type: 'text_delta', content: event.delta.text }
           } else if (event.delta.type === 'input_json_delta') {
-            // Accumulate JSON for the active tool call
-            // Anthropic streams tool input as JSON delta; we need to match by index
-            // The stream sends content_block_delta with index — find matching partial
-            for (const [id, partial] of partialToolCalls) {
+            const partial = partialToolCalls.get(event.index)
+            if (partial) {
               partial.argsJson += event.delta.partial_json
-              partialToolCalls.set(id, partial)
-              break // Only one tool call active per delta event
             }
           }
         } else if (event.type === 'content_block_stop') {
-          // Emit accumulated tool call if any finished
-          for (const [id, partial] of partialToolCalls) {
+          const partial = partialToolCalls.get(event.index)
+          if (partial) {
             let args: Record<string, unknown> = {}
             try {
               args = JSON.parse(partial.argsJson) as Record<string, unknown>
@@ -138,10 +136,10 @@ export class AnthropicProvider implements IModelProvider {
             yield {
               type: 'tool_call',
               toolName: partial.name,
-              toolCallId: id,
+              toolCallId: partial.id,
               args,
             }
-            partialToolCalls.delete(id)
+            partialToolCalls.delete(event.index)
           }
         } else if (event.type === 'message_delta') {
           outputTokens = event.usage.output_tokens
@@ -161,7 +159,23 @@ export class AnthropicProvider implements IModelProvider {
     const content = typeof result === 'string' ? result : JSON.stringify(result)
     return {
       role: 'user',
-      content: `[tool_result id="${toolCallId}"] ${content}`,
+      content: [{
+        type: 'tool_result',
+        tool_use_id: toolCallId,
+        content,
+      }],
+    }
+  }
+
+  formatToolCall(toolCalls: ToolCall[]): Message {
+    return {
+      role: 'assistant',
+      content: toolCalls.map(tc => ({
+        type: 'tool_use',
+        id: tc.id,
+        name: tc.name,
+        input: tc.args,
+      })),
     }
   }
 }

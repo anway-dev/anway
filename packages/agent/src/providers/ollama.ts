@@ -13,8 +13,10 @@ const DEFAULT_MODEL = 'llama3.2'
 const DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
 interface OpenAICompatMessage {
-  role: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
+  tool_call_id?: string
+  tool_calls?: OpenAICompatToolCall[]
 }
 
 interface OpenAICompatTool {
@@ -63,7 +65,30 @@ interface OpenAICompatResponse {
 }
 
 function mapMessages(messages: Message[]): OpenAICompatMessage[] {
-  return messages.map((m) => ({ role: m.role, content: m.content }))
+  return messages.map((m) => {
+    if (m.role === 'tool') {
+      return {
+        role: 'tool',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        tool_call_id: m.tool_call_id ?? '',
+      }
+    }
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+      return {
+        role: 'assistant',
+        content: typeof m.content === 'string' ? m.content : '',
+        tool_calls: m.tool_calls.map(tc => ({
+          id: tc.id,
+          type: tc.type,
+          function: tc.function,
+        })),
+      }
+    }
+    return {
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    }
+  })
 }
 
 function mapTools(tools: ToolDefinition[]): OpenAICompatTool[] {
@@ -259,8 +284,21 @@ export class OllamaProvider implements IModelProvider {
   formatToolResult(toolCallId: string, result: unknown): Message {
     const content = typeof result === 'string' ? result : JSON.stringify(result)
     return {
-      role: 'user',
-      content: String(content),
+      role: 'tool',
+      content,
+      tool_call_id: toolCallId,
+    }
+  }
+
+  formatToolCall(toolCalls: ToolCall[]): Message {
+    return {
+      role: 'assistant',
+      content: '',
+      tool_calls: toolCalls.map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+      })),
     }
   }
 }

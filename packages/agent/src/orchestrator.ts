@@ -131,8 +131,9 @@ export async function* runSession(
     })
     const parsed = JSON.parse(intentResp.content) as { intent?: unknown }
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
-  } catch {
-    // Not a hard failure — proceed with default intent
+  } catch (err) {
+    yield makeError('INTENT_CLASSIFICATION_FAILED', err instanceof Error ? err.message : 'intent classification failed')
+    return
   }
 
   await auditSink.append({
@@ -166,11 +167,14 @@ export async function* runSession(
 
   let totalInputTokens = 0
   let totalOutputTokens = 0
+  let accumulatedText = ''
 
   for (let step = 0; step < maxSteps; step++) {
     // Estimate tokens for budget check (rough: 1 token ≈ 4 chars + overhead)
-    const estimatedTokens =
-      messages.reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0) + 500
+    const estimatedTokens = messages.reduce((acc, m) => {
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+      return acc + Math.ceil(content.length / 4)
+    }, 0) + 500
 
     const tokenResult = await checkTokens({
       estimatedTokens,
@@ -189,6 +193,7 @@ export async function* runSession(
 
     for await (const chunk of model.stream(messages, toolDefs, { model: mainModel })) {
       if (chunk.type === 'text_delta') {
+        accumulatedText += chunk.content
         yield chunk
       } else if (chunk.type === 'tool_call') {
         hasToolCalls = true
@@ -246,10 +251,7 @@ export async function* runSession(
     }
 
     // Append this round's exchange to messages for the next step.
-    const assistantContent = collectedToolCalls
-      .map((tc) => `[tool_call id="${tc.id}" name="${tc.name}"] ${JSON.stringify(tc.args)}`)
-      .join('\n')
-    messages.push({ role: 'assistant', content: assistantContent })
+    messages.push(model.formatToolCall(collectedToolCalls))
     for (const msg of toolResultMessages) {
       messages.push(msg)
     }
@@ -258,7 +260,7 @@ export async function* runSession(
   // Persist assistant turn summary
   await sessionMemory.append(ctx.sessionId, {
     role: 'assistant',
-    content: '[streamed response]',
+    content: accumulatedText || '[no response]',
     timestamp: Date.now(),
   })
 

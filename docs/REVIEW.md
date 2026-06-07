@@ -3621,4 +3621,24 @@ const payload = JSON.stringify({ query, variables })
 
 **All three — not wired to registry, no tests.**
 
+---
+
+### `1a73251` — IncidentService, incident routes, SREAgent
+
+CRUD for incidents (create/get/list/update/resolve), REST routes, `SREAgent` skeleton with cheap→main model hypothesis flow. Routes all behind `app.authenticate`. Input schema validated. Correct structure.
+
+**`IncidentService` skips `withTenant` — RLS bypass:**
+All Prisma calls go without `withTenant`. Fix: wrap each in `withTenant(this.prisma, tenantId, (tx) => tx.incident.*)`.
+
+**Second `PrismaClient` instance:**
+`const prisma = new PrismaClient()` in `incidents.ts` duplicates the one in `chat.ts`. Two pools. Pass Prisma as dependency or import shared singleton.
+
+**404 not returned on missing incident:**
+`GET /api/incidents/:id` returns `{ error: 'Incident not found' }` with HTTP 200. Fix: `reply.code(404)`. `PATCH` same — `updateMany` with `count === 0` silently returns `{ ok: true }`.
+
+**`SREAgent` uses invalid model IDs:**
+`{ model: 'haiku' }` and `{ model: 'sonnet' }` — providers expect full IDs (`claude-haiku-3-5-20251001`, `claude-sonnet-4-6`). Will fail. Accept via constructor.
+
+**`SREAgent` connector data empty:** `relatedDeploys: []`, `relatedPRs: []` — connectors not wired. Acceptable skeleton for now.
+
 <!-- REVIEW SECTION END — 2026-06-07 -->

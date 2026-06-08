@@ -7,6 +7,119 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08c -->
+## Review — 2026-06-08 | M7 bootstrap + M8 ILIKE + gate L2 + opus fixes (16 commits)
+
+### Commits reviewed since last review (e71cc90)
+
+| Commit | Description | Verdict |
+|--------|-------------|---------|
+| `55e6393` | fix(docker): agent-service COPY paths + disable Postgres host port | LGTM ✓ |
+| `4bc420b` | fix: 7 CRITICAL + 4 HIGH opus review findings | ISSUES FOUND |
+| `99f7876` | fix(connectors): wire makeXxxTools into agent.ts for datadog/argocd/linear | LGTM ✓ |
+| `991c183` | fix(daemon): setInterval→IScheduler; RLS bypass; BullMQ default | LGTM ✓ |
+| `c37eb87` | feat(connectors): agent.ts for datadog/linear/argocd + GET /api/connectors | LGTM ✓ |
+| `d5bb973` | fix: BLOCKING-1/2 docs + HIGH-1/2 + MEDIUM-1/2/4 — spec audit batch 1 | LGTM ✓ |
+| `744da95` | fix(specialist): audit-log gate rejections in specialist agent | LGTM ✓ |
+| `9e9cffb` | fix: TriggerExecutor separate pub client; Fact claim field; add missing tests | LGTM ✓ |
+| `919dc13` | fix: specialist gate check + async IScheduler + BullMQ tests | LGTM ✓ |
+| `71d185c` | fix: 10 spec-compliance violations — B-3, B-4, H-1 through H-5, M-1, M-3 | LGTM ✓ |
+| `96e8c4a` | feat(scheduler): IScheduler interface + BullMQScheduler — replace node-cron | LGTM ✓ |
+| `593015b` | feat(gate): L2 approve gate — IGateSink, gate_required event, poll loop | LGTM ✓ |
+| `ec278db` | feat(kb): resolveContextByName ILIKE + depth — M8 | LGTM ✓ |
+| `b4c51e1` | feat(kb): connector bootstrap contract — IConnectorBootstrap + GitHub bootstrap | LGTM ✓ |
+| `693ddd1` | feat(kb): Redis subscriber wires connector events to GraphBuilderAgent — M6-T3 | LGTM ✓ |
+| `f5e0788` | fix(security): require CONNECTOR_API_KEYS; validate tenantId; cron last_run_at | LGTM ✓ |
+
+### Issues Found
+
+#### [BLOCKING] RLS bypass in gate-decide-route.ts — withTenant missing
+**File:** `apps/gateway/src/gate/gate-decide-route.ts:23-27`
+**Issue:** Direct `prisma.$executeRaw` without `withTenant()` wrapper. Postgres RLS not active — tenant A can decide gates for tenant B by knowing the gateId. The WHERE clause `tenant_id = ${tenantId}` is application-level only; without RLS it's bypassable.
+**Fix:**
+```typescript
+await withTenant(prisma, tenantId, (tx) =>
+  tx.$executeRaw`
+    UPDATE gate_events SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
+    WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
+  `
+)
+```
+**Verify:** Query gate_events as tenant B for tenant A's gate → must return 0 rows affected.
+
+#### [BLOCKING] Missing RLS policy on gate_events table
+**File:** `apps/gateway/prisma/migrations/0010_gate_events/migration.sql`
+**Issue:** Migration creates gate_events with tenant_id but no `ALTER TABLE gate_events ENABLE ROW LEVEL SECURITY` and no policy. Table is unprotected — any DB user can read/write all tenants' gate events.
+**Fix:** Add to end of migration:
+```sql
+ALTER TABLE gate_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY gate_events_tenant_isolation ON gate_events
+  FOR ALL
+  USING (tenant_id = current_setting('app.tenant_id')::uuid)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id')::uuid);
+```
+**Verify:** `SELECT * FROM gate_events` without `set_config('app.tenant_id', ...)` → returns 0 rows.
+
+#### [HIGH] gate_events schema missing tool_call_id column
+**File:** `apps/gateway/prisma/migrations/0010_gate_events/migration.sql`
+**Issue:** Orchestrator writes `toolCallId: toolCall.id` to gate events at runtime but migration has no `tool_call_id` column. Runtime insert will fail or silently drop the field.
+**Fix:** Add to CREATE TABLE:
+```sql
+  tool_call_id UUID NOT NULL,
+```
+**Verify:** `\d gate_events` shows tool_call_id column.
+
+#### [MEDIUM] RedisGateSink creates new Redis connection per poll call
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:36-46`
+**Issue:** `poll()` calls `createClient()` + `connect()` + `disconnect()` every 500ms during gate wait (30s timeout = 60 connections). Wastes Redis connection slots.
+**Fix:** Reuse `this.pub` client for polling — it's already connected. No need for a separate connection.
+**Verify:** Under load, `redis-cli client list` shows only 1-2 connections from gateway (not 60+).
+
+#### [MEDIUM] Bootstrap errors swallowed with no downstream signal
+**File:** `packages/agent/src/graph-builder/builder.ts:73-86`
+**Issue:** Bootstrap failure is logged at ERROR level but execution continues silently. Graph is partially initialized with no retry or notification. Downstream agents will operate on incomplete graph coordinates.
+**Fix:** Emit `bootstrap_failed` event to Redis after catch block so the system can retry:
+```typescript
+} catch (err) {
+  this.logger?.warn({ err, connectorType }, 'bootstrap failed — graph may be incomplete')
+  await this.redisPublisher?.publish('bootstrap:failed', JSON.stringify({ connectorType, tenantId, err: String(err) }))
+}
+```
+**Verify:** Stop agent-service, trigger connector_registered event → `bootstrap:failed` appears on Redis.
+
+#### [LOW] RedisGateSink record() ignores decidedBy in Redis value
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:50-54`
+**Issue:** `record()` stores only the decision string in Redis — `decidedBy` and `decidedAt` not in the Redis value. Postgres is source of truth (via gate-decide-route.ts) so this is acceptable, but if Redis is used for audit replay it's incomplete.
+**Note:** Accepted as-is given Postgres is authoritative. Redis is cache only.
+
+### Summary
+
+| Dimension | Rating | Notes |
+|-----------|--------|-------|
+| D1 Feature Completeness | 4/5 | IScheduler, BullMQ, L2 gate, bootstrap, ILIKE all end-to-end. Minor: tool_call_id missing from schema. |
+| D2 Code Standards | 4/5 | No console.log, no unsafe `any`, pino everywhere. Python routes could use response type hints. |
+| D3 Performance | 4/5 | BullMQ single-worker dispatch correct. Freshness decay efficient. Gap: RedisGateSink per-poll connections. |
+| D4 Security | 2/5 | BLOCKING: RLS bypass in gate-decide-route + missing RLS policy on gate_events. Gate is the V1 trust surface — must be hardened. |
+| D5 Readability | 4/5 | Clean naming, well-structured. Orchestrator context resolution dense but correct. |
+| D6 Clarity/Comments | 3/5 | Bootstrap error handling strategy undocumented. Gate timeout reason field missing context. |
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| M5-T1 Automations infra | Complete | Package.json runtime stage fix |
+| M5-T2 Trigger endpoints | Complete | Redis subscriber + PATCH/DELETE |
+| M5-T3 Cron scheduler | Complete | IScheduler + BullMQ |
+| M5-T4 Automations UI | Complete | Web automations-view wired |
+| M6-T1 StructuralGraph Postgres | Complete | Real Postgres wiring |
+| M6-T2 GraphBuilderAgent | Complete | Connector events → graph upsert |
+| M6-T3 Redis subscriber for graph | Complete | Wired to GraphBuilderAgent |
+| M7 Connector bootstrap | Complete | IConnectorBootstrap + GitHub |
+| M8 ILIKE + depth search | Complete | resolveContextByName |
+| Gate RLS hardening | **Pending** | BLOCKING issue in this review |
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08b -->
 ## Review — 2026-06-08 | M5 automations + M6 KB/GraphBuilder (13 commits)
 

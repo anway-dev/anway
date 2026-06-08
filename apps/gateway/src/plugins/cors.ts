@@ -4,9 +4,9 @@ import type { FastifyInstance } from 'fastify'
 
 export default fp(async function corsPlugin(app: FastifyInstance) {
   await app.register(cors, {
-    origin: process.env.CORS_ORIGIN ?? '*',
+    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id', 'x-connector-key'],
     credentials: true,
   })
 })

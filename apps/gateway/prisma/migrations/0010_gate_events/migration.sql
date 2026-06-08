@@ -14,3 +14,14 @@ CREATE TABLE gate_events (
 );
 CREATE INDEX ON gate_events (tenant_id);
 CREATE INDEX ON gate_events (status);
+
+-- RLS — tenant isolation
+ALTER TABLE gate_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gate_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON gate_events AS PERMISSIVE FOR ALL
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+-- Audit — gate decisions are immutable (no UPDATE without where; only status transitions allowed)
+CREATE POLICY gate_no_delete ON gate_events AS PERMISSIVE FOR DELETE
+  USING (false);

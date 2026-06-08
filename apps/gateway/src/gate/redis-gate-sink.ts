@@ -1,15 +1,16 @@
 import { createClient } from 'redis'
 import type { IGateSink, GateEvent } from '@anvay/agent'
+import { prisma } from '../db/client.js'
 
 const GATE_KEY_PREFIX = 'gate:'
 const GATE_TTL_SECONDS = 60
 
 /**
- * Redis-backed IGateSink. Gate events stored as Redis strings with 60s TTL.
+ * Redis-backed IGateSink. Gate events persisted to Postgres + Redis cache.
  *
- * - push: stores event JSON at key `gate:<gateId>`, publishes to `gate:required`
- * - poll: reads key `gate:<gateId>:decision`
- * - record: sets `gate:<gateId>:decision` = "approved" | "rejected"
+ * - push: inserts pending row into gate_events, stores event in Redis, publishes gate:required
+ * - poll: reads key `gate:<gateId>:decision` from Redis
+ * - record: sets `gate:<gateId>:decision` = "approved" | "rejected" in Redis
  */
 export class RedisGateSink implements IGateSink {
   private pub: ReturnType<typeof createClient> | null = null
@@ -25,6 +26,19 @@ export class RedisGateSink implements IGateSink {
   }
 
   async push(event: GateEvent): Promise<string> {
+    // Persist to Postgres (audit trail)
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, tool_call_id, created_at)
+        VALUES (${event.id}::uuid, ${event.tenantId}::uuid, ${event.userId}::uuid, ${event.sessionId}::uuid,
+          ${event.toolName}, ${JSON.stringify(event.args)}::jsonb, ${event.connectorId},
+          'pending', ${event.toolCallId}, ${event.createdAt.toISOString()}::timestamptz)
+      `
+    } catch {
+      // Best-effort — don't block gate flow on audit insert failure
+    }
+
+    // Cache in Redis + notify
     const pub = await this.getPub()
     const key = `${GATE_KEY_PREFIX}${event.id}`
     await pub.setEx(key, GATE_TTL_SECONDS, JSON.stringify(event))

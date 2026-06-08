@@ -65,5 +65,12 @@ export type { GraphBuilderLogger } from './graph-builder/builder.js'
 export { GraphBuilderAgent } from './graph-builder/builder.js'
 export type { IConnectorBootstrap, ConnectorBootstrapResult } from './graph-builder/bootstrap.js'
 
+// SRE Agent
+export { SREAgent } from './agents/sre.js'
+export type { IncidentContext, TimelineEvent } from './agents/sre.js'
+
+// Tools
+export { createGetIncidentContextTool } from './tools/incident-context.js'
+
 // Scheduler
 export type { IScheduler, ScheduledJob } from './scheduler/scheduler.js'

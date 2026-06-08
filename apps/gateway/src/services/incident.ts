@@ -6,7 +6,15 @@ export class IncidentService {
 
   async create(tenantId: string, data: { title: string; severity: IncidentSeverity; description?: string }) {
     return withTenant(this.prisma, tenantId, (tx) =>
-      tx.incident.create({ data: { tenant_id: tenantId, title: data.title, severity: data.severity, status: 'active' as IncidentStatus } })
+      tx.incident.create({
+        data: {
+          tenant_id: tenantId,
+          title: data.title,
+          severity: data.severity,
+          status: 'active' as IncidentStatus,
+          description: data.description ?? null,
+        },
+      })
     )
   }
 
@@ -16,9 +24,15 @@ export class IncidentService {
     )
   }
 
-  async update(id: string, tenantId: string, data: Partial<{ title: string; status: IncidentStatus }>) {
+  async update(id: string, tenantId: string, data: Partial<{ title: string; status: IncidentStatus; description: string }>) {
     return withTenant(this.prisma, tenantId, (tx) =>
       tx.incident.updateMany({ where: { id, tenant_id: tenantId }, data })
+    )
+  }
+
+  async setRootCause(id: string, tenantId: string, suggestedRootCause: string) {
+    return withTenant(this.prisma, tenantId, (tx) =>
+      tx.incident.updateMany({ where: { id, tenant_id: tenantId }, data: { suggested_root_cause: suggestedRootCause } })
     )
   }
 

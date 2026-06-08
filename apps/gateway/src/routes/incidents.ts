@@ -1,7 +1,23 @@
 import type { FastifyInstance } from 'fastify'
 import { IncidentSeverity, IncidentStatus } from '@prisma/client'
+import { createClient } from 'redis'
+import type { RedisClientType } from 'redis'
+import { TenantId, UserId, SessionId } from '@anvay/types'
 import { IncidentService } from '../services/incident.js'
+import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { prisma } from '../db/client.js'
+
+let _pub: RedisClientType | null = null
+
+async function getPub(): Promise<RedisClientType | null> {
+  const url = process.env['REDIS_URL']
+  if (!url) return null
+  if (!_pub) {
+    _pub = createClient({ url }) as RedisClientType
+    await _pub.connect()
+  }
+  return _pub
+}
 
 export async function incidentRoutes(app: FastifyInstance) {
   const service = new IncidentService(prisma)
@@ -47,29 +63,84 @@ export async function incidentRoutes(app: FastifyInstance) {
       },
     },
   }, async (request) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const user = request.user as { tenantId: string; sub: string }
     const { title, severity, description } = request.body
-    return service.create(tenantId, { title, severity, description })
+    const incident = await service.create(user.tenantId, { title, severity, description })
+
+    // Emit incident_created for graph builder + SRE subscriber (best-effort)
+    try {
+      const pub = await getPub()
+      if (pub) {
+        await pub.publish('incident_created', JSON.stringify({
+          type: 'incident_created',
+          tenantId: user.tenantId,
+          id: incident.id,
+          title: incident.title,
+          severity: incident.severity,
+          description: incident.description ?? undefined,
+        }))
+      }
+    } catch (err) {
+      request.log.warn({ err }, 'incident_created Redis publish failed')
+    }
+
+    // Audit log (best-effort — must not block response)
+    const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'incident audit write failed'))
+    void audit.append({
+      id: crypto.randomUUID(),
+      tenantId: TenantId(user.tenantId),
+      userId: UserId(user.sub),
+      sessionId: SessionId(''),
+      eventType: 'incident_created',
+      payload: { incidentId: incident.id, title, severity },
+      createdAt: new Date(),
+    })
+
+    return incident
   })
 
   app.patch<{ Params: { id: string }; Body: { status?: IncidentStatus } }>('/api/incidents/:id', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params
     const updates = request.body
-    const result = await service.update(id, tenantId, updates)
+    const result = await service.update(id, user.tenantId, updates)
     if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
+
+    const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'incident audit write failed'))
+    void audit.append({
+      id: crypto.randomUUID(),
+      tenantId: TenantId(user.tenantId),
+      userId: UserId(user.sub),
+      sessionId: SessionId(''),
+      eventType: 'incident_updated',
+      payload: { incidentId: id, updates },
+      createdAt: new Date(),
+    })
+
     return { ok: true }
   })
 
   app.post<{ Params: { id: string } }>('/api/incidents/:id/resolve', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params
-    const result = await service.resolve(id, tenantId)
+    const result = await service.resolve(id, user.tenantId)
     if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
+
+    const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'incident audit write failed'))
+    void audit.append({
+      id: crypto.randomUUID(),
+      tenantId: TenantId(user.tenantId),
+      userId: UserId(user.sub),
+      sessionId: SessionId(''),
+      eventType: 'incident_resolved',
+      payload: { incidentId: id },
+      createdAt: new Date(),
+    })
+
     return { ok: true }
   })
 }

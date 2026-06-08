@@ -10,6 +10,9 @@ export type AuditEventType =
   | 'write_action_executed'
   | 'session_end'
   | 'graph_context_failed'
+  | 'incident_created'
+  | 'incident_updated'
+  | 'incident_resolved'
 
 export interface AuditEvent {
   readonly id: string

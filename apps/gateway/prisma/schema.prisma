@@ -123,13 +123,15 @@ model AuditEvent {
 }
 
 model Incident {
-  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id   String           @db.Uuid
-  title       String
-  severity    IncidentSeverity @default(medium)
-  status      IncidentStatus   @default(active)
-  created_at  DateTime         @default(now()) @db.Timestamptz
-  resolved_at DateTime?        @db.Timestamptz
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id            String           @db.Uuid
+  title                String
+  severity             IncidentSeverity @default(medium)
+  status               IncidentStatus   @default(active)
+  description          String?
+  suggested_root_cause String?
+  created_at           DateTime         @default(now()) @db.Timestamptz
+  resolved_at          DateTime?        @db.Timestamptz
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 

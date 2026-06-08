@@ -4,6 +4,13 @@ import type { ExecutableTool } from '@anvay/agent'
 const MAX_BUFFER = 10 * 1024 * 1024 // 10MB
 const DEFAULT_TIMEOUT = 30_000
 
+export interface CliExecEntry {
+  binary: string
+  argv: string[]
+  durationMs: number
+  exitCode: number | null
+}
+
 /**
  * Generic CLI adapter — wraps any CLI binary as Anvay tools.
  * Allowlist-based: only subcommands in `allowedSubcommands` are exposed.
@@ -29,18 +36,21 @@ export class CliConnector {
       /** Environment variables to inject — never include in argv */
       env?: Record<string, string>
       timeoutMs?: number
+      /** Called after each subprocess completes. Wire to auditSink.append(). */
+      onExec?: (entry: CliExecEntry) => void
     },
   ) {
     this.toolsCache = this.buildTools()
   }
 
   private buildTools(): ExecutableTool[] {
+    const cfg = this.config
     return this.config.allowedSubcommands.map((subcommand) => {
       const parts = subcommand.split(/\s+/)
-      const toolName = `${this.config.name}.${parts.join('_')}`
+      const toolName = `${cfg.name}.${parts.join('_')}`
       return {
         name: toolName,
-        description: `Execute: ${this.config.binary} ${subcommand}`,
+        description: `Execute: ${cfg.binary} ${subcommand}`,
         parameters: {
           type: 'object',
           properties: {
@@ -58,54 +68,71 @@ export class CliConnector {
             }
           }
 
-          return this.execWithTimeout(argv, this.config.timeoutMs ?? DEFAULT_TIMEOUT)
+          return this.execWithTimeout(argv, cfg.timeoutMs ?? DEFAULT_TIMEOUT)
         },
       }
     })
   }
 
   private async execWithTimeout(argv: string[], timeoutMs: number): Promise<unknown> {
-    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      const child = execFile(
-        this.config.binary,
-        argv,
-        {
-          env: { ...process.env, ...this.config.env },
-          encoding: 'utf-8',
-          maxBuffer: MAX_BUFFER,
-          timeout: timeoutMs,
-        },
-        (err, stdout, stderr) => {
-          if (err) {
-            reject(new Error(`${this.config.binary} exited: ${err.message}\n${stderr}`))
-            return
-          }
-          resolve({ stdout, stderr })
-        },
-      )
-      // Ensure no timeout on the callback (Node built-in timeout)
-      if (timeoutMs > 0) {
-        setTimeout(() => {
-          child.kill()
-          reject(new Error(`${this.config.binary} timed out after ${timeoutMs}ms`))
-        }, timeoutMs + 1000)
-      }
-    })
+    const startTime = Date.now()
 
-    // Try JSON parse, fall back to plain text
-    let data: unknown = result.stdout
     try {
-      data = JSON.parse(result.stdout)
-    } catch {
-      // Not JSON — return as text
-    }
+      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFile(
+          this.config.binary,
+          argv,
+          {
+            env: { ...process.env, ...this.config.env },
+            encoding: 'utf-8',
+            maxBuffer: MAX_BUFFER,
+            timeout: timeoutMs,
+            killSignal: 'SIGTERM',
+          },
+          (err, stdout, stderr) => {
+            if (err) {
+              reject(new Error(`${this.config.binary} exited: ${err.message}\n${stderr}`))
+              return
+            }
+            resolve({ stdout, stderr })
+          },
+        )
+      })
 
-    return {
-      source: `cli:${this.config.name}`,
-      fetched_at: new Date(),
-      ttl: 120,
-      freshness_score: 1.0,
-      data,
+      const durationMs = Date.now() - startTime
+
+      // Audit callback
+      this.config.onExec?.({
+        binary: this.config.binary,
+        argv,
+        durationMs,
+        exitCode: 0,
+      })
+
+      // Try JSON parse, fall back to plain text
+      let data: unknown = stdout
+      try {
+        data = JSON.parse(stdout)
+      } catch {
+        // Not JSON — return as text
+      }
+
+      return {
+        source: `cli:${this.config.name}`,
+        fetched_at: new Date(),
+        ttl: 120,
+        freshness_score: 1.0,
+        data,
+      }
+    } catch (err) {
+      const durationMs = Date.now() - startTime
+      this.config.onExec?.({
+        binary: this.config.binary,
+        argv,
+        durationMs,
+        exitCode: 1,
+      })
+      throw err
     }
   }
 

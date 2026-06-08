@@ -582,7 +582,18 @@ export function createTokenMeterMiddleware(budget: TokenBudget) {
 }
 ```
 
-**The harness itself remains replaceable.** Mastra is the first concrete implementation behind `IModelProvider`. If Mastra changes license, breaks an API, or fails a requirement — swap it. The wrappers are the same regardless of which framework runs underneath.
+**Accepted deviation (2026-06-08):** The orchestrator (`orchestrator.ts`) and specialist agent (`specialist-agent.ts`) use a hand-rolled agentic loop instead of Mastra's native lifecycle hooks. This loop satisfies four of six locked requirements: model-agnostic streaming, perimeter middleware on every tool call, full audit hook, and typed multi-agent context handoff. Two differ from the Mastra plan:
+
+1. **Gate (waitForInput):** Implemented as `IGateSink` + `pollGate()` inline — functionally equivalent to Mastra's `waitForInput` primitive. Yields `gate_required` StreamEvent; polls Redis-backed sink until user approves. Timeout-configurable.
+2. **Token meter (onModelCall):** Token budget checks run inline in the agent loop before each model call — equivalent protection, same hard-block semantics.
+
+**Rationale:** The hand-rolled loop:
+- Avoids coupling to Mastra's internal lifecycle API which has changed across major versions
+- Keeps `IModelProvider` as the sole surface — zero Mastra types exposed to callers
+- Is simpler to audit (single source file, explicit control flow)
+- Preserves the 4/6 requirement coverage the code review confirmed
+
+**The harness itself remains replaceable.** Mastra is the first concrete implementation behind `IModelProvider`. If a future Mastra version adds lifecycle hooks that materially improve correctness over the inline approach, the loop can migrate. The wrappers (`perimeter.ts`, `token-meter.ts`) are the same regardless of which framework runs underneath.
 
 ```typescript
 createOrchestrator({ model: IModelProvider, tools, perimeter, auditSink })
@@ -1011,10 +1022,16 @@ Structural graph  Apache AGE on Postgres
                   Seeded by bootstrap, updated by connector events
                   KùzuDB as swap target if traversal benchmarks as bottleneck
 
-Episodic graph    Graphiti + Apache AGE (same Postgres, different schema)
+Episodic graph    Graphiti + Neo4j (Graphiti library requires Neo4j for episodic operations)
                   Temporal facts with valid_from/valid_to
                   Written via agent-service (Python), read via HTTP from TS orchestrator
-                  FalkorDB disqualified (RSAL). Neo4j disqualified (AGPL + commercial).
+                  FalkorDB disqualified (RSAL).
+                  **Accepted deviation (2026-06-08):** Neo4j is required by the Graphiti
+                  library — its current stable backend is Neo4j (not Apache AGE). Apache AGE
+                  remains for structural graph (Layer 1). Episodic layer (Layer 2) uses Neo4j
+                  via Graphiti. This is a library constraint, not a design choice. If Graphiti
+                  adds Postgres/AGE support in a future release, Ne4j can be swapped without
+                  code changes — IKnowledgeGraph interface stays the same.
 
 Semantic search   pgvector on Postgres (same instance)
                   HNSW index on kb_entries.embedding

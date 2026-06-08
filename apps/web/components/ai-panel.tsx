@@ -105,8 +105,7 @@ export function AiPanel({ node, action, onClose }: Props) {
           {lines.map((line, i) => (
             <div
               key={i}
-              className="stream-line"
-              style={{ fontSize: "12px", lineHeight: "1.7", color: line.startsWith("**") ? "#e5e5e5" : line.startsWith("TC-") ? (line.includes("✓") ? "#10b981" : "#ef4444") : line.startsWith("```") ? "#6b7280" : "#a1a1aa", whiteSpace: "pre-wrap", fontFamily: line.startsWith("```") || line.startsWith("  ") ? "monospace" : "sans-serif" }}
+              style={{ fontSize: "12px", lineHeight: "1.7", color: line.startsWith("**") ? "#e5e5e5" : line.startsWith("TC-") ? (line.includes("✓") ? "#10b981" : "#ef4444") : line.startsWith("```") ? "#6b7280" : "#a1a1aa", whiteSpace: "pre-wrap", fontFamily: line.startsWith("```") || line.startsWith("  ") ? "monospace" : "sans-serif", animation: "stream-in 0.15s ease forwards" }}
             >
               {line.replace(/\*\*/g, "")}
             </div>

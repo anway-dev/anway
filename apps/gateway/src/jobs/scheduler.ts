@@ -1,9 +1,10 @@
-// TODO: replace node-cron with Trigger.dev or BullMQ per PRODUCT.md §11 decision.
-// node-cron has no persistence or retry — jobs are lost on restart.
-import cron from 'node-cron'
+// Cron jobs factory — creates IScheduler backed by BullMQ.
+// node-cron removed per CLAUDE.md §11: no in-process cron in production.
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief } from './cron-monitors.js'
+import { BullMQScheduler } from './bullmq-scheduler.js'
+import type { IScheduler, ScheduledJob } from '@anvay/agent'
 
 async function updateLastRun(tenantId: string, jobType: string, result: unknown): Promise<void> {
   try {
@@ -19,34 +20,53 @@ async function updateLastRun(tenantId: string, jobType: string, result: unknown)
   }
 }
 
-export function startCronScheduler(): void {
-  cron.schedule('*/5 * * * *', async () => {
-    const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
-    for (const { id } of tenants) {
-      const sweep = new ServiceHealthSweep()
-      const result = await sweep.run(id)
-      await updateLastRun(id, 'service_health_sweep', result)
-    }
-  })
+export function createCronJobs(redisUrl: string): IScheduler {
+  const scheduler = new BullMQScheduler(redisUrl)
 
-  cron.schedule('0 * * * *', async () => {
-    const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
-    for (const { id } of tenants) {
-      const slo = new SloBurnCheck()
-      const sloResult = await slo.run(id)
-      await updateLastRun(id, 'slo_burn_check', sloResult)
-      const report = new DeployHealthReport()
-      const reportResult = await report.run(id)
-      await updateLastRun(id, 'deploy_health_report', reportResult)
-    }
-  })
+  scheduler.register({
+    id: 'service-health-sweep',
+    name: 'service_health_sweep',
+    schedule: '*/5 * * * *',
+    async run() {
+      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
+      for (const { id } of tenants) {
+        const sweep = new ServiceHealthSweep()
+        const result = await sweep.run(id)
+        await updateLastRun(id, 'service_health_sweep', result)
+      }
+    },
+  } satisfies ScheduledJob)
 
-  cron.schedule('0 8 * * *', async () => {
-    const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
-    for (const { id } of tenants) {
-      const brief = new OncallMorningBrief()
-      const result = await brief.run(id)
-      await updateLastRun(id, 'oncall_morning_brief', result)
-    }
-  })
+  scheduler.register({
+    id: 'hourly-slo-deploy',
+    name: 'hourly_slo_deploy',
+    schedule: '0 * * * *',
+    async run() {
+      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
+      for (const { id } of tenants) {
+        const slo = new SloBurnCheck()
+        const sloResult = await slo.run(id)
+        await updateLastRun(id, 'slo_burn_check', sloResult)
+        const report = new DeployHealthReport()
+        const reportResult = await report.run(id)
+        await updateLastRun(id, 'deploy_health_report', reportResult)
+      }
+    },
+  } satisfies ScheduledJob)
+
+  scheduler.register({
+    id: 'oncall-morning-brief',
+    name: 'oncall_morning_brief',
+    schedule: '0 8 * * *',
+    async run() {
+      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
+      for (const { id } of tenants) {
+        const brief = new OncallMorningBrief()
+        const result = await brief.run(id)
+        await updateLastRun(id, 'oncall_morning_brief', result)
+      }
+    },
+  } satisfies ScheduledJob)
+
+  return scheduler
 }

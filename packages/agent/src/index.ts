@@ -61,3 +61,6 @@ export type { GraphEvent } from './graph-builder/events.js'
 export type { GraphBuilderLogger } from './graph-builder/builder.js'
 export { GraphBuilderAgent } from './graph-builder/builder.js'
 export type { IConnectorBootstrap, ConnectorBootstrapResult } from './graph-builder/bootstrap.js'
+
+// Scheduler
+export type { IScheduler, ScheduledJob } from './scheduler/scheduler.js'

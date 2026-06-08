@@ -8,7 +8,7 @@ import { initMetrics } from './metrics.js'
 import { validateEnv } from './config/env.js'
 import pino from 'pino'
 import { startTriggerSubscriber } from './triggers/subscriber.js'
-import { startCronScheduler } from './jobs/scheduler.js'
+import { createCronJobs } from './jobs/scheduler.js'
 import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
 
 const bootstrapLog = pino({ level: 'info' })
@@ -49,9 +49,11 @@ async function main() {
       app.log.warn({ err }, 'Trigger subscriber not started — Redis may be unavailable')
     }
     try {
-      startCronScheduler()
+      const cronScheduler = createCronJobs(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+      await cronScheduler.start()
+      app.log.info('Cron scheduler started')
     } catch (err) {
-      app.log.warn({ err }, 'Cron scheduler not started')
+      app.log.warn({ err }, 'Cron scheduler not started — Redis may be unavailable')
     }
     try {
       await startGraphBuilderSubscriber(

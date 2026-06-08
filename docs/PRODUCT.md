@@ -390,6 +390,33 @@ MCP server → CLI → official SDK → REST API
 | Loki | read | Monitoring |
 | Prometheus | read | Monitoring |
 
+**Zero-code connector registration (MCP + CLI):**
+
+Any service with an MCP server or CLI can be connected without writing a custom connector. Two generic adapters ship out of the box:
+
+- **MCP Adapter** — point at any MCP server URL → Anvay calls `tools/list`, maps tools to `ExecutableTool[]`, registers as connector. No code required.
+- **CLI Adapter** — declare a CLI binary + allowed subcommands → each subcommand becomes a tool. Subprocess execution with args-as-array (no shell injection risk). Credentials via env only.
+
+Both adapters produce the same `ExecutableTool[]` output as custom connectors. Perimeter, audit, gate, and capability manifest all apply identically. The capability manifest is auto-derived from the MCP tool list or CLI allowlist at registration time.
+
+**Registration flow (MCP):**
+```
+Admin registers: { type: 'mcp', url: 'http://mcp.linear.app', name: 'linear' }
+  → McpConnector.getTools() → tools/list → ExecutableTool[]
+  → capability manifest written to connectors table
+  → tools available in orchestrator immediately, scoped by perimeter
+```
+
+**Registration flow (CLI):**
+```
+Admin registers: { type: 'cli', binary: 'gh', name: 'github', allowedSubcommands: ['pr list', ...] }
+  → CliConnector.getTools() → ExecutableTool[] from allowlist
+  → capability manifest written
+  → tools available in orchestrator
+```
+
+This means: any org can self-serve connectors for any MCP-compliant service (Linear, Notion, Stripe, Figma, etc.) or any tool with a CLI (kubectl, aws, gcloud, argocd, pd) without waiting for Anvay to ship an integration.
+
 ---
 
 ### 4.13 Cloud Health

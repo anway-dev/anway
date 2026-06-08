@@ -505,6 +505,65 @@ Each connector task follows the same pattern. Implement them simultaneously.
 
 ---
 
+### Wave 2-C — Parallel, depends on M2-T5 done
+
+#### M2-T6 `[PARALLEL]`
+**Title:** packages/mcp-adapter — generic MCP server connector
+
+**What to do:**
+- Create `packages/mcp-adapter/` workspace package
+- `McpConnector implements IConnector`:
+  - Constructor: `{ url: string, name: string, mode: ConnectorMode }`
+  - `getTools()`: calls MCP `tools/list` → maps each tool to `ExecutableTool` with `run()` that calls MCP `tools/call`
+  - Tool names namespaced: `<connectorName>.<mcpToolName>` (e.g. `linear.create_issue`)
+  - Capability manifest auto-derived from tool list: read tools → `capabilities.read`, write tools → `capabilities.write` (write detection: tool name matches `isWriteAction()`)
+  - Health check: `tools/list` ping with 5s timeout
+  - Each result tagged: `{ source: connectorName, fetched_at: Date, ttl: 60 }` — override per tool if MCP schema declares `x-ttl`
+- `GET /api/connectors/register` body: `{ type: 'mcp', url, name, mode }` → instantiates McpConnector, persists to connectors table, triggers KB bootstrap
+- Registry wires `McpConnector` when `connector.type === 'mcp'`
+
+**Ref:** PRODUCT.md §4.12 (Zero-code connector registration), §5.7 (connector strategy)
+
+**Files:** `packages/mcp-adapter/src/connector.ts`, `packages/mcp-adapter/src/tools.ts`, `packages/mcp-adapter/package.json`, `packages/mcp-adapter/tsconfig.json`
+
+**Done when:**
+- Point adapter at any MCP-compliant server → `getTools()` returns typed `ExecutableTool[]`
+- `run()` calls MCP server and returns grounded result
+- Tool names follow `<name>.<mcpTool>` convention
+- `health()` returns `healthy` when server reachable, `degraded` on timeout
+- `pnpm typecheck` clean, unit test with mock MCP server passes
+
+---
+
+#### M2-T7 `[PARALLEL]`
+**Title:** packages/cli-adapter — generic CLI subprocess connector
+
+**What to do:**
+- Create `packages/cli-adapter/` workspace package
+- `CliConnector implements IConnector`:
+  - Constructor: `{ name: string, binary: string, allowedSubcommands: string[], env?: Record<string, string> }`
+  - `getTools()`: each `allowedSubcommand` → one `ExecutableTool` (name: `<name>.<subcommand_underscored>`, e.g. `github.pr_list`)
+  - `run(subcommand, args)`: executes `[binary, ...subcommand.split(' '), ...argsList]` via `child_process.spawn` — **never shell string interpolation**
+  - Args serialized to CLI flags from typed object: `{ repo: 'org/x', limit: 10 }` → `['--repo', 'org/x', '--limit', '10']`
+  - Hard limits: 30s timeout (SIGTERM then SIGKILL), 10MB stdout cap
+  - Credentials injected via `env` option only — never in argv (no secrets in audit log)
+  - Every call appended to audit sink: `{ binary, subcommand, argv: redactedArgv, exitCode, durationMs }`
+  - Stdout: JSON.parse if parseable, else plain string
+- Registry wires `CliConnector` when `connector.type === 'cli'`
+
+**Ref:** PRODUCT.md §4.12 (Zero-code connector registration), §5.7 (connector strategy)
+
+**Files:** `packages/cli-adapter/src/connector.ts`, `packages/cli-adapter/src/tools.ts`, `packages/cli-adapter/package.json`, `packages/cli-adapter/tsconfig.json`
+
+**Done when:**
+- `CliConnector` wrapping `gh` returns typed PR list from `gh pr list --json`
+- Subprocess argv logged in audit sink (credentials absent from log)
+- Command injection not possible — test: `args = { repo: 'x; rm -rf /' }` → passed as literal string, not interpreted by shell
+- 30s timeout enforced — test: slow subprocess killed at deadline
+- `pnpm typecheck` clean, unit test with mock subprocess passes
+
+---
+
 ## M3 — Incident War Room
 
 **Goal:** Real incident data. War room auto-assembled from live connectors.

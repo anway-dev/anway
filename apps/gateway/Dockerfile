@@ -23,8 +23,8 @@ RUN pnpm build
 WORKDIR /app
 RUN pnpm deploy --filter=anvay-gateway /app/deploy --prod
 
-# Runtime stage — node:22-slim for CLI tools
-FROM node:22-slim AS runtime
+# Runtime stage — node:22 (not slim) for openssl compatibility with Prisma
+FROM node:22 AS runtime
 WORKDIR /app
 
 # Install gh CLI (GitHub's official package)
@@ -44,6 +44,8 @@ COPY --from=builder /app/apps/gateway/dist ./dist
 COPY --from=builder /app/apps/gateway/prisma ./prisma
 COPY --from=builder /app/deploy/node_modules ./node_modules
 COPY --from=builder /app/deploy/package.json ./package.json
+# Copy the generated Prisma client from the builder stage
+COPY --from=builder /app/apps/gateway/node_modules/.prisma ./node_modules/.prisma
 ENV NODE_ENV=production
 USER node
 EXPOSE 4000

@@ -21,13 +21,17 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       const { decision } = request.body
       const { sub: userId, tenantId } = request.user as { sub: string; tenantId: string }
 
-      await withTenant(prisma, tenantId, (tx) =>
+      const affected = await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
           UPDATE gate_events
           SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
-          WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
+          WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
         `
       )
+
+      if (affected === 0) {
+        return reply.code(404).send({ error: 'gate not found or already decided' })
+      }
 
       return { ok: true, gateId, decision }
     },

@@ -7,6 +7,179 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08g -->
+## Review — 2026-06-08g | NEW-1/2/3 fix verification — gate_events audit + trigger_rules RLS
+
+### Scope
+
+Two files changed since review `2026-06-08f` (commit `3ef238c`):
+- `apps/gateway/prisma/migrations/0014_trigger_rules_policy_cleanup/migration.sql`
+- `apps/gateway/src/gate/redis-gate-sink.ts`
+
+### Verdict: HOLD — 1 HIGH must be fixed before ship
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | 0014 migration correct. gate_events INSERT structurally correct but silently broken at runtime — missing withTenant(). |
+| D2 Code Standards | 3/5 | Module-level prisma used without tenant context. Pattern inconsistent with every other DB write in the codebase. |
+| D3 Performance | 3/5 | poll() creates a new Redis TCP connection per call — up to 60 connections per 30s gate timeout. Wasteful. |
+| D4 Security | 4/5 | 0014 correctly closes the trigger_rules WITH CHECK bypass. gate_events RLS is not broken (FORCE RLS already present from 0010). |
+| D5 Readability | 4/5 | push() catch comment explains intent. poll() client lifecycle is implicit. |
+| D6 Clarity and Comments | 3/5 | Missing comment on WHY withTenant() is absent — reader assumes it was intentional. It is a bug. |
+
+---
+
+### Issues Found
+
+#### [HIGH — BLOCKING] push() INSERT silently fails — gate_events rows never persisted
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:31-39`
+
+**Issue:** `push()` uses the module-level `prisma` singleton directly — no `withTenant()` wrapper:
+
+```typescript
+await prisma.$executeRaw`
+  INSERT INTO gate_events (...) VALUES (...)
+`
+```
+
+`gate_events` has `FORCE ROW LEVEL SECURITY` (set in migration 0010) and a `WITH CHECK` policy requiring `tenant_id = current_setting('app.tenant_id', true)::uuid`. Without a `withTenant()` call, `app.tenant_id` is not set on the Postgres session. The `WITH CHECK` expression evaluates `current_setting('app.tenant_id', true)` → `NULL`. `NULL::uuid` ≠ any tenant_id → policy rejects the INSERT.
+
+The exception is silently swallowed:
+```typescript
+} catch {
+  // Best-effort — don't block gate flow on audit insert failure
+}
+```
+
+Result: every `push()` call fails the INSERT silently, gate_events rows are never written, the gate UI is blind, and `/api/gate/:id/decide` always returns 404 (UPDATE finds 0 rows). NEW-3 from review `2026-06-08f` is not actually fixed at runtime — only at the syntactic level.
+
+**Fix:** Wrap INSERT in `withTenant()`. `GateEvent.tenantId` is already available:
+
+```typescript
+import { withTenant } from '../db/prisma.js'
+
+async push(event: GateEvent): Promise<string> {
+  // Persist to Postgres (audit trail) — withTenant sets app.tenant_id for RLS
+  try {
+    await withTenant(prisma, event.tenantId, (tx) =>
+      tx.$executeRaw`
+        INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, tool_call_id, created_at)
+        VALUES (${event.id}::uuid, ${event.tenantId}::uuid, ${event.userId}::uuid, ${event.sessionId}::uuid,
+          ${event.toolName}, ${JSON.stringify(event.args)}::jsonb, ${event.connectorId},
+          'pending', ${event.toolCallId}, ${event.createdAt.toISOString()}::timestamptz)
+      `
+    )
+  } catch (err) {
+    // Best-effort — log but don't block gate flow
+    console.warn('[RedisGateSink] gate_events insert failed', err)
+  }
+  // ... Redis publish unchanged
+}
+```
+
+**Verify:**
+```sql
+-- After push() call: row must exist
+SELECT id, status FROM gate_events WHERE id = '<gateId>';
+-- Must return 1 row with status = 'pending'
+```
+Then POST `/api/gate/:id/decide` → must return `{ ok: true }` (not 404).
+
+---
+
+#### [MEDIUM] poll() creates a new Redis TCP connection per invocation — 60 connections per gate event
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:49-62`
+
+**Issue:** `pollGate()` (in `packages/agent/src/gate/gate.ts`) calls `sink.poll()` every 500ms for up to 30s — up to 60 calls. `poll()` calls `createClient()` each time:
+
+```typescript
+async poll(gateId: string): Promise<'approved' | 'rejected' | null> {
+  const c = createClient({ url: this.redisUrl })  // new TCP connection per call
+  try {
+    await c.connect()
+    ...
+    return await c.get(key)
+  } finally {
+    await c.disconnect().catch(() => {})
+  }
+}
+```
+
+`poll()` only calls `c.get()` — a standard command, no subscriber mode. There is no reason to create a new connection. `getPub()` returns a cached, already-connected client suitable for GET.
+
+**Fix:**
+```typescript
+async poll(gateId: string): Promise<'approved' | 'rejected' | null> {
+  try {
+    const c = await this.getPub()
+    const key = `${GATE_KEY_PREFIX}${gateId}:decision`
+    const value = await c.get(key)
+    if (value === 'approved' || value === 'rejected') return value
+    return null
+  } catch {
+    return null
+  }
+}
+```
+
+**Verify:** Under concurrent gate approvals, no Redis connection exhaustion. Single active connection in Redis `CLIENT LIST` per `RedisGateSink` instance.
+
+---
+
+#### [LOW] gate-decide-route.ts: new RedisGateSink() per request, pub client never disconnected
+
+**File:** `apps/gateway/src/gate/gate-decide-route.ts:36-41`
+
+**Issue:** A new `RedisGateSink` is instantiated per request. `record()` calls `getPub()` which creates and caches `this.pub`. When the request ends, the instance is garbage-collected but `this.pub` (a live Redis client) is never explicitly disconnected. Under K8s rolling restarts or high decide traffic, open connections accumulate until GC runs.
+
+**Fix:** Module-level singleton or explicit `quit()` after `record()`:
+```typescript
+// Option A: module-level singleton (preferred — matches inMemoryStore pattern in chat.ts)
+const gateSink = process.env['REDIS_URL'] ? new RedisGateSink(process.env['REDIS_URL']) : null
+
+// Option B: explicit cleanup
+const sink = new RedisGateSink(process.env['REDIS_URL'])
+await sink.record(gateId, decision, userId)
+// After: call sink.quit() if/when RedisGateSink exposes it
+```
+
+---
+
+#### [LOW] NEW-4 from prior review was incorrect — cron_jobs FORCE RLS already present
+
+**Note:** Review `2026-06-08f` flagged cron_jobs as missing `FORCE ROW LEVEL SECURITY`. Incorrect. Migration `0008_cron_jobs_rls` already contains `ALTER TABLE cron_jobs FORCE ROW LEVEL SECURITY`. Prior finding was based on reading 0006 only, missing 0008. Retracting NEW-4.
+
+---
+
+### Pending Features (vs docs/TASKS.md)
+
+| Milestone | Task | Status |
+|-----------|------|--------|
+| M0 Foundation | Monorepo + Docker + Gateway + Auth + DB | ✅ Complete |
+| M0-T7 | E2E test suite (Playwright 38 tests) | ✅ Complete |
+| M1 Orchestrator Core | IModelProvider, streaming SSE, token budget, perimeter | ✅ Complete |
+| M1 Gate L2 | IGateSink wired, push/poll/record, gate-decide route | ⚠️ Partial — push() INSERT broken (this review HIGH) |
+| M2 Core Connectors | GitHub, Datadog, K8s, PagerDuty connector agents | ❌ Not started |
+| M2-T5 | Connector registry + getToolsForTenant() | ⚠️ Stub only (returns empty tools array) |
+| M3 Incident War Room | Incident CRUD, SRE context, event-driven triggers | ❌ Not started |
+| Knowledge Graph | StructuralGraph wired, IKnowledgeGraph interface | ⚠️ Structural only — no bootstrap, no episodic layer |
+| Graph Builder Agent | Event-driven entity extraction, Graphiti layer | ❌ Not started |
+| Audit trail | PostgresAuditSink, immutable gate_events | ⚠️ Partial — audit_events writes; gate_events INSERT broken |
+| Session memory | RedisSessionMemory, InMemorySessionMemory | ✅ Complete |
+| Token budget | Per-query/session/tenant limits, inline metering | ✅ Complete (in-process only) |
+| Trigger engine | Event → agent execution pipeline | ❌ Not started |
+| Cron monitors | Scheduled agent runs, anomaly detection | ❌ Not started |
+
+---
+
+### Summary
+
+0014 migration is correct and complete. The gate_events fix (`push()` INSERT) is syntactically present but broken at runtime — RLS rejects every INSERT because `withTenant()` is absent. This is the only change needed before the gate L2 round-trip is functional end-to-end. Fix is 3 lines.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08f -->
 ## Review — 2026-06-08f | Opus Expert Architectural Review #2 — post CRITICAL/HIGH fixes
 

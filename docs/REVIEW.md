@@ -7,6 +7,293 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08e -->
+## Review — 2026-06-08e | Opus Expert Architectural Review — post E2E (38/38 green)
+
+### Scope
+
+Full architectural review of the codebase as of commit `8aa676f` (38/38 Playwright tests passing).
+Covers security, agent harness, gate L2 flow, RLS, audit, migrations, and operational readiness.
+
+### Verdict: NO-SHIP
+
+Weighted score: **2.4/5** across 8 dimensions. 7 CRITICALs + 5 HIGHs must be resolved before ship.
+The gate L2 flow (V1 trust contract) is non-functional end-to-end. Auth is open. RLS is missing WITH CHECK. These are not polish issues — they are architectural gaps.
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Architecture vs CLAUDE.md | 2/5 | Graph-first non-negotiable softened to best-effort. Gate not wired. Two divergent isWriteAction. |
+| D2 Security | 1/5 | Auth open (no tenant verify). RLS missing WITH CHECK on 6 tables. JWT fallback secret. CORS wildcard+credentials. |
+| D3 Agent Harness | 3/5 | IModelProvider interface clean. Audit fire-and-forget. Token budget in-process only. Gate path incomplete. |
+| D4 Knowledge Graph | 3/5 | StructuralGraph Postgres wiring solid. 0003/0009 migration conflict — entities table created twice. |
+| D5 Connector Pattern | 3/5 | Tool naming consistent. args.resource never set by tools — perimeter falls to wildcard path always. |
+| D6 Operational Readiness | 2/5 | /health/ready is a stub. CORS missing x-connector-key header. |
+| D7 TypeScript Quality | 4/5 | Branded IDs throughout. Few unsafe casts. |
+| D8 Test Coverage | 2/5 | 38 happy-path E2E. No cross-tenant isolation tests. No gate round-trip test. No write-action perimeter test. |
+
+---
+
+### Issues Found
+
+#### [CRITICAL-1] Auth route open — any caller gets JWT for any tenant
+**File:** `apps/gateway/src/routes/auth.ts:22-58`
+**Issue:** `POST /auth/token` accepts any `email` + `tenantId` and returns a signed JWT with no tenant verification, no identity proof, no rate limit. Any caller who knows (or guesses) a tenant UUID can impersonate any user in that tenant. User lookup failure silently falls through to `crypto.randomUUID()` as userId — token is still signed and returned.
+**Fix:**
+```typescript
+// Step 1: verify tenant exists
+const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } })
+if (!tenant) return reply.code(400).send({ error: 'invalid tenantId' })
+
+// Step 2: verify user exists in that tenant (no auto-provision on token endpoint)
+const rows = await withTenant(prisma, tenantId, (tx) =>
+  tx.$queryRaw<{ id: string; role: string }[]>`
+    SELECT id, role FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1
+  `
+)
+if (!rows[0]) return reply.code(401).send({ error: 'user not found' })
+const user = rows[0]
+```
+Remove the silent fallback `user = { id: crypto.randomUUID() }`. Token must only be issued for verified (tenantId, email) pairs.
+**Verify:** POST `/auth/token` with a nonexistent tenantId → 400. POST with valid tenantId + unknown email → 401.
+
+#### [CRITICAL-2] Gate sink not wired in chatRoutes — all write tools bypass approval
+**File:** `apps/gateway/src/routes/chat.ts:280-288`
+**Issue:** `createOrchestrator` called without `gateSink` parameter:
+```typescript
+const orchestrator = createOrchestrator({
+  model: provider,
+  tools: connectorTools,
+  perimeter,
+  auditSink,
+  sessionMemory,
+  knowledgeGraph,
+  budget,
+  // gateSink: MISSING
+})
+```
+In `orchestrator.ts:298`: `if (isWriteAction(toolCall.name) && config.gateSink)` — when `gateSink` is undefined, the gate check is skipped entirely. Every write action executes without approval. V1 trust contract (L2 Approve — show gate, human confirms, then execute) is non-functional.
+**Fix:**
+```typescript
+// In chatRoutes, after sessionMemory setup:
+const gateSink = process.env['REDIS_URL']
+  ? new RedisGateSink(process.env['REDIS_URL'])
+  : undefined
+
+const orchestrator = createOrchestrator({
+  model: provider,
+  tools: connectorTools,
+  perimeter,
+  auditSink,
+  sessionMemory,
+  knowledgeGraph,
+  budget,
+  gateSink,
+})
+```
+Import `RedisGateSink` from `'../gate/redis-gate-sink.js'`. If Redis is not configured, gate checks are skipped (dev-only acceptable; log a warning).
+**Verify:** With Redis running and a write tool in the tool list, calling the tool should emit a `gate_required` SSE event and block execution until `/api/gate/:id/decide` is called.
+
+#### [CRITICAL-3] gate_decide route never publishes to Redis — gate polling always times out
+**File:** `apps/gateway/src/gate/gate-decide-route.ts:24-36`
+**Issue:** The route updates the DB row but never calls `gateSink.record()`. `pollGate()` polls `gate:<id>:decision` in Redis. That key is only set by `RedisGateSink.record()`. Without the publish step, `pollGate` will always exhaust its timeout and return `{ _tag: 'timeout' }`.
+**Fix:** After the DB UPDATE succeeds, publish to Redis:
+```typescript
+const affected = await withTenant(prisma, tenantId, (tx) =>
+  tx.$executeRaw`
+    UPDATE gate_events
+    SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
+    WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
+  `
+)
+
+if (Number(affected) === 0) {
+  return reply.code(404).send({ error: 'gate not found or already decided' })
+}
+
+// Publish decision to Redis so pollGate() wakes up
+if (process.env['REDIS_URL']) {
+  const sink = new RedisGateSink(process.env['REDIS_URL'])
+  await sink.record(gateId, decision, userId)
+}
+
+return { ok: true, gateId, decision }
+```
+**Verify:** Full gate round-trip: trigger a write tool call → receive `gate_required` SSE → POST `/api/gate/:id/decide` → tool executes (not timeout). Add a Playwright test for this flow.
+
+#### [CRITICAL-4] RLS policies missing WITH CHECK on 6 tables — cross-tenant INSERT possible
+**File:** `apps/gateway/prisma/migrations/0001_initial/migration.sql:171-198`
+**Issue:** All 6 `tenant_isolation` policies use only `USING` clause. `USING` controls which rows are *visible* for SELECT/UPDATE/DELETE. Without `WITH CHECK`, INSERT and UPDATE can write rows with any `tenant_id` — including another tenant's ID. A compromised or buggy app layer could poison another tenant's data.
+**Fix:** Add a new migration `0012_rls_with_check`:
+```sql
+-- Drop and recreate with WITH CHECK on the 6 initial tables
+DO $$ DECLARE t TEXT; BEGIN
+  FOR t IN VALUES ('tenants'), ('users'), ('sessions'), ('connectors'), ('audit_events'), ('incidents')
+  LOOP
+    EXECUTE format('DROP POLICY tenant_isolation ON %I', t);
+    EXECUTE format(
+      'CREATE POLICY tenant_isolation ON %I AS PERMISSIVE FOR ALL
+       USING (tenant_id = current_setting(''app.tenant_id'', true)::uuid)
+       WITH CHECK (tenant_id = current_setting(''app.tenant_id'', true)::uuid)',
+      t
+    );
+  END LOOP;
+END $$;
+-- tenants table uses id not tenant_id — fix separately
+DROP POLICY tenant_isolation ON tenants;
+CREATE POLICY tenant_isolation ON tenants AS PERMISSIVE FOR ALL
+  USING (id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (id = current_setting('app.tenant_id', true)::uuid);
+```
+Also check `triggers`, `cron_jobs` tables from later migrations — apply same pattern.
+**Verify:** `SET app.tenant_id = '<tenant-a>'; INSERT INTO users (tenant_id, email, role) VALUES ('<tenant-b-uuid>', 'x@x.com', 'dev')` → must fail with RLS violation.
+
+#### [CRITICAL-5] Audit sink fire-and-forget — events silently lost on DB failure
+**File:** `apps/gateway/src/audit/postgres-sink.ts:20-36`
+**Issue:** `append()` immediately resolves with `Promise.resolve()` — the actual DB write is fire-and-forget (`void withTenant(...).catch(...)`). If the DB is down or the write fails, the audit event is lost. The interface contract implies durability — callers do `await auditSink.append(...)` expecting the event was persisted.
+**Fix:** Make `append` await the write, then surface errors to callers (don't swallow):
+```typescript
+async append(event: AuditEvent): Promise<void> {
+  await withTenant(this.prisma, event.tenantId, (tx) =>
+    tx.auditEvent.create({ data: { ... } })
+  ).catch((err: unknown) => {
+    this.onError?.(err)
+    // Re-throw so callers know the write failed — they can decide whether to abort
+    throw err
+  })
+}
+```
+If fire-and-forget is intentional for latency reasons, document it explicitly as "at-most-once delivery" and update callers that use `await auditSink.append(...)` to use `void` consistently.
+**Verify:** Kill DB mid-request → `onError` is called, request continues (caller handles the error).
+
+#### [CRITICAL-6] entities/relationships tables created in two incompatible migrations
+**File:** `apps/gateway/prisma/migrations/0003_kb/migration.sql:1-11` and `apps/gateway/prisma/migrations/0009_knowledge_graph/migration.sql:4-25`
+**Issue:** `0003_kb` creates `entities` and `relationships` with `IF NOT EXISTS` + `VARCHAR(64/512)` columns, no UNIQUE constraints, no FK on `tenant_id`. `0009_knowledge_graph` attempts `CREATE TABLE entities` (no IF NOT EXISTS) with `TEXT` columns, `UNIQUE (tenant_id, type, name)`, tenant_id FK, and FORCE RLS. The two schemas are divergent. On a fresh DB, 0003 runs first — 0009 then fails (`relation "entities" already exists`). The executor's workaround (`prisma migrate resolve --applied 0009`) marks it applied without running it, leaving the 0003 schema in place: no UNIQUE constraint, no WITH CHECK, no FK on tenant_id.
+**Fix:** Delete `0009_knowledge_graph` entirely. Add a new migration `0009_kb_unique_constraints` that adds the missing elements to the tables created by 0003:
+```sql
+-- Add missing constraints to entities (created by 0003_kb)
+ALTER TABLE entities ADD CONSTRAINT entities_tenant_id_fkey
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+ALTER TABLE entities ADD CONSTRAINT entities_unique_per_tenant
+  UNIQUE (tenant_id, type, name);
+ALTER TABLE entities FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON entities;
+CREATE POLICY tenant_isolation ON entities AS PERMISSIVE FOR ALL
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+-- Same for relationships
+ALTER TABLE relationships FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON relationships;
+CREATE POLICY tenant_isolation ON relationships AS PERMISSIVE FOR ALL
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+```
+**Verify:** Fresh `docker compose down -v && up -d && prisma migrate deploy` succeeds without `--applied` workaround.
+
+#### [CRITICAL-7] JWT plugin has hardcoded fallback secret — bypasses env validation
+**File:** `apps/gateway/src/plugins/jwt.ts:30`
+**Issue:**
+```typescript
+const secret = process.env.JWT_SECRET ?? 'dev-secret-change-in-production'
+```
+The JWT plugin reads `process.env.JWT_SECRET` directly. `validateEnv()` in `server.ts` requires JWT_SECRET and throws if absent — but `buildApp()` registers this plugin before `validateEnv()` is called. If the env var is missing or the plugin loads early, tokens are signed with the public string `'dev-secret-change-in-production'`. Any attacker can forge valid JWTs for any tenant.
+**Fix:** Remove the fallback entirely. Let the plugin read from validated env:
+```typescript
+import { validateEnv } from '../config/env.js'
+// or pass secret as a parameter
+
+export default fp(async function jwtPlugin(app: FastifyInstance, opts: { secret: string }) {
+  const privateKey = process.env.JWT_PRIVATE_KEY
+  const publicKey = process.env.JWT_PUBLIC_KEY
+
+  await app.register(jwt, {
+    secret: privateKey && publicKey
+      ? { private: privateKey, public: publicKey }
+      : opts.secret,     // caller provides validated secret — no fallback
+    sign: { algorithm: privateKey ? 'RS256' : 'HS256', expiresIn: '24h' },
+  })
+  // ...
+})
+```
+In `app.ts`, call `await app.register(jwtPlugin, { secret: env.JWT_SECRET })` where `env` comes from `validateEnv()`.
+**Verify:** Start gateway without JWT_SECRET → process exits before listening. No fallback token signing possible.
+
+---
+
+#### [HIGH-1] Perimeter resource extraction always null — wildcard fallback always taken
+**File:** `packages/agent/src/perimeter/engine.ts:101`
+**Issue:**
+```typescript
+const resource = typeof toolCall.args['resource'] === 'string' ? toolCall.args['resource'] : null
+```
+No connector tool in the codebase passes `args.resource`. It is always `null`. When `resource === null` and `isWriteAction()` returns true, the check falls to `scope.write.includes('*')`. Any connector with `write: ['*']` (all seeded connectors have this) passes unconditionally for all write tools. The per-resource scope check is dead code.
+**Fix:** Either (a) remove the `resource` check and use only the scope wildcard logic, or (b) add a `resource` field to the write tools that need resource-scoped checks and document the contract.
+**Verify:** Perimeter test: user has `write: ['org/repo-a']`, tool call is `github.create_pr` with `args.repo = 'org/repo-b'` → should be hard-blocked.
+
+#### [HIGH-2] Two divergent isWriteAction implementations — gate and perimeter disagree
+**File:** `packages/agent/src/gate/gate.ts:31` vs `packages/agent/src/perimeter/engine.ts:75`
+**Issue:** 
+- `gate.ts` uses regex patterns: `/^notify_/`, `/^create_/`, `/^rollback/`, `/^comment/`, `/^run_runbook/`
+- `perimeter/engine.ts` uses suffix split on `WRITE_SUFFIXES` — `notify`, `rollback`, `comment`, `run_runbook` are absent
+
+A tool named `notify_oncall` is classified as a write action by the gate (fires gate approval) but NOT by the perimeter (passes through as read-like). Divergent classification = gate fires unnecessarily OR perimeter misclassifies.
+**Fix:** Single source of truth — delete `isWriteAction` from `perimeter/engine.ts`. Import from `gate/gate.ts`. Adjust `WRITE_ACTION_PATTERNS` to cover all cases both files need.
+**Verify:** `isWriteAction('notify_oncall')` returns the same value in both perimeter checks and gate checks.
+
+#### [HIGH-3] CORS wildcard origin + credentials enabled — browser rejects + security risk
+**File:** `apps/gateway/src/plugins/cors.ts:7-8`
+**Issue:** `origin: '*'` + `credentials: true`. The CORS spec prohibits this combination — browsers will reject credentialed cross-origin requests with wildcard origin. Additionally, if origin is scoped to `'*'`, any site can make credentialed requests if JWT is stored in a cookie. In current implementation JWT is in Authorization header (not cookie), so risk is lower — but the wildcard must still be scoped.
+**Fix:**
+```typescript
+origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+```
+In production, set `CORS_ORIGIN` to the UI's actual origin. Add to `env.ts` as optional with default.
+**Verify:** Request from `http://evil.com` with `Authorization: Bearer <token>` → CORS rejected.
+
+#### [HIGH-4] /health/ready is a stub — fake readiness in Kubernetes
+**File:** `apps/gateway/src/routes/health.ts:19-21`
+**Issue:** `/health/ready` returns `{ status: 'ok' }` without verifying DB or Redis connectivity. In K8s, the readiness probe gates traffic admission. A fake readiness probe means pods receive requests before Prisma is connected — first requests fail with 500.
+**Fix:**
+```typescript
+app.get('/health/ready', async (_request, reply) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    return reply.send({ status: 'ok' })
+  } catch (err) {
+    return reply.code(503).send({ status: 'unavailable', reason: 'db not ready' })
+  }
+})
+```
+**Verify:** Stop Postgres → `/health/ready` returns 503.
+
+#### [HIGH-5] CORS missing x-connector-key allowed header
+**File:** `apps/gateway/src/plugins/cors.ts:8`
+**Issue:** `allowedHeaders: ['Content-Type', 'Authorization', 'X-Trace-Id']` — missing `x-connector-key`. The graph events route authenticates connectors via this header. In cross-origin preflight requests, browsers strip unallowed headers — graph event ingestion from browser-facing connectors will silently fail.
+**Fix:** Add `'x-connector-key'` to `allowedHeaders`.
+
+---
+
+### Summary Table
+
+| ID | Severity | File | Issue |
+|----|----------|------|-------|
+| CRITICAL-1 | 🔴 | `auth.ts:22` | Open auth — JWT for any tenant, no verification |
+| CRITICAL-2 | 🔴 | `chat.ts:280` | Gate sink not passed to createOrchestrator — gate bypass |
+| CRITICAL-3 | 🔴 | `gate-decide-route.ts:36` | Decision never published to Redis — pollGate always times out |
+| CRITICAL-4 | 🔴 | `0001_initial/migration.sql:171` | RLS missing WITH CHECK on 6 tables |
+| CRITICAL-5 | 🔴 | `postgres-sink.ts:21` | Audit fire-and-forget — events lost on DB failure |
+| CRITICAL-6 | 🔴 | `0003_kb` + `0009_knowledge_graph` | entities/relationships created twice, schemas diverge |
+| CRITICAL-7 | 🔴 | `plugins/jwt.ts:30` | JWT fallback secret `dev-secret-change-in-production` |
+| HIGH-1 | 🟠 | `perimeter/engine.ts:101` | args.resource always null — perimeter wildcard always taken |
+| HIGH-2 | 🟠 | `gate/gate.ts:31` vs `perimeter/engine.ts:75` | Two divergent isWriteAction definitions |
+| HIGH-3 | 🟠 | `plugins/cors.ts:7` | CORS wildcard + credentials |
+| HIGH-4 | 🟠 | `health.ts:19` | Fake readiness probe |
+| HIGH-5 | 🟠 | `plugins/cors.ts:8` | x-connector-key missing from CORS allowed headers |
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08d -->
 ## Review — 2026-06-08d | Gate RLS hardening + Dockerfile pnpm-deploy removal (3 source commits)
 

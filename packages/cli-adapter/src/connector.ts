@@ -1,5 +1,10 @@
 import { execFile } from 'node:child_process'
 import type { ExecutableTool } from '@anvay/agent'
+import { discoverSubcommands } from './discovery.js'
+import type { DiscoveredCommand } from './discovery.js'
+
+export type { DiscoveredCommand }
+export { discoverSubcommands }
 
 const MAX_BUFFER = 10 * 1024 * 1024 // 10MB
 const DEFAULT_TIMEOUT = 30_000
@@ -14,25 +19,29 @@ export interface CliExecEntry {
 /**
  * Generic CLI adapter — wraps any CLI binary as Anvay tools.
  * Allowlist-based: only subcommands in `allowedSubcommands` are exposed.
+ * If `allowedSubcommands` is omitted, auto-discovers from `binary --help`.
+ *
  * Subprocess args are passed as array (no shell interpolation).
  *
  * Usage:
- *   const adapter = new CliConnector({
- *     name: 'github',
- *     binary: 'gh',
+ *   const adapter = new CliConnector({ name: 'github', binary: 'gh' })
+ *   const tools = await adapter.getTools()   // auto-discovery
+ *   await adapter.call('pr list', { repo: 'org/payments' })
+ *
+ *   // Curated mode:
+ *   const curated = new CliConnector({
+ *     name: 'github', binary: 'gh',
  *     allowedSubcommands: ['pr list', 'pr view'],
  *   })
- *   const tools = adapter.getTools()
- *   await adapter.call('pr list', { repo: 'org/payments' })
  */
 export class CliConnector {
-  private readonly toolsCache: ExecutableTool[]
+  private toolsCache: ExecutableTool[] | null = null
 
   constructor(
     private readonly config: {
       name: string
       binary: string
-      allowedSubcommands: string[]
+      allowedSubcommands?: string[]
       /** Environment variables to inject — never include in argv */
       env?: Record<string, string>
       timeoutMs?: number
@@ -40,12 +49,14 @@ export class CliConnector {
       onExec?: (entry: CliExecEntry) => void
     },
   ) {
-    this.toolsCache = this.buildTools()
+    if (this.config.allowedSubcommands) {
+      this.toolsCache = this.buildTools(this.config.allowedSubcommands)
+    }
   }
 
-  private buildTools(): ExecutableTool[] {
+  private buildTools(subcommands: string[]): ExecutableTool[] {
     const cfg = this.config
-    return this.config.allowedSubcommands.map((subcommand) => {
+    return subcommands.map((subcommand) => {
       const parts = subcommand.split(/\s+/)
       const toolName = `${cfg.name}.${parts.join('_')}`
       return {
@@ -72,6 +83,17 @@ export class CliConnector {
         },
       }
     })
+  }
+
+  /**
+   * Auto-discover subcommands from `binary --help` and build tools.
+   * Used when `allowedSubcommands` was not provided in config.
+   */
+  async discoverAndBuild(): Promise<ExecutableTool[]> {
+    if (this.toolsCache) return this.toolsCache
+    const cmds = await discoverSubcommands(this.config.binary, this.config.env, this.config.timeoutMs)
+    this.toolsCache = this.buildTools(cmds.map((c) => c.name))
+    return this.toolsCache
   }
 
   private async execWithTimeout(argv: string[], timeoutMs: number): Promise<unknown> {
@@ -136,15 +158,21 @@ export class CliConnector {
     }
   }
 
-  /** Returns the built tools list. */
-  getTools(): ExecutableTool[] {
-    return this.toolsCache
+  /**
+   * Returns the tools list.
+   * If `allowedSubcommands` was provided in config, returns cached list synchronously.
+   * Otherwise runs discovery via `binary --help` and builds tools.
+   */
+  async getTools(): Promise<ExecutableTool[]> {
+    if (this.toolsCache) return this.toolsCache
+    return this.discoverAndBuild()
   }
 
   /** Call a specific CLI tool by name (e.g., "pr list"). */
   async call(subcommand: string, args?: Record<string, unknown>): Promise<unknown> {
+    const tools = await this.getTools()
     const toolName = `${this.config.name}.${subcommand.replace(/\s+/g, '_')}`
-    const tool = this.toolsCache.find((t) => t.name === toolName)
+    const tool = tools.find((t) => t.name === toolName)
     if (!tool) throw new Error(`CLI tool "${toolName}" not found`)
     return tool.run(args ?? {})
   }

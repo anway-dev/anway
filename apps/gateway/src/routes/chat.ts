@@ -27,6 +27,7 @@ import type { IKnowledgeGraph } from '@anvay/agent'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
+import { makeRegistrationTools } from '../connectors/registration-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
@@ -278,6 +279,8 @@ export async function chatRoutes(app: FastifyInstance) {
         withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
+    const registrationTools = makeRegistrationTools(tenantId)
+    const allTools = [...connectorTools, ...registrationTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
     const redisUrl = process.env['REDIS_URL']
@@ -288,7 +291,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const orchestrator = createOrchestrator({
       model: provider,
-      tools: connectorTools,
+      tools: allTools,
       perimeter,
       auditSink,
       sessionMemory,

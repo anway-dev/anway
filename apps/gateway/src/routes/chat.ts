@@ -315,7 +315,7 @@ export async function chatRoutes(app: FastifyInstance) {
         for await (const event of runSession(orchestrator, query, sessionCtx, abortController.signal)) {
           if (event.type === 'done') {
             totalTokens = event.inputTokens + event.outputTokens
-            void auditSink.append({
+            await auditSink.append({
               id: crypto.randomUUID(),
               tenantId: TenantId(tenantId),
               userId: UserId(userId),

@@ -1,6 +1,7 @@
 import type { ConnectorMode, UserId } from '@anvay/types'
 import type { ToolCall } from '../interfaces/provider.js'
 import { connectorIdFromTool } from '../tools/naming.js'
+import { isWriteAction } from '../gate/gate.js'
 
 export interface ConnectorScope {
   readonly connectorId: string
@@ -64,17 +65,6 @@ function intersectScope(userScope: ConnectorScope, manifest: ConnectorManifest):
     read: intersectResourceLists(userScope.read, manifest.capabilities.read),
     write: intersectResourceLists(userScope.write, manifest.capabilities.write),
   }
-}
-
-// Write action suffixes — if a tool name contains any of these, it is treated as a write action.
-const WRITE_SUFFIXES = [
-  'create', 'update', 'delete', 'write', 'push', 'deploy',
-  'restart', 'scale', 'patch', 'merge', 'close', 'post', 'put',
-]
-
-function isWriteAction(toolName: string): boolean {
-  const actionParts = toolName.split(/[._-]/)
-  return WRITE_SUFFIXES.some(s => actionParts.includes(s))
 }
 
 export class AgentPerimeter {

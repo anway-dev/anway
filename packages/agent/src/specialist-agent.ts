@@ -130,6 +130,13 @@ async function* runSpecialist(
         yield { type: 'gate_required', gateId, toolCallId: toolCall.id, toolName: toolCall.name, args: toolCall.args }
         const decision = await pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000)
         if (decision._tag !== 'approved') {
+          await config.auditSink.append({
+            id: crypto.randomUUID(),
+            tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId,
+            eventType: 'tool_call_blocked',
+            payload: { gateId, toolName: toolCall.name, decision: decision._tag },
+            createdAt: new Date(),
+          })
           const blockMsg = `Write action "${toolCall.name}" ${decision._tag === 'rejected' ? 'rejected by user' : 'timed out'}`
           toolResultParts.push(blockMsg)
           yield { type: 'tool_result', toolCallId: toolCall.id, result: blockMsg }

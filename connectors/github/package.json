@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anvay/agent": "workspace:*",
     "@anvay/types": "workspace:*"
   },
   "devDependencies": {

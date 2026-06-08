@@ -12,5 +12,9 @@
     "skipLibCheck": true,
     "composite": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/agent" },
+    { "path": "../../packages/types" }
+  ]
 }

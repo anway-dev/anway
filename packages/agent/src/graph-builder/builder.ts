@@ -2,6 +2,7 @@ import type { TenantId } from '@anvay/types'
 import type { IModelProvider, Message } from '../interfaces/provider.js'
 import type { IKnowledgeGraph } from '../interfaces/knowledge-graph.js'
 import type { GraphEvent } from './events.js'
+import type { IConnectorBootstrap } from './bootstrap.js'
 
 export interface GraphBuilderLogger {
   error(obj: unknown, msg?: string): void
@@ -20,6 +21,7 @@ export class GraphBuilderAgent {
     private readonly model: IModelProvider,
     private readonly cheapModel: string,
     private readonly logger?: GraphBuilderLogger,
+    private readonly bootstrapRegistry?: Map<string, IConnectorBootstrap>,
   ) {}
 
   /** Route event to correct handler. Never throws — failures are caught and logged. */
@@ -50,14 +52,31 @@ export class GraphBuilderAgent {
   // -- event handlers --------------------------------------------------------
 
   private async onConnectorRegistered(event: GraphEvent & { type: 'connector_registered' }): Promise<void> {
+    const tenantId = this.tid(event.tenantId)
     await this.kg.upsertEntity(
       {
         type: 'Connector',
         name: event.connectorId,
         metadata: { connectorType: event.connectorType, payload: event.payload },
       },
-      this.tid(event.tenantId),
+      tenantId,
     )
+
+    // If a bootstrap is registered for this connector type, run it
+    const bootstrap = this.bootstrapRegistry?.get(event.connectorType)
+    if (bootstrap) {
+      try {
+        const result = await bootstrap.bootstrap(tenantId, event.connectorId, event.payload)
+        if (result.entitiesUpserted > 0) {
+          this.logger?.warn(
+            { entitiesUpserted: result.entitiesUpserted, connectorType: event.connectorType },
+            `GraphBuilder: bootstrapped ${result.entitiesUpserted} entities from ${event.connectorType}`,
+          )
+        }
+      } catch (err) {
+        this.logger?.error({ err, connectorType: event.connectorType }, 'GraphBuilder: bootstrap failed')
+      }
+    }
   }
 
   private async onPrMerged(event: GraphEvent & { type: 'pr_merged' }): Promise<void> {

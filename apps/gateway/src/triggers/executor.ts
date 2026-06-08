@@ -6,7 +6,8 @@ const log = pino({ name: 'trigger-executor' })
 
 export async function startTriggerExecutor(redisUrl: string): Promise<void> {
   const sub = createClient({ url: redisUrl })
-  await sub.connect()
+  const pub = createClient({ url: redisUrl })
+  await Promise.all([sub.connect(), pub.connect()])
 
   await sub.subscribe('trigger_matched', async (message) => {
     let payload: { tenantId: string; channel: string; actions: TriggerAction[] }
@@ -15,7 +16,7 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
     for (const action of payload.actions) {
       // V1: ALL write actions require gate — surface to UI, do not auto-execute
       if (['notify_oncall', 'create_incident', 'run_runbook'].includes(action.type)) {
-        await sub.publish('trigger_gate_required', JSON.stringify({
+        await pub.publish('trigger_gate_required', JSON.stringify({
           tenantId: payload.tenantId,
           action,
           createdAt: new Date().toISOString(),

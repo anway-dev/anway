@@ -14,4 +14,4 @@ async def get_facts(
     if graphiti is None:
         return []
     results = await graphiti.search(query=query, group_ids=[x_tenant_id])
-    return [{"uuid": str(r.uuid), "fact": r.fact, "valid_at": r.valid_at} for r in results]
+    return [{"claim": r.fact, "valid_at": r.valid_at} for r in results]

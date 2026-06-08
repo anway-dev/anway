@@ -6,7 +6,7 @@ export interface ScheduledJob {
 }
 
 export interface IScheduler {
-  register(job: ScheduledJob): void
+  register(job: ScheduledJob): Promise<void>
   start(): Promise<void>
   stop(): Promise<void>
 }

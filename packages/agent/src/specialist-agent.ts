@@ -6,6 +6,8 @@ import { createPerimeterMiddleware } from './middleware/perimeter.js'
 import type { PerimeterCtx } from './middleware/perimeter.js'
 import type { AgentPerimeter } from './perimeter/engine.js'
 import type { ExecutableTool } from './orchestrator.js'
+import { isWriteAction, pollGate } from './gate/gate.js'
+import type { IGateSink } from './gate/gate.js'
 
 export interface SpecialistAgentConfig {
   name: string
@@ -16,6 +18,8 @@ export interface SpecialistAgentConfig {
   auditSink: IAuditSink
   defaultModel?: string
   maxSteps?: number
+  gateSink?: IGateSink
+  gateTimeoutMs?: number
 }
 
 export interface SpecialistAgent {
@@ -107,6 +111,30 @@ async function* runSpecialist(
         yield { type: 'error', code: 'FORBIDDEN', message: perimResult.reason }
         toolResultParts.push(`Tool "${toolCall.name}" blocked: ${perimResult.reason}`)
         continue
+      }
+
+      // V1 L2 gate: every write action requires user approval before execution
+      if (isWriteAction(toolCall.name) && config.gateSink) {
+        const gateId = crypto.randomUUID()
+        await config.gateSink.push({
+          id: gateId,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          args: toolCall.args,
+          connectorId: toolCall.name.split('.')[0] ?? toolCall.name,
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          sessionId: ctx.sessionId,
+          createdAt: new Date(),
+        })
+        yield { type: 'gate_required', gateId, toolCallId: toolCall.id, toolName: toolCall.name, args: toolCall.args }
+        const decision = await pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000)
+        if (decision._tag !== 'approved') {
+          const blockMsg = `Write action "${toolCall.name}" ${decision._tag === 'rejected' ? 'rejected by user' : 'timed out'}`
+          toolResultParts.push(blockMsg)
+          yield { type: 'tool_result', toolCallId: toolCall.id, result: blockMsg }
+          continue
+        }
       }
 
       const execTool = tools.find((t) => t.name === toolCall.name)

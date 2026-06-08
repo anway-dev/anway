@@ -50,7 +50,7 @@ async function main() {
       app.log.warn({ err }, 'Trigger subscriber not started — Redis may be unavailable')
     }
     try {
-      const cronScheduler = createCronJobs(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+      const cronScheduler = await createCronJobs(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
       await cronScheduler.start()
       app.log.info('Cron scheduler started')
     } catch (err) {

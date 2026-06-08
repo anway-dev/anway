@@ -12,12 +12,16 @@ export class BullMQScheduler implements IScheduler {
     this.queue = new Queue('cron-jobs', { connection })
   }
 
-  register(job: ScheduledJob): void {
+  async register(job: ScheduledJob): Promise<void> {
     // Register as a repeatable job with cron pattern
-    void this.queue.add(job.name, { jobId: job.id }, {
-      repeat: { pattern: job.schedule },
-      jobId: `repeat:${job.id}`,
-    })
+    try {
+      await this.queue.add(job.name, { jobId: job.id }, {
+        repeat: { pattern: job.schedule },
+        jobId: `repeat:${job.id}`,
+      })
+    } catch (err) {
+      throw new Error(`BullMQScheduler: failed to register job "${job.name}": ${err instanceof Error ? err.message : err}`)
+    }
 
     // Worker that runs the job when scheduled
     const worker = new Worker('cron-jobs', async (bullJob) => {

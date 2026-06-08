@@ -20,10 +20,10 @@ async function updateLastRun(tenantId: string, jobType: string, result: unknown)
   }
 }
 
-export function createCronJobs(redisUrl: string): IScheduler {
+export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
   const scheduler = new BullMQScheduler(redisUrl)
 
-  scheduler.register({
+  await scheduler.register({
     id: 'service-health-sweep',
     name: 'service_health_sweep',
     schedule: '*/5 * * * *',
@@ -35,9 +35,9 @@ export function createCronJobs(redisUrl: string): IScheduler {
         await updateLastRun(id, 'service_health_sweep', result)
       }
     },
-  } satisfies ScheduledJob)
+  })
 
-  scheduler.register({
+  await scheduler.register({
     id: 'hourly-slo-deploy',
     name: 'hourly_slo_deploy',
     schedule: '0 * * * *',
@@ -52,9 +52,9 @@ export function createCronJobs(redisUrl: string): IScheduler {
         await updateLastRun(id, 'deploy_health_report', reportResult)
       }
     },
-  } satisfies ScheduledJob)
+  })
 
-  scheduler.register({
+  await scheduler.register({
     id: 'oncall-morning-brief',
     name: 'oncall_morning_brief',
     schedule: '0 8 * * *',
@@ -66,7 +66,7 @@ export function createCronJobs(redisUrl: string): IScheduler {
         await updateLastRun(id, 'oncall_morning_brief', result)
       }
     },
-  } satisfies ScheduledJob)
+  })
 
   return scheduler
 }

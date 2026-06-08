@@ -1,6 +1,10 @@
 import { createClient } from 'redis'
 import type { IGateSink, GateEvent } from '@anvay/agent'
 import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
+import pino from 'pino'
+
+const log = pino({ name: 'redis-gate-sink' })
 
 const GATE_KEY_PREFIX = 'gate:'
 const GATE_TTL_SECONDS = 60
@@ -26,16 +30,19 @@ export class RedisGateSink implements IGateSink {
   }
 
   async push(event: GateEvent): Promise<string> {
-    // Persist to Postgres (audit trail)
+    // Persist to Postgres (audit trail) — withTenant sets RLS GUC
     try {
-      await prisma.$executeRaw`
-        INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, tool_call_id, created_at)
-        VALUES (${event.id}::uuid, ${event.tenantId}::uuid, ${event.userId}::uuid, ${event.sessionId}::uuid,
-          ${event.toolName}, ${JSON.stringify(event.args)}::jsonb, ${event.connectorId},
-          'pending', ${event.toolCallId}, ${event.createdAt.toISOString()}::timestamptz)
-      `
-    } catch {
+      await withTenant(prisma, event.tenantId, (tx) =>
+        tx.$executeRaw`
+          INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, tool_call_id, created_at)
+          VALUES (${event.id}::uuid, ${event.tenantId}::uuid, ${event.userId}::uuid, ${event.sessionId}::uuid,
+            ${event.toolName}, ${JSON.stringify(event.args)}::jsonb, ${event.connectorId},
+            'pending', ${event.toolCallId}, ${event.createdAt.toISOString()}::timestamptz)
+        `
+      )
+    } catch (err) {
       // Best-effort — don't block gate flow on audit insert failure
+      log.warn({ err, gateId: event.id }, 'gate_events insert failed')
     }
 
     // Cache in Redis + notify
@@ -47,17 +54,14 @@ export class RedisGateSink implements IGateSink {
   }
 
   async poll(gateId: string): Promise<'approved' | 'rejected' | null> {
-    const c = createClient({ url: this.redisUrl })
     try {
-      await c.connect()
+      const c = await this.getPub()
       const key = `${GATE_KEY_PREFIX}${gateId}:decision`
       const value = await c.get(key)
       if (value === 'approved' || value === 'rejected') return value
       return null
     } catch {
       return null
-    } finally {
-      await c.disconnect().catch(() => {})
     }
   }
 

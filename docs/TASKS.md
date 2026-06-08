@@ -392,104 +392,76 @@
 
 ## M2 — Core Connectors
 
-**Goal:** GitHub, Datadog, Linear, ArgoCD connected. Read mode. Real data in orchestrator context.
-**Ref:** PRODUCT.md §5.7 (connector strategy), §9 M2
-**Depends on:** All M1 tasks done
+**Goal:** Generic adapter-based connector system. Any MCP server or CLI auto-registers without writing connector code. Agent-driven discovery. No per-service packages.
+**Ref:** PRODUCT.md §4.12 (Zero-code connector registration), §9 M2
+**Depends on:** All M1 tasks done, M2-T6/T7 (mcp-adapter + cli-adapter) done ✅
+
+> **CANCELLED:** M2-T1/T2/T3/T4 (per-service connector packages) are removed. There are no `connectors/github`, `connectors/datadog`, `connectors/linear`, `connectors/argocd` packages. Services connect via config entries against the generic adapters. The `connectors/` directory does not exist.
 
 ---
 
-### Wave 2-A — All parallel (one per connector)
-
-Each connector task follows the same pattern. Implement them simultaneously.
+### Wave 2-A — All parallel
 
 #### M2-T1 `[PARALLEL]`
-**Title:** connectors/github — GitHub connector
+**Title:** CliConnector — `discoverSubcommands()` from `--help` output
 
 **What to do:**
-- Create `connectors/github/` package
-- `IConnector` interface (define in `packages/types` if not already): `{ id, capabilities: CapabilityManifest, read(query: ConnectorQuery): Promise<ConnectorResult>, write(action: ConnectorAction): Promise<ConnectorResult>, health(): Promise<HealthStatus> }`
-- `GitHubConnector implements IConnector`:
-  - Mode: `read` (V1 — no write actions in M2)
-  - Use `gh` CLI via subprocess for all reads (MCP first if GitHub ships one — check before coding)
-  - Reads: `list_prs(repo, filters)`, `get_pr(repo, pr_number)`, `list_commits(repo, branch, since)`, `list_workflows(repo)`, `get_workflow_run(repo, run_id)`, `search_code(repo, query)`
-  - Every subprocess call: logged to audit sink with exact command (no secrets in log)
-  - Result type: grounded response with `source: "github"`, `fetched_at`, `ttl: 120s`
-- `ConnectorAgent` for GitHub: specialist agent with GitHub tools, returns grounded `ConnectorResult`
+- Add `discoverSubcommands()` to `packages/cli-adapter/src/connector.ts`
+- Runs `binary --help` → parses subcommand names + one-line descriptions from stdout
+- For each top-level subcommand, optionally runs `binary <subcommand> --help` to discover nested subcommands (1 level deep only)
+- Returns `DiscoveredCommand[]`: `{ name: string, description: string, subcommands?: string[] }`
+- If `allowedSubcommands` is provided in config: skip discovery, use allowlist (curated mode)
+- If `allowedSubcommands` is absent: run discovery, build tool list from parsed output
+- Add `discoverAndBuild()`: runs discovery → calls `buildTools()` with discovered list → stores in cache
+- Help text parsing: handle common formats (`  subcommand   description`, tab-separated, USAGE blocks). Best-effort — unknown format → empty list, log warn
 
-**Ref:** PRODUCT.md §5.7 (connector strategy — MCP → CLI → SDK), §5.8 (connector model)
-
-**Files:** `connectors/github/src/connector.ts`, `connectors/github/src/tools.ts`, `connectors/github/src/agent.ts`
+**Files:** `packages/cli-adapter/src/connector.ts`, `packages/cli-adapter/src/discovery.ts`
 
 **Done when:**
-- `GitHubConnector.read({ type: 'list_prs', repo: 'owner/repo' })` returns typed result against real GitHub (or sandbox)
-- Subprocess command appears in audit log
-- `health()` returns `healthy` when GitHub API reachable
+- `new CliConnector({ binary: 'gh', name: 'github' }).discoverSubcommands()` returns non-empty list
+- `new CliConnector({ binary: 'kubectl', name: 'k8s' }).discoverSubcommands()` returns non-empty list
+- `allowedSubcommands` present → discovery skipped, uses list directly
+- Unit tests cover: parsed output with mock help text, allowlist bypass
+- `pnpm typecheck` clean
 
 ---
 
 #### M2-T2 `[PARALLEL]`
-**Title:** connectors/datadog — Datadog connector
+**Title:** Agent-driven connector registration tools
 
 **What to do:**
-- Same pattern as M2-T1
-- Mode: `read`
-- Use Datadog REST API (no official CLI) — `IConnector` via SDK (`@datadog/datadog-api-client`)
-- Reads: `get_metrics(service, metric_name, from, to)`, `list_monitors(query)`, `get_monitor(id)`, `search_logs(query, from, to)`, `list_dashboards()`
-- TTL: metrics = 60s, monitors = 120s, logs = 30s
-- Config: `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE` from connector config (encrypted in DB)
+- Add two orchestrator tools to `apps/gateway/src/connectors/`:
+  - `register_connector`: accepts `{ type: 'mcp' | 'cli', name, config }` → instantiates adapter, calls `getTools()` / `discoverSubcommands()`, writes to `connectors` table, returns tool count
+  - `list_connectors`: returns all connectors for tenant with health status
+- Both tools go through perimeter (only `admin` role can call `register_connector`)
+- `register_connector` is a write action → subject to gate approval (L2)
+- Wire into `getToolsForTenant()` in `apps/gateway/src/connectors/registry.ts`
 
-**Ref:** PRODUCT.md §5.7
+**Files:** `apps/gateway/src/connectors/registration-tools.ts`, `apps/gateway/src/connectors/registry.ts`
 
-**Files:** `connectors/datadog/src/connector.ts`, `connectors/datadog/src/tools.ts`, `connectors/datadog/src/agent.ts`
-
-**Done when:** Same pattern as M2-T1 verified against Datadog sandbox or mock server
+**Done when:**
+- Chat message "connect github via gh CLI" → agent calls `register_connector` → `gh` tools available in next query
+- Chat message "connect Linear MCP at http://..." → agent calls `register_connector` → Linear tools available
+- Non-admin user calling `register_connector` → hard blocked by perimeter
 
 ---
 
-#### M2-T3 `[PARALLEL]`
-**Title:** connectors/linear — Linear connector
-
-**What to do:**
-- Same pattern as M2-T1
-- Mode: `read`
-- Use Linear GraphQL API (official SDK: `@linear/sdk`)
-- Reads: `list_issues(team, filters)`, `get_issue(id)`, `list_projects(team)`, `get_project(id)`, `list_cycles(team)`, `get_team_members(team)`
-- TTL: issues = 120s, projects = 300s
-
-**Ref:** PRODUCT.md §5.7
-
-**Files:** `connectors/linear/src/connector.ts`, `connectors/linear/src/tools.ts`, `connectors/linear/src/agent.ts`
-
-**Done when:** Same pattern as M2-T1
-
----
-
-#### M2-T4 `[PARALLEL]`
-**Title:** connectors/argocd — ArgoCD connector
-
-**What to do:**
-- Same pattern as M2-T1
-- Mode: `read` (V1)
-- Use `argocd` CLI via subprocess (MCP-first — check ArgoCD for official MCP server first)
-- Reads: `list_applications()`, `get_application(name)`, `get_application_history(name)`, `get_sync_status(name)`, `get_resource_tree(name)`
-- TTL: app status = 30s, history = 120s
-
-**Ref:** PRODUCT.md §5.7
-
-**Files:** `connectors/argocd/src/connector.ts`, `connectors/argocd/src/tools.ts`, `connectors/argocd/src/agent.ts`
-
-**Done when:** Same pattern as M2-T1
-
----
-
-### Wave 2-B — Depends on all Wave 2-A done
+### Wave 2-B — Depends on Wave 2-A done
 
 #### M2-T5 `[SEQUENTIAL]`
-**Title:** Connector registry + orchestrator integration
+**Title:** Connector registry + orchestrator integration (updated)
 
 **What to do:**
-- `apps/gateway/src/connectors/registry.ts`: loads connector configs from DB per tenant, instantiates correct `IConnector` impl, caches instances per session
-- Orchestrator: on each query, registry resolves available connectors for user, injects connector tools into agent tool set (scoped by perimeter)
+- `apps/gateway/src/connectors/registry.ts`: loads connector configs from DB per tenant, instantiates `McpConnector` or `CliConnector` based on `connector.type`, caches instances per tenant (singleton — not per-request)
+- Singleton pattern: one adapter instance per `(tenantId, connectorId)` pair — prevents connection leak from `McpConnector`
+- `getToolsForTenant(prisma, tenantId)`: returns `ExecutableTool[]` for all active connectors for tenant, scoped by perimeter
+- Wire `CliConnector.onExec` to `auditSink.append()` for every CLI tool call
+- `GET /api/connectors`: returns connector list with health status per tenant (calls `adapter.health()`)
+- `apps/web/components/connectors.tsx`: fetch real connector status from `GET /api/connectors`
+
+**Ref:** PRODUCT.md §4.12
+
+**Files:** `apps/gateway/src/connectors/registry.ts`, `apps/gateway/src/routes/connectors.ts`
 - KB sync: after each connector read, push event to Redis Pub/Sub channel `kb:sync:{tenantId}`
 - `apps/web/components/connectors.tsx`: fetch real connector status from `GET /api/connectors`
 - `GET /api/connectors`: returns connector list with health status per tenant

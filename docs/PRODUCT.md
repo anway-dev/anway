@@ -390,30 +390,44 @@ MCP server → CLI → official SDK → REST API
 | Loki | read | Monitoring |
 | Prometheus | read | Monitoring |
 
-**Zero-code connector registration (MCP + CLI):**
+**Zero-code connector registration (MCP + CLI) — generic, agent-driven:**
 
-Any service with an MCP server or CLI can be connected without writing a custom connector. Two generic adapters ship out of the box:
+There are no per-service connector packages. The two generic adapters (`McpConnector`, `CliConnector`) handle every service. Admins connect a service by registering its config — no code change required, ever.
 
-- **MCP Adapter** — point at any MCP server URL → Anvay calls `tools/list`, maps tools to `ExecutableTool[]`, registers as connector. No code required.
-- **CLI Adapter** — declare a CLI binary + allowed subcommands → each subcommand becomes a tool. Subprocess execution with args-as-array (no shell injection risk). Credentials via env only.
+**Core principle:** the adapters are the only connectors. Services are config, not code.
 
-Both adapters produce the same `ExecutableTool[]` output as custom connectors. Perimeter, audit, gate, and capability manifest all apply identically. The capability manifest is auto-derived from the MCP tool list or CLI allowlist at registration time.
+**MCP Adapter** — point at any MCP server URL → adapter calls `tools/list` at registration time, maps tools to `ExecutableTool[]`. Adding a new SaaS integration = one config entry, zero code.
 
-**Registration flow (MCP):**
+**CLI Adapter** — point at any CLI binary → adapter runs `binary --help` to discover available subcommands and auto-populate the tool list. No static `allowedSubcommands` list required. The help text is the documentation. Admins can optionally provide a curated allowlist to restrict scope, but it is not required.
+
+**CLI help-text discovery:**
 ```
-Admin registers: { type: 'mcp', url: 'http://mcp.linear.app', name: 'linear' }
+CliConnector.discoverSubcommands()
+  → runs: binary --help (and binary <subcommand> --help for nested commands)
+  → parses subcommand names + descriptions from stdout
+  → builds ExecutableTool[] with names, descriptions, and a generic args schema
+  → stores discovered manifest in connectors table (human can review + restrict)
+```
+
+Both adapters produce the same `ExecutableTool[]` output. Perimeter, audit, gate, and capability manifest apply identically. Capability manifest is auto-derived — from MCP `tools/list` for MCP connectors, from `--help` parse for CLI connectors.
+
+**Registration flows:**
+```
+MCP: { type: 'mcp', url: 'http://mcp.linear.app', name: 'linear', mode: 'read-write' }
   → McpConnector.getTools() → tools/list → ExecutableTool[]
-  → capability manifest written to connectors table
-  → tools available in orchestrator immediately, scoped by perimeter
+  → manifest written to connectors table → available in orchestrator
+
+CLI: { type: 'cli', binary: 'gh', name: 'github', mode: 'read-write' }
+  → CliConnector.discoverSubcommands() → gh --help → ExecutableTool[]
+  → manifest written to connectors table → available in orchestrator
+
+CLI (curated): { type: 'cli', binary: 'kubectl', name: 'k8s', allowedSubcommands: ['get pods', 'get deployments'], mode: 'read' }
+  → CliConnector.getTools() → ExecutableTool[] from explicit allowlist (skips discovery)
 ```
 
-**Registration flow (CLI):**
-```
-Admin registers: { type: 'cli', binary: 'gh', name: 'github', allowedSubcommands: ['pr list', ...] }
-  → CliConnector.getTools() → ExecutableTool[] from allowlist
-  → capability manifest written
-  → tools available in orchestrator
-```
+**Agent-driven registration:** the orchestrator exposes connector registration as tools. An admin can say "connect Linear's MCP server at http://mcp.linear.app" in chat — the agent calls `register_connector(type, config)`, the registry instantiates the adapter, tools become available in the next query. No deployment required.
+
+**No per-service connector packages.** M2-T1/T2/T3/T4 (GitHub/Datadog/Linear/ArgoCD) are NOT separate packages. They are connector config entries registered against the generic adapters. The `connectors/` directory does not exist. The connector table in the DB is the source of truth.
 
 This means: any org can self-serve connectors for any MCP-compliant service (Linear, Notion, Stripe, Figma, etc.) or any tool with a CLI (kubectl, aws, gcloud, argocd, pd) without waiting for Anvay to ship an integration.
 

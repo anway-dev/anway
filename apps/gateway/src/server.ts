@@ -9,6 +9,7 @@ import { validateEnv } from './config/env.js'
 import pino from 'pino'
 import { startTriggerSubscriber } from './triggers/subscriber.js'
 import { startCronScheduler } from './jobs/scheduler.js'
+import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
 
 const bootstrapLog = pino({ level: 'info' })
 
@@ -51,6 +52,14 @@ async function main() {
       startCronScheduler()
     } catch (err) {
       app.log.warn({ err }, 'Cron scheduler not started')
+    }
+    try {
+      await startGraphBuilderSubscriber(
+        process.env['REDIS_URL'] ?? 'redis://localhost:6379',
+        app.log,
+      )
+    } catch (err) {
+      app.log.warn({ err }, 'Graph builder subscriber not started — Redis may be unavailable')
     }
   } catch (err) {
     const log = app?.log ?? bootstrapLog

@@ -1,24 +1,98 @@
 "use client";
 import { useState, useEffect } from "react";
-import { AUTOMATION_TRIGGERS, CRON_MONITORS, TriggerStatus, CronStatus, CronResultStatus } from "@/lib/mock";
 
-// API response types — replace mock shapes with real API contracts
-interface TriggerRuleAPI { id: string; eventType: string; enabled: boolean; condition: unknown; actions: unknown[] }
-interface CronMonitorAPI { id: string; name: string; schedule: string; jobType: string; enabled: boolean; lastRunAt: string | null; lastResult: unknown | null }
+interface TriggerRuleAPI {
+  id: string
+  eventType: string
+  enabled: boolean
+  condition: Record<string, unknown> | null
+  actions: Array<{ type: string; target?: string; params?: Record<string, string> }>
+  createdAt?: string
+}
 
-const TRIGGER_STATUS_COLOR: Record<TriggerStatus, string> = {
+interface CronMonitorAPI {
+  id: string
+  name: string
+  schedule: string
+  jobType: string
+  enabled: boolean
+  lastRunAt: string | null
+  lastResult: { status?: string; summary?: string } | null
+}
+
+interface DisplayTrigger {
+  id: string
+  name: string
+  status: string
+  event: string
+  condition: string
+  scope: string
+  actions: Array<{ type: string; target?: string }>
+  lastFired: string | null
+  fireCount: number
+  createdBy: string
+}
+
+interface DisplayCron {
+  id: string
+  name: string
+  status: string
+  schedule: string
+  description: string
+  agentType: string
+  lastRun: string
+  nextRun: string
+  lastResult: string
+  lastResultSummary: string
+  runCount: number
+  errorCount: number
+}
+
+function toDisplayTrigger(t: TriggerRuleAPI): DisplayTrigger {
+  const condStr = t.condition && Object.keys(t.condition).length > 0
+    ? Object.entries(t.condition).map(([k, v]) => `${k}: ${v}`).join(', ')
+    : 'any'
+  return {
+    id: t.id,
+    name: t.eventType.replace(/_/g, ' '),
+    status: t.enabled ? 'active' : 'paused',
+    event: t.eventType,
+    condition: condStr,
+    scope: 'all',
+    actions: t.actions.map(a => ({ type: a.type, target: a.target })),
+    lastFired: null,
+    fireCount: 0,
+    createdBy: 'system',
+  }
+}
+
+function toDisplayCron(c: CronMonitorAPI): DisplayCron {
+  const lastRunAt = c.lastRunAt ? new Date(c.lastRunAt).toLocaleTimeString() : 'Never'
+  const resultStatus = c.lastResult?.status ?? 'ok'
+  const resultSummary = c.lastResult?.summary ?? ''
+  return {
+    id: c.id,
+    name: c.name,
+    status: c.enabled ? 'active' : 'paused',
+    schedule: c.schedule,
+    description: c.jobType.replace(/_/g, ' '),
+    agentType: c.jobType,
+    lastRun: lastRunAt,
+    nextRun: '—',
+    lastResult: resultStatus,
+    lastResultSummary: resultSummary,
+    runCount: 0,
+    errorCount: 0,
+  }
+}
+
+const STATUS_COLOR: Record<string, string> = {
   active: "#10b981",
   paused: "#555",
   error:  "#ef4444",
 };
 
-const CRON_STATUS_COLOR: Record<CronStatus, string> = {
-  active: "#10b981",
-  paused: "#555",
-  error:  "#ef4444",
-};
-
-const RESULT_COLOR: Record<CronResultStatus, string> = {
+const RESULT_COLOR: Record<string, string> = {
   ok:      "#10b981",
   warning: "#f59e0b",
   error:   "#ef4444",
@@ -26,37 +100,37 @@ const RESULT_COLOR: Record<CronResultStatus, string> = {
 };
 
 const EVENT_COLOR: Record<string, string> = {
-  alert_fired:        "#ef4444",
-  deploy_completed:   "#3b82f6",
-  deploy_failed:      "#ef4444",
+  alert_fired:          "#ef4444",
+  deploy_completed:     "#3b82f6",
+  deploy_failed:        "#ef4444",
   error_rate_threshold: "#f59e0b",
-  slo_burn_rate:      "#f59e0b",
-  pr_merged:          "#8b5cf6",
-  test_failed:        "#ef4444",
-  incident_created:   "#ef4444",
-  cloud_finding:      "#f59e0b",
+  slo_burn_rate:        "#f59e0b",
+  pr_merged:            "#8b5cf6",
+  test_failed:          "#ef4444",
+  incident_created:     "#ef4444",
+  cloud_finding:        "#f59e0b",
 };
 
 const ACTION_LABEL: Record<string, string> = {
-  notify_oncall:    "Notify oncall",
-  notify_channel:   "Notify channel",
-  create_incident:  "Create incident",
-  open_war_room:    "Open war room",
-  surface_context:  "Surface to Anvay",
-  escalate:         "Escalate",
-  run_runbook:      "Run runbook",
-  block_deploy_gate:"Block deploy gate",
+  notify_oncall:     "Notify oncall",
+  notify_channel:    "Notify channel",
+  create_incident:   "Create incident",
+  open_war_room:     "Open war room",
+  surface_context:   "Surface to Anvay",
+  escalate:          "Escalate",
+  run_runbook:       "Run runbook",
+  block_deploy_gate: "Block deploy gate",
 };
 
 const ACTION_COLOR: Record<string, string> = {
-  notify_oncall:    "#3b82f6",
-  notify_channel:   "#3b82f6",
-  create_incident:  "#ef4444",
-  open_war_room:    "#f59e0b",
-  surface_context:  "#10b981",
-  escalate:         "#f59e0b",
-  run_runbook:      "#8b5cf6",
-  block_deploy_gate:"#ef4444",
+  notify_oncall:     "#3b82f6",
+  notify_channel:    "#3b82f6",
+  create_incident:   "#ef4444",
+  open_war_room:     "#f59e0b",
+  surface_context:   "#10b981",
+  escalate:          "#f59e0b",
+  run_runbook:       "#8b5cf6",
+  block_deploy_gate: "#ef4444",
 };
 
 type Tab = "triggers" | "crons";
@@ -65,10 +139,17 @@ export function AutomationsView() {
   const [tab, setTab] = useState<Tab>("triggers");
   const [triggers, setTriggers] = useState<TriggerRuleAPI[]>([]);
   const [monitors, setMonitors] = useState<CronMonitorAPI[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/automations/triggers').then(r => r.json()).then(setTriggers).catch(() => setTriggers([]))
-    fetch('/api/automations/monitors').then(r => r.json()).then(setMonitors).catch(() => setMonitors([]))
+    Promise.all([
+      fetch('/api/automations/triggers').then(r => r.json() as Promise<TriggerRuleAPI[]>).catch(() => [] as TriggerRuleAPI[]),
+      fetch('/api/automations/monitors').then(r => r.json() as Promise<CronMonitorAPI[]>).catch(() => [] as CronMonitorAPI[]),
+    ]).then(([t, m]) => {
+      setTriggers(t)
+      setMonitors(m)
+      setLoading(false)
+    })
   }, [])
 
   async function toggleTrigger(id: string, enabled: boolean) {
@@ -79,6 +160,9 @@ export function AutomationsView() {
     })
     setTriggers(prev => prev.map(t => t.id === id ? { ...t, enabled } : t))
   }
+
+  const displayTriggers = triggers.map(toDisplayTrigger)
+  const displayMonitors = monitors.map(toDisplayCron)
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", overflow: "hidden" }}>
@@ -92,8 +176,8 @@ export function AutomationsView() {
       {/* Tabs */}
       <div style={{ display: "flex", gap: "0", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         {([
-          { id: "triggers", label: "Event Triggers", count: triggers.filter(t => t.enabled).length },
-          { id: "crons",    label: "Cron Monitors",  count: monitors.filter(c => c.enabled).length },
+          { id: "triggers", label: "Event Triggers", count: displayTriggers.filter(t => t.status === "active").length },
+          { id: "crons",    label: "Cron Monitors",  count: displayMonitors.filter(c => c.status === "active").length },
         ] as { id: Tab; label: string; count: number }[]).map(t => (
           <button
             key={t.id}
@@ -125,173 +209,186 @@ export function AutomationsView() {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto" }}>
-        {tab === "triggers" && (
+        {loading && (
+          <div style={{ padding: "40px 20px", textAlign: "center", color: "#444", fontSize: "12px" }}>Loading…</div>
+        )}
+
+        {!loading && tab === "triggers" && (
           <div>
-            {/* Table header */}
             <div style={{ display: "grid", gridTemplateColumns: "22px 200px 140px 200px 1fr 90px 60px", gap: "0", padding: "8px 20px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
               {["", "Name", "Event", "Condition", "Actions", "Last Fired", "Fires"].map(h => (
                 <div key={h} style={{ fontSize: "10px", color: "#444", textTransform: "uppercase", letterSpacing: "0.08em", padding: "0 6px" }}>{h}</div>
               ))}
             </div>
 
-            {AUTOMATION_TRIGGERS.map(t => (
-              <div
-                key={t.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "22px 200px 140px 200px 1fr 90px 60px",
-                  gap: "0",
-                  padding: "12px 20px",
-                  borderBottom: "1px solid #111",
-                  alignItems: "center",
-                  background: t.status === "paused" ? "rgba(0,0,0,0.3)" : "transparent",
-                  opacity: t.status === "paused" ? 0.6 : 1,
-                }}
-              >
-                {/* Status dot */}
-                <div style={{ padding: "0 6px", display: "flex", alignItems: "center" }}>
-                  <div style={{
-                    width: "6px", height: "6px", borderRadius: "50%",
-                    background: TRIGGER_STATUS_COLOR[t.status],
-                    ...(t.status === "active" ? { boxShadow: `0 0 5px ${TRIGGER_STATUS_COLOR[t.status]}` } : {}),
-                  }} />
-                </div>
-
-                {/* Name */}
-                <div style={{ padding: "0 6px" }}>
-                  <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 500, marginBottom: "2px" }}>{t.name}</div>
-                  <div style={{ fontSize: "10px", color: "#444" }}>by {t.createdBy}</div>
-                </div>
-
-                {/* Event type */}
-                <div style={{ padding: "0 6px" }}>
-                  <span style={{
-                    fontSize: "10px", color: EVENT_COLOR[t.event] ?? "#888",
-                    background: `${EVENT_COLOR[t.event] ?? "#888"}15`,
-                    border: `1px solid ${EVENT_COLOR[t.event] ?? "#888"}30`,
-                    padding: "2px 7px", borderRadius: "4px", fontFamily: "monospace",
-                  }}>
-                    {t.event.replace(/_/g, " ")}
-                  </span>
-                </div>
-
-                {/* Condition */}
-                <div style={{ padding: "0 6px" }}>
-                  <code style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>{t.condition}</code>
-                  <div style={{ fontSize: "10px", color: "#444", marginTop: "2px" }}>{t.scope}</div>
-                </div>
-
-                {/* Actions */}
-                <div style={{ padding: "0 6px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                  {t.actions.map((a, i) => (
-                    <span
-                      key={i}
-                      style={{
-                        fontSize: "9px", color: ACTION_COLOR[a.type],
-                        background: `${ACTION_COLOR[a.type]}12`,
-                        border: `1px solid ${ACTION_COLOR[a.type]}25`,
-                        padding: "2px 6px", borderRadius: "3px",
-                      }}
-                    >
-                      {ACTION_LABEL[a.type] ?? a.type}
-                      {a.target ? ` → ${a.target}` : ""}
-                    </span>
-                  ))}
-                </div>
-
-                {/* Last fired */}
-                <div style={{ padding: "0 6px", fontSize: "10px", color: t.lastFired ? "#888" : "#444" }}>
-                  {t.lastFired ?? "Never"}
-                </div>
-
-                {/* Fire count */}
-                <div style={{ padding: "0 6px", fontSize: "11px", color: "#555", fontFamily: "monospace" }}>
-                  {t.fireCount}
-                </div>
+            {displayTriggers.length === 0 && (
+              <div style={{ padding: "40px 20px", textAlign: "center", color: "#444", fontSize: "12px" }}>
+                No trigger rules configured. Connect a data source to enable event-driven automation.
               </div>
-            ))}
+            )}
+
+            {displayTriggers.map(t => {
+              const statusColor = STATUS_COLOR[t.status] ?? "#555"
+              return (
+                <div
+                  key={t.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "22px 200px 140px 200px 1fr 90px 60px",
+                    gap: "0",
+                    padding: "12px 20px",
+                    borderBottom: "1px solid #111",
+                    alignItems: "center",
+                    background: t.status === "paused" ? "rgba(0,0,0,0.3)" : "transparent",
+                    opacity: t.status === "paused" ? 0.6 : 1,
+                  }}
+                >
+                  <div style={{ padding: "0 6px", display: "flex", alignItems: "center" }}>
+                    <div
+                      onClick={() => toggleTrigger(t.id, t.status !== 'active')}
+                      style={{
+                        width: "6px", height: "6px", borderRadius: "50%",
+                        background: statusColor, cursor: "pointer",
+                        ...(t.status === "active" ? { boxShadow: `0 0 5px ${statusColor}` } : {}),
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 500, marginBottom: "2px" }}>{t.name}</div>
+                    <div style={{ fontSize: "10px", color: "#444" }}>by {t.createdBy}</div>
+                  </div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <span style={{
+                      fontSize: "10px", color: EVENT_COLOR[t.event] ?? "#888",
+                      background: `${EVENT_COLOR[t.event] ?? "#888"}15`,
+                      border: `1px solid ${EVENT_COLOR[t.event] ?? "#888"}30`,
+                      padding: "2px 7px", borderRadius: "4px", fontFamily: "monospace",
+                    }}>
+                      {t.event.replace(/_/g, " ")}
+                    </span>
+                  </div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <code style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>{t.condition}</code>
+                    <div style={{ fontSize: "10px", color: "#444", marginTop: "2px" }}>{t.scope}</div>
+                  </div>
+
+                  <div style={{ padding: "0 6px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                    {t.actions.map((a, i) => {
+                      const aColor = ACTION_COLOR[a.type] ?? "#888"
+                      return (
+                        <span
+                          key={i}
+                          style={{
+                            fontSize: "9px", color: aColor,
+                            background: `${aColor}12`,
+                            border: `1px solid ${aColor}25`,
+                            padding: "2px 6px", borderRadius: "3px",
+                          }}
+                        >
+                          {ACTION_LABEL[a.type] ?? a.type}
+                          {a.target ? ` → ${a.target}` : ""}
+                        </span>
+                      )
+                    })}
+                  </div>
+
+                  <div style={{ padding: "0 6px", fontSize: "10px", color: t.lastFired ? "#888" : "#444" }}>
+                    {t.lastFired ?? "Never"}
+                  </div>
+
+                  <div style={{ padding: "0 6px", fontSize: "11px", color: "#555", fontFamily: "monospace" }}>
+                    {t.fireCount}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {tab === "crons" && (
+        {!loading && tab === "crons" && (
           <div>
-            {/* Table header */}
             <div style={{ display: "grid", gridTemplateColumns: "22px 200px 130px 120px 120px 1fr 60px", gap: "0", padding: "8px 20px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
               {["", "Name", "Schedule", "Last Run", "Next Run", "Last Result", "Runs"].map(h => (
                 <div key={h} style={{ fontSize: "10px", color: "#444", textTransform: "uppercase", letterSpacing: "0.08em", padding: "0 6px" }}>{h}</div>
               ))}
             </div>
 
-            {CRON_MONITORS.map(c => (
-              <div
-                key={c.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "22px 200px 130px 120px 120px 1fr 60px",
-                  gap: "0",
-                  padding: "12px 20px",
-                  borderBottom: "1px solid #111",
-                  alignItems: "start",
-                }}
-              >
-                {/* Status dot */}
-                <div style={{ padding: "0 6px 0 0", display: "flex", alignItems: "center", paddingTop: "2px" }}>
-                  <div style={{
-                    width: "6px", height: "6px", borderRadius: "50%",
-                    background: CRON_STATUS_COLOR[c.status],
-                    ...(c.status === "active" ? { boxShadow: `0 0 5px ${CRON_STATUS_COLOR[c.status]}` } : {}),
-                  }} />
-                </div>
-
-                {/* Name + desc */}
-                <div style={{ padding: "0 6px" }}>
-                  <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 500, marginBottom: "3px" }}>{c.name}</div>
-                  <div style={{ fontSize: "10px", color: "#555", lineHeight: "1.5" }}>{c.description}</div>
-                  <div style={{ marginTop: "4px" }}>
-                    <span style={{ fontSize: "9px", background: "#111", border: "1px solid #2a2a2a", color: "#666", padding: "1px 6px", borderRadius: "3px" }}>
-                      {c.agentType} agent
-                    </span>
-                  </div>
-                </div>
-
-                {/* Schedule */}
-                <div style={{ padding: "0 6px" }}>
-                  <code style={{ fontSize: "10px", color: "#8b5cf6", fontFamily: "monospace", background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)", padding: "2px 6px", borderRadius: "3px" }}>
-                    {c.schedule}
-                  </code>
-                </div>
-
-                {/* Last run */}
-                <div style={{ padding: "0 6px", fontSize: "10px", color: "#888" }}>{c.lastRun}</div>
-
-                {/* Next run */}
-                <div style={{ padding: "0 6px", fontSize: "10px", color: "#555" }}>{c.nextRun}</div>
-
-                {/* Last result */}
-                <div style={{ padding: "0 6px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "4px" }}>
-                    <span style={{
-                      fontSize: "9px", fontWeight: 700, textTransform: "uppercase",
-                      color: RESULT_COLOR[c.lastResult],
-                      background: `${RESULT_COLOR[c.lastResult]}12`,
-                      border: `1px solid ${RESULT_COLOR[c.lastResult]}30`,
-                      padding: "1px 6px", borderRadius: "3px",
-                    }}>
-                      {c.lastResult}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: "10px", color: "#555", lineHeight: "1.5" }}>{c.lastResultSummary}</div>
-                </div>
-
-                {/* Run count */}
-                <div style={{ padding: "0 6px" }}>
-                  <div style={{ fontSize: "11px", color: "#555", fontFamily: "monospace" }}>{c.runCount}</div>
-                  {c.errorCount > 0 && (
-                    <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>{c.errorCount} err</div>
-                  )}
-                </div>
+            {displayMonitors.length === 0 && (
+              <div style={{ padding: "40px 20px", textAlign: "center", color: "#444", fontSize: "12px" }}>
+                No scheduled monitors configured. Set up a cron monitor to enable proactive intelligence.
               </div>
-            ))}
+            )}
+
+            {displayMonitors.map(c => {
+              const statusColor = STATUS_COLOR[c.status] ?? "#555"
+              const resultColor = RESULT_COLOR[c.lastResult] ?? "#555"
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "22px 200px 130px 120px 120px 1fr 60px",
+                    gap: "0",
+                    padding: "12px 20px",
+                    borderBottom: "1px solid #111",
+                    alignItems: "start",
+                  }}
+                >
+                  <div style={{ padding: "0 6px 0 0", display: "flex", alignItems: "center", paddingTop: "2px" }}>
+                    <div style={{
+                      width: "6px", height: "6px", borderRadius: "50%",
+                      background: statusColor,
+                      ...(c.status === "active" ? { boxShadow: `0 0 5px ${statusColor}` } : {}),
+                    }} />
+                  </div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 500, marginBottom: "3px" }}>{c.name}</div>
+                    <div style={{ fontSize: "10px", color: "#555", lineHeight: "1.5" }}>{c.description}</div>
+                    <div style={{ marginTop: "4px" }}>
+                      <span style={{ fontSize: "9px", background: "#111", border: "1px solid #2a2a2a", color: "#666", padding: "1px 6px", borderRadius: "3px" }}>
+                        {c.agentType} agent
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <code style={{ fontSize: "10px", color: "#8b5cf6", fontFamily: "monospace", background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)", padding: "2px 6px", borderRadius: "3px" }}>
+                      {c.schedule}
+                    </code>
+                  </div>
+
+                  <div style={{ padding: "0 6px", fontSize: "10px", color: "#888" }}>{c.lastRun}</div>
+
+                  <div style={{ padding: "0 6px", fontSize: "10px", color: "#555" }}>{c.nextRun}</div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "4px" }}>
+                      <span style={{
+                        fontSize: "9px", fontWeight: 700, textTransform: "uppercase",
+                        color: resultColor,
+                        background: `${resultColor}12`,
+                        border: `1px solid ${resultColor}30`,
+                        padding: "1px 6px", borderRadius: "3px",
+                      }}>
+                        {c.lastResult}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "10px", color: "#555", lineHeight: "1.5" }}>{c.lastResultSummary}</div>
+                  </div>
+
+                  <div style={{ padding: "0 6px" }}>
+                    <div style={{ fontSize: "11px", color: "#555", fontFamily: "monospace" }}>{c.runCount}</div>
+                    {c.errorCount > 0 && (
+                      <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>{c.errorCount} err</div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

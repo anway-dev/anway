@@ -11,6 +11,7 @@ import { incidentRoutes } from './routes/incidents.js'
 import { automationsRoutes } from './routes/automations.js'
 import { graphEventRoutes } from './routes/graph-events.js'
 import { connectorsRoutes } from './routes/connectors.js'
+import { serviceRoutes } from './routes/services.js'
 import { gateDecideRoutes } from './gate/gate-decide-route.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
@@ -49,6 +50,7 @@ export async function buildApp() {
   await app.register(automationsRoutes)
   await app.register(graphEventRoutes)
   await app.register(connectorsRoutes)
+  await app.register(serviceRoutes)
   await app.register(gateDecideRoutes)
 
   app.addHook('onResponse', async (request, reply) => {

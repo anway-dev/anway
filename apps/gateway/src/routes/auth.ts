@@ -22,37 +22,34 @@ export async function authRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { email, tenantId } = request.body
 
-    // Look up user by (tenantId, email) — create at first login (provisioning)
-    let user: { id: string } | null = null
+    // Verify tenant exists
+    let tenantExists = false
     try {
       const rows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<{ id: string }[]>`SELECT id FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1`
+        tx.$queryRaw<{ id: string }[]>`SELECT id FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1`
+      )
+      tenantExists = rows.length > 0
+    } catch { /* fall through to 400 */ }
+    if (!tenantExists) return reply.code(400).send({ error: 'invalid tenantId' })
+
+    // Look up user — no auto-provision (provisioned by admin)
+    let user: { id: string; role: string } | null = null
+    try {
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<{ id: string; role: string }[]>`
+          SELECT id, role FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1
+        `
       )
       user = rows[0] ?? null
-    } catch {
-      // Best-effort — fall back to stub user if DB not available
-    }
+    } catch { /* DB unavailable */ }
 
-    // If no user record, create one (provisioning step)
-    if (!user) {
-      try {
-        const rows = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<{ id: string }[]>`INSERT INTO users (tenant_id, email, role) VALUES (${tenantId}::uuid, ${email}, 'dev') RETURNING id`
-        )
-        user = rows[0] ?? null
-      } catch {
-        // Fallback: sign a deterministic ID for audit traceability
-        user = { id: crypto.randomUUID() }
-      }
-    }
-
-    const userId = user?.id ?? crypto.randomUUID()
+    if (!user) return reply.code(401).send({ error: 'user not found' })
 
     const token = await reply.jwtSign({
-      sub: userId,
+      sub: user.id,
       email,
       tenantId,
-      role: 'dev',
+      role: user.role,
     })
 
     return reply.send({ token, expiresIn: '24h' })

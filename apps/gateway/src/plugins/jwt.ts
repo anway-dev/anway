@@ -28,7 +28,11 @@ declare module '@fastify/jwt' {
 export default fp(async function jwtPlugin(app: FastifyInstance) {
   const privateKey = process.env.JWT_PRIVATE_KEY
   const publicKey = process.env.JWT_PUBLIC_KEY
-  const secret = process.env.JWT_SECRET ?? 'dev-secret-change-in-production'
+  const secret = process.env.JWT_SECRET
+
+  if (!privateKey && !secret) {
+    throw new Error('JWT_SECRET or JWT_PRIVATE_KEY must be set')
+  }
 
   await app.register(jwt, {
     secret:

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { RedisGateSink } from './redis-gate-sink.js'
 
 export async function gateDecideRoutes(app: FastifyInstance) {
   app.post<{ Params: { gateId: string }; Body: { decision: 'approved' | 'rejected' } }>(
@@ -31,6 +32,16 @@ export async function gateDecideRoutes(app: FastifyInstance) {
 
       if (Number(affected) === 0) {
         return reply.code(404).send({ error: 'gate not found or already decided' })
+      }
+
+      // Publish decision to Redis so orchestrator's pollGate() can wake up
+      if (process.env['REDIS_URL']) {
+        try {
+          const sink = new RedisGateSink(process.env['REDIS_URL'])
+          await sink.record(gateId, decision, userId)
+        } catch (err) {
+          request.log.warn({ err, gateId }, 'failed to publish gate decision to Redis')
+        }
       }
 
       return { ok: true, gateId, decision }

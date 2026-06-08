@@ -53,6 +53,9 @@ export { isWriteAction, pollGate } from './gate/gate.js'
 // Knowledge Graph
 export type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph.js'
 export { StructuralGraph } from './kb/structural-graph.js'
+export { HybridKnowledgeGraph } from './kb/hybrid-knowledge-graph.js'
+export { GraphitiClient } from './kb/graphiti-client.js'
+export type { GraphitiClientConfig } from './kb/graphiti-client.js'
 export type { PgPoolLike } from './kb/postgres-query.js'
 export { createPostgresQueryFn } from './kb/postgres-query.js'
 

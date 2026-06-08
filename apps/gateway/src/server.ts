@@ -10,6 +10,7 @@ import pino from 'pino'
 import { startTriggerSubscriber } from './triggers/subscriber.js'
 import { createCronJobs } from './jobs/scheduler.js'
 import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
+import { startTriggerExecutor } from './triggers/executor.js'
 
 const bootstrapLog = pino({ level: 'info' })
 
@@ -62,6 +63,11 @@ async function main() {
       )
     } catch (err) {
       app.log.warn({ err }, 'Graph builder subscriber not started — Redis may be unavailable')
+    }
+    try {
+      await startTriggerExecutor(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+    } catch (err) {
+      app.log.warn({ err }, 'Trigger executor not started — Redis may be unavailable')
     }
   } catch (err) {
     const log = app?.log ?? bootstrapLog

@@ -100,12 +100,26 @@ export class StructuralGraph implements IKnowledgeGraph {
       }
     }
 
+    // Extract connectorCoordinates from entity metadata
+    const connectorCoordinates: Record<string, ConnectorCoordinates> = {}
+    const allEntities = [entity, ...relatedEntitiesMap.values()]
+    for (const e of allEntities) {
+      const coords = (e.metadata as Record<string, unknown>)?.['connectorCoordinates']
+      if (coords && typeof coords === 'object') {
+        for (const [k, v] of Object.entries(coords as Record<string, unknown>)) {
+          if (!connectorCoordinates[k] && typeof v === 'object' && v !== null) {
+            connectorCoordinates[k] = v as unknown as ConnectorCoordinates
+          }
+        }
+      }
+    }
+
     return {
       primaryEntity: entity,
       relatedEntities: [...relatedEntitiesMap.values()],
       relationships: allRelationships,
       recentEpisodes: [],
-      connectorCoordinates: {} as Record<string, ConnectorCoordinates>,
+      connectorCoordinates,
       groundingSources: [] as GroundingSource[],
       freshness: 1.0,
     }

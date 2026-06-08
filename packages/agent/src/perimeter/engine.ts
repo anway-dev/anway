@@ -105,9 +105,8 @@ export class AgentPerimeter {
     const resource = typeof toolCall.args['resource'] === 'string' ? toolCall.args['resource'] : null
 
     if (resource === null) {
-      return isWriteAction(toolCall.name)
-        ? scope.write.includes('*')
-        : scope.read.includes('*')
+      if (isWriteAction(toolCall.name)) return scope.write.length > 0 && scope.write.includes('*')
+      return scope.read.length > 0  // Any read scope = allowed for non-resource tools
     }
 
     if (isWriteAction(toolCall.name)) {

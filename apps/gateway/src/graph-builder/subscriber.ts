@@ -34,6 +34,10 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
   const sub: RedisClientType = createClient({ url: redisUrl })
   await sub.connect()
 
+  // Shared publisher for graph:updated events
+  const graphPub = createClient({ url: redisUrl })
+  await graphPub.connect()
+
   for (const channel of GRAPH_EVENT_CHANNELS) {
     await sub.subscribe(channel, async (message) => {
       let event: GraphEvent & { tenantId: string }
@@ -47,7 +51,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         return
       }
       const kg = createKnowledgeGraph(event.tenantId as TenantId)
-      const agent = new GraphBuilderAgent(kg, provider, cheapModel, log)
+      const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, undefined, graphPub)
       await agent.handle(event)
     })
   }

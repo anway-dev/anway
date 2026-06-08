@@ -1,7 +1,9 @@
 import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anvay/agent'
 import type { IKnowledgeGraph } from '@anvay/agent'
 import type { TenantId } from '@anvay/types'
-import { spawnSync } from 'child_process'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+const execFileAsync = promisify(execFile)
 
 export class GitHubBootstrap implements IConnectorBootstrap {
   constructor(
@@ -13,21 +15,25 @@ export class GitHubBootstrap implements IConnectorBootstrap {
     const org = payload['org'] as string | undefined
     if (!org) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
 
-    // List repos in org via gh CLI
-    const result = spawnSync('gh', [
-      'repo', 'list', org,
-      '--json', 'name,defaultBranchRef,languages',
-      '--limit', '100',
-    ], {
-      env: { ...process.env, GH_TOKEN: this.token },
-      encoding: 'utf-8',
-    })
-
-    if (result.status !== 0) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
+    // List repos in org via gh CLI (async — non-blocking)
+    let stdout: string
+    try {
+      const result = await execFileAsync('gh', [
+        'repo', 'list', org,
+        '--json', 'name,defaultBranchRef,languages',
+        '--limit', '100',
+      ], {
+        env: { ...process.env, GH_TOKEN: this.token },
+        timeout: 30_000,
+      })
+      stdout = result.stdout
+    } catch {
+      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
+    }
 
     let repos: { name: string; defaultBranchRef?: { name: string }; languages: { node: { name: string } }[] }[]
     try {
-      repos = JSON.parse(result.stdout)
+      repos = JSON.parse(stdout)
     } catch {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
     }

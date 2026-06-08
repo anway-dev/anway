@@ -22,6 +22,7 @@ export class GraphBuilderAgent {
     private readonly cheapModel: string,
     private readonly logger?: GraphBuilderLogger,
     private readonly bootstrapRegistry?: Map<string, IConnectorBootstrap>,
+    private readonly redisPublisher?: { publish(channel: string, message: string): Promise<number> },
   ) {}
 
   /** Route event to correct handler. Never throws — failures are caught and logged. */
@@ -29,16 +30,22 @@ export class GraphBuilderAgent {
     try {
       switch (event.type) {
         case 'connector_registered':
-          return await this.onConnectorRegistered(event)
+          await this.onConnectorRegistered(event); break
         case 'pr_merged':
-          return await this.onPrMerged(event)
+          await this.onPrMerged(event); break
         case 'incident_created':
-          return await this.onIncidentCreated(event)
+          await this.onIncidentCreated(event); break
         case 'deploy_completed':
-          return await this.onDeployCompleted(event)
+          await this.onDeployCompleted(event); break
         case 'ticket_created':
-          return await this.onTicketCreated(event)
+          await this.onTicketCreated(event); break
       }
+      // Emit graph:updated after successful handling
+      await this.redisPublisher?.publish('graph:updated', JSON.stringify({
+        eventType: event.type,
+        tenantId: (event as GraphEvent & { tenantId: string }).tenantId,
+        processedAt: new Date().toISOString(),
+      }))
     } catch (err) {
       // Log + swallow — graph builder errors must not break the event pipeline
       this.logger?.error({ err, eventType: event.type }, 'GraphBuilderAgent event handling failed')

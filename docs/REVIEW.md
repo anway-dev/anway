@@ -7,6 +7,229 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08b -->
+## Review — 2026-06-08 | M5 automations + M6 KB/GraphBuilder (13 commits)
+
+### Commits reviewed since last review (24504df)
+
+| Commit | Description | Verdict |
+|--------|-------------|---------|
+| `8b3a881` | fix(gateway): package.json in runtime stage; TriggerEngine camelCase | LGTM ✓ |
+| `cd6e0d7` | fix: arch-agnostic gh CLI URL; list_commits since as URL param; Ollama null | LGTM ✓ |
+| `100d5ba` | feat(automations): Redis subscriber, PATCH/DELETE trigger endpoints — M5-T2 | ISSUES FOUND |
+| `638d475` | fix(security): withTenant on KG/audit/cron; perimeter intersectScope; connectorCoordinates | LGTM ✓ |
+| `8862d1f` | feat(automations): cron monitors, cron_jobs migration, scheduler — M5-T3 | ISSUES FOUND |
+| `0f56fab` | fix(migrations): rename 0006_audit_rls_with_check → 0007 | LGTM ✓ |
+| `3983b50` | feat(web): wire automations-view to real API — M5-T4 | ISSUES FOUND |
+| `dfd37d5` | fix: subscriber withTenant, PATCH all fields, cron RLS, batch resolveContext — corrections | LGTM ✓ |
+| `d95dca4` | test: unit tests for KB, triggers, GitHub connector — correction | LGTM ✓ |
+| `a10317f` | fix(kb): filter visited entities in resolveContext batch traversal | LGTM ✓ |
+| `c068812` | feat(kb): wire StructuralGraph to real Postgres — M6-T1 | LGTM ✓ |
+| `f2d664a` | feat(kb): GraphBuilderAgent connector events to graph upsert — M6-T2 | ISSUES FOUND |
+| `e71cc90` | fix(kb): per-tenant KG in graph-events; pino logger in GraphBuilderAgent | LGTM ✓ |
+
+---
+
+### Dimension ratings
+
+| Dimension | Rating | Notes |
+|-----------|--------|-------|
+| Feature completeness | B | M5/M6 tasks coded; scheduler never writes last_run_at/last_result back to DB; /api/graph/events open to any caller when CONNECTOR_API_KEYS env is unset |
+| Code standards | B | No console.log violations, no any-casts in source; `as any` in automations-view.tsx (UI); extractServiceName duplicates text in system+user turn |
+| Performance | B | resolveContext batch traversal correct; scheduler queries all tenants serially every 5 min — acceptable at current scale |
+| Security | B | withTenant applied everywhere; subscriber does not validate tenantId is a UUID before passing to withTenant::uuid cast — Postgres will throw but no clean 400; CONNECTOR_API_KEYS bypass on empty env |
+| Readability | A | Code is clean; the otherId derivation in resolveContext is dense but correct |
+| Clarity/comments | B | Good inline comments on KG per-request rationale; scheduler missing comment on why last_run_at is not updated |
+
+---
+
+### Pending Features
+
+| Task | Status | Commit |
+|------|--------|--------|
+| M5-T1 | Complete (camelCase fixed) | `8b3a881` |
+| M5-T2 | Complete | `100d5ba`, `dfd37d5` |
+| M5-T3 | Complete (node-cron; stubs for SLO/oncall remain) | `8862d1f` |
+| M5-T4 | Complete | `3983b50` |
+| M6-T1 | Complete | `c068812` |
+| M6-T2 | Complete | `f2d664a`, `e71cc90` |
+
+---
+
+### Issues found
+
+#### HIGH — GB-1 | apps/gateway/src/routes/graph-events.ts line 58
+
+**Issue:** When `CONNECTOR_API_KEYS` env var is empty or unset, `CONNECTOR_API_KEYS.size` is 0 and
+the short-circuit `CONNECTOR_API_KEYS.size > 0 &&` makes the auth check **always pass** — any caller
+with any (or no) `x-connector-key` header can POST graph events for any tenantId. The intent is
+"if env is unset, disable key-check for dev" but the route still writes to the graph and runs LLM
+extraction, so in a misconfigured prod deployment any anonymous caller can inject arbitrary graph
+entities.
+
+```typescript
+// graph-events.ts line 58 — current:
+if (!key || (CONNECTOR_API_KEYS.size > 0 && !CONNECTOR_API_KEYS.has(key as string))) {
+  return reply.code(401).send(...)
+}
+// When CONNECTOR_API_KEYS is empty: condition is (!key || false) → only rejects missing key
+// A caller that sends any non-empty x-connector-key passes through.
+```
+
+**Fix:** Fail closed in production. Only bypass auth in explicit dev mode:
+```typescript
+const isDev = process.env['NODE_ENV'] !== 'production'
+if (!isDev && (!key || CONNECTOR_API_KEYS.size === 0 || !CONNECTOR_API_KEYS.has(key as string))) {
+  return reply.code(401).send({ error: 'unauthorized — missing or invalid x-connector-key' })
+}
+if (!isDev && !key) {
+  return reply.code(401).send({ error: 'unauthorized — missing x-connector-key' })
+}
+```
+
+Or simpler — require `CONNECTOR_API_KEYS` in env schema validation and always check it:
+```typescript
+if (!key || !CONNECTOR_API_KEYS.has(key as string)) {
+  return reply.code(401).send({ error: 'unauthorized — missing or invalid x-connector-key' })
+}
+```
+Then add `CONNECTOR_API_KEYS` to `validateEnv()` so startup fails fast if missing in production.
+
+**Verify:** Start gateway without `CONNECTOR_API_KEYS` set → POST `/api/graph/events` without
+a key header → must get 401. With a key that is in the set → 200/503 (depending on provider).
+
+---
+
+#### MEDIUM — GB-2 | apps/gateway/src/triggers/subscriber.ts line 26
+
+**Issue:** `tenantId` extracted from the Redis message is passed directly to `withTenant(prisma, tenantId, ...)` which internally sets `app.tenant_id = ${tenantId}::uuid` as a Postgres GUC. If the Redis message carries a malformed or missing `tenantId`, the Postgres cast `::uuid` will throw an unhandled exception inside the subscriber callback. The exception propagates through the `async` callback but `ioredis`/`redis` v6 drops unhandled promise rejections in subscribe callbacks silently in some versions — meaning the subscriber stays alive but the error is invisible in logs.
+
+```typescript
+// subscriber.ts line 26
+const { tenantId, ...rest } = payload  // no validation that tenantId is a valid UUID
+const rules = await withTenant(prisma, tenantId, ...)  // ::uuid cast blows up on bad input
+```
+
+**Fix:** Validate tenantId is a UUID before using it:
+```typescript
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+if (!tenantId || !UUID_RE.test(tenantId)) {
+  // log and drop — do not process untrusted messages
+  return
+}
+```
+
+**Verify:** Publish a message to `alert_fired` channel with `tenantId: "not-a-uuid"` → subscriber
+logs a warning and drops the message, no unhandled rejection, gateway stays running.
+
+---
+
+#### MEDIUM — GB-3 | apps/gateway/src/jobs/scheduler.ts — missing result write-back
+
+**Issue:** `startCronScheduler` runs `ServiceHealthSweep`, `SloBurnCheck`, `DeployHealthReport`,
+and `OncallMorningBrief` but never writes results back to the `cron_jobs` table. The
+`cron_jobs` schema has `last_run_at TIMESTAMPTZ` and `last_result JSONB` columns specifically
+for this. The `/api/automations/monitors` endpoint queries these columns — users see all `null`
+forever, making the monitor list useless.
+
+**Fix:** After each job run, update the record:
+```typescript
+// After sweep.run(id) in each cron handler:
+await prisma.$executeRaw`
+  UPDATE cron_jobs
+  SET last_run_at = NOW(), last_result = ${JSON.stringify(result)}::jsonb
+  WHERE tenant_id = ${id}::uuid AND job_type = 'service_health_sweep'
+`
+```
+
+This must be wrapped in `withTenant`. The cron_jobs table has RLS (0008 migration) — a direct
+`prisma.$executeRaw` without `withTenant` will fail the RLS policy at runtime.
+
+**Verify:** Trigger the `*/5` cron manually (or lower the interval temporarily) → query
+`SELECT last_run_at, last_result FROM cron_jobs` → both columns populated.
+
+---
+
+#### MEDIUM — GB-4 | packages/agent/src/graph-builder/builder.ts line 206–208
+
+**Issue:** `extractServiceName` puts the text in both the `system` message and the `user` message,
+doubling the input tokens for every LLM extraction call. The `EXTRACT_PROMPT` string already
+embeds the text inline — sending it again as the user turn is redundant and wasteful given that
+the cheap model tier is used at high volume (once per ticket, once per PR).
+
+```typescript
+// builder.ts lines 206–208 — current (text sent twice):
+{ role: 'system', content: EXTRACT_PROMPT + text.slice(0, 500) },
+{ role: 'user', content: text.slice(0, 500) },  // redundant
+```
+
+**Fix:** Use a single user message with the full prompt, or a system + empty user:
+```typescript
+{ role: 'user', content: EXTRACT_PROMPT + text.slice(0, 500) },
+```
+Or, if a system turn is needed for provider compatibility:
+```typescript
+{ role: 'system', content: 'Extract service names from text as instructed.' },
+{ role: 'user', content: EXTRACT_PROMPT + text.slice(0, 500) },
+```
+
+**Verify:** Builder test for `extractServiceName` passes. Token count for a typical call drops by
+~40% (500 text tokens no longer duplicated).
+
+---
+
+#### LOW — GB-5 | apps/web/components/automations-view.tsx lines 76, 91, 92
+
+**Issue:** Three `as any` casts in the component after wiring to real API. The triggers/monitors
+state is typed as `typeof AUTOMATION_TRIGGERS` / `typeof CRON_MONITORS` (mock types) but the API
+returns different shapes. The fix is to define proper API response types and use them.
+
+```typescript
+// line 76:
+setTriggers(prev => prev.map((t: any) => t.id === id ? { ...t, enabled } : t))
+// lines 91-92:
+triggers.filter((t: any) => t.enabled)
+monitors.filter((c: any) => c.enabled)
+```
+
+**Fix:** Define minimal API types and replace mock state types:
+```typescript
+interface TriggerRuleAPI { id: string; eventType: string; enabled: boolean; actions: unknown[] }
+interface CronMonitorAPI { id: string; name: string; enabled: boolean; lastRunAt: string | null }
+const [triggers, setTriggers] = useState<TriggerRuleAPI[]>([])
+const [monitors, setMonitors] = useState<CronMonitorAPI[]>([])
+```
+Then remove all three `as any` casts.
+
+**Verify:** TypeScript (`tsc --noEmit`) passes with no errors in `apps/web`.
+
+---
+
+#### LOW — GB-6 | apps/gateway/src/jobs/scheduler.ts — node-cron vs TASKS.md spec
+
+**Note (not blocking):** TASKS.md §M5-T2 and PRODUCT.md specify Trigger.dev (primary) or BullMQ
+(fallback) as the durable scheduler — explicitly disqualifying `setInterval` and `cron` npm
+packages due to no persistence, no retry, no visibility. `scheduler.ts` uses `node-cron` which
+is in the same disqualified category. Acceptable for the prototype phase but must be replaced
+before production. The CLAUDE.md (PRODUCT.md) section on cron monitors is explicit:
+
+> "Do not use setInterval or cron npm packages in production — no persistence, no retry, no visibility."
+
+**Not blocking for current milestone** — prototype flag. Add to backlog before M7.
+
+---
+
+### Notes
+
+- All 6 BLOCKING/HIGH issues from the prior 2026-06-08 review (S-0, I-4, CL-4, I-7) are now fixed in commits `8b3a881` and `cd6e0d7`. Those items are now closed.
+- GB-1 (HIGH) is the only HIGH issue in this pass. Must be fixed before connecting a real prod Redis channel that external connectors publish to.
+- GB-2/GB-3 (MEDIUM) are functional gaps. GB-3 makes the cron monitor UI permanently empty.
+- GB-4/GB-5/GB-6 (LOW) are quality/standards issues — fix in the next task touching those files.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-08b -->
+
 <!-- REVIEW SECTION START — 2026-06-08 -->
 ## Review — 2026-06-08 | Final acceptance — 24504df (wget fix) + overall state
 

@@ -29,7 +29,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
         `
       )
 
-      if (affected === 0) {
+      if (Number(affected) === 0) {
         return reply.code(404).send({ error: 'gate not found or already decided' })
       }
 

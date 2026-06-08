@@ -7,6 +7,156 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08f -->
+## Review — 2026-06-08f | Opus Expert Architectural Review #2 — post CRITICAL/HIGH fixes
+
+### Scope
+
+Verification review of all 7 CRITICALs + 5 HIGHs from review `2026-06-08e`, plus fresh architectural scan. Baseline: 13/13 migrations applied on fresh Docker build, 38/38 Playwright E2E passing.
+
+### Verdict: CONDITIONAL-SHIP
+
+Weighted score: **3.6/5**. All 7 CRITICALs and 5 HIGHs from the prior review are fixed. One new HIGH blocker (NEW-1) must be resolved before ship — it re-opens the RLS WITH CHECK hole in `trigger_rules` that CRITICAL-4 intended to close. One-migration fix.
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Architecture vs CLAUDE.md | 3/5 | Graph-first best-effort preserved. Gate L2 now wired end-to-end. isWriteAction unified. |
+| D2 Security | 3/5 | Auth hardened. 11/12 tables have WITH CHECK. trigger_rules duplicate policy re-opens cross-tenant INSERT. |
+| D3 Agent Harness | 3/5 | Gate round-trip functional. Audit await'd. RedisGateSink connection lifecycle leaks (MEDIUM). |
+| D4 Knowledge Graph | 4/5 | 13/13 migrations clean, no `--applied` workaround. UNIQUE constraints present. |
+| D5 Connector Pattern | 3/5 | args.resource accepted as-is (HIGH-1 deferred). Tools consistent. |
+| D6 Operational Readiness | 4/5 | /health/ready hits DB. CORS hardened. x-connector-key header allowed. |
+| D7 TypeScript Quality | 4/5 | isWriteAction unified. No new type regressions. |
+| D8 Test Coverage | 3/5 | 38 E2E passing. Still no cross-tenant isolation test. No gate round-trip E2E. |
+
+---
+
+### Prior Issues — Verification Status
+
+| ID | Status | Notes |
+|----|--------|-------|
+| CRITICAL-1 | ✅ FIXED | auth.ts verifies tenant + user before issuing JWT. 400 on bad tenant, 401 on unknown user. |
+| CRITICAL-2 | ✅ FIXED | gateSink wired in chatRoutes. Gate path now active when REDIS_URL set. |
+| CRITICAL-3 | ✅ FIXED | gate-decide-route.ts calls `sink.record()` after DB UPDATE. pollGate wakes on Redis publish. |
+| CRITICAL-4 | ✅ FIXED (partial) | 0012_rls_with_check adds WITH CHECK on tenants/users/sessions/connectors/audit_events/incidents. trigger_rules has a residual issue — see NEW-1. |
+| CRITICAL-5 | ✅ FIXED | postgres-sink.ts append() now awaits the write. onError called on failure, swallowed intentionally for latency. |
+| CRITICAL-6 | ✅ FIXED | 0009_knowledge_graph replaced with SELECT 1 no-op. 0013_kb_constraints adds UNIQUE + FORCE RLS + WITH CHECK on entities/relationships/kb_entries. |
+| CRITICAL-7 | ✅ FIXED | JWT fallback secret removed. Plugin throws if neither key set. |
+| HIGH-1 | ✅ ACCEPTED | args.resource still null for all tools. Deferred — documented, not blocking for V1. |
+| HIGH-2 | ✅ FIXED | perimeter/engine.ts now imports isWriteAction from gate/gate.ts. Single source of truth. |
+| HIGH-3 | ✅ FIXED | CORS origin scoped to env var, defaults to localhost:3000. |
+| HIGH-4 | ✅ FIXED | /health/ready hits Postgres. Returns 503 on DB unavailability. |
+| HIGH-5 | ✅ FIXED | x-connector-key added to CORS allowedHeaders. |
+
+---
+
+### New Issues Found
+
+#### [NEW-1 HIGH — BLOCKER] trigger_rules has duplicate PERMISSIVE policies — WITH CHECK bypassed
+
+**File:** `apps/gateway/prisma/migrations/0005_triggers/migration.sql` + `apps/gateway/prisma/migrations/0012_rls_with_check/migration.sql`
+
+**Issue:** Migration 0005_triggers created a policy named `tenant_isolation_trigger_rules` on the `trigger_rules` table with only a `USING` clause (no `WITH CHECK`). Migration 0012_rls_with_check then attempts to `DROP POLICY IF EXISTS tenant_isolation ON trigger_rules` (wrong name) — that drop is a no-op. It then creates a new `tenant_isolation` policy WITH CHECK. Result: two PERMISSIVE policies coexist on `trigger_rules`:
+
+```
+1. tenant_isolation_trigger_rules  (PERMISSIVE, no WITH CHECK)  ← from 0005
+2. tenant_isolation                (PERMISSIVE, WITH CHECK)      ← from 0012
+```
+
+Postgres OR's WITH CHECK expressions across PERMISSIVE policies. The old policy implicitly allows any tenant_id for INSERT (no WITH CHECK defaults to TRUE). OR'd with the new policy's WITH CHECK = TRUE. Cross-tenant INSERT into `trigger_rules` is still possible.
+
+**Fix:** New migration `0014_trigger_rules_policy_cleanup`:
+```sql
+-- Drop the stale no-WITH-CHECK policy from 0005_triggers
+DROP POLICY IF EXISTS tenant_isolation_trigger_rules ON trigger_rules;
+
+-- Ensure FORCE RLS is set (non-superusers cannot bypass)
+ALTER TABLE trigger_rules FORCE ROW LEVEL SECURITY;
+```
+The correct `tenant_isolation` policy with WITH CHECK already exists from 0012 — no need to recreate it.
+
+**Verify:**
+```sql
+SET app.tenant_id = '<tenant-a-uuid>';
+INSERT INTO trigger_rules (tenant_id, ...) VALUES ('<tenant-b-uuid>', ...);
+-- Must fail with RLS policy violation
+```
+
+---
+
+#### [NEW-2 MEDIUM] RedisGateSink.poll() creates a new Redis client per call — connection leak
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts`
+
+**Issue:** `push()` and `record()` reuse a cached `pub` client via `getPub()`. `poll()` calls `this.redis.subscribe(...)` on the shared client — `subscribe` moves a client into subscriber mode, blocking it for other commands. If `poll()` is called concurrently (multiple pending gate approvals), the second `poll()` tries to use a client already in subscriber mode and fails or creates a new untracked client per call.
+
+**Fix:** In `poll()`, create a dedicated subscriber client that is disconnected after the poll resolves:
+```typescript
+async poll(gateId: string, timeoutMs = 30_000): Promise<GatePollResult> {
+  const sub = this.redis.duplicate()
+  try {
+    // ... subscribe, await, unsubscribe
+    return result
+  } finally {
+    await sub.quit()
+  }
+}
+```
+**Verify:** Two concurrent gate approvals both resolve correctly without connection errors.
+
+---
+
+#### [NEW-3 MEDIUM] gate_events rows never inserted — only the UPDATE path exists
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts` and `packages/agent/src/orchestrator/orchestrator.ts`
+
+**Issue:** The orchestrator's gate flow calls `gateSink.push(gateId, toolCall)` to create a pending gate event, then `pollGate()` to wait. `push()` only publishes to Redis — it never inserts a row into `gate_events`. The `/api/gate/:id/decide` route calls `$executeRaw UPDATE gate_events SET status = ... WHERE id = $1` — if no row exists, 0 rows are updated, route returns 404. Gate events are invisible to the audit log and the UI.
+
+**Fix:** `push()` must insert the row before publishing:
+```typescript
+async push(gateId: string, toolCall: ToolCall): Promise<void> {
+  await withTenant(this.prisma, this.tenantId, (tx) =>
+    tx.$executeRaw`
+      INSERT INTO gate_events (id, tenant_id, tool_name, args, status, created_at)
+      VALUES (${gateId}::uuid, ${this.tenantId}::uuid, ${toolCall.name}, ${JSON.stringify(toolCall.args)}::jsonb, 'pending', NOW())
+    `
+  )
+  await this.getPub().publish(`gate:${gateId}`, JSON.stringify({ status: 'pending', toolCall }))
+}
+```
+`RedisGateSink` needs a `prisma` + `tenantId` dependency injected at construction time.
+
+**Verify:** After `push()`, `SELECT * FROM gate_events WHERE id = $gateId` returns a row. After `/decide`, the row has `status = 'approved'|'rejected'`.
+
+---
+
+#### [NEW-4 LOW] cron_jobs RLS policy missing in 0006_cron_jobs migration
+
+**File:** `apps/gateway/prisma/migrations/0006_cron_jobs/migration.sql`
+
+**Issue:** 0006_cron_jobs creates the `cron_jobs` table without an RLS policy. 0008_cron_jobs_rls adds tenant isolation later — but without FORCE RLS on the table itself, a superuser connection (or Prisma in dev mode) can bypass the policy entirely.
+
+**Fix:** In 0008_cron_jobs_rls or a new migration:
+```sql
+ALTER TABLE cron_jobs FORCE ROW LEVEL SECURITY;
+```
+**Verify:** `SET ROLE postgres; SELECT * FROM cron_jobs` → still filtered by policy (FORCE RLS applies to superuser too).
+
+---
+
+### Summary Table
+
+| ID | Severity | File | Issue |
+|----|----------|------|-------|
+| NEW-1 | 🟠 HIGH — BLOCKER | `0005_triggers` + `0012_rls_with_check` | trigger_rules duplicate PERMISSIVE policy — WITH CHECK bypass |
+| NEW-2 | 🟡 MEDIUM | `redis-gate-sink.ts` | poll() subscriber mode conflict — connection leak under concurrency |
+| NEW-3 | 🟡 MEDIUM | `redis-gate-sink.ts` + `orchestrator.ts` | gate_events rows never inserted — gate UI blind, audit incomplete |
+| NEW-4 | 🔵 LOW | `0006_cron_jobs` + `0008_cron_jobs_rls` | cron_jobs missing FORCE RLS |
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08e -->
 ## Review — 2026-06-08e | Opus Expert Architectural Review — post E2E (38/38 green)
 

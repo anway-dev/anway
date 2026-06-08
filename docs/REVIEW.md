@@ -7,6 +7,553 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-09 -->
+## Review — 2026-06-09 | M3/M4/M5 milestone review — incident War Room, KB grounding, automations + service catalog wiring
+
+### Scope
+
+44 source files changed across commits `89d1a12..b963e8c` (since review `2026-06-08g`). Covers:
+- `apps/gateway/src/gate/redis-gate-sink.ts` (HIGH fix from 2026-06-08g verified, new issues found)
+- `apps/gateway/src/routes/incidents.ts`, `services.ts`, `chat.ts`
+- `apps/gateway/src/events/incident-subscriber.ts`
+- `apps/gateway/src/services/incident.ts`
+- `apps/gateway/src/connectors/registry.ts`, `registration-tools.ts`
+- `apps/gateway/prisma/migrations/0015_incidents_description_root_cause/migration.sql`, `schema.prisma`, `seed.ts`
+- `apps/web/app/api/incidents/`, `services/`, `automations/triggers/`, `automations/monitors/` (new proxy routes)
+- `apps/web/components/incident-view.tsx`, `orchestrator-chat.tsx`, `automations-view.tsx`, `service-catalog.tsx`
+- `packages/agent/src/orchestrator.ts`, `tools/incident-context.ts`, `interfaces/audit.ts`, `index.ts`
+- `packages/types/src/index.ts`
+- `packages/mcp-adapter/src/connector.ts`, `connector.test.ts`, `index.ts`
+- `packages/cli-adapter/src/connector.ts`, `discovery.ts`, `connector.test.ts`, `discovery.test.ts`, `index.ts`
+
+### Verdict: HOLD — 2 BLOCKING issues must be fixed before ship
+
+The milestone code is architecturally sound. The orchestrator, incident War Room, KB grounding, MCP/CLI adapters, and all five UI views are wired to real APIs. However three issues block shipping: the gate Approve/Reject buttons are no-ops (V1 trust contract broken), the connector registry audit write bypasses RLS (security isolation broken), and the gate Redis TTL is shorter than the human response window (gate flow breaks in practice). Fix these three before any further feature work touches the affected files.
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2/5 | Gate approve/reject buttons are no-ops — V1 L2 trust contract broken. `activeIncidents` hardcoded 0. `record()` does not persist decision to Postgres. Incident subscriber has no reconnect. |
+| D2 Code Standards | 3/5 | `prisma.auditEvent.create` in `registry.ts:52` bypasses RLS (withTenant imported but not used). `SessionId('')` is an invalid UUID stored in `session_id @db.Uuid`. Branching types inconsistency between service layer (plain string) and audit layer (branded). |
+| D3 Performance | 3/5 | `getToolsForTenant` calls `adapter.getTools()` serially for each connector. `getDemoToken()` duplicated 6×, called per-request with no caching. `RedisGateSink` instantiated per-request in gate-decide-route. `allEntities` query has no type filter — full table scan. |
+| D4 Security | 2/5 | `prisma.auditEvent.create` without `withTenant` in registry — data isolation violation. Gate Redis TTL (60s) shorter than human response window. `register_connector` tool has no runtime admin role check — relies on LLM discretion. |
+| D5 Readability | 4/5 | Code is generally clean. Two issues: `chat.ts` has `redisUrl` declared twice (outer shadowed by inner). `incident-view.tsx` stores truncated 8-char IDs in selection state — confusing and breaks `onTriggerOrchestrator` calls. |
+| D6 Clarity and Comments | 3/5 | Gate TTL invariant (must exceed poll timeout + human response) undocumented. `activeIncidents: 0` placeholder not marked as TODO. `adapterCache` eviction policy undocumented. `incident-subscriber.ts` has no comment about missing reconnect. |
+
+---
+
+### Issues Found
+
+#### [BLOCKING] Gate Approve/Reject buttons are no-ops — V1 L2 trust contract broken
+
+**File:** `apps/web/components/orchestrator-chat.tsx:810,820`
+
+**Issue:** Both Approve and Reject `onClick` handlers only call `setGateRequired(null)` — no HTTP request to the backend:
+
+```typescript
+// line 810
+onClick={() => setGateRequired(null)}  // Approve
+// line 820
+onClick={() => setGateRequired(null)}  // Reject
+```
+
+The gate sink is polling `gate:<gateId>:decision` in Redis. Without a call to the gate-decide endpoint, the Redis key is never set, `pollGate()` times out after 30 seconds, and every write action is permanently blocked. The V1 trust principle (L2 Approve — user explicitly confirms before Anvay executes) is completely broken. This is the most critical issue in the codebase.
+
+**Fix:**
+1. Create `apps/web/app/api/gate/[id]/decide/route.ts`:
+```typescript
+const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
+// ... getDemoToken pattern same as other proxy routes
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const token = await getDemoToken()
+  if (!token) return new Response(JSON.stringify({ error: 'auth failed' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
+  const body = await request.text()
+  const resp = await fetch(`${GATEWAY_URL}/api/gate/${id}/decide`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body,
+  })
+  const data = await resp.text()
+  return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })
+}
+```
+
+2. In `orchestrator-chat.tsx`, replace both handlers:
+```typescript
+async function submitGateDecision(gateId: string, decision: 'approved' | 'rejected') {
+  try {
+    await fetch(`/api/gate/${gateId}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, decidedBy: 'ui-user' }),
+    })
+  } catch (err) {
+    pushLog({ actor: 'GATE', actorColor: '#ef4444', text: `Decision submit failed: ${err instanceof Error ? err.message : 'unknown'}`, status: 'error' })
+  } finally {
+    setGateRequired(null)
+  }
+}
+// Approve button:
+onClick={() => { void submitGateDecision(gateRequired.gateId, 'approved') }}
+// Reject button:
+onClick={() => { void submitGateDecision(gateRequired.gateId, 'rejected') }}
+```
+
+**Verify:** Enable a write action, trigger it via chat, click Approve. Confirm: (1) gateway logs `gate_decision` audit event, (2) the write action executes, (3) `gate_events.status` = `'approved'` in DB.
+
+---
+
+#### [BLOCKING] `registry.ts:52` — `prisma.auditEvent.create` bypasses RLS
+
+**File:** `apps/gateway/src/connectors/registry.ts:52`
+
+**Issue:** The `onExec` callback for CLI connectors calls `prisma.auditEvent.create({...})` directly — without `withTenant()`. Despite `withTenant` being imported at line 1, the `onExec` closure uses the bare `prisma` singleton:
+
+```typescript
+onExec(entry: CliExecEntry) {
+  void (async () => {
+    try {
+      await prisma.auditEvent.create({  // ← no withTenant — RLS bypass
+        data: { ..., tenant_id: tenantId, ... }
+      })
+    } catch { /* swallow */ }
+  })()
+},
+```
+
+`audit_events` has `FORCE ROW LEVEL SECURITY`. Without the `app.tenant_id` GUC set, the INSERT either fails silently (caught and swallowed) or—depending on the Postgres role—succeeds and writes to the wrong tenant namespace. Either way audit logging for all CLI tool executions is broken.
+
+**Fix:**
+```typescript
+onExec(entry: CliExecEntry) {
+  void (async () => {
+    try {
+      await withTenant(prisma, tenantId, (tx) =>
+        tx.auditEvent.create({
+          data: {
+            id: crypto.randomUUID(),
+            tenant_id: tenantId,
+            user_id: null,    // String? @db.Uuid — null valid
+            session_id: null, // String? @db.Uuid — null valid
+            event_type: 'tool_call_allowed',
+            payload: JSON.parse(JSON.stringify(entry)),
+            created_at: new Date(),
+          },
+        })
+      )
+    } catch { /* swallow — best effort */ }
+  })()
+},
+```
+
+**Verify:** Execute a CLI tool for a non-default tenant. Confirm `audit_events` row exists with correct `tenant_id`. Confirm no row appears under a different tenant.
+
+---
+
+#### [BLOCKING] Gate Redis TTL (60s) is shorter than the human response window
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:10`
+
+**Issue:** `GATE_TTL_SECONDS = 60`. The orchestrator polls for up to 30 seconds by default (`gateTimeoutMs = 30_000`). After the poll times out, `pollGate()` returns `{ _tag: 'timed_out' }`. If the user then clicks Approve after the poll window (very common), `record()` sets the Redis key—but `pollGate()` has already returned and the action is blocked. Even within the poll window, a human who takes 35 seconds will find the key expired. The effective human decision window is `60 - 30 = 30 seconds`, which is insufficient for any non-trivial action review.
+
+**Fix:**
+```typescript
+// TTL must exceed gateTimeoutMs (30s default) plus a generous human decision buffer.
+// 10 minutes covers the UI review window for any non-automated action.
+const GATE_TTL_SECONDS = 600
+```
+
+Both key writes (event payload at line 51, decision at line 71) use this constant.
+
+**Verify:** Push a gate event, wait 35 seconds, call `record()` with `'approved'`. Confirm `poll()` still returns `'approved'` (key not expired).
+
+---
+
+#### [HIGH] `incident-subscriber.ts` has no Redis reconnect handling
+
+**File:** `apps/gateway/src/events/incident-subscriber.ts:36-42`
+
+**Issue:** `sub.connect()` runs once at startup with no error handler and no reconnect strategy. If Redis drops (network event, container restart), the subscriber silently dies. All `incident_created` events during the outage are permanently lost — SRE root cause analysis never runs for those incidents. There is no observable signal that the subscriber is dead (no metrics, no periodic heartbeat).
+
+**Fix:**
+```typescript
+const sub = createClient({
+  url: redisUrl,
+  socket: { reconnectStrategy: (retries) => Math.min(retries * 500, 10_000) },
+}) as RedisClientType
+
+sub.on('error', (err) => {
+  log.error({ err }, 'incident-subscriber: Redis error')
+})
+sub.on('reconnecting', () => {
+  log.warn('incident-subscriber: reconnecting to Redis')
+})
+```
+
+**Verify:** Kill Redis while subscriber is running. Restart Redis. Publish `incident_created`. Confirm subscriber processes it within reconnect delay.
+
+---
+
+#### [HIGH] `register_connector` tool has no runtime admin role enforcement
+
+**File:** `apps/gateway/src/connectors/registration-tools.ts:25-29`
+
+**Issue:** Tool description says "Admin only" but `run()` contains no role check. The LLM is not a hard enforcement boundary — role enforcement via natural language is probabilistic. Any user whose query happens to route to `register_connector` executes it regardless of their role.
+
+**Fix:** Make `makeRegistrationTools` role-aware:
+```typescript
+import type { AgentRole } from '@anvay/types'
+
+export function makeRegistrationTools(tenantId: string, role: AgentRole): ExecutableTool[] {
+  return [{
+    name: 'register_connector',
+    // ...
+    async run(args) {
+      if (role !== 'admin') return { error: 'register_connector requires admin role' }
+      // ... rest unchanged
+    },
+  }, {
+    name: 'list_connectors',
+    // ...
+    async run(args) {
+      if (role !== 'admin') return { error: 'list_connectors requires admin role' }
+      // ... rest unchanged
+    },
+  }]
+}
+```
+
+Update `chat.ts` to extract `role` from JWT claims and pass to `makeRegistrationTools`.
+
+**Verify:** Authenticate as dev role user, send a query that triggers `register_connector`, confirm it returns the role error.
+
+---
+
+#### [HIGH] `activeIncidents` hardcoded to 0 — service catalog badges permanently blank
+
+**File:** `apps/gateway/src/routes/services.ts:71`
+
+**Issue:** `activeIncidents: 0` — the incident count badge in `service-catalog.tsx` always shows zero, misrepresenting live system state.
+
+**Fix:** Inside the `withTenant` block, add an aggregation query:
+```typescript
+const incidentCounts = await tx.$queryRaw<{ name: string; cnt: bigint }[]>`
+  SELECT e.name, COUNT(i.id)::bigint AS cnt
+  FROM incidents i
+  JOIN entities e ON LOWER(i.title) LIKE '%' || LOWER(e.name) || '%'
+  WHERE i.status IN ('active', 'investigating') AND e.type = 'Service'
+  GROUP BY e.name
+`
+const countMap = new Map(incidentCounts.map(r => [r.name, Number(r.cnt)]))
+```
+Then `activeIncidents: countMap.get(entity.name) ?? 0`. Add a comment noting this is name-match approximate until RELATES_TO edges are populated.
+
+**Verify:** Create an active incident whose title contains a service name. Confirm that service's badge shows a non-zero count.
+
+---
+
+#### [HIGH] `RedisGateSink.record()` does not persist decision to Postgres
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:68-71`
+
+**Issue:** `record()` only writes the decision to Redis. The `gate_events` row inserted by `push()` keeps `status = 'pending'` unless `gate-decide-route.ts` runs the UPDATE independently. Future callers of `record()` (automated approval, batch approve) will leave audit rows as permanently pending.
+
+**Fix:** Add a best-effort Postgres UPDATE inside `record()`:
+```typescript
+async record(gateId: string, decision: 'approved' | 'rejected', decidedBy: string): Promise<void> {
+  // Best-effort — audit trail update; do not block gate flow
+  try {
+    await prisma.$executeRaw`
+      UPDATE gate_events SET status = ${decision}::text, decided_by = ${decidedBy}::text, decided_at = NOW()
+      WHERE id = ${gateId}::uuid AND status = 'pending'
+    `
+  } catch (err) {
+    log.warn({ err, gateId }, 'gate_events decision UPDATE failed')
+  }
+  // Then Redis
+  const pub = await this.getPub()
+  const key = `${GATE_KEY_PREFIX}${gateId}:decision`
+  await pub.setEx(key, GATE_TTL_SECONDS, decision)
+}
+```
+
+Note: `withTenant` cannot be used without a `tenantId` parameter; the raw UPDATE is acceptable here since the WHERE clause is on the specific `gateId` (UUIDs are globally unique).
+
+**Verify:** Call `record()` directly (without going through gate-decide-route). Confirm `gate_events.status` = `'approved'` in DB.
+
+---
+
+#### [HIGH] `getDemoToken()` duplicated 6× with no in-process caching
+
+**Files:** `apps/web/app/api/incidents/route.ts:5`, `apps/web/app/api/services/route.ts:5`, `apps/web/app/api/automations/triggers/route.ts:5`, `apps/web/app/api/automations/triggers/[id]/route.ts:5`, `apps/web/app/api/automations/monitors/route.ts:5`, `apps/web/app/api/automations/monitors/[id]/route.ts:5`
+
+**Issue:** Six identical 14-line functions + identical env-var constants. Pages that fetch multiple endpoints in parallel (service-catalog: services + incidents) issue two concurrent `POST /auth/token` requests. No caching means token acquisition scales O(N) with API routes loaded on a page.
+
+**Fix:** Extract to `apps/web/lib/gateway-client.ts`:
+```typescript
+const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
+const DEMO_EMAIL   = process.env['DEMO_EMAIL']   ?? 'demo@anvay.dev'
+const DEMO_TENANT  = process.env['DEMO_TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001'
+
+let _tokenCache: { token: string; expiresAt: number } | null = null
+
+export async function getDemoToken(): Promise<string | null> {
+  if (_tokenCache && Date.now() < _tokenCache.expiresAt) return _tokenCache.token
+  try {
+    const r = await fetch(`${GATEWAY_URL}/auth/token`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: DEMO_EMAIL, tenantId: DEMO_TENANT }),
+    })
+    if (!r.ok) return null
+    const body = await r.json() as { token?: string }
+    if (!body.token) return null
+    _tokenCache = { token: body.token, expiresAt: Date.now() + 5 * 60_000 }
+    return body.token
+  } catch { return null }
+}
+export const GATEWAY = GATEWAY_URL
+```
+
+Replace all six duplicate definitions with `import { getDemoToken, GATEWAY } from '@/lib/gateway-client'`.
+
+**Verify:** Load service catalog page. Confirm only one `POST /auth/token` appears in gateway access log per page load.
+
+---
+
+#### [HIGH] `automations-view.tsx` `toggleTrigger` swallows errors with no user feedback
+
+**File:** `apps/web/components/automations-view.tsx:155-161`
+
+**Issue:** If the PATCH request fails (network error, 5xx), the error is swallowed entirely. State is only updated on success (`await` comes before `setTriggers`), so the UI does not flip — but the user sees no indication the action failed.
+
+**Fix:**
+```typescript
+async function toggleTrigger(id: string, enabled: boolean) {
+  try {
+    const resp = await fetch(`/api/automations/triggers/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    setTriggers(prev => prev.map(t => t.id === id ? { ...t, enabled } : t))
+  } catch (err) {
+    console.error('toggleTrigger failed:', err)
+    // TODO: surface via toast notification
+  }
+}
+```
+
+**Verify:** Mock the PATCH endpoint to return 503. Click the status dot. Confirm the state does not change and an error appears in console.
+
+---
+
+#### [MEDIUM] `getToolsForTenant` fetches MCP/CLI tools serially — adds latency per connector
+
+**File:** `apps/gateway/src/connectors/registry.ts:80-90`
+
+**Issue:** Sequential `for...of` loop calling `await adapter.getTools()` for each connector. For 5 MCP connectors at 100ms each = 500ms added to every chat request.
+
+**Fix:** Parallelise with `Promise.all`:
+```typescript
+const toolArrays = await Promise.all(
+  rows.map(async (row) => {
+    const key = `${tenantId}:${row.id}`
+    if (!adapterCache.has(key)) adapterCache.set(key, instantiateAdapter(row, tenantId))
+    return adapterCache.get(key)!.getTools()
+  })
+)
+return toolArrays.flat()
+```
+
+**Verify:** Benchmark with 3+ connectors; confirm total time ≈ slowest single connector not their sum.
+
+---
+
+#### [MEDIUM] `services.ts` fetches all entity rows without type filter on second query
+
+**File:** `apps/gateway/src/routes/services.ts:29-34`
+
+**Issue:** `SELECT id, name, type, metadata FROM entities` with no WHERE clause fetches every entity (Teams, Repos, Engineers, Tickets, etc.). Only the first query filters by `type = 'Service'`. At org scale this is a full table scan to build the join map.
+
+**Fix:** Scope to IDs referenced by the fetched Service entities and their relationships:
+```typescript
+// Run allRels first with a scope filter, then fetch only referenced entity IDs
+const allRels = await tx.$queryRaw<RelRow[]>`
+  SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
+  FROM relationships
+  WHERE from_entity_id = ANY(${entities.map(e => e.id)}::uuid[])
+     OR to_entity_id   = ANY(${entities.map(e => e.id)}::uuid[])
+`
+const referencedIds = [...new Set([...allRels.map(r => r.fromEntityId), ...allRels.map(r => r.toEntityId)])]
+const allEntities = referencedIds.length > 0
+  ? await tx.$queryRaw<EntityRow[]>`SELECT id, name, type, metadata FROM entities WHERE id = ANY(${referencedIds}::uuid[])`
+  : []
+```
+
+Note: Prisma doesn't natively support array params in tagged templates — use `$queryRawUnsafe` with `Prisma.join` or extract to a helper.
+
+**Verify:** With 100 mixed entities, confirm `allEntities` result set is bounded by relationship count, not total entity count.
+
+---
+
+#### [MEDIUM] `incident-view.tsx` stores truncated 8-char ID in selection state — breaks orchestrator queries
+
+**File:** `apps/web/components/incident-view.tsx:120`
+
+**Issue:** `toDisplay()` slices `id` to 8 characters. This truncated ID is stored as `selectedId` and passed to `onTriggerOrchestrator` — the orchestrator query contains a partial UUID, not a valid one, making lookups impossible.
+
+**Fix:** Store the full UUID; use a `shortId` field for display only:
+```typescript
+function toDisplay(a: ApiIncident): DisplayIncident {
+  return {
+    id: a.id,              // full UUID — used for selection + queries
+    shortId: a.id.slice(0, 8),   // display badge only
+    // ...
+  }
+}
+```
+Update all render sites to use `shortId` for the badge and `id` for selection/queries.
+
+**Verify:** Click "Investigate with Anvay" on an incident. Confirm the query sent to the orchestrator contains a full UUID.
+
+---
+
+#### [MEDIUM] `chat.ts` — `redisUrl` declared twice, inner shadows outer
+
+**File:** `apps/gateway/src/routes/chat.ts:160,286`
+
+**Issue:** `const redisUrl = process.env['REDIS_URL']` at line 160 is re-declared inside the request handler at line 286. TypeScript allows this (different scopes) but creates confusion — a reader may believe the gate sink uses a different Redis URL than the session memory.
+
+**Fix:** Remove line 286 redeclaration and use the outer `redisUrl` constant.
+
+**Verify:** TypeScript compiles cleanly; grep confirms only one `const redisUrl` in the file.
+
+---
+
+#### [MEDIUM] MCP adapter test has no error-path coverage
+
+**File:** `packages/mcp-adapter/src/connector.test.ts`
+
+**Issue:** Tests only cover happy path. Missing: `connect()` failure → `health()` returns `unhealthy`; calling a tool not in the discovered set; transport error mid-call.
+
+**Fix:** Add at minimum:
+```typescript
+it('health() returns unhealthy when connection fails', async () => { ... })
+it('call() throws for unknown tool name', async () => { ... })
+```
+
+**Verify:** `vitest run` passes; error branches are exercised.
+
+---
+
+#### [MEDIUM] CLI adapter — `parseHelpOutput` has unused `env`/`timeoutMs` parameters
+
+**File:** `packages/cli-adapter/src/discovery.ts:46-51`
+
+**Issue:** Signature includes `env?: NodeJS.ProcessEnv` and `timeoutMs?: number` but neither is referenced inside the function body — they are used at the call site in `discoverSubcommands` but not passed into `parseHelpOutput`. The exported function signature is misleading.
+
+**Fix:**
+```typescript
+export function parseHelpOutput(text: string, binary: string): DiscoveredCommand[] {
+```
+Remove the unused parameters. Update tests if they pass these args.
+
+**Verify:** TypeScript compiles; existing tests pass.
+
+---
+
+#### [LOW] `SessionId('')` is an invalid UUID stored in `session_id @db.Uuid`
+
+**File:** `apps/gateway/src/routes/incidents.ts:94,117,139`
+
+**Issue:** `SessionId('')` creates a branded empty string. The `audit_events.session_id` column is `String? @db.Uuid` — Postgres will reject a non-UUID value when the column is actually used as a UUID. While Prisma may allow the write (if the column is `TEXT` at the DB level), it creates invalid data.
+
+**Fix:** Use the all-zeros sentinel UUID for system actions with no session context:
+```typescript
+const SYSTEM_SESSION = SessionId('00000000-0000-0000-0000-000000000000')
+// In audit events for incident mutations:
+sessionId: SYSTEM_SESSION,
+```
+
+**Verify:** Insert an incident-created audit event. Confirm `session_id` in DB is a valid UUID (all-zeros).
+
+---
+
+#### [LOW] `adapterCache` in `registry.ts` has no eviction — stale adapters persist
+
+**File:** `apps/gateway/src/connectors/registry.ts:19`
+
+**Issue:** Module-level `Map` with no max size, no TTL, no eviction on connector delete/update. A deleted connector's adapter persists in cache and its tools continue to appear in `getToolsForTenant`.
+
+**Fix:** Expose a `clearAdapterCache(tenantId: string, connectorId: string)` function and call it from the connector DELETE route. Add a comment:
+```typescript
+// Per-process cache, no TTL. Callers must invoke clearAdapterCache() on connector delete/update.
+const adapterCache = new Map<string, McpConnector | CliConnector>()
+export function clearAdapterCache(tenantId: string, connectorId: string) {
+  adapterCache.delete(`${tenantId}:${connectorId}`)
+}
+```
+
+**Verify:** Register a connector, call `getToolsForTenant`, delete the connector, call `clearAdapterCache`, call `getToolsForTenant` again — deleted connector's tools must not appear.
+
+---
+
+#### [LOW] Gate TTL invariant and `activeIncidents: 0` placeholder undocumented
+
+**Files:** `apps/gateway/src/gate/redis-gate-sink.ts:10`, `apps/gateway/src/routes/services.ts:71`
+
+**Issue:** Neither placeholder is marked as temporary or constrained. Future readers may assume they are intentional rather than known gaps.
+
+**Fix:**
+```typescript
+// redis-gate-sink.ts line 10 (after fixing to 600):
+// Must exceed gateTimeoutMs (30s default) + human review window. See OrchestratorConfig.gateTimeoutMs.
+const GATE_TTL_SECONDS = 600
+
+// services.ts line 71:
+activeIncidents: 0, // TODO: join with incidents table once RELATES_TO graph edges are populated
+```
+
+**Verify:** Code review — comments present.
+
+---
+
+### Pending Features (vs docs/TASKS.md)
+
+| Milestone | Task | Status | Notes |
+|-----------|------|--------|-------|
+| M0 — Foundation | All tasks (T1–T8) | ✅ Complete | DB, auth, Docker, E2E (38/38) |
+| M1-T1 | IModelProvider + provider implementations | ✅ Complete | Anthropic, OpenAI, Ollama providers |
+| M1-T2 | ISessionMemory + RedisSessionMemory | ✅ Complete | TTL, turn compression |
+| M1-T3 | Perimeter engine + IAuditSink | ✅ Complete | Deterministic rule evaluation |
+| M1-T4 | Orchestrator + runSession | ✅ Complete | Hand-rolled loop, graph-first |
+| M1-T5 | /api/chat SSE gateway endpoint | ✅ Complete | Streams real LLM tokens |
+| M1-T6 | OrchestratorChat wired to /api/chat | ⚠️ Partial | SSE streaming done; gate approve/reject buttons are no-ops (BLOCKING) |
+| M2-T1 | CliConnector — `discoverSubcommands()` | ✅ Complete | parseHelpOutput + 1-level deep |
+| M2-T2 | CliConnector — `run()` subprocess | ✅ Complete | onExec audit callback wired |
+| M2-T5 | Connector registry + getToolsForTenant | ✅ Complete | Serial loop is HIGH perf issue |
+| M2-T6 | MCP adapter | ✅ Complete | McpConnector, tool discovery, call() |
+| M2-T7 | CLI adapter | ✅ Complete | CliConnector, discovery, subprocess |
+| M3-T1 | Incident CRUD endpoints | ✅ Complete | GET/POST/PATCH/resolve with audit |
+| M3-T2 | get_incident_context tool | ✅ Complete | Graph-first + SREAgent |
+| M3-T3 | Redis incident_created subscriber | ⚠️ Partial | Runs but no reconnect handling (HIGH) |
+| M3-T4 | Incident War Room UI | ✅ Complete | Fetches real API; empty states; hypothesis display |
+| M4-T1 | IKnowledgeGraph migration (entities/relationships) | ✅ Complete | Tables, RLS policies |
+| M4-T2 | HybridKnowledgeGraph implementation | ✅ Complete | StructuralGraph + GraphitiClient |
+| M4-T3 | Freshness scoring | ✅ Complete | TTL-based decay, staleness flag |
+| M4-T4 | Grounding validation + stale banner | ✅ Complete | GroundingSource in DoneEvent, UI banner |
+| M4-T5 | StructuralGraph entity extraction | ⚠️ Partial | Interface + queries work; no connector bootstrap |
+| M4-T6 | Graph Builder Agent event-driven wiring | ⚠️ Partial | Agent code exists; no event subscription in production path |
+| M4-T7 | KB semantic search | ⚠️ Partial | Interface defined; no pgvector population |
+| M5-T1 | Scheduler (Trigger.dev / BullMQ) | ⚠️ Partial | BullMQScheduler wired; Trigger.dev not implemented |
+| M5-T2 | Trigger engine + rule evaluation | ✅ Complete | TriggerEngine, automations CRUD, Redis evaluate |
+| M5-T3 | Cron monitors — scheduled agent runs | ⚠️ Partial | cron_jobs table + BullMQ registration; actual agent execution partial |
+| M5-T4 | Automations + service catalog UI wiring | ✅ Complete | All views fetch real API; proxy routes wired |
+
+**Overall progress:** 18/26 tasks fully complete. 6 tasks partial (functional code exists but known gaps). 2 tasks not started (Graph Builder production wiring, pgvector population).
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08g -->
 ## Review — 2026-06-08g | NEW-1/2/3 fix verification — gate_events audit + trigger_rules RLS
 

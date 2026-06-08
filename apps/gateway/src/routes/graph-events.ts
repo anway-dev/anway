@@ -13,6 +13,13 @@ const CONNECTOR_API_KEYS = new Set(
     .filter(Boolean),
 )
 
+// Guard: warn at startup if no keys configured (open endpoint in dev, must be set in production)
+function warnIfNoKeys(app: FastifyInstance): void {
+  if (CONNECTOR_API_KEYS.size === 0) {
+    app.log.warn('CONNECTOR_API_KEYS not set — /api/graph/events is unauthenticated. Set this in production.')
+  }
+}
+
 function resolveGraphBuilderProvider(): IModelProvider | null {
   const providerOrder: ProviderConfig['type'][] = ['anthropic', 'openai', 'groq', 'mistral', 'ollama', 'lmstudio']
   for (const type of providerOrder) {
@@ -51,11 +58,14 @@ export async function graphEventRoutes(app: FastifyInstance) {
     app.log.warn('GraphBuilderAgent: no LLM provider configured — extraction disabled')
   }
 
+  // Guard: warn at startup if no keys configured
+  warnIfNoKeys(app)
+
   app.post<{ Body: GraphEvent }>('/api/graph/events', {
     preHandler: async (request, reply) => {
       // Connector API key auth — not user JWT
       const key = request.headers['x-connector-key']
-      if (!key || (CONNECTOR_API_KEYS.size > 0 && !CONNECTOR_API_KEYS.has(key as string))) {
+      if (!key || !CONNECTOR_API_KEYS.has(key as string)) {
         return reply.code(401).send({ error: 'unauthorized — missing or invalid x-connector-key' })
       }
     },

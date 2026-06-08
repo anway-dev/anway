@@ -2,6 +2,10 @@
 import { useState, useEffect } from "react";
 import { AUTOMATION_TRIGGERS, CRON_MONITORS, TriggerStatus, CronStatus, CronResultStatus } from "@/lib/mock";
 
+// API response types — replace mock shapes with real API contracts
+interface TriggerRuleAPI { id: string; eventType: string; enabled: boolean; condition: unknown; actions: unknown[] }
+interface CronMonitorAPI { id: string; name: string; schedule: string; jobType: string; enabled: boolean; lastRunAt: string | null; lastResult: unknown | null }
+
 const TRIGGER_STATUS_COLOR: Record<TriggerStatus, string> = {
   active: "#10b981",
   paused: "#555",
@@ -59,8 +63,8 @@ type Tab = "triggers" | "crons";
 
 export function AutomationsView() {
   const [tab, setTab] = useState<Tab>("triggers");
-  const [triggers, setTriggers] = useState<typeof AUTOMATION_TRIGGERS>([]);
-  const [monitors, setMonitors] = useState<typeof CRON_MONITORS>([]);
+  const [triggers, setTriggers] = useState<TriggerRuleAPI[]>([]);
+  const [monitors, setMonitors] = useState<CronMonitorAPI[]>([]);
 
   useEffect(() => {
     fetch('/api/automations/triggers').then(r => r.json()).then(setTriggers).catch(() => setTriggers([]))
@@ -73,7 +77,7 @@ export function AutomationsView() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     })
-    setTriggers(prev => prev.map((t: any) => t.id === id ? { ...t, enabled } : t))
+    setTriggers(prev => prev.map(t => t.id === id ? { ...t, enabled } : t))
   }
 
   return (
@@ -88,8 +92,8 @@ export function AutomationsView() {
       {/* Tabs */}
       <div style={{ display: "flex", gap: "0", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         {([
-          { id: "triggers", label: "Event Triggers", count: triggers.filter((t: any) => t.enabled).length },
-          { id: "crons",    label: "Cron Monitors",  count: monitors.filter((c: any) => c.enabled).length },
+          { id: "triggers", label: "Event Triggers", count: triggers.filter(t => t.enabled).length },
+          { id: "crons",    label: "Cron Monitors",  count: monitors.filter(c => c.enabled).length },
         ] as { id: Tab; label: string; count: number }[]).map(t => (
           <button
             key={t.id}

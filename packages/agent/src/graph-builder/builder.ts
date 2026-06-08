@@ -203,8 +203,9 @@ export class GraphBuilderAgent {
    * Returns null if no service found or model call fails.
    */
   async extractServiceName(text: string, _tenantId: TenantId): Promise<string | null> {
+    // Send text once as user content — avoid token doubling in high-volume cheap-model calls
     const messages: Message[] = [
-      { role: 'system', content: EXTRACT_PROMPT + text.slice(0, 500) },
+      { role: 'system', content: EXTRACT_PROMPT },
       { role: 'user', content: text.slice(0, 500) },
     ]
     const resp = await this.model.chat(messages, [], {

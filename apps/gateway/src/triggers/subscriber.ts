@@ -3,6 +3,10 @@ import { TriggerEngine } from './engine.js'
 import type { TriggerRule } from './engine.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import pino from 'pino'
+
+const log = pino({ name: 'trigger-subscriber' })
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const EVENT_CHANNELS = [
   'alert_fired', 'deploy_completed', 'deploy_failed',
@@ -21,6 +25,11 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
       try {
         payload = JSON.parse(message)
       } catch {
+        return
+      }
+      // Validate tenantId before passing to DB
+      if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId)) {
+        log.warn({ channel, tenantId: payload.tenantId }, 'subscriber: invalid tenantId — skipping')
         return
       }
       const { tenantId, ...rest } = payload

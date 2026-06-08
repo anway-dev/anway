@@ -13,7 +13,7 @@ type StreamEvent =
   | { type: "tool_call"; toolCallId: string; toolName: string; args: Record<string, unknown> }
   | { type: "tool_result"; toolCallId: string; result: unknown }
   | { type: "gate_required"; gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> }
-  | { type: "done"; inputTokens: number; outputTokens: number }
+  | { type: "done"; inputTokens: number; outputTokens: number; groundingSources?: { source: string; fetchedAt: string; confidence: number; freshness: number }[] }
   | { type: "error"; code: string; message: string };
 
 interface Message {
@@ -28,6 +28,7 @@ interface Message {
   confidence?: number;
   inputTokens?: number;
   outputTokens?: number;
+  staleWarning?: string;
 }
 
 interface LogLine {
@@ -175,6 +176,9 @@ function MessageBlock({ message }: { message: Message }) {
               }} />
             ))}
           </div>
+        )}
+        {message.staleWarning && (
+          <span style={{ fontSize: "9px", color: "#f59e0b", fontFamily: "monospace" }}>⚠ {message.staleWarning}</span>
         )}
       </div>
       {/* Response body */}
@@ -433,6 +437,13 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
             ));
           } else if (event.type === 'done') {
             setAgentStates(prev => prev.map(a => ({ ...a, currentStatus: 'done' })));
+            const staleSources = (event.groundingSources ?? []).filter(s => s.freshness < 0.5);
+            const oldestFetch = staleSources.length > 0
+              ? staleSources.reduce((oldest, s) => s.fetchedAt < oldest ? s.fetchedAt : oldest, staleSources[0].fetchedAt)
+              : null;
+            const staleWarning = oldestFetch
+              ? `Based on data from ${new Date(oldestFetch).toLocaleTimeString()} · re-sync recommended`
+              : undefined;
             setMessages(prev => prev.map(m =>
               m.id === respId
                 ? {
@@ -441,6 +452,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
                     durationMs: Date.now() - startTime,
                     inputTokens: event.inputTokens,
                     outputTokens: event.outputTokens,
+                    staleWarning,
                   }
                 : m
             ));

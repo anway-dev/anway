@@ -143,10 +143,18 @@ export interface GateRequiredEvent {
   readonly confidence?: number
 }
 
+export interface GroundingSource {
+  readonly source: string
+  readonly fetchedAt: string  // ISO 8601 — serialisable over SSE
+  readonly confidence: number
+  readonly freshness: number  // 0.0–1.0; < 0.5 = stale
+}
+
 export interface DoneEvent {
   readonly type: 'done'
   readonly inputTokens: number
   readonly outputTokens: number
+  readonly groundingSources?: readonly GroundingSource[]
 }
 
 export interface ErrorEvent {

@@ -1,4 +1,4 @@
-import type { ErrorCode, Message, StreamEvent } from '@anvay/types'
+import type { ErrorCode, GroundingSource, Message, StreamEvent } from '@anvay/types'
 import type { IAuditSink } from './interfaces/audit.js'
 import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
 import type { IModelProvider, ToolCall, ToolDefinition } from './interfaces/provider.js'
@@ -165,6 +165,7 @@ export async function* runSession(
 
   // Knowledge Graph context injection — mandatory first step per CLAUDE.md
   let graphContext = ''
+  let groundingSources: GroundingSource[] = []
   try {
     const entityResp = await model.chat([
       { role: 'system', content: 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.' },
@@ -191,6 +192,12 @@ export async function* runSession(
         }
         if (context.freshness < 0.5) parts.push('  [STALE] Verify critical facts from live source.')
         graphContext = parts.join('\n')
+        groundingSources = context.groundingSources.map(gs => ({
+          source: gs.source,
+          fetchedAt: gs.fetchedAt.toISOString(),
+          confidence: gs.confidence,
+          freshness: context.freshness,
+        }))
       }
     }
   } catch (err) {
@@ -365,7 +372,12 @@ export async function* runSession(
     timestamp: Date.now(),
   })
 
-  yield { type: 'done', inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
+  yield {
+    type: 'done',
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
+    ...(groundingSources.length > 0 ? { groundingSources } : {}),
+  }
 }
 
 function makeError(code: ErrorCode, message: string): StreamEvent & { type: 'error' } {

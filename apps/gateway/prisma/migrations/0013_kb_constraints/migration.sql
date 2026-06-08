@@ -25,3 +25,8 @@ DROP POLICY IF EXISTS tenant_isolation ON relationships;
 CREATE POLICY tenant_isolation ON relationships AS PERMISSIVE FOR ALL
   USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+DROP POLICY IF EXISTS tenant_isolation ON kb_entries;
+CREATE POLICY tenant_isolation ON kb_entries AS PERMISSIVE FOR ALL
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);

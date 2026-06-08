@@ -2,6 +2,7 @@
 import { createSpecialistAgent } from '@anvay/agent'
 import type { SpecialistAgent, SpecialistAgentConfig } from '@anvay/agent'
 import { LinearConnector } from './connector.js'
+import { makeLinearTools } from './tools.js'
 
 export function createLinearAgent(
   perimeter: SpecialistAgentConfig['perimeter'],
@@ -11,7 +12,7 @@ export function createLinearAgent(
   return createSpecialistAgent({
     name: 'linear',
     model,
-    tools: [],
+    tools: makeLinearTools(new LinearConnector('linear-prod')),
     systemPrompt: 'You are a Linear project management specialist. Use list_issues and get_issue to answer product and engineering questions.',
     perimeter,
     auditSink,

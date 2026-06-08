@@ -38,7 +38,7 @@ export default fp(async function jwtPlugin(app: FastifyInstance) {
     secret:
       privateKey && publicKey
         ? { private: privateKey, public: publicKey }
-        : secret,
+        : (secret as string),
     sign: {
       algorithm: privateKey ? 'RS256' : 'HS256',
       expiresIn: '24h',

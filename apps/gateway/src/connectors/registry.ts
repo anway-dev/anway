@@ -29,7 +29,7 @@ function getCfg(row: ConnectorRow): Record<string, unknown> {
   return {}
 }
 
-function instantiateAdapter(row: ConnectorRow): McpConnector | CliConnector {
+function instantiateAdapter(row: ConnectorRow, tenantId: string): McpConnector | CliConnector {
   const cfg = getCfg(row)
   const name = row.name || row.type
 
@@ -40,14 +40,28 @@ function instantiateAdapter(row: ConnectorRow): McpConnector | CliConnector {
     })
   }
 
-  // CLI type — use allowedSubcommands if provided, else auto-discovery
+  // CLI type — binary from config, not from row.type
   return new CliConnector({
     name,
-    binary: row.type,
+    binary: cfg['binary'] as string,
     allowedSubcommands: cfg['allowedSubcommands'] as string[] | undefined,
     env: cfg['env'] as Record<string, string> | undefined,
-    onExec: (_entry: CliExecEntry) => {
-      /* Audit via caller — registry doesn't have tenant context */
+    onExec(entry: CliExecEntry) {
+      void (async () => {
+        try {
+          await prisma.auditEvent.create({
+            data: {
+              id: crypto.randomUUID(),
+              tenant_id: tenantId,
+              user_id: '',
+              session_id: '',
+              event_type: 'tool_call_allowed',
+              payload: JSON.parse(JSON.stringify(entry)),
+              created_at: new Date(),
+            },
+          })
+        } catch { /* swallow */ }
+      })()
     },
   })
 }
@@ -67,7 +81,7 @@ export async function getToolsForTenant(
     let adapter = adapterCache.get(key)
 
     if (!adapter) {
-      adapter = instantiateAdapter(row)
+      adapter = instantiateAdapter(row, tenantId)
       adapterCache.set(key, adapter)
     }
 
@@ -98,8 +112,7 @@ export async function registerConnectorTool(
     })
   )
 
-  // Instantiate and register in cache
-  const adapter = instantiateAdapter({ id: row.id, type, name, mode: 'read', config_encrypted: config as Prisma.JsonObject })
+  const adapter = instantiateAdapter({ id: row.id, type, name, mode: 'read', config_encrypted: config as Prisma.JsonObject }, tenantId)
   const key = cacheKey(tenantId, row.id)
   adapterCache.set(key, adapter)
 

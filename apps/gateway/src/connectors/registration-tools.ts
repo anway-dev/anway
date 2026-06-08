@@ -19,7 +19,7 @@ export function makeRegistrationTools(tenantId: string): ExecutableTool[] {
         properties: {
           type: { type: 'string', enum: ['mcp', 'cli'], description: 'Connector type' },
           name: { type: 'string', description: 'Connector name (e.g. "linear", "github")' },
-          config: { type: 'object', description: 'Connector config. For MCP: { url: string }. For CLI: { allowedSubcommands?: string[], env?: Record<string,string> }' },
+          config: { type: 'object', description: 'Connector config. For MCP: { url: string }. For CLI: { binary: string, allowedSubcommands?: string[], env?: Record<string,string> }' },
         },
       },
       async run(args: Record<string, unknown>) {

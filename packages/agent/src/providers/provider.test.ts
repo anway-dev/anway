@@ -121,7 +121,7 @@ describe('IModelProvider contract via MockProvider', () => {
     const textDelta: StreamChunk = { type: 'text_delta', content: 'x' }
     const toolCall: StreamChunk = { type: 'tool_call', toolName: 'f', toolCallId: '1', args: {} }
     const toolResult: StreamChunk = { type: 'tool_result', toolCallId: '1', result: null }
-    const gate: StreamChunk = { type: 'gate_required', gateId: 'g', action: 'a', target: 't', confidence: 0.9 }
+    const gate: StreamChunk = { type: 'gate_required', gateId: 'g', toolCallId: '1', toolName: 'test', args: {} }
     const done: StreamChunk = { type: 'done', inputTokens: 1, outputTokens: 1 }
     const error: StreamChunk = { type: 'error', code: 'UPSTREAM_ERROR', message: 'fail' }
 

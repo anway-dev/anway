@@ -12,7 +12,7 @@ type StreamEvent =
   | { type: "text_delta"; content: string }
   | { type: "tool_call"; toolCallId: string; toolName: string; args: Record<string, unknown> }
   | { type: "tool_result"; toolCallId: string; result: unknown }
-  | { type: "gate_required"; action: string; resource: string; reason: string }
+  | { type: "gate_required"; gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> }
   | { type: "done"; inputTokens: number; outputTokens: number }
   | { type: "error"; code: string; message: string };
 
@@ -308,7 +308,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const [currentInferredRole, setCurrentInferredRole] = useState("dev");
   const [contextSource, setContextSource] = useState<{ title: string; source: string } | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
-  const [gateRequired, setGateRequired] = useState<{ action: string; resource: string; reason: string } | null>(null);
+  const [gateRequired, setGateRequired] = useState<{ gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -422,8 +422,8 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
             pushLog({ actor: "TOOL", actorColor: "#555", text: `→ ${resultStr}...`, status: 'done', ms: 0 });
             setAgentStates(prev => prev.map(a => a.name === toolName ? { ...a, currentStatus: 'done' } : a));
           } else if (event.type === 'gate_required') {
-            setGateRequired({ action: event.action, resource: event.resource, reason: event.reason });
-            pushLog({ actor: "GATE", actorColor: "#f59e0b", text: `${event.action} on ${event.resource} — awaiting approval`, status: 'running' });
+            setGateRequired({ gateId: event.gateId, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
+            pushLog({ actor: "GATE", actorColor: "#f59e0b", text: `${event.toolName} — awaiting approval`, status: 'running' });
           } else if (event.type === 'error') {
             pushLog({ actor: "ERROR", actorColor: "#ef4444", text: `${event.code}: ${event.message}`, status: 'error' });
             setMessages(prev => prev.map(m =>
@@ -783,10 +783,10 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
               ✦ GATE REQUIRED
             </div>
             <div style={{ fontSize: "10px", color: "#888", fontFamily: "monospace", marginBottom: "4px" }}>
-              {gateRequired.action} on {gateRequired.resource}
+              {gateRequired.toolName}
             </div>
             <div style={{ fontSize: "9px", color: "#444", fontFamily: "monospace" }}>
-              {gateRequired.reason}
+              {JSON.stringify(gateRequired.args)}
             </div>
             <div style={{ display: "flex", gap: "6px", marginTop: "8px" }}>
               <button

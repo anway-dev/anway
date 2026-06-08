@@ -46,9 +46,9 @@ export { createOrchestrator, runSession } from './orchestrator.js'
 export type { SpecialistAgentConfig, SpecialistAgent } from './specialist-agent.js'
 export { createSpecialistAgent } from './specialist-agent.js'
 
-// Gate
-export type { GateConfig, GateDecision, Gate } from './gate.js'
-export { createGate } from './gate.js'
+// Gate (L2 Approve — V1 trust principle)
+export type { IGateSink, GateEvent, GateDecision } from './gate/gate.js'
+export { isWriteAction, pollGate } from './gate/gate.js'
 
 // Knowledge Graph
 export type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph.js'

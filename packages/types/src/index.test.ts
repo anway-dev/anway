@@ -148,17 +148,19 @@ describe('StreamEvent discriminated union', () => {
     expect(event.type).toBe('tool_call')
   })
 
-  it('gate_required event has gateId, action, target, confidence', () => {
+  it('gate_required event has gateId, toolCallId, toolName, args', () => {
     const event: StreamEvent = {
       type: 'gate_required',
       gateId: 'gate-1',
-      action: 'deploy',
-      target: 'payments-api',
-      confidence: 0.92,
+      toolCallId: 't-1',
+      toolName: 'deploy_service',
+      args: { target: 'payments-api' },
     }
     expect(event.type).toBe('gate_required')
     if (event.type === 'gate_required') {
-      expect(event.confidence).toBe(0.92)
+      expect(event.toolName).toBe('deploy_service')
+      expect(event.args.target).toBe('payments-api')
+      expect(event.gateId).toBe('gate-1')
     }
   })
 

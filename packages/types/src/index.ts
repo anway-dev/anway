@@ -137,9 +137,10 @@ export interface ToolResultEvent {
 export interface GateRequiredEvent {
   readonly type: 'gate_required'
   readonly gateId: string
-  readonly action: string
-  readonly target: string
-  readonly confidence: number
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly args: Record<string, unknown>
+  readonly confidence?: number
 }
 
 export interface DoneEvent {

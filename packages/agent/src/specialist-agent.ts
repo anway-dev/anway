@@ -25,8 +25,9 @@ export interface SpecialistAgent {
 
 /**
  * Creates a specialist agent scoped to a single domain (SRE, Dev, PM, BA).
- * Same agentic loop as the orchestrator but without intent classification.
- * Mastra handles the lifecycle internally; no Mastra types are returned.
+ * Hand-rolled agentic loop — same architecture as the orchestrator but without
+ * intent classification. Model-agnostic via IModelProvider. Satisfies four of
+ * six locked Mastra requirements (see orchestrator.ts JSDoc for details).
  */
 export function createSpecialistAgent(config: SpecialistAgentConfig): SpecialistAgent {
   return {

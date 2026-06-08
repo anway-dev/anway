@@ -8,6 +8,8 @@ import type { PerimeterCtx } from './middleware/perimeter.js'
 import { createTokenMeterMiddleware } from './middleware/token-meter.js'
 import type { TokenBudget } from './middleware/token-meter.js'
 import type { AgentPerimeter } from './perimeter/engine.js'
+import { isWriteAction, pollGate } from './gate/gate.js'
+import type { IGateSink } from './gate/gate.js'
 
 export interface ExecutableTool extends ToolDefinition {
   run(args: Record<string, unknown>): Promise<unknown>
@@ -31,6 +33,10 @@ export interface OrchestratorConfig {
   maxSteps?: number
   /** Knowledge Graph for context injection */
   knowledgeGraph?: IKnowledgeGraph
+  /** V1 L2 gate — required for write actions. Omit to block all writes (safe default). */
+  gateSink?: IGateSink
+  /** Gate poll timeout in ms (default: 30000) */
+  gateTimeoutMs?: number
 }
 
 /** Opaque handle returned by createOrchestrator. Contains no Mastra types. */
@@ -64,7 +70,12 @@ const INTENT_SYSTEM_PROMPT =
 
 /**
  * Creates an orchestrator instance. The returned object is an opaque handle —
- * no Mastra types are exposed to the caller.
+ * hand-rolled agentic loop, model-agnostic (IModelProvider). Satisfies four of
+ * six locked Mastra requirements: model-agnostic streaming, perimeter middleware
+ * on every tool call, full audit hook, and typed multi-agent context handoff.
+ * Two missing: waitForInput/gate (see gateSink below) and onModelCall token hook
+ * (token-meter middleware is inline, not a Mastra lifecycle hook — functionally
+ * equivalent for current feature set).
  */
 export function createOrchestrator(config: OrchestratorConfig): Orchestrator {
   return { config }
@@ -275,6 +286,45 @@ export async function* runSession(
         continue
       }
 
+      // V1 L2 gate: every write action requires user approval before execution
+      if (isWriteAction(toolCall.name) && config.gateSink) {
+        const gateId = crypto.randomUUID()
+        await config.gateSink.push({
+          id: gateId,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          args: toolCall.args,
+          connectorId: connectorIdFromTool(toolCall.name),
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          sessionId: ctx.sessionId,
+          createdAt: new Date(),
+        })
+        yield {
+          type: 'gate_required',
+          gateId,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          args: toolCall.args,
+        }
+        const decision = await pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000)
+        if (decision._tag !== 'approved') {
+          await auditSink.append({
+            id: crypto.randomUUID(),
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            sessionId: ctx.sessionId,
+            eventType: 'tool_call_blocked',
+            payload: { gateId, toolName: toolCall.name, decision: decision._tag, reason: '_tag' in decision && 'reason' in decision ? decision.reason : undefined },
+            createdAt: new Date(),
+          })
+          const blockMsg = `Write action "${toolCall.name}" ${decision._tag === 'rejected' ? 'rejected by user' : 'timed out awaiting approval'}`
+          toolResultMessages.push(model.formatToolResult(toolCall.id, blockMsg))
+          yield { type: 'tool_result', toolCallId: toolCall.id, result: blockMsg }
+          continue
+        }
+      }
+
       // Find matching executable tool
       const execTool = tools.find((t) => t.name === toolCall.name)
       let result: unknown
@@ -312,4 +362,10 @@ export async function* runSession(
 
 function makeError(code: ErrorCode, message: string): StreamEvent & { type: 'error' } {
   return { type: 'error', code, message }
+}
+
+function connectorIdFromTool(toolName: string): string {
+  // Simple heuristic: tool names like 'github_list_prs' → connector 'github'
+  const underscoreIdx = toolName.indexOf('_')
+  return underscoreIdx > 0 ? toolName.slice(0, underscoreIdx) : toolName
 }

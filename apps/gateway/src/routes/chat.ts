@@ -218,7 +218,7 @@ export async function chatRoutes(app: FastifyInstance) {
         capabilities?: { read?: string[]; write?: string[] }
       }
       return {
-        connectorId: c.id,
+        connectorId: c.type,
         read: raw.capabilities?.read ?? ['*'],
         write: c.mode === 'write' || c.mode === 'read_write' ? (raw.capabilities?.write ?? ['*']) : [],
       }
@@ -234,7 +234,7 @@ export async function chatRoutes(app: FastifyInstance) {
         capabilities?: { read?: string[]; write?: string[] }
       }
       return {
-        connectorId: c.id,
+        connectorId: c.type,
         mode: (c.mode === 'read_write' ? 'read-write' : c.mode) as 'read' | 'write' | 'read-write',
         capabilities: {
           read: raw.capabilities?.read ?? ['*'],

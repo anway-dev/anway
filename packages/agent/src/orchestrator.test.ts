@@ -46,6 +46,21 @@ class InMemorySessionMemory implements ISessionMemory {
   }
 }
 
+function makeMockKG() {
+  return {
+    addEpisode: async () => {},
+    getFacts: async () => [],
+    getEntity: async () => null,
+    getRelationships: async () => [],
+    search: async () => [],
+    resolveContext: async () => ({ primaryEntity: { id: 'e1', tenantId: 't1', type: 'Service', name: 'test', metadata: {} }, relatedEntities: [], relationships: [], recentEpisodes: [], connectorCoordinates: {}, groundingSources: [], freshness: 1.0 }),
+    resolveContextByName: async () => null,
+    getEntityByExternalRef: async () => null,
+    upsertEntity: async () => 'e1',
+    upsertRelationship: async () => 'r1',
+  }
+}
+
 function makePermissivePerimeter(): AgentPerimeter {
   const userPerimeter: UserPerimeter = {
     userId: UserId('test-user'),
@@ -145,7 +160,7 @@ describe('createOrchestrator', () => {
     const auditSink = new InMemoryAuditSink()
     const sessionMemory = new InMemorySessionMemory()
     const perimeter = makePermissivePerimeter()
-    const orch = createOrchestrator({ model, tools: [], perimeter, auditSink, sessionMemory })
+    const orch = createOrchestrator({ model, tools: [], perimeter, auditSink, sessionMemory, knowledgeGraph: makeMockKG() })
     expect(orch).toBeDefined()
     expect(orch.config.model).toBe(model)
   })
@@ -186,6 +201,7 @@ describe('runSession', () => {
       perimeter: makePermissivePerimeter(),
       auditSink: new InMemoryAuditSink(),
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
       maxSteps: 3,
     })
 
@@ -203,6 +219,7 @@ describe('runSession', () => {
       perimeter: makePermissivePerimeter(),
       auditSink,
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
     })
     const events = await collectEvents(runSession(orch, 'Hello', makeCtx()))
     const textEvents = events.filter((e) => e.type === 'text_delta')
@@ -223,6 +240,7 @@ describe('runSession', () => {
       perimeter: makePermissivePerimeter(),
       auditSink,
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
     })
     await collectEvents(runSession(orch, 'Test query', makeCtx()))
     const types = auditSink.events.map((e) => e.eventType)
@@ -245,6 +263,7 @@ describe('runSession', () => {
       perimeter: makePermissivePerimeter(),
       auditSink,
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
     })
     await collectEvents(runSession(orch, 'Use the tool', makeCtx()))
     const perimEvents = auditSink.events.filter(
@@ -268,6 +287,7 @@ describe('runSession', () => {
       perimeter: makePermissivePerimeter(),
       auditSink,
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
     })
     const events = await collectEvents(runSession(orch, 'Fetch data', makeCtx()))
     const toolResultEvents = events.filter((e) => e.type === 'tool_result')
@@ -290,6 +310,7 @@ describe('runSession', () => {
       perimeter: makePermissivePerimeter(),
       auditSink: new InMemoryAuditSink(),
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
       budget: zeroBudget,
     })
     const events = await collectEvents(runSession(orch, 'Query with exhausted budget', makeCtx()))
@@ -315,6 +336,7 @@ describe('runSession', () => {
       perimeter: makeRestrictedPerimeter(),
       auditSink,
       sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
     })
     const events = await collectEvents(runSession(orch, 'Do something blocked', makeCtx()))
     const forbiddenEvents = events.filter(

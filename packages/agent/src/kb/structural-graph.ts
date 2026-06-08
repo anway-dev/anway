@@ -87,8 +87,7 @@ export class StructuralGraph implements IKnowledgeGraph {
       const nextSet = new Set<string>()
       for (const rel of rels) {
         allRelationships.push(rel)
-        const otherId = rel.fromEntityId === toVisit.find(eid => eid === rel.fromEntityId || eid === rel.toEntityId)
-          ? rel.toEntityId : rel.fromEntityId
+        const otherId = visited.has(rel.fromEntityId) ? rel.toEntityId : rel.fromEntityId
         if (!visited.has(otherId)) nextSet.add(otherId)
       }
       for (const eid of toVisit) visited.add(eid)

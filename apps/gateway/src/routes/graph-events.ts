@@ -6,16 +6,19 @@ import type { IModelProvider, ProviderConfig } from '@anvay/agent'
 import type { TenantId } from '@anvay/types'
 import { createKnowledgeGraph } from '../kb/index.js'
 
-const CONNECTOR_API_KEYS = new Set(
-  (process.env['CONNECTOR_API_KEYS'] ?? '')
-    .split(',')
-    .map((k) => k.trim())
-    .filter(Boolean),
-)
+// CONNECTOR_API_KEYS format: <key>:<tenantId>,<key>:<tenantId>,...
+// Each key is bound to exactly one tenant — cross-tenant writes are rejected.
+const CONNECTOR_KEY_TENANT_MAP = new Map<string, string>()
+for (const entry of (process.env['CONNECTOR_API_KEYS'] ?? '').split(',').map(k => k.trim()).filter(Boolean)) {
+  const colonIdx = entry.indexOf(':')
+  if (colonIdx > 0) {
+    CONNECTOR_KEY_TENANT_MAP.set(entry.slice(0, colonIdx), entry.slice(colonIdx + 1))
+  }
+}
+const VALID_API_KEYS = new Set(CONNECTOR_KEY_TENANT_MAP.keys())
 
-// Guard: warn at startup if no keys configured (open endpoint in dev, must be set in production)
 function warnIfNoKeys(app: FastifyInstance): void {
-  if (CONNECTOR_API_KEYS.size === 0) {
+  if (CONNECTOR_KEY_TENANT_MAP.size === 0) {
     app.log.warn('CONNECTOR_API_KEYS not set — /api/graph/events is unauthenticated. Set this in production.')
   }
 }
@@ -63,9 +66,9 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
   app.post<{ Body: GraphEvent }>('/api/graph/events', {
     preHandler: async (request, reply) => {
-      // Connector API key auth — not user JWT
+      // Connector API key auth with tenant binding
       const key = request.headers['x-connector-key']
-      if (!key || !CONNECTOR_API_KEYS.has(key as string)) {
+      if (!key || !VALID_API_KEYS.has(key as string)) {
         return reply.code(401).send({ error: 'unauthorized — missing or invalid x-connector-key' })
       }
     },
@@ -81,6 +84,13 @@ export async function graphEventRoutes(app: FastifyInstance) {
     },
   }, async (request, reply) => {
     const event = request.body
+    const apiKey = request.headers['x-connector-key'] as string
+
+    // Enforce tenant binding — key can only write to its own tenant
+    const boundTenant = CONNECTOR_KEY_TENANT_MAP.get(apiKey)
+    if (boundTenant && event.tenantId !== boundTenant) {
+      return reply.code(403).send({ error: 'forbidden — API key is not authorized for this tenantId' })
+    }
 
     if (!provider) {
       return reply.code(503).send({ error: 'GraphBuilderAgent not configured — no LLM provider' })

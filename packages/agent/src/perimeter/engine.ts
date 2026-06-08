@@ -1,5 +1,6 @@
 import type { ConnectorMode, UserId } from '@anvay/types'
 import type { ToolCall } from '../interfaces/provider.js'
+import { connectorIdFromTool } from '../tools/naming.js'
 
 export interface ConnectorScope {
   readonly connectorId: string
@@ -74,11 +75,6 @@ const WRITE_SUFFIXES = [
 function isWriteAction(toolName: string): boolean {
   const actionParts = toolName.split(/[._-]/)
   return WRITE_SUFFIXES.some(s => actionParts.includes(s))
-}
-
-function connectorIdFromTool(toolName: string): string {
-  const dot = toolName.indexOf('.')
-  return dot === -1 ? toolName : toolName.slice(0, dot)
 }
 
 export class AgentPerimeter {

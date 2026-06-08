@@ -91,6 +91,21 @@ function makeMockProvider(chunks: StreamChunk[]): IModelProvider {
   }
 }
 
+function makeMockKG() {
+  return {
+    addEpisode: async () => {},
+    getFacts: async () => [],
+    getEntity: async () => null,
+    getRelationships: async () => [],
+    search: async () => [],
+    resolveContext: async () => ({ primaryEntity: { id: 'e1', tenantId: 't1', type: 'Service', name: 'test', metadata: {} }, relatedEntities: [], relationships: [], recentEpisodes: [], connectorCoordinates: {}, groundingSources: [], freshness: 1.0 }),
+    resolveContextByName: async () => null,
+    getEntityByExternalRef: async () => null,
+    upsertEntity: async () => 'e1',
+    upsertRelationship: async () => 'r1',
+  }
+}
+
 // ---- Tests ----
 
 describe('runSession — streaming and audit', () => {
@@ -112,6 +127,7 @@ describe('runSession — streaming and audit', () => {
       perimeter,
       auditSink,
       sessionMemory: new InMemoryTestMemory(),
+      knowledgeGraph: makeMockKG(),
     })
 
     const ctx: SessionContext = {
@@ -151,6 +167,7 @@ describe('runSession — streaming and audit', () => {
       perimeter,
       auditSink,
       sessionMemory: new InMemoryTestMemory(),
+      knowledgeGraph: makeMockKG(),
     })
 
     const ctx: SessionContext = {
@@ -189,6 +206,7 @@ describe('runSession — streaming and audit', () => {
       perimeter,
       auditSink,
       sessionMemory: new InMemoryTestMemory(),
+      knowledgeGraph: makeMockKG(),
     })
 
     const ctx: SessionContext = {
@@ -234,6 +252,7 @@ describe('runSession — streaming and audit', () => {
       perimeter,
       auditSink,
       sessionMemory: new InMemoryTestMemory(),
+      knowledgeGraph: makeMockKG(),
     })
 
     const ctx: SessionContext = {

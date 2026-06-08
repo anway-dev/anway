@@ -8,6 +8,7 @@ import type { AgentPerimeter } from './perimeter/engine.js'
 import type { ExecutableTool } from './orchestrator.js'
 import { isWriteAction, pollGate } from './gate/gate.js'
 import type { IGateSink } from './gate/gate.js'
+import { connectorIdFromTool } from './tools/naming.js'
 
 export interface SpecialistAgentConfig {
   name: string
@@ -121,7 +122,7 @@ async function* runSpecialist(
           toolCallId: toolCall.id,
           toolName: toolCall.name,
           args: toolCall.args,
-          connectorId: toolCall.name.split('.')[0] ?? toolCall.name,
+          connectorId: connectorIdFromTool(toolCall.name),
           tenantId: ctx.tenantId,
           userId: ctx.userId,
           sessionId: ctx.sessionId,

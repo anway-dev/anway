@@ -10,6 +10,7 @@ import type { TokenBudget } from './middleware/token-meter.js'
 import type { AgentPerimeter } from './perimeter/engine.js'
 import { isWriteAction, pollGate } from './gate/gate.js'
 import type { IGateSink } from './gate/gate.js'
+import { connectorIdFromTool } from './tools/naming.js'
 
 export interface ExecutableTool extends ToolDefinition {
   run(args: Record<string, unknown>): Promise<unknown>
@@ -31,8 +32,8 @@ export interface OrchestratorConfig {
   budget?: TokenBudget
   /** Maximum tool-call round-trips per runSession call (default: 10) */
   maxSteps?: number
-  /** Knowledge Graph for context injection */
-  knowledgeGraph?: IKnowledgeGraph
+  /** Knowledge Graph for context injection — mandatory. Skipping = hard violation. */
+  knowledgeGraph: IKnowledgeGraph
   /** V1 L2 gate — required for write actions. Omit to block all writes (safe default). */
   gateSink?: IGateSink
   /** Gate poll timeout in ms (default: 30000) */
@@ -162,40 +163,47 @@ export async function* runSession(
     createdAt: new Date(),
   })
 
-  // Try to inject knowledge graph context
+  // Knowledge Graph context injection — mandatory first step per CLAUDE.md
   let graphContext = ''
-  if (config.knowledgeGraph) {
-    try {
-      const entityResp = await model.chat([
-        { role: 'system', content: 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.' },
-        { role: 'user', content: input },
-      ], [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
-      const entityName = entityResp.content.trim()
-      if (entityName) {
-        const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 2)
-        if (context?.primaryEntity) {
-          const parts = [`Graph context for "${context.primaryEntity.name}" (${context.primaryEntity.type}):`]
-          for (const rel of context.relationships.slice(0, 10)) {
-            const fromName = rel.fromEntityId === context.primaryEntity.id
-              ? context.primaryEntity.name
-              : context.relatedEntities.find(e => e.id === rel.fromEntityId)?.name ?? rel.fromEntityId
-            const toName = context.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
-            parts.push(`  ${rel.relType}: ${fromName} → ${toName}`)
-          }
-          const coords = context.connectorCoordinates
-          if (Object.keys(coords).length > 0) {
-            parts.push('Connector coordinates (use for targeted calls):')
-            for (const [connType, coord] of Object.entries(coords)) {
-              parts.push(`  ${connType}: ${JSON.stringify(coord.resourceIds)}`)
-            }
-          }
-          if (context.freshness < 0.5) parts.push('  [STALE] Verify critical facts from live source.')
-          graphContext = parts.join('\n')
+  try {
+    const entityResp = await model.chat([
+      { role: 'system', content: 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.' },
+      { role: 'user', content: input },
+    ], [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+    const entityName = entityResp.content.trim()
+    if (entityName) {
+      const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 2)
+      if (context?.primaryEntity) {
+        const parts = [`Graph context for "${context.primaryEntity.name}" (${context.primaryEntity.type}):`]
+        for (const rel of context.relationships.slice(0, 10)) {
+          const fromName = rel.fromEntityId === context.primaryEntity.id
+            ? context.primaryEntity.name
+            : context.relatedEntities.find(e => e.id === rel.fromEntityId)?.name ?? rel.fromEntityId
+          const toName = context.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
+          parts.push(`  ${rel.relType}: ${fromName} → ${toName}`)
         }
+        const coords = context.connectorCoordinates
+        if (Object.keys(coords).length > 0) {
+          parts.push('Connector coordinates (use for targeted calls):')
+          for (const [connType, coord] of Object.entries(coords)) {
+            parts.push(`  ${connType}: ${JSON.stringify(coord.resourceIds)}`)
+          }
+        }
+        if (context.freshness < 0.5) parts.push('  [STALE] Verify critical facts from live source.')
+        graphContext = parts.join('\n')
       }
-    } catch {
-      // Non-blocking — proceed without graph context
     }
+  } catch (err) {
+    // Graph failure is audit-logged (hard violation per CLAUDE.md)
+    await auditSink.append({
+      id: crypto.randomUUID(),
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      sessionId: ctx.sessionId,
+      eventType: 'graph_context_failed',
+      payload: { error: err instanceof Error ? err.message : 'graph context resolution failed' },
+      createdAt: new Date(),
+    })
   }
 
   // Tool definitions for the LLM (run function stripped)
@@ -364,8 +372,3 @@ function makeError(code: ErrorCode, message: string): StreamEvent & { type: 'err
   return { type: 'error', code, message }
 }
 
-function connectorIdFromTool(toolName: string): string {
-  // Simple heuristic: tool names like 'github_list_prs' → connector 'github'
-  const underscoreIdx = toolName.indexOf('_')
-  return underscoreIdx > 0 ? toolName.slice(0, underscoreIdx) : toolName
-}

@@ -29,7 +29,9 @@ const WRITE_ACTION_PATTERNS = [
 ]
 
 export function isWriteAction(toolName: string): boolean {
-  return WRITE_ACTION_PATTERNS.some((p) => p.test(toolName))
+  // Test action suffix only — tools are named `<connector>.<action>` (e.g. `github.create_pr`)
+  const action = toolName.split('.').pop() ?? toolName
+  return WRITE_ACTION_PATTERNS.some((p) => p.test(action))
 }
 
 export async function pollGate(

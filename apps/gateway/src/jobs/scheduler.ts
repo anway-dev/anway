@@ -3,8 +3,9 @@
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief } from './cron-monitors.js'
-import { BullMQScheduler } from './bullmq-scheduler.js'
-import type { IScheduler, ScheduledJob } from '@anvay/agent'
+import { SchedulerFactory } from '../scheduler/factory.js'
+import { runFreshnessDecay } from '../kb/freshness-daemon.js'
+import type { IScheduler } from '@anvay/agent'
 
 async function updateLastRun(tenantId: string, jobType: string, result: unknown): Promise<void> {
   try {
@@ -21,7 +22,7 @@ async function updateLastRun(tenantId: string, jobType: string, result: unknown)
 }
 
 export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
-  const scheduler = new BullMQScheduler(redisUrl)
+  const scheduler = SchedulerFactory.create(redisUrl)
 
   await scheduler.register({
     id: 'service-health-sweep',
@@ -65,6 +66,16 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
         const result = await brief.run(id)
         await updateLastRun(id, 'oncall_morning_brief', result)
       }
+    },
+  })
+
+  // Freshness daemon — replaces setInterval with persistent IScheduler job
+  await scheduler.register({
+    id: 'freshness-decay',
+    name: 'freshness_decay',
+    schedule: '*/5 * * * *',
+    async run() {
+      return runFreshnessDecay(redisUrl)
     },
   })
 

@@ -3,20 +3,18 @@ import { PrismaClient } from '@prisma/client'
 const prisma = new PrismaClient()
 const log = (msg: string) => process.stdout.write(`[seed] ${msg}\n`)
 
+// Fixed UUID for deterministic E2E test access
+const DEMO_TENANT_ID = '00000000-0000-0000-0000-000000000001'
+
 async function main() {
   log('Starting seed...')
 
-  const tenant = await prisma.tenant.upsert({
-    where: { slug: 'demo' },
-    update: {},
-    create: {
-      name: 'Acme Corp (Demo)',
-      slug: 'demo',
-      plan: 'tier2',
-      token_budget_monthly: 10_000_000,
-      connector_limit: 10,
-    },
-  })
+  await prisma.$executeRaw`
+    INSERT INTO tenants (id, name, slug, plan, token_budget_monthly, connector_limit)
+    VALUES (${DEMO_TENANT_ID}::uuid, 'Acme Corp (Demo)', 'demo', 'tier2', 10000000, 10)
+    ON CONFLICT (slug) DO UPDATE SET id = ${DEMO_TENANT_ID}::uuid
+  `
+  const tenant = { id: DEMO_TENANT_ID, slug: 'demo' }
   log(`Tenant: ${tenant.slug} (${tenant.id})`)
 
   const user = await prisma.user.upsert({

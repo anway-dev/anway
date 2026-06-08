@@ -7,6 +7,139 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-08d -->
+## Review — 2026-06-08d | Gate RLS hardening + Dockerfile pnpm-deploy removal (3 source commits)
+
+### Commits reviewed since last review (33cbf81)
+
+| Commit | Description | Verdict |
+|--------|-------------|---------|
+| `98168d5` | fix(gate): withTenant wrapper + RLS on gate_events — BLOCKING-1/2 | ISSUES FOUND |
+| `81af3e1` | bridge: gateway Dockerfile fix — drop pnpm deploy, direct COPY approach | ISSUES FOUND |
+| `3572255` | bridge: gateway Dockerfile fix [ANSWERED] | LGTM ✓ (BRIDGE.md only) |
+
+### Issues Found
+
+#### [BLOCKING] gate_no_delete PERMISSIVE policy is a no-op — audit immutability not enforced
+**File:** `apps/gateway/prisma/migrations/0010_gate_events/migration.sql:26-27`
+**Issue:** `CREATE POLICY gate_no_delete ON gate_events AS PERMISSIVE FOR DELETE USING (false)`.
+Postgres OR's all PERMISSIVE policies for the same command. `tenant_isolation` is also PERMISSIVE FOR ALL (includes DELETE). For the owning tenant, `tenant_isolation` USING returns `true`. OR'd with `false` from `gate_no_delete` = `true`. Delete is allowed. The immutability contract is broken — any tenant can delete their own gate_events.
+**Fix:** Change to RESTRICTIVE, which AND's with PERMISSIVE policies:
+```sql
+-- Drop the no-op permissive policy
+DROP POLICY gate_no_delete ON gate_events;
+
+-- Immutable audit: RESTRICTIVE blocks ALL deletes regardless of other policies
+CREATE POLICY gate_no_delete ON gate_events AS RESTRICTIVE FOR DELETE USING (false);
+```
+Add to a new migration `0011_gate_events_restrictive_delete/migration.sql`.
+**Verify:**
+```sql
+SET app.tenant_id = '<valid-tenant-uuid>';
+DELETE FROM gate_events WHERE tenant_id = '<valid-tenant-uuid>';
+-- Must return: ERROR:  new row violates row-level security policy for table "gate_events"
+-- or: DELETE 0 (no rows deleted)
+```
+
+#### [HIGH] Container runs as root — USER node removed from Dockerfile
+**File:** `apps/gateway/Dockerfile` (runtime stage, line ~64)
+**Issue:** `USER node` was present in previous Dockerfile; removed in `81af3e1`. Container now runs as root. If the process is compromised, the attacker has root inside the container. `node:22` includes a built-in `node` user (uid 1000).
+**Fix:** Add before CMD:
+```dockerfile
+USER node
+```
+**Verify:** `docker run --rm infra-gateway whoami` → must return `node`, not `root`.
+
+#### [HIGH] gate-decide-route.ts returns { ok: true } when 0 rows updated
+**File:** `apps/gateway/src/gate/gate-decide-route.ts:24-32`
+**Issue:** `withTenant` + `$executeRaw` UPDATE returns `BigInt` rows affected. If the gate ID doesn't exist or belongs to a different tenant, 0 rows are updated — but the route still returns `{ ok: true, gateId, decision }`. Caller gets false confirmation.
+**Fix:**
+```typescript
+const result = await withTenant(prisma, tenantId, (tx) =>
+  tx.$executeRaw`
+    UPDATE gate_events
+    SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
+    WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
+  `
+)
+if (result === BigInt(0)) {
+  return reply.code(404).send({ error: 'gate not found or already decided' })
+}
+return { ok: true, gateId, decision }
+```
+Also add `AND status = 'pending'` to the WHERE clause — prevents re-deciding an already-decided gate.
+**Verify:** POST to `/api/gate/nonexistent-uuid/decide` → must return 404.
+
+#### [HIGH] tool_call_id column still missing from gate_events (carry-forward from 2026-06-08c)
+**File:** `apps/gateway/prisma/migrations/0010_gate_events/migration.sql:2-14`
+**Issue:** Orchestrator writes `toolCallId: toolCall.id` to gate events at runtime. Column does not exist in schema. Runtime inserts will fail or silently drop the field. Flagged as HIGH in 2026-06-08c review, not yet fixed.
+**Fix:** Add to migration (new migration `0011`):
+```sql
+ALTER TABLE gate_events ADD COLUMN tool_call_id TEXT;
+```
+Use TEXT not UUID — tool call IDs from Anthropic SDK are opaque strings, not UUIDs.
+**Verify:** `\d gate_events` shows `tool_call_id TEXT` column.
+
+#### [MEDIUM] cp -rn direction: root node_modules win over gateway-scoped versions
+**File:** `apps/gateway/Dockerfile` (runtime stage, line ~52)
+**Issue:** `RUN cp -rn gateway_node_modules/. node_modules/`. The `-n` flag = no-clobber (do not overwrite existing files). Root `node_modules` takes precedence. If gateway has a different version of a package already present in root, root's version is kept. Gateway-specific overrides are silently ignored.
+**Fix:** Remove `-n` flag so gateway-scoped versions win for conflicting files:
+```dockerfile
+RUN cp -r gateway_node_modules/. node_modules/ 2>/dev/null || true && rm -rf gateway_node_modules
+```
+**Verify:** Build and confirm `require.resolve('@prisma/client')` inside container resolves to the generated client, not a root stub.
+
+#### [MEDIUM] pnpm build steps use || true — build failures silently ignored
+**File:** `apps/gateway/Dockerfile` (builder stage, lines 21-22)
+**Issue:** `RUN pnpm --filter @anvay/types build || true` and `RUN pnpm --filter @anvay/agent build || true`. If either package fails to compile, the Docker build continues and the runtime container will crash when gateway tries to import missing dist files. Failure is invisible in CI.
+**Fix:** Remove `|| true`. If workspace packages fail to build, the gateway build should fail:
+```dockerfile
+RUN pnpm --filter @anvay/types build
+RUN pnpm --filter @anvay/agent build
+```
+If the packages are optional (not required at runtime), add an explicit comment explaining why failure is acceptable.
+**Verify:** Introduce a syntax error in `packages/types/src/index.ts` → Docker build must fail at the types build step.
+
+#### [LOW] Gate decisions not emitted as audit events
+**File:** `apps/gateway/src/gate/gate-decide-route.ts:24-32`
+**Issue:** Gate approve/reject is a WRITE action (status transition on a gate event). CLAUDE.md requires every write action to be audit-logged. The route only updates the DB row — no `audit_events` INSERT. Gap in the immutable audit trail.
+**Fix:** After the UPDATE, insert an audit event:
+```typescript
+await withTenant(prisma, tenantId, (tx) =>
+  tx.$executeRaw`
+    INSERT INTO audit_events (tenant_id, user_id, session_id, event_type, payload)
+    SELECT tenant_id, ${userId}::uuid, session_id,
+           'gate_decided',
+           jsonb_build_object('gateId', id::text, 'decision', ${decision}::text)
+    FROM gate_events WHERE id = ${gateId}::uuid
+  `
+)
+```
+**Verify:** After gate decision, `SELECT * FROM audit_events WHERE event_type = 'gate_decided'` returns a row.
+
+### Summary
+
+| Dimension | Rating | Notes |
+|-----------|--------|-------|
+| D1 Feature Completeness | 3/5 | BLOCKING-1/2 from 2026-06-08c applied. tool_call_id still absent (HIGH carry-forward). Dockerfile builds successfully. |
+| D2 Code Standards | 3/5 | `|| true` on build steps swallows failures; 0-rows update silent; no audit event on gate decision. |
+| D3 Performance | 5/5 | No regressions. Direct COPY approach avoids pnpm deploy overhead. |
+| D4 Security | 2/5 | BLOCKING: gate_no_delete PERMISSIVE is a no-op (audit immutability unenforceable). HIGH: container runs as root. |
+| D5 Readability | 4/5 | gate-decide-route clean and minimal. Dockerfile comments are clear. |
+| D6 Clarity/Comments | 4/5 | "Generated Prisma client is in the pnpm store" comment is accurate. gate_no_delete comment says "immutable" but enforcement is broken. |
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Gate RLS hardening (BLOCKING from 2026-06-08c) | Partial | withTenant + ENABLE RLS done. gate_no_delete PERMISSIVE bug still blocks immutability. |
+| tool_call_id in gate_events (HIGH from 2026-06-08c) | Pending | Not fixed. Carry-forward HIGH. |
+| Docker stack fully healthy | Pending | Dockerfile builds. Stack startup blocked by executor disk exhaustion. |
+| Playwright E2E tests | Pending | Blocked on healthy stack. |
+| All M0–M5 tasks | Complete | Based on prior reviews. No regressions in this batch. |
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-08c -->
 ## Review — 2026-06-08 | M7 bootstrap + M8 ILIKE + gate L2 + opus fixes (16 commits)
 

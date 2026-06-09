@@ -41,7 +41,7 @@ export function ConnectorsView() {
   }, []);
 
   const visible = filter === "All" ? CONNECTORS : CONNECTORS.filter((c) => c.category === filter);
-  const connected = CONNECTORS.filter((c) => configuredMap[c.id] || c.connected).length;
+  const connected = Object.values(configuredMap).filter(Boolean).length;
 
   async function handleConnect() {
     if (!modal) return;

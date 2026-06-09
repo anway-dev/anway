@@ -315,6 +315,14 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const [confidence, setConfidence] = useState<number | null>(null);
   const [gateRequired, setGateRequired] = useState<{ gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [devToken, setDevToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/dev-token')
+      .then(r => r.json())
+      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
+      .catch(() => {})
+  }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -366,7 +374,10 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     try {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(devToken ? { Authorization: `Bearer ${devToken}` } : {}),
+        },
         body: JSON.stringify({ messages: [{ role: 'user', content: text }] }),
       });
 

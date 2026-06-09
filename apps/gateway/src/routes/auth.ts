@@ -54,4 +54,37 @@ export async function authRoutes(app: FastifyInstance) {
 
     return reply.send({ token, expiresIn: '24h' })
   })
+
+  // Dev-only: returns a signed JWT + upserts dev tenant/user — no auth required
+  // Only available when NODE_ENV=development
+  app.get('/api/auth/dev-token', async (request, reply) => {
+    if (process.env.NODE_ENV !== 'development') {
+      return reply.code(404).send({ error: 'not found' })
+    }
+
+    const DEV_TENANT = '00000000-0000-0000-0000-000000000001'
+    const DEV_USER = '00000000-0000-0000-0000-000000000002'
+    const DEV_EMAIL = 'dev@anvay.local'
+
+    // Upsert tenant + user so withTenant() works downstream
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO tenants (id, name, slug, plan) VALUES (${DEV_TENANT}::uuid, 'Dev Tenant', 'dev', 'free')
+        ON CONFLICT (id) DO NOTHING
+      `
+      await prisma.$executeRaw`
+        INSERT INTO users (id, tenant_id, email, role) VALUES (${DEV_USER}::uuid, ${DEV_TENANT}::uuid, ${DEV_EMAIL}, 'admin')
+        ON CONFLICT (id) DO NOTHING
+      `
+    } catch { /* table may not exist yet — still return token */ }
+
+    const token = await reply.jwtSign({
+      sub: DEV_USER,
+      email: DEV_EMAIL,
+      tenantId: DEV_TENANT,
+      role: 'admin',
+    })
+
+    return reply.send({ token, tenantId: DEV_TENANT })
+  })
 }

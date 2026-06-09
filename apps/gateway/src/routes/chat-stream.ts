@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream'
 import type { FastifyInstance } from 'fastify'
-import { ProviderFactory, providerRegistry } from '@anvay/agent'
-import type { ProviderConfig, IConnectorAgent, ConnectorTool, Message } from '@anvay/agent'
+import { ProviderFactory } from '@anvay/agent'
+import type { ProviderConfig, IConnectorAgent, ConnectorTool, ToolDefinition } from '@anvay/agent'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
@@ -68,16 +68,16 @@ export async function chatStreamRoutes(app: FastifyInstance) {
     ).catch(() => [])
 
     // Build tool list from connected connectors' agent files
-    const tools: { definition: Record<string, unknown>; execute: (params: Record<string, unknown>) => Promise<unknown> }[] = []
+    const tools: { definition: ToolDefinition; execute: (params: Record<string, unknown>) => Promise<unknown> }[] = []
     const credMap = new Map<string, Record<string, unknown>>()
 
     for (const cc of connConfigs) {
       credMap.set(cc.connector_type, cc.credentials as Record<string, unknown>)
       try {
-        const mod = await import(`../../../connectors/${cc.connector_type}/src/agent.js`) as { default?: new () => IConnectorAgent; [key: string]: new () => IConnectorAgent | unknown }
+        const mod = await import(`../../../../connectors/${cc.connector_type}/src/agent.js`) as Record<string, unknown>
         // Try default export or named export {XxxAgent}
-        const AgentClass = Object.values(mod).find(v => typeof v === 'function' && v.prototype?.connectorType !== undefined) as (new () => IConnectorAgent) | undefined
-          ?? Object.values(mod).find(v => typeof v === 'function') as (new () => IConnectorAgent) | undefined
+        const AgentClass = (Object.values(mod).find(v => typeof v === 'function' && (v as { prototype?: { connectorType?: string } }).prototype?.connectorType !== undefined)
+          ?? Object.values(mod).find(v => typeof v === 'function')) as (new () => IConnectorAgent) | undefined
         if (AgentClass) {
           const agent = new AgentClass()
           for (const tool of agent.tools) {
@@ -100,8 +100,9 @@ export async function chatStreamRoutes(app: FastifyInstance) {
     reply.header('Cache-Control', 'no-cache')
     reply.header('Connection', 'keep-alive')
 
-    const llmMessages: Message[] = messages.map(m => ({
-      role: m.role as 'user' | 'assistant',
+    interface LLMMessage { role: 'user' | 'assistant'; content: string }
+    const llmMessages: LLMMessage[] = messages.map(m => ({
+      role: (m.role === 'tool' ? 'assistant' : m.role) as 'user' | 'assistant',
       content: m.content,
     }))
 
@@ -110,7 +111,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
         let iterations = 0
         while (iterations < MAX_ITERATIONS) {
           iterations++
-          const response = await provider.chat(llmMessages, tools.map(t => t.definition as never), {
+          const response = await provider.chat(llmMessages as Parameters<typeof provider.chat>[0], tools.map(t => t.definition), {
             model: defaultModel,
             maxTokens: 2000,
           })
@@ -125,7 +126,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
           }
 
           for (const tc of response.toolCalls) {
-            const tool = tools.find(t => (t.definition as { name?: string }).name === tc.name)
+            const tool = tools.find(t => t.definition.name === tc.name)
             if (tool) {
               try {
                 const result = await tool.execute(tc.args as Record<string, unknown>)

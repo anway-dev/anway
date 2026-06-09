@@ -7,6 +7,310 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10 -->
+## Review — 2026-06-10 | Bridge 2026-06-10a phases 1–3: demo stack + real connectors + event bus
+
+### Scope
+
+All commits from `36e1d50` → `50c6243`. 255 files changed across gateway routes, agent packages,
+33 connector packages, web app, infra demo stack, and scripts.
+
+### Verdict: 5 BLOCKING, 6 HIGH, 7 MEDIUM, 7 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2.5/5 | Phase 1 demo stack ~90% done. Phase 2 connector execute() wired but multi-hop broken (tool-result role bug). Phase 3 event bus wired but async-in-sync bug + SSE type mismatch = streaming path dead end-to-end. |
+| D2 Code Standards | 3/5 | `withTenant` + provider abstraction consistent. New `chat-stream.ts` diverges from established `chat.ts` orchestrator pattern without justification — two competing agentic loops. Several `(creds as any)` casts signal missing typed credential schemas. |
+| D3 Performance | 2.5/5 | No request timeout on streaming loop. Credentials fetched on every request without caching. Bootstrap registry rebuilt on every graph event (accepted: correctness over perf). |
+| D4 Security | 1.5/5 | Path traversal in dynamic import, no audit on streaming path, GraphQL injection, SSRF on GitHub baseUrl, plaintext credentials comment, XSS on chat output. RLS coverage good; connector allowlist exists in settings.ts but missing from connectors.ts and chat-stream.ts. |
+| D5 Readability | 3.5/5 | Demo services and chaos script minimal and clear. `chat-stream.ts` hand-rolled loop harder to follow than the orchestrator it should delegate to. |
+| D6 Clarity/Comments | 3/5 | `graph-builder/subscriber.ts` explains bootstrap-per-event rationale. Migration `0017` has misleading "encrypted" comment. `isSafeBaseUrl` is in `settings.ts` not `validators.ts`. |
+
+---
+
+### Phase completion
+
+| Phase | Target | State | % |
+|-------|--------|-------|---|
+| Phase 1 — chaotic demo services | payments/auth/checkout + chaos + Prometheus + Grafana + Gitea | Services run, metrics emit, chaos injects, Gitea commits work. Docker socket scope issue is a nuance. | ~90% |
+| Phase 2 — real connector execute() | GitHub + Linear call live APIs | Agents implemented. Tool-result role bug means multi-hop queries are broken. Single-shot tool calls work. | ~60% |
+| Phase 3 — event bus flow | alert → EventBus → GraphBuilder → KG → Orchestrator → SSE | Redis pub/sub wired, subscribers exist. Three blockers: async bug in graph-builder, SSE type mismatch, no audit on stream path. | ~40% |
+| Phase 4 — UI wired to real data | Chat shows real connector data | Hard-blocked by SSE event type mismatch. Bootstrap-status proxy drops auth header. | ~25% |
+| End-to-end demo | Demo starts → alert fires → Anvay surfaces root cause in chat | Not working. B3, B4, B5 together mean streaming chat path is dead. | ~35% |
+
+---
+
+### BLOCKING
+
+**B1 — `apps/gateway/src/routes/chat-stream.ts:77` — path traversal via unsanitised `connector_type` in dynamic import**
+
+`connector_type` loaded from DB is injected into `import()` with no allowlist check. A tenant who can write to `connector_config` can set `connector_type = '../../routes/auth'` to load arbitrary bundle files as side-effects. Even though `PUT /api/settings/connectors/:type` validates against `KNOWN_CONNECTORS`, the DB value is still tenant-controlled.
+
+```typescript
+// Add at top of chat-stream.ts:
+const ALLOWED_CONNECTORS = new Set([
+  'github','datadog','linear','argocd','coralogix','notion','prometheus','newrelic',
+  'jira','loki','terraform','pagerduty','slack','grafana','elastic','dynatrace',
+  'sentry','jenkins','circleci','vercel','k8s','vault','snyk','sonarqube',
+  'opsgenie','launchdarkly','confluence','eks','gke','aws-cloudwatch',
+  'aws-health','gcp-monitoring','azure-monitor',
+])
+// Before the dynamic import:
+if (!ALLOWED_CONNECTORS.has(cc.connector_type) || /[./\\]/.test(cc.connector_type)) continue
+```
+
+Verify: insert `connector_type = '../../routes/auth'` directly into DB; confirm loop skips it without a module-resolution error.
+
+---
+
+**B2 — `apps/gateway/src/routes/chat-stream.ts:104–107` — no audit trail, no perimeter enforcement, no graph-first context injection**
+
+The streaming route builds its own bare agentic loop that: never calls `PostgresAuditSink` (violates CLAUDE.md non-negotiable audit requirement), runs a hard-coded `!tool.write` filter instead of evaluating the provisioned capability perimeter, and never calls `resolveContext` on the KG before dispatching (violates "graph first, always").
+
+The existing `routes/chat.ts` wires the proper orchestrator with audit, token budgets, and perimeter enforcement. This new route reinvents it incorrectly.
+
+Fix: Replace the hand-rolled loop with the same orchestrator wiring from `routes/chat.ts`. If streaming requires different response handling, pipe the orchestrator's `AsyncIterator<StreamEvent>` to SSE rather than rewriting the loop.
+
+Verify: After a chat via `/api/chat/stream`, confirm a row appears in `audit_events` for tool calls made.
+
+---
+
+**B3 — `apps/gateway/src/routes/chat-stream.ts:133` — tool-result messages use role `assistant`; agentic loop is broken**
+
+```typescript
+// WRONG:
+llmMessages.push({ role: 'assistant', content: JSON.stringify(result) })
+// FIX:
+llmMessages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: tc.id, name: tc.name })
+```
+
+The LLM does not recognise the `assistant` turn as a tool response. Multi-hop queries always get a second LLM turn that ignores the tool data entirely.
+
+Verify: submit a query triggering a tool call; confirm the second LLM turn receives grounded tool data, not an ignored assistant message.
+
+---
+
+**B4 — `apps/gateway/src/routes/auth.ts:72` — `plan = 'free'` is not a valid Prisma `Plan` enum; dev-token upsert silently fails**
+
+Schema defines `Plan` as `{ tier1, tier2, tier3 }`. Inserting `'free'` throws a PostgreSQL enum cast error, caught silently by `catch {}`. The JWT is issued, but the dev tenant row never lands in DB. Every downstream `withTenant()` call fails because RLS finds no matching tenant. Demo is silently broken from the start.
+
+```typescript
+// Fix: change 'free' → 'tier1'
+INSERT INTO tenants (id, name, slug, plan) VALUES (${DEV_TENANT}::uuid, 'Dev Tenant', 'dev', 'tier1')
+```
+
+Verify: call `GET /api/auth/dev-token`, then `SELECT * FROM tenants WHERE id = '00000000-0000-0000-0000-000000000001'` — row must exist with `plan = 'tier1'`.
+
+---
+
+**B5 — `apps/gateway/src/routes/chat-stream.ts:119–120` — SSE emits `type: 'token'`; frontend only handles `type: 'text_delta'` — streaming is silently dead**
+
+```typescript
+// Gateway emits (WRONG):
+stream.push(`data: ${JSON.stringify({ type: 'token', content: response.content })}\n\n`)
+// Fix:
+stream.push(`data: ${JSON.stringify({ type: 'text_delta', content: response.content })}\n\n`)
+```
+
+Every streamed token falls through every handler branch with no match. From the user's perspective: spinner shows, nothing renders, spinner stops.
+
+Verify: send a chat message; confirm assistant message box populates with streamed text.
+
+---
+
+### HIGH
+
+**H1 — `connectors/linear/src/agent.ts:11,29` — GraphQL injection via LLM-controlled `params.team`**
+
+```typescript
+// WRONG: direct interpolation
+const query = `query { issues(filter: { team: { key: { eq: "${params.team}" } } }, first: ${params.limit ?? 25}) { ... } }`
+// FIX: use variables
+const query = `query GetIssues($teamKey: String!, $limit: Int!) { issues(filter: { team: { key: { eq: $teamKey } } }, first: $limit) { ... } }`
+const variables = { teamKey: String(params.team).slice(0, 64), limit: Math.min(Number(params.limit ?? 25), 100) }
+body: JSON.stringify({ query, variables })
+```
+
+Applies to `get_projects` on line 29 as well.
+
+Verify: pass `params.team = '"}}\nquery { malicious }'`; confirm injected fragment is not reflected in the request body.
+
+---
+
+**H2 — `connectors/github/src/agent.ts:5–7,41` — SSRF via tenant-controlled `baseUrl` + path traversal in `params.path`**
+
+`baseUrl` from tenant credentials is not passed through `isSafeBaseUrl`. A tenant can store `baseUrl = 'http://169.254.169.254'` or an internal K8s API server URL. `params.path` in `get_file` is concatenated without stripping `..` segments.
+
+Fix: call `isSafeBaseUrl(baseUrl)` before any fetch; strip `..` from path:
+```typescript
+if (!isSafeBaseUrl(baseUrl)) throw new Error('SSRF: unsafe baseUrl')
+const safePath = (params.path as string).replace(/\.\.[/\\]/g, '').replace(/^\/+/, '')
+```
+
+Verify: store credential with `baseUrl = 'http://169.254.169.254'` and invoke `get_prs`; confirm blocked.
+
+---
+
+**H3 — `apps/gateway/src/routes/settings.ts:47–62` — API keys stored plaintext; migration comment says "encrypted" — false confidence**
+
+Migration `0017` comment: `-- Connector credentials stored encrypted in DB.` No encryption implementation exists anywhere in the codebase. A DB read leak exposes every tenant's LLM API keys and connector credentials.
+
+Minimum fix for this PR: correct the misleading comment to `-- NOTE: api_key stored plaintext — encryption is a follow-on task`. Proper fix: AES-256-GCM wrap at application layer before INSERT, decrypt on SELECT.
+
+---
+
+**H4 — `apps/gateway/src/routes/connectors.ts:51–61` — bootstrap trigger accepts any `:type` with no allowlist; publishes to Redis without validation**
+
+`POST /api/connectors/:type/bootstrap` publishes `connectorType` from URL path directly to Redis. An authenticated user can flood the event bus with fabricated connector types or attempt path traversal via URL encoding.
+
+```typescript
+if (!KNOWN_CONNECTORS.includes(type)) return reply.code(400).send({ error: 'Unknown connector type' })
+```
+
+(Extract `KNOWN_CONNECTORS` from `settings.ts` to a shared `constants.ts`.)
+
+---
+
+**H5 — `apps/web/components/orchestrator-chat.tsx:192` — LLM output injected into DOM via `dangerouslySetInnerHTML` without sanitisation (XSS)**
+
+```typescript
+// WRONG:
+<span dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }} />
+// FIX: add isomorphic-dompurify to apps/web/package.json, then:
+import DOMPurify from 'isomorphic-dompurify'
+<span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(parseMarkdown(message.content)) }} />
+```
+
+A prompt-injected LLM response containing `<script>` or `<img onerror=...>` executes in the user's browser.
+
+---
+
+**H6 — `apps/web/app/api/connectors/[type]/bootstrap-status/route.ts:5` — proxy drops auth header; gateway returns 401 on every call**
+
+```typescript
+// WRONG: no auth header
+const resp = await fetch(`${GATEWAY_URL}/api/connectors/${type}/bootstrap-status`)
+// FIX:
+const authHeader = request.headers.get('Authorization')
+const resp = await fetch(`${GATEWAY_URL}/api/connectors/${type}/bootstrap-status`, {
+  headers: authHeader ? { Authorization: authHeader } : {},
+})
+```
+
+Verify: authenticated browser request to `/api/connectors/github/bootstrap-status` returns non-401.
+
+---
+
+### MEDIUM
+
+**M1 — `apps/gateway/src/graph-builder/subscriber.ts:61` — async handler inside sync `subscribe` callback; unhandled rejections crash process**
+
+```typescript
+// FIX: wrap in void IIFE with try/catch
+await sub.subscribe(channel, (message) => {
+  void (async () => {
+    try { /* existing body */ }
+    catch (err) { log.error({ err }, 'graph-builder: unhandled event error') }
+  })()
+})
+```
+
+---
+
+**M2 — `apps/gateway/src/routes/settings.ts:65` — `GET /api/settings/models` has no authentication**
+
+No `preHandler: [app.authenticate]`. Anyone can call with arbitrary `baseUrl` and trigger an outbound HTTP fetch — enables port scanning of external targets via the gateway. Add auth preHandler.
+
+---
+
+**M3 — `apps/gateway/src/routes/chat-stream.ts:112–125` — no per-request timeout on streaming loop**
+
+Up to 5 sequential `provider.chat()` calls with no wall-clock timeout. Slow Ollama models can hold a connection 300s+. Thread an `AbortController` with `REQUEST_TIMEOUT_MS = 120_000` through all provider calls.
+
+---
+
+**M4 — `apps/gateway/src/routes/auth.ts:60` — `GET /api/auth/dev-token` has no rate limit**
+
+In a dev VM with accidental external exposure, any caller gets a valid admin JWT with fixed dev UUIDs. Add `fastify-rate-limit` at `max: 5` per minute and optionally bind to localhost-only.
+
+---
+
+**M5 — `apps/gateway/src/routes/chat-stream.ts:64–68` — credentials fetched from DB on every chat request, no size limit**
+
+No `LIMIT` on the query. A tenant with 33 connectors each with a large credentials blob causes a large allocation every request. Add `LIMIT 50` to query; enforce max credential JSON size on PUT endpoint.
+
+---
+
+**M6 — `infra/demo/docker-compose.yml:27` — chaos container mounts raw Docker socket; `docker kill` filter matches by substring, not exact name**
+
+`--filter "name=$TARGET"` matches any container whose name *contains* the string. A host running a production `payments-api` alongside the demo would have it killed. Use exact-name filter: `--filter "name=^/anvay-demo_${TARGET}"` or route all docker CLI calls through the socket proxy.
+
+---
+
+**M7 — `apps/gateway/src/jobs/bullmq-scheduler.ts:30–34` — raw cron string from DB passed to BullMQ without validation**
+
+An invalid expression throws at registration. Validate before enqueuing:
+```typescript
+import { parseExpression } from 'cron-parser'
+try { parseExpression(job.schedule) } catch { throw new Error(`Invalid cron: ${job.schedule}`) }
+```
+
+---
+
+### LOW
+
+**L1 — `connectors/github/src/agent.ts:6–7` — Gitea detection by `:3000` hostname heuristic is fragile**
+
+`:3000` also matches Next.js dev, Grafana, etc. Add explicit `type: 'gitea' | 'github'` to the credential schema instead.
+
+---
+
+**L2 — `packages/agent/src/agents/ba.ts:27`, `oncall.ts:27,37` — model IDs hardcoded as string literals**
+
+CLAUDE.md requires model IDs from config, not hardcoded. If tenant configures Groq, these agents still attempt `claude-sonnet-4-6`. Pass `cheapModelId`/`mainModelId` constructor params (already done in `SREAgent`).
+
+---
+
+**L3 — `infra/demo/services/chaos/chaos.sh:23–28` — Gitea credentials hardcoded in script**
+
+```bash
+GITEA_USER="${GITEA_USER:-anvay}"
+GITEA_PASS="${GITEA_PASS:-anvaypassword}"
+```
+Source from env vars set by `docker-compose.yml` instead of hardcoding.
+
+---
+
+**L4 — `apps/gateway/src/graph-builder/subscriber.ts:57–58` — `graphPub` Redis client has no reconnect strategy**
+
+`sub` has reconnect strategy; `graphPub` uses bare `createClient({url})`. Silent failures on transient Redis disconnect. Add `socket: { reconnectStrategy: (r) => Math.min(r * 100, 3000) }`.
+
+---
+
+**L5 — `apps/gateway/src/routes/chat-stream.ts:116` — `maxTokens: 2000` hardcoded; ignores tenant token budget**
+
+`routes/chat.ts` enforces `buildTokenBudget(dbTenant.token_budget_monthly, sessionUsed)`. Streaming route hardcodes 2000 with no budget check. Load and enforce the same budget.
+
+---
+
+**L6 — `infra/.env` tracked by git**
+
+Contains `JWT_SECRET=dev-secret-change-in-production` and Neo4j password. Root `.gitignore` blocks `.env` but `infra/` has no `.gitignore`. Add `infra/.env` to root `.gitignore`. Rotate values if remote history exists.
+
+---
+
+**L7 — `apps/web/app/api/connectors/[type]/bootstrap-status/route.ts:5` — `type` segment forwarded to gateway without allowlist**
+
+`../../auth/dev-token` via URL encoding could reach unintended gateway endpoints. Validate `type` against `KNOWN_CONNECTORS` before forwarding.
+
+<!-- REVIEW SECTION END — 2026-06-10 -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-09g -->
 ## Review — 2026-06-09g | Full codebase review — M0 through M5+M6 connector bootstraps
 

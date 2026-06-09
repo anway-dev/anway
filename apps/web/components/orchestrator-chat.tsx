@@ -364,10 +364,10 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" });
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: text, sessionId: sessionIdRef.current }),
+        body: JSON.stringify({ messages: [{ role: 'user', content: text }] }),
       });
 
       if (!response.ok) {

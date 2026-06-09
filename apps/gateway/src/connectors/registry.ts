@@ -54,8 +54,8 @@ function instantiateAdapter(row: ConnectorRow, tenantId: string): McpConnector |
               data: {
                 id: crypto.randomUUID(),
                 tenant_id: tenantId,
-                user_id: '',
-                session_id: '',
+                user_id: null,
+                session_id: null,
                 event_type: 'tool_call_allowed',
                 payload: JSON.parse(JSON.stringify(entry)),
                 created_at: new Date(),

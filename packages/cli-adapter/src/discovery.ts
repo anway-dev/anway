@@ -46,8 +46,8 @@ export async function discoverSubcommands(
 export function parseHelpOutput(
   text: string,
   binary: string,
-  env?: Record<string, string>,
-  timeoutMs?: number,
+  _env?: Record<string, string>,
+  _timeoutMs?: number,
 ): DiscoveredCommand[] {
   const lines = text.split('\n')
   const topLevel: DiscoveredCommand[] = []

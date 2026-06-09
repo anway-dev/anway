@@ -7,7 +7,7 @@ import pino from 'pino'
 const log = pino({ name: 'redis-gate-sink' })
 
 const GATE_KEY_PREFIX = 'gate:'
-const GATE_TTL_SECONDS = 600
+const GATE_TTL_SECONDS = 600 // must exceed orchestrator poll timeout (default 5 min) + max human response window
 
 /**
  * Redis-backed IGateSink. Gate events persisted to Postgres + Redis cache.
@@ -65,29 +65,9 @@ export class RedisGateSink implements IGateSink {
     }
   }
 
-  async record(gateId: string, decision: 'approved' | 'rejected', decidedBy: string): Promise<void> {
+  async record(gateId: string, decision: 'approved' | 'rejected', _decidedBy: string): Promise<void> {
+    // Postgres update is handled by gate-decide-route.ts — this only sets Redis key
     const pub = await this.getPub()
-
-    // Read cached event to get tenantId for RLS-aware Postgres update
-    const eventJson = await pub.get(`${GATE_KEY_PREFIX}${gateId}`)
-    const tenantId = eventJson
-      ? (JSON.parse(eventJson) as { tenantId?: string }).tenantId
-      : null
-
-    if (tenantId) {
-      try {
-        await withTenant(prisma, tenantId, (tx) =>
-          tx.$executeRaw`
-            UPDATE gate_events
-            SET status = ${decision}::text, decided_by = ${decidedBy}::uuid, decided_at = NOW()
-            WHERE id = ${gateId}::uuid AND status = 'pending'
-          `
-        )
-      } catch (err) {
-        log.warn({ err, gateId }, 'gate_events status update failed')
-      }
-    }
-
     await pub.setEx(`${GATE_KEY_PREFIX}${gateId}:decision`, GATE_TTL_SECONDS, decision)
   }
 }

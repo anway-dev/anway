@@ -1,10 +1,9 @@
 import type { AuditEvent, IAuditSink } from '@anvay/agent'
 import type { PrismaClient } from '@prisma/client'
 import { withTenant } from '../db/prisma.js'
+import { isValidUUID } from '../utils/validators.js'
 
-function isUUID(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-}
+const isUUID = isValidUUID
 
 /**
  * Writes audit events to the audit_events table.
@@ -24,7 +23,10 @@ export class PostgresAuditSink implements IAuditSink {
           data: {
             id: event.id,
             tenant_id: event.tenantId,
-            user_id: isUUID(event.userId) ? event.userId : null,
+            user_id: isUUID(event.userId) ? event.userId : (() => {
+              this.onError?.(new Error(`audit: invalid userId "${String(event.userId)}" — storing null`))
+              return null
+            })(),
             session_id: isUUID(event.sessionId) ? event.sessionId : null,
             event_type: event.eventType,
             payload: event.payload as object,

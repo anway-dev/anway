@@ -141,11 +141,12 @@ export class StructuralGraph implements IKnowledgeGraph {
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (tenant_id, from_entity_id, rel_type, to_entity_id)
-	       DO UPDATE SET metadata = EXCLUDED.metadata
+	       DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = NOW()
        RETURNING id`,
       [tenantId, rel.fromEntityId, rel.relType, rel.toEntityId, JSON.stringify(rel.metadata ?? {})],
     )
-    return rows[0]?.id ?? ''
+    if (!rows[0]?.id) throw new Error('upsertRelationship: no row returned')
+    return rows[0]!.id
   }
 
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {

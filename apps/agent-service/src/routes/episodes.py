@@ -22,8 +22,8 @@ def validate_uuid(value: str) -> str:
 async def add_episode(body: EpisodeIn, request: Request, x_tenant_id: str = Header(...)):
     validate_uuid(x_tenant_id)
     graphiti = request.app.state.graphiti
-    if graphiti is None:
-        return {"status": "unavailable", "error": "Graphiti not initialized"}
+    if not graphiti:
+        raise HTTPException(status_code=503, detail="Graphiti unavailable")
     await graphiti.add_episode(
         name=body.name,
         episode_body=body.episode_body,

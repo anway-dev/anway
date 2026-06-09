@@ -5,11 +5,10 @@ import { ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
 import { IncidentService } from '../services/incident.js'
 import { prisma } from '../db/client.js'
+import { UUID_RE } from '../utils/validators.js'
 import pino from 'pino'
 
 const log = pino({ name: 'incident-subscriber' })
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function resolveProviderConfig(): ProviderConfig | null {
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }

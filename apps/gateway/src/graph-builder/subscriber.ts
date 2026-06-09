@@ -10,14 +10,13 @@ import { ArgocdBootstrap } from '@anvay/connector-argocd'
 import { DatadogBootstrap } from '@anvay/connector-datadog'
 import { LinearBootstrap } from '@anvay/connector-linear'
 import type { TenantId } from '@anvay/types'
+import { UUID_RE } from '../utils/validators.js'
 interface SubscriberLogger { warn(obj: unknown, msg?: string): void; info(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void }
 
 const GRAPH_EVENT_CHANNELS = [
   'pr_merged', 'deploy_completed', 'incident_created',
   'ticket_created', 'connector_registered',
 ]
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function resolveProviderConfig(): ProviderConfig | null {
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic' as const, apiKey: process.env['ANTHROPIC_API_KEY']! }
@@ -54,6 +53,11 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         log.warn({ channel, tenantId: event.tenantId }, 'graph-builder subscriber: invalid tenantId — skipping')
         return
       }
+      // bootstrapRegistry is rebuilt per event because kg is per-tenant.
+      // GitHubBootstrap(kg, token) and LinearBootstrap(kg, apiKey) each capture
+      // a per-tenant IKnowledgeGraph instance, so registry must live in callback.
+      // Moving registry outside would require tenant-aware factory — correctness
+      // is fine as-is, no optimisation needed.
       const kg = createKnowledgeGraph(event.tenantId as TenantId)
       const bootstrapRegistry = new Map<string, IConnectorBootstrap>()
       bootstrapRegistry.set('github', new GitHubBootstrap(kg, process.env['GH_TOKEN'] ?? ''))

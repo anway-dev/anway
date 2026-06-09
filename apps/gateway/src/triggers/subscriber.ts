@@ -3,10 +3,10 @@ import { TriggerEngine } from './engine.js'
 import type { TriggerRule } from './engine.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { UUID_RE } from '../utils/validators.js'
 import pino from 'pino'
 
 const log = pino({ name: 'trigger-subscriber' })
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const EVENT_CHANNELS = [
   'alert_fired', 'deploy_completed', 'deploy_failed',

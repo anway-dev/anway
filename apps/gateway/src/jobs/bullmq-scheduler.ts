@@ -16,6 +16,15 @@ export class BullMQScheduler implements IScheduler {
   async register(job: ScheduledJob): Promise<void> {
     this.jobMap.set(job.name, job)
 
+    // Deduplicate: remove existing repeatable job with same name
+    try {
+      const existing = await this.queue.getRepeatableJobs()
+      const dup = existing.find(j => j.name === job.name)
+      if (dup) await this.queue.removeRepeatableByKey(dup.key)
+    } catch {
+      // Best-effort dedup — register proceeds even if dedup fails
+    }
+
     // Register as a repeatable job with cron pattern
     try {
       await this.queue.add(job.name, { jobId: job.id }, {

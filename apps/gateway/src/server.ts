@@ -13,6 +13,7 @@ import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
 import { startTriggerExecutor } from './triggers/executor.js'
 import { startIncidentSubscriber } from './events/incident-subscriber.js'
 
+const DEFAULT_REDIS_URL = 'redis://localhost:6379'
 const bootstrapLog = pino({ level: 'info' })
 
 async function main() {
@@ -46,12 +47,12 @@ async function main() {
     app.log.info({ port, host }, 'gateway server started')
     // Start trigger subscriber (non-blocking — fails gracefully without Redis)
     try {
-      await startTriggerSubscriber(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+      await startTriggerSubscriber(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
     } catch (err) {
       app.log.warn({ err }, 'Trigger subscriber not started — Redis may be unavailable')
     }
     try {
-      const cronScheduler = await createCronJobs(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+      const cronScheduler = await createCronJobs(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
       await cronScheduler.start()
       app.log.info('Cron scheduler started')
     } catch (err) {
@@ -59,19 +60,19 @@ async function main() {
     }
     try {
       await startGraphBuilderSubscriber(
-        process.env['REDIS_URL'] ?? 'redis://localhost:6379',
+        process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL,
         app.log,
       )
     } catch (err) {
       app.log.warn({ err }, 'Graph builder subscriber not started — Redis may be unavailable')
     }
     try {
-      await startTriggerExecutor(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+      await startTriggerExecutor(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
     } catch (err) {
       app.log.warn({ err }, 'Trigger executor not started — Redis may be unavailable')
     }
     try {
-      await startIncidentSubscriber(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+      await startIncidentSubscriber(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
     } catch (err) {
       app.log.warn({ err }, 'Incident subscriber not started — Redis may be unavailable')
     }

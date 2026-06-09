@@ -12,6 +12,6 @@ export class LinearBootstrap implements IConnectorBootstrap {
     if (!this.apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Linear bootstrap: no API key'] }
     }
-    return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Linear bootstrap: SDK not wired'] }
+    return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Linear bootstrap: not implemented'] }
   }
 }

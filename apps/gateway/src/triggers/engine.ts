@@ -31,6 +31,7 @@ export class TriggerEngine {
     return matched
   }
 
+  // V1: exact equality match only. Range/nested/array operators not supported.
   private matchesCondition(condition: Record<string, unknown>, payload: Record<string, unknown>): boolean {
     for (const [key, value] of Object.entries(condition)) {
       if (payload[key] !== value) return false

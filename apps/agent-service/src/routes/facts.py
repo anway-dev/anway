@@ -20,7 +20,7 @@ async def get_facts(
 ):
     validate_uuid(x_tenant_id)
     graphiti = request.app.state.graphiti
-    if graphiti is None:
-        return []
+    if not graphiti:
+        raise HTTPException(status_code=503, detail="Graphiti unavailable")
     results = await graphiti.search(query=query, group_ids=[x_tenant_id])
     return [{"claim": r.fact, "valid_at": r.valid_at} for r in results]

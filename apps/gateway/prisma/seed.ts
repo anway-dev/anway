@@ -12,7 +12,7 @@ async function main() {
   await prisma.$executeRaw`
     INSERT INTO tenants (id, name, slug, plan, token_budget_monthly, connector_limit)
     VALUES (${DEMO_TENANT_ID}::uuid, 'Acme Corp (Demo)', 'demo', 'tier2', 10000000, 10)
-    ON CONFLICT (slug) DO UPDATE SET id = ${DEMO_TENANT_ID}::uuid
+    ON CONFLICT (slug) DO NOTHING
   `
   const tenant = { id: DEMO_TENANT_ID, slug: 'demo' }
   log(`Tenant: ${tenant.slug} (${tenant.id})`)

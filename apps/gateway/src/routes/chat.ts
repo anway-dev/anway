@@ -211,6 +211,10 @@ export async function chatRoutes(app: FastifyInstance) {
       ),
     ])
 
+    if (connectorsResult.status === 'rejected')
+      request.log.error({ err: connectorsResult.reason }, 'failed to load connectors — proceeding with empty tool set')
+    if (tenantResult.status === 'rejected')
+      request.log.error({ err: tenantResult.reason }, 'failed to load tenant')
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
@@ -285,7 +289,7 @@ export async function chatRoutes(app: FastifyInstance) {
     // L2 gate — write actions require user approval (V1 trust principle)
     const gateSink = redisUrl ? new RedisGateSink(redisUrl) : undefined
     if (!gateSink) {
-      request.log.warn('REDIS_URL not set — gate approval bypassed (dev mode only)')
+      request.log.error('REDIS_URL not set — gate approval bypassed (V1 trust violation)')
     }
 
     const orchestrator = createOrchestrator({
@@ -352,6 +356,4 @@ export async function chatRoutes(app: FastifyInstance) {
   })
 }
 
-function isValidUUID(s: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-}
+import { isValidUUID } from '../utils/validators.js'

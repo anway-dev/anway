@@ -7,6 +7,120 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-09c -->
+## Review — 2026-06-09c | Fix verification — registry null UUIDs, token cache, gate double-write, unused params
+
+### Scope
+
+4 source files changed in commit `9b25ed2` (since review `2026-06-09b`). Covers:
+- `apps/gateway/src/connectors/registry.ts` — `user_id`/`session_id` null UUID fix
+- `apps/gateway/src/gate/redis-gate-sink.ts` — double-write removed, TTL comment, `_decidedBy` prefix
+- `apps/web/lib/gateway-client.ts` — `getDemoToken()` module-level cache + DEMO_EMAIL fix
+- `packages/cli-adapter/src/discovery.ts` — `_env`/`_timeoutMs` prefix on unused params
+
+### Verdict: PASS — 0 BLOCKING, 0 HIGH, 0 MEDIUM, 3 LOW
+
+All issues from review `2026-06-09b` fully resolved and verified. Codebase is in clean state. Three LOW-severity observations documented below — none block development.
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | All M0–M5 features wired. All prior BLOCKING/HIGH/MEDIUM issues resolved. |
+| D2 Code Standards | 5/5 | `null` UUIDs correct. `_` prefixes on unused params correct. No `any`, no unused vars. |
+| D3 Performance | 5/5 | `getDemoToken()` now cached at module level with JWT `exp` parsing. No unnecessary re-fetches. |
+| D4 Security | 5/5 | RLS enforced on all DB writes. Gate flow correct. Admin role check on write tools. |
+| D5 Readability | 4/5 | `record()` clarity improved with inline comment. Class docstring doesn't document Postgres ownership delegation (LOW). |
+| D6 Clarity and Comments | 4/5 | `GATE_TTL_SECONDS` invariant documented. One LOW: `RedisGateSink` has no reconnect strategy unlike fixed `incident-subscriber`. |
+
+---
+
+### Issues Found
+
+#### [LOW] redis-gate-sink.ts — `getPub()` has no reconnect strategy
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:26`
+
+**Issue:** `createClient({ url: this.redisUrl })` — no `socket.reconnectStrategy`. If Redis drops, `push()` and `record()` throw unhandled. `poll()` has try/catch (returns `null`, orchestrator times out), but `push()` has only a best-effort catch around the Postgres insert — the Redis `setEx` and `publish` calls after it are unguarded. `incident-subscriber.ts` was fixed to add reconnect in a prior cycle; this class was not.
+
+**Fix:**
+
+```typescript
+private async getPub(): Promise<ReturnType<typeof createClient>> {
+  if (!this.pub) {
+    this.pub = createClient({
+      url: this.redisUrl,
+      socket: { reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000) },
+    })
+    this.pub.on('error', (err) => log.error({ err }, 'RedisGateSink connection error'))
+    await this.pub.connect()
+  }
+  return this.pub
+}
+```
+
+**Verify:** Stop Redis mid-session, observe gateway logs show reconnect attempts instead of unhandled throw.
+
+---
+
+#### [LOW] gateway-client.ts — concurrent requests can double-fetch token on cold start
+
+**File:** `apps/web/lib/gateway-client.ts:8-9`
+
+**Issue:** Two route handlers arriving simultaneously when `_cachedToken === null` both pass the cache check, both fetch `/auth/token`, both write the cache. Last writer wins — no data corruption, both tokens are valid. Harmless in practice (demo, low concurrency) but worth documenting.
+
+**Fix (optional):** Deduplicate with a pending promise:
+
+```typescript
+let _fetchPromise: Promise<string | null> | null = null
+
+export async function getDemoToken(): Promise<string | null> {
+  if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken
+  if (_fetchPromise) return _fetchPromise
+  _fetchPromise = fetchToken().finally(() => { _fetchPromise = null })
+  return _fetchPromise
+}
+```
+
+**Verify:** Two concurrent requests at cold start produce one `/auth/token` call in gateway logs.
+
+---
+
+#### [LOW] redis-gate-sink.ts — class docstring doesn't document Postgres ownership split
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:12-18`
+
+**Issue:** The class docstring describes all three methods but doesn't indicate that the Postgres `gate_events` update is owned by `gate-decide-route.ts`, not by `record()`. A reader scanning only the docstring would not know to look at the route for the DB update.
+
+**Fix:** Update the `record:` line in the docstring:
+
+```
+- record: sets `gate:<gateId>:decision` in Redis — Postgres update is gate-decide-route.ts responsibility
+```
+
+---
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Title | Status |
+|------|-------|--------|
+| M0–M5 all tasks | Foundation through Automations | ✅ Complete |
+| — | Gate Approve/Reject wired to backend | ✅ Complete |
+| — | RLS on all audit writes | ✅ Complete |
+| — | `getDemoToken()` consolidated + cached | ✅ Complete |
+| — | `activeIncidents` computed from incidents table | ✅ Complete |
+| — | `getToolsForTenant` parallel | ✅ Complete |
+| — | `parseHelpOutput` unused params prefixed | ✅ Complete |
+| — | `record()` double-write removed | ✅ Complete |
+| — | `user_id`/`session_id` null in registry audit | ✅ Complete |
+| — | `RedisGateSink.getPub()` reconnect strategy | ❌ Not started (LOW) |
+| — | `getDemoToken()` concurrent fetch dedup | ❌ Not started (LOW) |
+| — | `RedisGateSink` class docstring Postgres ownership | ❌ Not started (LOW) |
+
+<!-- REVIEW SECTION END — 2026-06-09c -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-09b -->
 ## Review — 2026-06-09b | BLOCKING+HIGH fix pass + MEDIUM executor fixes
 

@@ -9,7 +9,17 @@ function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint
   return []  // dynamic models resolved client-side
 }
 
-export async function settingsRoutes(app: FastifyInstance) {
+function isSafeBaseUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw)
+    if (!['http:', 'https:'].includes(u.protocol)) return false
+    // Block cloud metadata + RFC-1918 private ranges — allow localhost for Ollama dev
+    if (/^(169\.254\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(u.hostname)) return false
+    return true
+  } catch { return false }
+}
+
+export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import('redis').RedisClientType }) {
   app.get('/api/settings/provider-manifests', async () => {
     const manifests = providerRegistry.list()
     return manifests.map(m => ({
@@ -62,8 +72,8 @@ export async function settingsRoutes(app: FastifyInstance) {
     // Static model list
     if (Array.isArray(manifest.models)) return { models: manifest.models }
 
-    // Dynamic: fetch from endpoint
-    if (manifest.modelsEndpoint && baseUrl) {
+    // Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata, allow localhost for Ollama)
+    if (manifest.modelsEndpoint && baseUrl && isSafeBaseUrl(baseUrl)) {
       try {
         const url = `${baseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
         const resp = await fetch(url)
@@ -88,10 +98,15 @@ export async function settingsRoutes(app: FastifyInstance) {
     return configs.map(c => ({ connectorType: c.connector_type, enabled: c.enabled, bootstrappedAt: c.bootstrapped_at }))
   })
 
+  const KNOWN_CONNECTORS = ['github', 'datadog', 'linear', 'argocd', 'k8s', 'pagerduty', 'slack']
+
   app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(
-    '/api/settings/connectors/:type', { preHandler: [app.authenticate] }, async (request) => {
+    '/api/settings/connectors/:type', { preHandler: [app.authenticate] }, async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { type } = request.params
+      if (!KNOWN_CONNECTORS.includes(type)) {
+        return reply.code(400).send({ error: 'Unknown connector type' })
+      }
       const { credentials } = request.body
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
@@ -103,9 +118,8 @@ export async function settingsRoutes(app: FastifyInstance) {
       )
 
       // Emit connector_registered event for graph builder
-      const pub = await getPub()
-      if (pub) {
-        await pub.publish('connector_registered', JSON.stringify({ tenantId, connectorType: type }))
+      if (opts?.pub) {
+        await opts.pub.publish('connector_registered', JSON.stringify({ tenantId, connectorType: type }))
       }
 
       return { ok: true }
@@ -113,15 +127,3 @@ export async function settingsRoutes(app: FastifyInstance) {
   )
 }
 
-let _pub: import('redis').RedisClientType | null = null
-
-async function getPub(): Promise<import('redis').RedisClientType | null> {
-  const url = process.env['REDIS_URL']
-  if (!url) return null
-  if (!_pub) {
-    const { createClient } = await import('redis')
-    _pub = createClient({ url }) as import('redis').RedisClientType
-    await _pub.connect()
-  }
-  return _pub
-}

@@ -23,7 +23,7 @@ export class GitHubBootstrap implements IConnectorBootstrap {
         '--json', 'name,defaultBranchRef,languages',
         '--limit', '100',
       ], {
-        env: { ...process.env, GH_TOKEN: this.token },
+        env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin', GH_TOKEN: this.token },
         timeout: 30_000,
       })
       stdout = result.stdout

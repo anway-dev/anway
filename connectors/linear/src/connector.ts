@@ -15,7 +15,7 @@ export class LinearConnector implements IConnector {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: token,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ query, variables }),
     })

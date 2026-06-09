@@ -27,7 +27,7 @@ export function createGetIncidentContextTool(
   mainModel: IModelProvider,
   getIncident: (id: string, tenantId: string) => Promise<IncidentRecord | null>,
 ): ExecutableTool {
-  const sreAgent = new SREAgent(cheapModel, mainModel)
+  const sreAgent = new SREAgent(cheapModel, mainModel, knowledgeGraph)
 
   return {
     name: 'get_incident_context',
@@ -50,25 +50,11 @@ export function createGetIncidentContextTool(
         return { error: `Incident ${incidentId} not found` }
       }
 
-      // Graph-first: resolve entity context before connector calls
-      const graphContext = await knowledgeGraph.resolveContextByName(incident.title, TenantId(tenantId))
-
-      const graphSummary = graphContext
-        ? [
-            `Service: ${graphContext.primaryEntity.name}`,
-            graphContext.relatedEntities.length > 0
-              ? `Related: ${graphContext.relatedEntities.map(e => e.name).join(', ')}`
-              : null,
-            graphContext.recentEpisodes.length > 0
-              ? `Recent events: ${graphContext.recentEpisodes.slice(0, 3).map(e => e.text).join(' | ')}`
-              : null,
-          ].filter(Boolean).join('. ')
-        : 'No graph context available — entity not yet indexed'
-
       const description = incident.description ?? ''
       const context: IncidentContext = await sreAgent.assembleContext(
         incident.title,
-        description ? `${description}\n\nGraph context: ${graphSummary}` : `Graph context: ${graphSummary}`,
+        description,
+        TenantId(tenantId),
       )
 
       return {
@@ -76,8 +62,8 @@ export function createGetIncidentContextTool(
         title: incident.title,
         severity: incident.severity,
         status: incident.status,
-        graphContextAvailable: graphContext !== null,
-        graphFreshness: graphContext?.freshness ?? 0,
+        graphContextAvailable: false,
+        graphFreshness: 0,
         ...context,
       }
     },

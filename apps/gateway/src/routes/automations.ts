@@ -35,7 +35,18 @@ export async function automationsRoutes(app: FastifyInstance) {
         properties: {
           eventType: { type: 'string' },
           condition: { type: 'object' },
-          actions: { type: 'array' },
+          actions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['type'],
+              properties: {
+                type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate'] },
+                params: { type: 'object' },
+              },
+              additionalProperties: false,
+            },
+          },
         },
       },
     },

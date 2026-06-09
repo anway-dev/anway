@@ -39,7 +39,7 @@ export async function serviceRoutes(app: FastifyInstance) {
         FROM relationships
       `
       const activeIncidents = await tx.$queryRaw<IncidentRow[]>`
-        SELECT title, status FROM incidents WHERE status IN ('active', 'in_progress')
+        SELECT title, status FROM incidents WHERE status IN ('active', 'investigating')
       `
 
       const entityById = new Map(allEntities.map(e => [e.id, e]))

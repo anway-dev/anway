@@ -32,6 +32,8 @@ export { AgentPerimeter } from './perimeter/engine.js'
 export type { TokenBudget, ModelCallRequest, TokenHardBlock, TokenLimitType } from './middleware/token-meter.js'
 
 export { ProviderFactory } from './providers/factory.js'
+export { providerRegistry } from './providers/registry.js'
+export type { ProviderManifest, ProviderField } from './interfaces/provider.js'
 export { RedisSessionMemory } from './memory/redis-session.js'
 export { MemoryFactory } from './memory/factory.js'
 export { createPerimeterMiddleware } from './middleware/perimeter.js'

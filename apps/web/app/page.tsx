@@ -17,10 +17,11 @@ import { CloudView } from "@/components/cloud-view";
 import { IncidentView } from "@/components/incident-view";
 import { ServiceCatalog } from "@/components/service-catalog";
 import { AutomationsView } from "@/components/automations-view";
+import { ApprovalsView } from "@/components/approvals-view";
 import { StageNode } from "@/lib/mock";
 import { AUDIT_EVENTS, LIVE_ALERTS, CLOUD_PROVIDERS, INCIDENTS } from "@/lib/mock";
 
-type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations";
+type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations";
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "chat",        label: "Anvay",        icon: "✦" },
@@ -32,6 +33,7 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "editor",      label: "Editor",       icon: "⌗" },
   { id: "kb",          label: "Knowledge",    icon: "◉" },
   { id: "workflow",    label: "Workflows",    icon: "⬡" },
+  { id: "approvals",  label: "Approvals",    icon: "⊡" },
   { id: "automations", label: "Automations",  icon: "⟳" },
   { id: "api",         label: "API Client",   icon: "⚡" },
   { id: "connectors",  label: "Connectors",   icon: "⬡" },
@@ -190,6 +192,7 @@ export default function App() {
           )}
           {view === "editor" && <EditorView />}
           {view === "workflow" && <WorkflowView />}
+          {view === "approvals" && <ApprovalsView />}
           {view === "api" && <ApiClientView />}
           {view === "connectors" && <ConnectorsView />}
           {view === "audit" && <AuditView />}

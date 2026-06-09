@@ -18,7 +18,7 @@ import type {
   ConversationTurn,
   SessionContext,
 } from '@anvay/agent'
-import type { ProviderConfig, ProviderType } from '@anvay/agent'
+import type { ProviderConfig } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
 import type { PrismaClient } from '@prisma/client'
@@ -75,7 +75,7 @@ export class InMemorySessionMemory implements ISessionMemory {
   }
 }
 
-export function providerConfigFromEnv(type: ProviderType): ProviderConfig | null {
+export function providerConfigFromEnv(type: string): ProviderConfig | null {
   if (type === 'anthropic' && process.env['ANTHROPIC_API_KEY']) {
     return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
   }
@@ -132,7 +132,7 @@ export function resolveProviderConfig(override?: ClientModelConfig): ProviderCon
     return config ? withDefaultModel(config, override.defaultModel) : null
   }
 
-  const providerOrder: ProviderType[] = ['anthropic', 'openai', 'groq', 'mistral', 'ollama', 'lmstudio']
+  const providerOrder: string[] = ['anthropic', 'openai', 'groq', 'mistral', 'ollama', 'lmstudio']
   for (const type of providerOrder) {
     const config = providerConfigFromEnv(type)
     if (config) return config

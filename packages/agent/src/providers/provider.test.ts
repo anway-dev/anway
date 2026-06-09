@@ -46,7 +46,6 @@ describe('ProviderFactory.create', () => {
 
   it('throws AppError for unknown provider type', () => {
     expect(() =>
-      // @ts-expect-error — intentionally testing unknown type
       ProviderFactory.create({ type: 'unknown-provider' })
     ).toThrow()
   })

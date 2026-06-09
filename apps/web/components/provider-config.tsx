@@ -11,17 +11,29 @@ interface ModelList {
   models: string[];
 }
 
-const PROVIDER_OPTIONS = [
-  { value: "anthropic", label: "Anthropic", keyLabel: "API Key" },
-  { value: "openai", label: "OpenAI", keyLabel: "API Key" },
-  { value: "deepseek", label: "DeepSeek", keyLabel: "API Key (OpenAI-compatible)" },
-  { value: "groq", label: "Groq", keyLabel: "API Key" },
-  { value: "mistral", label: "Mistral", keyLabel: "API Key" },
-  { value: "ollama", label: "Ollama (local)", keyLabel: "Endpoint URL" },
-];
+interface ManifestField {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+}
+
+interface ProviderManifest {
+  id: string;
+  displayName: string;
+  website: string;
+  fields: ManifestField[];
+  models: string[];
+  modelsEndpoint?: string;
+  defaultBaseUrl?: string;
+  openAICompatible: boolean;
+}
 
 export function ProviderConfig({ onConfigured, renderGearIn }: { onConfigured?: () => void; renderGearIn?: (gear: React.ReactNode) => React.ReactNode }) {
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
+  const [manifests, setManifests] = useState<ProviderManifest[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPanel, setShowPanel] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState("anthropic");
@@ -32,15 +44,20 @@ export function ProviderConfig({ onConfigured, renderGearIn }: { onConfigured?: 
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/settings/provider")
-      .then(r => r.json())
-      .then((data: ProviderInfo) => {
-        setProviderInfo(data);
-        if (!data.configured) setShowPanel(true);
+    Promise.all([
+      fetch("/api/settings/provider").then(r => r.json()),
+      fetch("/api/settings/provider-manifests").then(r => r.json()),
+    ])
+      .then(([prov, man]) => {
+        setProviderInfo(prov as ProviderInfo);
+        setManifests(man as ProviderManifest[]);
+        if (!(prov as ProviderInfo).configured) setShowPanel(true);
       })
       .catch(() => setProviderInfo({ configured: false }))
       .finally(() => setLoading(false));
   }, []);
+
+  const selectedManifest = manifests.find(m => m.id === selectedProvider);
 
   useEffect(() => {
     setSelectedModel("");
@@ -54,20 +71,15 @@ export function ProviderConfig({ onConfigured, renderGearIn }: { onConfigured?: 
   }, [selectedProvider, baseUrl]);
 
   async function handleSave() {
-    if (!apiKey && selectedProvider !== "ollama") return;
+    if (!apiKey && selectedManifest?.fields.some(f => f.required && f.key === 'apiKey')) return;
     setSaving(true);
     try {
       const body: Record<string, string> = { provider: selectedProvider };
-      if (selectedProvider === "deepseek") {
-        body.apiKey = apiKey;
-        body.baseUrl = "https://api.deepseek.com";
-        body.provider = "openai";
-      } else if (selectedProvider === "ollama") {
-        body.baseUrl = baseUrl || "http://localhost:11434";
-      } else {
-        body.apiKey = apiKey;
-        if (baseUrl) body.baseUrl = baseUrl;
+      if (selectedManifest?.defaultBaseUrl) {
+        body.baseUrl = selectedManifest.defaultBaseUrl;
       }
+      if (apiKey) body.apiKey = apiKey;
+      if (baseUrl) body.baseUrl = baseUrl;
       if (selectedModel) body.defaultModel = selectedModel;
       const resp = await fetch("/api/settings/provider", {
         method: "POST",
@@ -113,40 +125,32 @@ export function ProviderConfig({ onConfigured, renderGearIn }: { onConfigured?: 
                 marginBottom: "16px", outline: "none",
               }}
             >
-              {PROVIDER_OPTIONS.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
+              {manifests.map(m => (
+                <option key={m.id} value={m.id}>{m.displayName}</option>
               ))}
             </select>
 
-            <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace" }}>
-              {PROVIDER_OPTIONS.find(p => p.value === selectedProvider)?.keyLabel ?? "API Key"}
-            </label>
-            <input
-              type="password" value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder={selectedProvider === "ollama" ? "http://localhost:11434" : "sk-..."}
-              style={{
-                width: "100%", background: "#080808", border: "1px solid #1a1a1a", borderRadius: "4px",
-                color: "#e5e5e5", padding: "8px 10px", fontSize: "12px", fontFamily: "monospace",
-                marginBottom: "16px", outline: "none",
-              }}
-            />
-
-            {selectedProvider !== "deepseek" && selectedProvider !== "ollama" && (
-              <>
-                <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace" }}>Base URL (optional)</label>
+            {selectedManifest?.fields.map(field => (
+              <div key={field.key}>
+                <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace" }}>
+                  {field.label}{field.required ? ' *' : ''}
+                </label>
                 <input
-                  type="text" value={baseUrl}
-                  onChange={e => setBaseUrl(e.target.value)}
-                  placeholder="https://api.openai.com"
+                  type={field.type === "password" ? "password" : "text"}
+                  value={field.key === 'apiKey' ? apiKey : field.key === 'baseURL' ? (baseUrl || field.defaultValue || '') : ''}
+                  onChange={e => {
+                    if (field.key === 'apiKey') setApiKey(e.target.value);
+                    if (field.key === 'baseURL') setBaseUrl(e.target.value);
+                  }}
+                  placeholder={field.placeholder || field.defaultValue || `Enter ${field.label.toLowerCase()}`}
                   style={{
                     width: "100%", background: "#080808", border: "1px solid #1a1a1a", borderRadius: "4px",
                     color: "#e5e5e5", padding: "8px 10px", fontSize: "12px", fontFamily: "monospace",
                     marginBottom: "16px", outline: "none",
                   }}
                 />
-              </>
-            )}
+              </div>
+            ))}
 
             {models.length > 0 && (
               <>

@@ -1,11 +1,12 @@
 import { createClient } from 'redis'
 import type { RedisClientType } from 'redis'
-import { SREAgent } from '@anvay/agent'
-import { ProviderFactory } from '@anvay/agent'
+import { SREAgent, ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
 import { IncidentService } from '../services/incident.js'
 import { prisma } from '../db/client.js'
+import { createKnowledgeGraph } from '../kb/index.js'
 import { UUID_RE } from '../utils/validators.js'
+import type { TenantId } from '@anvay/types'
 import pino from 'pino'
 
 const log = pino({ name: 'incident-subscriber' })
@@ -29,7 +30,6 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
   const cheapModelId = process.env['CHEAP_MODEL'] ?? 'claude-haiku-3-5-20251001'
   const mainModelId = process.env['MAIN_MODEL'] ?? 'claude-sonnet-4-6'
 
-  const sreAgent = new SREAgent(provider, provider, cheapModelId, mainModelId)
   const incidentService = new IncidentService(prisma)
 
   const sub: RedisClientType = createClient({
@@ -64,7 +64,9 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
       }
 
       try {
-        const context = await sreAgent.assembleContext(title, description ?? '')
+        const kg = createKnowledgeGraph(tenantId as TenantId)
+        const sre = new SREAgent(provider, provider, kg, cheapModelId, mainModelId)
+        const context = await sre.assembleContext(title, description ?? '', tenantId as TenantId)
         await incidentService.setRootCause(id, tenantId, context.hypothesis)
         log.info({ incidentId: id, tenantId }, 'incident-subscriber: root cause written')
       } catch (err) {

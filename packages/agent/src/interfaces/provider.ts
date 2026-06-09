@@ -53,12 +53,35 @@ export interface IEmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>
 }
 
-// Supported provider types
+// Field definition for provider config forms — drives dynamic UI
+export interface ProviderField {
+  key: string
+  label: string
+  type: 'password' | 'text' | 'url'
+  required: boolean
+  placeholder?: string
+  defaultValue?: string
+}
+
+// Provider manifest — every provider registered via manifest, no code change to add new ones
+export interface ProviderManifest {
+  id: string
+  displayName: string
+  website: string
+  fields: ProviderField[]
+  models: string[] | 'dynamic'
+  modelsEndpoint?: string
+  defaultBaseUrl?: string
+  openAICompatible: boolean
+  factory?: (config: ProviderConfig) => IModelProvider
+}
+
+// Supported provider types (kept for backwards compat, not used for routing)
 export type ProviderType = 'anthropic' | 'openai' | 'ollama' | 'groq' | 'mistral' | 'lmstudio'
 
 // Configuration passed to ProviderFactory.create()
 export interface ProviderConfig {
-  type: ProviderType
+  type: string  // open string for extensibility — was union type
   apiKey?: string
   baseURL?: string
   defaultModel?: string

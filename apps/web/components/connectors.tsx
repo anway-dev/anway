@@ -14,6 +14,8 @@ export function ConnectorsView() {
   const [modal, setModal] = useState<Connector | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [configuredMap, setConfiguredMap] = useState<Record<string, boolean>>({});
+  const [bootstrapInfo, setBootstrapInfo] = useState<Record<string, { bootstrapped: boolean; bootstrappedAt?: string }>>({});
+  const [bootstrapping, setBootstrapping] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -23,6 +25,17 @@ export function ConnectorsView() {
         const map: Record<string, boolean> = {};
         for (const c of list) map[c.connectorType] = c.enabled;
         setConfiguredMap(map);
+        // Fetch bootstrap status for each configured connector
+        for (const c of list) {
+          if (c.enabled) {
+            fetch(`/api/connectors/${c.connectorType}/bootstrap-status`)
+              .then(r => r.json())
+              .then((data: { bootstrapped: boolean; bootstrappedAt?: string }) => {
+                if (data.bootstrapped) setBootstrapInfo(prev => ({ ...prev, [c.connectorType]: data }))
+              })
+              .catch(() => {});
+          }
+        }
       })
       .catch(() => {});
   }, []);
@@ -84,7 +97,7 @@ export function ConnectorsView() {
       {/* Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} onConnect={() => { setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST' }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setModal(conn); setFormValues({}); }} />
         ))}
       </div>
 
@@ -148,7 +161,7 @@ export function ConnectorsView() {
   );
 }
 
-function ConnectorCard({ connector: c, configured, onConnect }: { connector: Connector; configured: boolean; onConnect: () => void }) {
+function ConnectorCard({ connector: c, configured, bootstrap, bootstrapping, onBootstrap, onConnect }: { connector: Connector; configured: boolean; bootstrap?: { bootstrapped: boolean; bootstrappedAt?: string }; bootstrapping?: boolean; onBootstrap?: () => void; onConnect: () => void }) {
   return (
     <div style={{
       background: "#111", border: `1px solid ${configured ? "#1f2f1f" : "#1f1f1f"}`,
@@ -177,6 +190,26 @@ function ConnectorCard({ connector: c, configured, onConnect }: { connector: Con
       </div>
 
       <div style={{ fontSize: "11px", color: "#888" }}>{c.description}</div>
+      {configured && bootstrap && (
+        <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>
+          {bootstrap.bootstrapped ? (
+            <span>Bootstrapped {bootstrap.bootstrappedAt ? new Date(bootstrap.bootstrappedAt).toLocaleString() : ''}</span>
+          ) : (
+            <span>
+              Not bootstrapped
+              <button onClick={onBootstrap} disabled={bootstrapping}
+                style={{
+                  marginLeft: "8px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
+                  color: bootstrapping ? "#444" : "#10b981", padding: "2px 8px", borderRadius: "3px",
+                  cursor: bootstrapping ? "not-allowed" : "pointer", fontSize: "9px", fontFamily: "monospace",
+                }}
+              >
+                {bootstrapping ? '...' : 'Bootstrap now'}
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
         {c.capabilities.map((cap) => (

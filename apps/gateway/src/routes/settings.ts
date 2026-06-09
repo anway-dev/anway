@@ -2,17 +2,27 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
+import { providerRegistry } from '@anvay/agent'
 
-const PROVIDER_MODELS: Record<string, string[]> = {
-  anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'o1-mini', 'o1'],
-  deepseek: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'],
-  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-  mistral: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest', 'codestral-latest'],
-  ollama: [],
+function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint?: string; defaultBaseUrl?: string }): string[] {
+  if (Array.isArray(manifest.models)) return manifest.models
+  return []  // dynamic models resolved client-side
 }
 
 export async function settingsRoutes(app: FastifyInstance) {
+  app.get('/api/settings/provider-manifests', async () => {
+    const manifests = providerRegistry.list()
+    return manifests.map(m => ({
+      id: m.id,
+      displayName: m.displayName,
+      website: m.website,
+      fields: m.fields,
+      models: manifestModels(m),
+      modelsEndpoint: m.modelsEndpoint,
+      defaultBaseUrl: m.defaultBaseUrl,
+      openAICompatible: m.openAICompatible,
+    }))
+  })
   app.get('/api/settings/provider', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const config = await withTenant(prisma, tenantId, (tx) =>
@@ -42,27 +52,29 @@ export async function settingsRoutes(app: FastifyInstance) {
   )
 
   app.get('/api/settings/models', async (request) => {
-    const provider = (request.query as { provider?: string }).provider
+    const p = (request.query as { provider?: string }).provider
     const baseUrl = (request.query as { baseUrl?: string }).baseUrl
-    if (!provider) return { models: [] }
+    if (!p) return { models: [] }
 
-    // Ollama: dynamic from endpoint
-    if (provider === 'ollama' && baseUrl) {
+    const manifest = providerRegistry.get(p)
+    if (!manifest) return { models: [] }
+
+    // Static model list
+    if (Array.isArray(manifest.models)) return { models: manifest.models }
+
+    // Dynamic: fetch from endpoint
+    if (manifest.modelsEndpoint && baseUrl) {
       try {
-        const resp = await fetch(`${baseUrl}/api/tags`)
-        const data = await resp.json() as { models?: { name: string }[] }
-        return { models: (data.models ?? []).map((m: { name: string }) => m.name) }
-      } catch {
-        return { models: [] }
-      }
+        const url = `${baseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
+        const resp = await fetch(url)
+        const data = await resp.json() as { models?: { name: string }[]; data?: { id: string }[] }
+        // Handle both Ollama format ({ models: [{ name }] }) and OpenAI format ({ data: [{ id }] })
+        if (data.models) return { models: data.models.map((m: { name: string }) => m.name) }
+        if (data.data) return { models: data.data.map((m: { id: string }) => m.id) }
+      } catch { /* fall through */ }
     }
 
-    // OpenAI with DeepSeek base URL → deepseek models
-    if (provider === 'openai' && baseUrl?.includes('deepseek.com')) {
-      return { models: PROVIDER_MODELS['deepseek'] ?? [] }
-    }
-
-    return { models: PROVIDER_MODELS[provider] ?? [] }
+    return { models: [] }
   })
 
   app.get('/api/settings/connectors', { preHandler: [app.authenticate] }, async (request) => {

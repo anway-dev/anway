@@ -145,4 +145,26 @@ export async function automationsRoutes(app: FastifyInstance) {
     )
     return { updated: true }
   })
+
+  // T8: Trigger run history — mock data for now
+  app.get<{ Params: { id: string } }>('/api/triggers/:id/runs', {
+    preHandler: [app.authenticate],
+  }, async () => ({
+    runs: [
+      { event: 'alert_fired', timestamp: new Date(Date.now() - 3_600_000).toISOString(), actions: ['create_incident', 'notify_oncall'], result: 'success' },
+      { event: 'deploy_failed', timestamp: new Date(Date.now() - 7_200_000).toISOString(), actions: ['surface_context'], result: 'success' },
+      { event: 'error_rate_threshold', timestamp: new Date(Date.now() - 14_400_000).toISOString(), actions: ['create_incident'], result: 'error: incident already exists' },
+    ],
+  }))
+
+  // T8: Cron run history — mock data for now
+  app.get<{ Params: { id: string } }>('/api/cron/:id/runs', {
+    preHandler: [app.authenticate],
+  }, async () => ({
+    runs: [
+      { started_at: new Date(Date.now() - 300_000).toISOString(), duration_ms: 1200, anomaly_found: false, summary: 'All services healthy' },
+      { started_at: new Date(Date.now() - 600_000).toISOString(), duration_ms: 980, anomaly_found: false, summary: 'All services healthy' },
+      { started_at: new Date(Date.now() - 900_000).toISOString(), duration_ms: 1500, anomaly_found: true, summary: 'payments-api p99 elevated' },
+    ],
+  }))
 }

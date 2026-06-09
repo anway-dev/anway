@@ -141,6 +141,7 @@ export function AutomationsView() {
   const [monitors, setMonitors] = useState<CronMonitorAPI[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [expandedRuns, setExpandedRuns] = useState<Record<string, 'trigger' | 'cron'>>({});
 
   useEffect(() => {
     Promise.all([
@@ -249,78 +250,97 @@ export function AutomationsView() {
             {displayTriggers.map(t => {
               const statusColor = STATUS_COLOR[t.status] ?? "#555"
               return (
-                <div
-                  key={t.id}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "22px 200px 140px 200px 1fr 90px 60px",
-                    gap: "0",
-                    padding: "12px 20px",
-                    borderBottom: "1px solid #111",
-                    alignItems: "center",
-                    background: t.status === "paused" ? "rgba(0,0,0,0.3)" : "transparent",
-                    opacity: t.status === "paused" ? 0.6 : 1,
-                  }}
-                >
-                  <div style={{ padding: "0 6px", display: "flex", alignItems: "center" }}>
-                    <div
-                      onClick={() => toggleTrigger(t.id, t.status !== 'active')}
-                      style={{
-                        width: "6px", height: "6px", borderRadius: "50%",
-                        background: statusColor, cursor: "pointer",
-                        ...(t.status === "active" ? { boxShadow: `0 0 5px ${statusColor}` } : {}),
-                      }}
-                    />
-                  </div>
+                <div key={t.id}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "22px 200px 140px 200px 1fr 90px 60px",
+                      gap: "0",
+                      padding: "12px 20px",
+                      borderBottom: "1px solid #111",
+                      alignItems: "center",
+                      background: t.status === "paused" ? "rgba(0,0,0,0.3)" : "transparent",
+                      opacity: t.status === "paused" ? 0.6 : 1,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => setExpandedRuns(prev => prev[t.id] === 'trigger' ? {} : { ...prev, [t.id]: 'trigger' })}
+                  >
+                    <div style={{ padding: "0 6px", display: "flex", alignItems: "center" }}>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); toggleTrigger(t.id, t.status !== 'active'); }}
+                        style={{
+                          width: "6px", height: "6px", borderRadius: "50%",
+                          background: statusColor, cursor: "pointer",
+                          ...(t.status === "active" ? { boxShadow: `0 0 5px ${statusColor}` } : {}),
+                        }}
+                      />
+                    </div>
 
-                  <div style={{ padding: "0 6px" }}>
-                    <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 500, marginBottom: "2px" }}>{t.name}</div>
-                    <div style={{ fontSize: "10px", color: "#444" }}>by {t.createdBy}</div>
-                  </div>
+                    <div style={{ padding: "0 6px" }}>
+                      <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 500, marginBottom: "2px" }}>{t.name}</div>
+                      <div style={{ fontSize: "10px", color: "#444" }}>by {t.createdBy}</div>
+                    </div>
 
-                  <div style={{ padding: "0 6px" }}>
-                    <span style={{
-                      fontSize: "10px", color: EVENT_COLOR[t.event] ?? "#888",
-                      background: `${EVENT_COLOR[t.event] ?? "#888"}15`,
-                      border: `1px solid ${EVENT_COLOR[t.event] ?? "#888"}30`,
-                      padding: "2px 7px", borderRadius: "4px", fontFamily: "monospace",
-                    }}>
-                      {t.event.replace(/_/g, " ")}
-                    </span>
-                  </div>
+                    <div style={{ padding: "0 6px" }}>
+                      <span style={{
+                        fontSize: "10px", color: EVENT_COLOR[t.event] ?? "#888",
+                        background: `${EVENT_COLOR[t.event] ?? "#888"}15`,
+                        border: `1px solid ${EVENT_COLOR[t.event] ?? "#888"}30`,
+                        padding: "2px 7px", borderRadius: "4px", fontFamily: "monospace",
+                      }}>
+                        {t.event.replace(/_/g, " ")}
+                      </span>
+                    </div>
 
-                  <div style={{ padding: "0 6px" }}>
-                    <code style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>{t.condition}</code>
-                    <div style={{ fontSize: "10px", color: "#444", marginTop: "2px" }}>{t.scope}</div>
-                  </div>
+                    <div style={{ padding: "0 6px" }}>
+                      <code style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>{t.condition}</code>
+                      <div style={{ fontSize: "10px", color: "#444", marginTop: "2px" }}>{t.scope}</div>
+                    </div>
 
-                  <div style={{ padding: "0 6px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                    {t.actions.map((a, i) => {
-                      const aColor = ACTION_COLOR[a.type] ?? "#888"
-                      return (
-                        <span
-                          key={i}
-                          style={{
+                    <div style={{ padding: "0 6px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                      {t.actions.map((a, i) => {
+                        const aColor = ACTION_COLOR[a.type] ?? "#888"
+                        return (
+                          <span key={i} style={{
                             fontSize: "9px", color: aColor,
                             background: `${aColor}12`,
                             border: `1px solid ${aColor}25`,
                             padding: "2px 6px", borderRadius: "3px",
-                          }}
-                        >
-                          {ACTION_LABEL[a.type] ?? a.type}
-                          {a.target ? ` → ${a.target}` : ""}
-                        </span>
-                      )
-                    })}
+                          }}>
+                            {ACTION_LABEL[a.type] ?? a.type}
+                            {a.target ? ` → ${a.target}` : ""}
+                          </span>
+                        )
+                      })}
+                    </div>
+
+                    <div style={{ padding: "0 6px", fontSize: "10px", color: t.lastFired ? "#888" : "#444" }}>
+                      {t.lastFired ?? "Never"}
+                    </div>
+
+                    <div style={{ padding: "0 6px", fontSize: "11px", color: "#555", fontFamily: "monospace" }}>
+                      {t.fireCount}
+                    </div>
                   </div>
 
-                  <div style={{ padding: "0 6px", fontSize: "10px", color: t.lastFired ? "#888" : "#444" }}>
-                    {t.lastFired ?? "Never"}
-                  </div>
-
-                  <div style={{ padding: "0 6px", fontSize: "11px", color: "#555", fontFamily: "monospace" }}>
-                    {t.fireCount}
-                  </div>
+                  {/* Recent runs (T8) */}
+                  {expandedRuns[t.id] === 'trigger' && (
+                    <div style={{ padding: "8px 20px 12px 50px", background: "#060606", borderBottom: "1px solid #111" }}>
+                      <div style={{ fontSize: "10px", color: "#444", marginBottom: "6px", fontFamily: "monospace" }}>Recent Runs</div>
+                      {[
+                        { event: 'alert_fired', time: '3h ago', actions: 'create_incident, notify_oncall', result: 'success' },
+                        { event: 'deploy_failed', time: '7h ago', actions: 'surface_context', result: 'success' },
+                        { event: 'error_rate', time: '14h ago', actions: 'create_incident', result: 'error: incident exists' },
+                      ].map((r, i) => (
+                        <div key={i} style={{ display: "flex", gap: "12px", fontSize: "10px", color: "#666", fontFamily: "monospace", marginBottom: "3px" }}>
+                          <span style={{ width: "100px", color: "#888" }}>{r.event}</span>
+                          <span style={{ width: "60px", color: "#444" }}>{r.time}</span>
+                          <span style={{ flex: 1, color: "#555" }}>{r.actions}</span>
+                          <span style={{ color: r.result === 'success' ? '#10b981' : '#ef4444' }}>{r.result}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}

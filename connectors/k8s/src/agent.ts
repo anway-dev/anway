@@ -1,11 +1,63 @@
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
 const TOOLS: ConnectorTool[] = [
-  { definition: { name: 'get_pods', description: 'List pods', parameters: { type: 'object', properties: { namespace: { type: 'string' }, selector: { type: 'string', optional: true } }, required: ['namespace'] } }, execute: () => Promise.resolve({ pods: [{ name:'payments-api-7d9f6',status:'Running',restarts:0,node:'node-3' }] }), write: false },
-  { definition: { name: 'get_deployments', description: 'List deployments', parameters: { type: 'object', properties: { namespace: { type: 'string' } }, required: ['namespace'] } }, execute: () => Promise.resolve({ deployments: [{ name:'payments-api',ready:3,desired:3,image:'payments-api:v2.3' }] }), write: false },
-  { definition: { name: 'get_pod_logs', description: 'Get pod logs', parameters: { type: 'object', properties: { namespace: { type: 'string' }, pod: { type: 'string' }, lines: { type: 'number', optional: true } }, required: ['namespace', 'pod'] } }, execute: () => Promise.resolve({ logs: ['[INFO] Server started'] }), write: false },
-  { definition: { name: 'get_events', description: 'List namespace events', parameters: { type: 'object', properties: { namespace: { type: 'string' } }, required: ['namespace'] } }, execute: () => Promise.resolve({ events: [{ reason:'BackOff',object:'pod/payments-api',message:'Back-off restarting',ts:new Date().toISOString() }] }), write: false },
-  { definition: { name: 'restart_deployment', description: 'Restart a deployment', parameters: { type: 'object', properties: { namespace: { type: 'string' }, deployment: { type: 'string' } }, required: ['namespace', 'deployment'] } }, execute: () => Promise.resolve({ ok: true }), write: true },
+  {
+    definition: { name: 'get_pods', description: 'List pods (Docker containers)', parameters: { type: 'object', properties: { namespace: { type: 'string', optional: true } } } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      try {
+        const res = await fetch(`${base}/containers/json?all=true`)
+        if (!res.ok) return { pods: [] }
+        const cs = await res.json() as Array<{ Id: string; Names: string[]; State: string; Status: string; Image: string }>
+        return { pods: cs.map(c => ({ name: (c.Names[0] ?? '').replace('/', ''), status: c.State === 'running' ? 'Running' : 'Stopped', image: c.Image, restarts: 0, node: 'docker' })) }
+      } catch { return { pods: [] } }
+    },
+    write: false,
+  },
+  {
+    definition: { name: 'get_deployments', description: 'List running containers', parameters: { type: 'object', properties: { namespace: { type: 'string', optional: true } } } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      try {
+        const res = await fetch(`${base}/containers/json?all=true`)
+        if (!res.ok) return { deployments: [] }
+        const cs = await res.json() as Array<{ Names: string[]; Image: string; State: string }>
+        return { deployments: cs.filter((c: { State: string }) => c.State === 'running').map(c => ({ name: (c.Names[0] ?? '').replace('/', ''), ready: 1, desired: 1, image: c.Image })) }
+      } catch { return { deployments: [] } }
+    },
+    write: false,
+  },
+  {
+    definition: { name: 'get_pod_logs', description: 'Get container logs', parameters: { type: 'object', properties: { pod: { type: 'string' }, lines: { type: 'number', optional: true } }, required: ['pod'] } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      try {
+        const res = await fetch(`${base}/containers/${params.pod}/logs?tail=${params.lines ?? 100}&stdout=true&stderr=true`)
+        if (!res.ok) return { logs: [] }
+        return { logs: (await res.text()).split('\n').filter(Boolean) }
+      } catch { return { logs: [] } }
+    },
+    write: false,
+  },
+  {
+    definition: { name: 'get_events', description: 'List recent Docker events', parameters: { type: 'object', properties: {} } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      try {
+        const res = await fetch(`${base}/events?since=${Math.floor(Date.now()/1000)-300}`)
+        if (!res.ok) return { events: [] }
+        const text = await res.text()
+        const events = text.split('\n').filter(Boolean).slice(0, 20).map(l => { try { const j = JSON.parse(l); return { reason: j.Type, object: j.Actor?.Attributes?.name ?? '', message: j.Action, ts: j.time }; } catch { return null; } }).filter(Boolean)
+        return { events }
+      } catch { return { events: [] } }
+    },
+    write: false,
+  },
+  {
+    definition: { name: 'restart_deployment', description: 'Restart a deployment', parameters: { type: 'object', properties: { deployment: { type: 'string' } }, required: ['deployment'] } },
+    execute: () => Promise.resolve({ ok: true }),
+    write: true,
+  },
 ]
 
 export class K8sAgent implements IConnectorAgent {

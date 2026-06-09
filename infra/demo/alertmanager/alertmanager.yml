@@ -1,0 +1,7 @@
+route:
+  receiver: anvay
+receivers:
+  - name: anvay
+    webhook_configs:
+      - url: http://gateway:4000/api/events/alert
+        send_resolved: true

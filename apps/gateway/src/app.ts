@@ -15,6 +15,7 @@ import { connectorsRoutes } from './routes/connectors.js'
 import { serviceRoutes } from './routes/services.js'
 import { gateDecideRoutes } from './gate/gate-decide-route.js'
 import { settingsRoutes } from './routes/settings.js'
+import { eventRoutes } from './routes/events.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -54,6 +55,7 @@ export async function buildApp() {
   await app.register(connectorsRoutes)
   await app.register(serviceRoutes)
   await app.register(chatStreamRoutes)
+  await app.register(eventRoutes)
   await app.register(settingsRoutes)
   await app.register(gateDecideRoutes)
 

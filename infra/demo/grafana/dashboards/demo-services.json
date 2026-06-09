@@ -1,0 +1,9 @@
+{
+  "title": "Demo Services",
+  "panels": [
+    {"title":"Error Rate","type":"graph","gridPos":{"h":8,"w":12,"x":0,"y":0},"targets":[{"expr":"error_rate","legendFormat":"{{service}}"}]},
+    {"title":"Request Rate","type":"graph","gridPos":{"h":8,"w":12,"x":12,"y":0},"targets":[{"expr":"rate(http_requests_total[1m])","legendFormat":"{{service}}"}]},
+    {"title":"Request Duration P99","type":"graph","gridPos":{"h":8,"w":12,"x":0,"y":8},"targets":[{"expr":"http_request_duration_seconds{quantile=\"0.99\"}","legendFormat":"{{service}}"}]}
+  ],
+  "schemaVersion": 14
+}

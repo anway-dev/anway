@@ -1,0 +1,13 @@
+groups:
+  - name: demo
+    rules:
+      - alert: HighErrorRate
+        expr: error_rate > 0.1
+        for: 30s
+        labels: { severity: critical }
+        annotations: { summary: 'High error rate on {{ $labels.service }}' }
+      - alert: ServiceDown
+        expr: up == 0
+        for: 15s
+        labels: { severity: critical }
+        annotations: { summary: 'Service {{ $labels.instance }} is down' }

@@ -2,18 +2,43 @@ import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
 const TOOLS: ConnectorTool[] = [
   {
-    definition: { name: 'get_metrics', description: 'Fetch metrics for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, window: { type: 'string' }, metric: { type: 'string', optional: true } }, required: ['service', 'window'] } },
-    execute: () => Promise.resolve({ points: Array.from({length:12},(_,i)=>({t:Date.now()-(11-i)*300_000,v:0.01+Math.random()*0.05})), unit: 'requests/s' }),
+    definition: { name: 'query_metrics', description: 'Run PromQL instant query', parameters: { type: 'object', properties: { query: { type: 'string' }, window: { type: 'string', optional: true } }, required: ['query'] } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://prometheus:9090'
+      const q = encodeURIComponent(params.query as string)
+      try {
+        const res = await fetch(`${base}/api/v1/query?query=${q}`)
+        if (!res.ok) return { error: `Prometheus ${res.status}` }
+        const data = await res.json() as { data: { result: unknown[] } }
+        return { result: data.data.result }
+      } catch { return { error: 'Prometheus unreachable' } }
+    },
     write: false,
   },
   {
-    definition: { name: 'get_alerts', description: 'List active alerts', parameters: { type: 'object', properties: { service: { type: 'string', optional: true }, severity: { type: 'string', optional: true } } } },
-    execute: () => Promise.resolve({ alerts: [{ id:'al-1',title:'High error rate',severity:'critical',status:'firing',firedAt:new Date().toISOString() }] }),
+    definition: { name: 'get_alerts', description: 'List active alerts', parameters: { type: 'object', properties: {} } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://prometheus:9090'
+      try {
+        const res = await fetch(`${base}/api/v1/alerts`)
+        if (!res.ok) return { alerts: [] }
+        const data = await res.json() as { data: { alerts: unknown[] } }
+        return { alerts: data.data.alerts ?? [] }
+      } catch { return { alerts: [] } }
+    },
     write: false,
   },
   {
-    definition: { name: 'get_logs', description: 'Search logs for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, query: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['service', 'query'] } },
-    execute: () => Promise.resolve({ lines: [{ ts: new Date().toISOString(), level: 'error', msg: 'Sample log line' }] }),
+    definition: { name: 'get_targets', description: 'List scrape targets', parameters: { type: 'object', properties: {} } },
+    execute: async (params, creds) => {
+      const base = (creds as any).baseUrl ?? 'http://prometheus:9090'
+      try {
+        const res = await fetch(`${base}/api/v1/targets`)
+        if (!res.ok) return { targets: [] }
+        const data = await res.json() as { data: { activeTargets: unknown[] } }
+        return { targets: data.data.activeTargets ?? [] }
+      } catch { return { targets: [] } }
+    },
     write: false,
   },
 ]

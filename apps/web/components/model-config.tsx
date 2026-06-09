@@ -13,49 +13,40 @@ interface Provider {
   envVar?: string;
 }
 
-const INITIAL_PROVIDERS: Provider[] = [
-  {
-    id: "anthropic", name: "Anthropic", type: "cloud", icon: "◆", color: "#cc785c",
-    models: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
-    connected: true, activeModel: "claude-sonnet-4-6", envVar: "ANTHROPIC_API_KEY",
-  },
-  {
-    id: "openai", name: "OpenAI", type: "cloud", icon: "○", color: "#10a37f",
-    models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o3-mini"],
-    connected: false, envVar: "OPENAI_API_KEY",
-  },
-  {
-    id: "deepseek", name: "DeepSeek", type: "cloud", icon: "◈", color: "#4f46e5",
-    models: ["deepseek-chat", "deepseek-coder", "deepseek-reasoner"],
-    connected: false, envVar: "DEEPSEEK_API_KEY",
-  },
-  {
-    id: "groq", name: "Groq", type: "cloud", icon: "⚡", color: "#f55036",
-    models: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"],
-    connected: false, envVar: "GROQ_API_KEY",
-  },
-  {
-    id: "mistral", name: "Mistral", type: "cloud", icon: "≋", color: "#ff7000",
-    models: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
-    connected: false, envVar: "MISTRAL_API_KEY",
-  },
-  {
-    id: "ollama", name: "Ollama", type: "local", icon: "◉", color: "#3b82f6",
-    models: ["llama3.2", "mistral", "codellama", "deepseek-coder", "phi3"],
-    connected: false,
-  },
-  {
-    id: "lmstudio", name: "LM Studio", type: "local", icon: "⬡", color: "#8b5cf6",
-    models: [],
-    connected: false,
-  },
-];
+const PROVIDER_META: Record<string, { icon: string; color: string }> = {
+  anthropic: { icon: "◆", color: "#cc785c" },
+  openai: { icon: "○", color: "#10a37f" },
+  deepseek: { icon: "◈", color: "#4f46e5" },
+  groq: { icon: "⚡", color: "#f55036" },
+  mistral: { icon: "≋", color: "#ff7000" },
+  ollama: { icon: "◉", color: "#3b82f6" },
+  lmstudio: { icon: "⬡", color: "#8b5cf6" },
+};
 
 type TestState = "idle" | "testing" | "success" | "fail";
 
 export function ModelConfig() {
-  const [providers, setProviders] = useState<Provider[]>(INITIAL_PROVIDERS);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [selected, setSelected] = useState("anthropic");
+
+  useEffect(() => {
+    fetch("/api/settings/provider-manifests")
+      .then(r => r.json())
+      .then((manifests: Array<{ id: string; displayName: string; models: string[] }>) => {
+        setProviders(manifests.map(m => ({
+          id: m.id,
+          name: m.displayName,
+          type: (m.id === 'ollama' || m.id === 'lmstudio' ? "local" : "cloud") as "cloud" | "local",
+          icon: PROVIDER_META[m.id]?.icon ?? "◇",
+          color: PROVIDER_META[m.id]?.color ?? "#888",
+          models: m.models,
+          connected: false,
+          envVar: (m.id).toUpperCase() + '_API_KEY',
+        })));
+      })
+      .catch(() => {});
+  }, []);
+
   const [endpoints, setEndpoints] = useState<Record<string, string>>({
     ollama: "http://localhost:11434",
     lmstudio: "http://localhost:1234",

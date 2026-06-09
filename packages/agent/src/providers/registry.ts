@@ -43,7 +43,7 @@ providerRegistry.register({
   displayName: 'Anthropic',
   website: 'https://anthropic.com',
   fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'sk-ant-...' }],
-  models: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  models: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-haiku-4-5-20251001'],
   openAICompatible: false,
   factory: (c) => new AnthropicProvider(c),
 })
@@ -56,7 +56,9 @@ providerRegistry.register({
     { key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'sk-...' },
     { key: 'baseURL', label: 'Base URL (optional)', type: 'url', required: false, defaultValue: 'https://api.openai.com/v1' },
   ],
-  models: ['gpt-4o', 'gpt-4o-mini', 'o1-mini', 'o1'],
+  models: 'dynamic',
+  modelsEndpoint: '/v1/models',
+  defaultBaseUrl: 'https://api.openai.com/v1',
   openAICompatible: true,
 })
 
@@ -65,7 +67,8 @@ providerRegistry.register({
   displayName: 'DeepSeek',
   website: 'https://deepseek.com',
   fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'sk-...' }],
-  models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'],
+  models: 'dynamic',
+  modelsEndpoint: '/v1/models',
   defaultBaseUrl: 'https://api.deepseek.com',
   openAICompatible: true,
 })
@@ -75,7 +78,8 @@ providerRegistry.register({
   displayName: 'Groq',
   website: 'https://groq.com',
   fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'gsk_...' }],
-  models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+  models: 'dynamic',
+  modelsEndpoint: '/v1/models',
   defaultBaseUrl: 'https://api.groq.com/openai/v1',
   openAICompatible: true,
 })
@@ -85,7 +89,8 @@ providerRegistry.register({
   displayName: 'Mistral',
   website: 'https://mistral.ai',
   fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'ey...' }],
-  models: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest', 'codestral-latest'],
+  models: 'dynamic',
+  modelsEndpoint: '/v1/models',
   defaultBaseUrl: 'https://api.mistral.ai/v1',
   openAICompatible: true,
 })

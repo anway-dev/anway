@@ -1,10 +1,14 @@
 import { createClient } from 'redis'
 import type { RedisClientType } from 'redis'
 import { GraphBuilderAgent } from '@anvay/agent'
-import type { GraphEvent } from '@anvay/agent'
+import type { GraphEvent, IConnectorBootstrap } from '@anvay/agent'
 import { ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { GitHubBootstrap } from '@anvay/connector-github'
+import { ArgocdBootstrap } from '@anvay/connector-argocd'
+import { DatadogBootstrap } from '@anvay/connector-datadog'
+import { LinearBootstrap } from '@anvay/connector-linear'
 import type { TenantId } from '@anvay/types'
 interface SubscriberLogger { warn(obj: unknown, msg?: string): void; info(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void }
 
@@ -51,7 +55,12 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         return
       }
       const kg = createKnowledgeGraph(event.tenantId as TenantId)
-      const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, undefined, graphPub)
+      const bootstrapRegistry = new Map<string, IConnectorBootstrap>()
+      bootstrapRegistry.set('github', new GitHubBootstrap(kg, process.env['GH_TOKEN'] ?? ''))
+      bootstrapRegistry.set('argocd', new ArgocdBootstrap(kg))
+      bootstrapRegistry.set('datadog', new DatadogBootstrap(kg))
+      bootstrapRegistry.set('linear', new LinearBootstrap(kg, process.env['LINEAR_API_KEY']))
+      const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
       await agent.handle(event)
     })
   }

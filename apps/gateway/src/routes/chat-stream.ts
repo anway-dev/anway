@@ -5,6 +5,14 @@ import type { ProviderConfig, IConnectorAgent, ConnectorTool, ToolDefinition } f
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
+const ALLOWED_CONNECTOR_TYPES = new Set([
+  'github','datadog','linear','argocd','coralogix','notion','prometheus','newrelic',
+  'jira','loki','terraform','pagerduty','slack','grafana','elastic','dynatrace',
+  'sentry','jenkins','circleci','vercel','k8s','vault','snyk','sonarqube',
+  'opsgenie','launchdarkly','confluence','eks','gke','aws-cloudwatch',
+  'aws-health','gcp-monitoring','azure-monitor',
+])
+
 const MAX_ITERATIONS = 5
 
 interface ChatMessage {
@@ -72,6 +80,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
     const credMap = new Map<string, Record<string, unknown>>()
 
     for (const cc of connConfigs) {
+      if (!ALLOWED_CONNECTOR_TYPES.has(cc.connector_type) || /[./\\]/.test(cc.connector_type)) continue
       credMap.set(cc.connector_type, cc.credentials as Record<string, unknown>)
       try {
         const mod = await import(`../../../../connectors/${cc.connector_type}/src/agent.js`) as Record<string, unknown>
@@ -100,10 +109,12 @@ export async function chatStreamRoutes(app: FastifyInstance) {
     reply.header('Cache-Control', 'no-cache')
     reply.header('Connection', 'keep-alive')
 
-    interface LLMMessage { role: 'user' | 'assistant'; content: string }
+    interface LLMMessage { role: 'user' | 'assistant' | 'tool'; content: string; tool_call_id?: string; name?: string }
     const llmMessages: LLMMessage[] = messages.map(m => ({
-      role: (m.role === 'tool' ? 'assistant' : m.role) as 'user' | 'assistant',
+      role: m.role,
       content: m.content,
+      ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+      ...(m.name ? { name: m.name } : {}),
     }))
 
     void (async () => {
@@ -117,7 +128,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
           })
 
           if (response.content) {
-            stream.push(`data: ${JSON.stringify({ type: 'token', content: response.content })}\n\n`)
+            stream.push(`data: ${JSON.stringify({ type: 'text_delta', content: response.content })}\n\n`)
           }
 
           if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -130,7 +141,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
             if (tool) {
               try {
                 const result = await tool.execute(tc.args as Record<string, unknown>)
-                llmMessages.push({ role: 'assistant' as const, content: JSON.stringify(result) })
+                llmMessages.push({ role: 'tool' as const, content: JSON.stringify(result), tool_call_id: tc.id, name: tc.name })
                 stream.push(`data: ${JSON.stringify({ type: 'tool_call', toolCallId: tc.id, toolName: tc.name, args: tc.args })}\n\n`)
               } catch (err) {
                 const msg = err instanceof Error ? err.message : 'tool execution failed'

@@ -36,12 +36,12 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
 
   useEffect(() => {
     setSelectedModel("");
-    setModels([]);
-    const params = new URLSearchParams({ provider: selectedProvider });
-    if (baseUrl) params.set("baseUrl", baseUrl);
-    if (apiKey) params.set("apiKey", apiKey);
-    fetch(`/api/settings/models?${params}`).then(r => r.json()).then((data: ModelList) => setModels(data.models)).catch(() => setModels([]));
-  }, [selectedProvider, baseUrl, apiKey]);
+    // For API-key providers, wait until key looks complete (≥10 chars)
+    const needsKey = selectedManifest?.fields.some(f => f.key === 'apiKey' && f.required)
+    if (needsKey && apiKey.length < 10) { setModels([]); return }
+    fetch(`/api/settings/models?${new URLSearchParams({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) })}`)
+      .then(r => r.json()).then((data: ModelList) => setModels(data.models)).catch(() => setModels([]));
+  }, [selectedProvider, baseUrl, apiKey, selectedManifest]);
 
   async function handleSave() {
     if (!apiKey && selectedManifest?.fields.some(f => f.required && f.key === 'apiKey')) return;

@@ -74,9 +74,10 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     if (Array.isArray(manifest.models)) return { models: manifest.models }
 
     // Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata, allow localhost for Ollama)
-    if (manifest.modelsEndpoint && baseUrl && isSafeBaseUrl(baseUrl)) {
+    const effectiveBaseUrl = baseUrl ?? manifest.defaultBaseUrl
+    if (manifest.modelsEndpoint && effectiveBaseUrl && isSafeBaseUrl(effectiveBaseUrl)) {
       try {
-        const url = `${baseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
+        const url = `${effectiveBaseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
         const headers: Record<string, string> = {}
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
         const resp = await fetch(url, { headers })

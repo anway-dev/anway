@@ -69,7 +69,7 @@ export async function authRoutes(app: FastifyInstance) {
     // Upsert tenant + user so withTenant() works downstream
     try {
       await prisma.$executeRaw`
-        INSERT INTO tenants (id, name, slug, plan) VALUES (${DEV_TENANT}::uuid, 'Dev Tenant', 'dev', 'free')
+        INSERT INTO tenants (id, name, slug, plan) VALUES (${DEV_TENANT}::uuid, 'Dev Tenant', 'dev', 'tier1')
         ON CONFLICT (id) DO NOTHING
       `
       await prisma.$executeRaw`

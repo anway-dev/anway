@@ -98,7 +98,14 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     return configs.map(c => ({ connectorType: c.connector_type, enabled: c.enabled, bootstrappedAt: c.bootstrapped_at }))
   })
 
-  const KNOWN_CONNECTORS = ['github', 'datadog', 'linear', 'argocd', 'k8s', 'pagerduty', 'slack']
+  const KNOWN_CONNECTORS = [
+    'github', 'datadog', 'linear', 'argocd', 'coralogix', 'notion',
+    'prometheus', 'newrelic', 'jira', 'loki', 'terraform', 'pagerduty',
+    'slack', 'grafana', 'elastic', 'dynatrace', 'sentry', 'jenkins',
+    'circleci', 'vercel', 'k8s', 'vault', 'snyk', 'sonarqube',
+    'opsgenie', 'launchdarkly', 'confluence',
+    'eks', 'gke', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
+  ]
 
   app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(
     '/api/settings/connectors/:type', { preHandler: [app.authenticate] }, async (request, reply) => {

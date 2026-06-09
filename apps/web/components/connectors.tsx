@@ -7,7 +7,7 @@ interface ConnectorStatus {
   enabled: boolean;
 }
 
-const CATEGORIES = ["All", "Cloud Health", "Observability", "Logging", "Kubernetes", "Code & CI", "Issue Tracking", "Deployment", "Infrastructure", "Alerting", "Docs"];
+const CATEGORIES = ["All", "Code & CI", "CI/CD", "Observability", "Logging", "Issue Tracking", "Error Tracking", "Alerting", "Deployment", "Kubernetes", "Infrastructure", "Security", "Code Quality", "Collaboration", "Docs", "Cloud Health", "Feature Flags"];
 
 export function ConnectorsView() {
   const [filter, setFilter] = useState("All");

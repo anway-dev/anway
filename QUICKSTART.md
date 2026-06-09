@@ -6,9 +6,10 @@
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-## 2. Install + migrate
+## 2. Configure + migrate
 
 ```bash
+cp apps/gateway/.env.example apps/gateway/.env
 pnpm install
 cd apps/gateway && pnpm prisma migrate deploy && cd ../..
 ```

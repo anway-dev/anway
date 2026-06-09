@@ -80,7 +80,8 @@ log "Gateway ready"
 
 # ── Start web ──
 log "Starting web on :3000..."
-(cd apps/web && pnpm dev) > /tmp/anvay-web.log 2>&1 &
+# Unset PORT so Next.js uses its default (:3000), not the gateway's PORT=4000
+(cd apps/web && env -u PORT pnpm dev) > /tmp/anvay-web.log 2>&1 &
 WEB_PID=$!
 
 TRIES=0

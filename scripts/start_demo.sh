@@ -9,31 +9,36 @@ err()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# ── Stop old containerized gateway on :4000 (conflicts with source-run) ──
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'infra-gateway'; then
-  warn "Stopping old containerized gateway (conflicts with port 4000)..."
-  docker stop infra-gateway-1 2>/dev/null || true
-fi
+# ── Check Docker is running ──
+docker info > /dev/null 2>&1 || err "Docker is not running — start Docker Desktop first"
+
+# ── Stop old containerized gateway/web on same ports ──
+for name in infra-gateway-1 infra-web-1; do
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${name}$"; then
+    warn "Stopping container ${name} (freeing port)..."
+    docker stop "$name" 2>/dev/null || true
+  fi
+done
 
 # ── Start infra (postgres, redis, neo4j) ──
-log "Starting infra services..."
-docker compose -f infra/docker-compose.yml up -d postgres redis neo4j 2>/dev/null || \
-  docker compose -f infra/docker-compose.yml up -d 2>/dev/null || \
-  err "docker compose failed — is Docker running?"
+# Use project name 'infra' to match any existing containers
+log "Starting infra services (postgres, redis, neo4j)..."
+docker compose -p infra -f infra/docker-compose.yml up -d postgres redis neo4j 2>&1 | grep -v '^#' || \
+  err "docker compose failed — check infra/docker-compose.yml"
 
 # Wait for postgres
-log "Waiting for postgres to be ready..."
+log "Waiting for postgres..."
 TRIES=0
-until docker compose -f infra/docker-compose.yml exec -T postgres pg_isready -U anvay > /dev/null 2>&1; do
+until docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1; do
   TRIES=$((TRIES + 1))
-  [ $TRIES -ge 30 ] && err "Postgres not ready after 30s"
+  [ $TRIES -ge 40 ] && err "Postgres not ready after 40s — check: docker logs infra-postgres-1"
   sleep 1
 done
 
 # ── Env file ──
 if [ ! -f apps/gateway/.env ]; then
   cp apps/gateway/.env.example apps/gateway/.env
-  log "Created apps/gateway/.env from example"
+  log "Created apps/gateway/.env"
 fi
 
 # ── Install deps ──
@@ -42,9 +47,10 @@ pnpm install --silent 2>/dev/null || pnpm install
 
 # ── Migrations ──
 log "Running database migrations..."
-(cd apps/gateway && pnpm prisma migrate deploy 2>/dev/null) || warn "Migration skipped (DB may already be up to date)"
+(cd apps/gateway && pnpm prisma migrate deploy) 2>/dev/null || \
+  warn "Migration skipped (may already be up to date)"
 
-# ── Kill any existing dev servers on :3000 / :4000 ──
+# ── Free ports 3000 / 4000 ──
 lsof -ti :4000 2>/dev/null | xargs kill -9 2>/dev/null || true
 lsof -ti :3000 2>/dev/null | xargs kill -9 2>/dev/null || true
 sleep 1
@@ -54,11 +60,15 @@ log "Starting gateway on :4000..."
 (cd apps/gateway && pnpm dev) > /tmp/anvay-gateway.log 2>&1 &
 GATEWAY_PID=$!
 
-# Wait for gateway health
 TRIES=0
 until curl -sf http://localhost:4000/health > /dev/null 2>&1; do
   TRIES=$((TRIES + 1))
-  [ $TRIES -ge 30 ] && err "Gateway failed to start — check /tmp/anvay-gateway.log"
+  if [ $TRIES -ge 40 ]; then
+    echo ""
+    warn "Gateway log tail:"
+    tail -20 /tmp/anvay-gateway.log
+    err "Gateway failed to start — full log: /tmp/anvay-gateway.log"
+  fi
   sleep 1
 done
 log "Gateway ready"
@@ -68,11 +78,15 @@ log "Starting web on :3000..."
 (cd apps/web && pnpm dev) > /tmp/anvay-web.log 2>&1 &
 WEB_PID=$!
 
-# Wait for web
 TRIES=0
 until curl -sf http://localhost:3000 > /dev/null 2>&1; do
   TRIES=$((TRIES + 1))
-  [ $TRIES -ge 60 ] && err "Web failed to start — check /tmp/anvay-web.log"
+  if [ $TRIES -ge 60 ]; then
+    echo ""
+    warn "Web log tail:"
+    tail -20 /tmp/anvay-web.log
+    err "Web failed to start — full log: /tmp/anvay-web.log"
+  fi
   sleep 1
 done
 log "Web ready"
@@ -88,12 +102,10 @@ echo ""
 echo "  Logs:  tail -f /tmp/anvay-gateway.log"
 echo "         tail -f /tmp/anvay-web.log"
 echo ""
-echo "  Stop:  kill $GATEWAY_PID $WEB_PID"
+echo "  Stop: Ctrl+C"
 echo ""
 
-# Open browser on macOS
 open http://localhost:3000 2>/dev/null || true
 
-# Keep script alive so Ctrl+C stops both servers
 trap "kill $GATEWAY_PID $WEB_PID 2>/dev/null; echo ''; log 'Stopped.'" EXIT INT TERM
 wait $GATEWAY_PID $WEB_PID

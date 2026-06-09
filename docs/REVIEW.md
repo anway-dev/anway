@@ -6515,3 +6515,16 @@ Classes exist, nothing schedules them. Per CLAUDE.md, use Trigger.dev or BullMQ 
 `apps/gateway/src/graph-builder/subscriber.ts` line ~44 passes `undefined` for the bootstrapRegistry arg to `GraphBuilderAgent`. `GitHubBootstrap` at `connectors/github/src/bootstrap.ts` exists but is never invoked. ArgoCD, Datadog, Linear connectors have no bootstrap implementations. `connector_registered` events seed a Connector entity in the graph but never bootstrap repos/apps/teams/monitors. Fix: implement bootstrap classes for each connector and wire the registry. (Tracked in BRIDGE.md T2.)
 
 <!-- REVIEW SECTION END — 2026-06-09d -->
+
+<!-- REVIEW SECTION START — 2026-06-09e -->
+## Review — 2026-06-09e (commit `5929dc2`)
+
+T1/T2 from BRIDGE.md 2026-06-09d — verified correct.
+
+### BLOCKING
+
+**T3 — GitHub connector test mocks `spawnSync`, connector uses `execFile`**
+
+`connectors/github/src/connector.test.ts` mocks `spawnSync` but `connector.ts` imports and uses `execFile` (via `promisify`). Both tests fail: `No "execFile" export is defined on the "node:child_process" mock`. `pnpm -r test` exits non-zero. Fix: change mock to return `execFile` in callback form (promisify-compatible). (Tracked in BRIDGE.md T3.)
+
+<!-- REVIEW SECTION END — 2026-06-09e -->

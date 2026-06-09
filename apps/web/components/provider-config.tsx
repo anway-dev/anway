@@ -39,8 +39,9 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
     setModels([]);
     const params = new URLSearchParams({ provider: selectedProvider });
     if (baseUrl) params.set("baseUrl", baseUrl);
+    if (apiKey) params.set("apiKey", apiKey);
     fetch(`/api/settings/models?${params}`).then(r => r.json()).then((data: ModelList) => setModels(data.models)).catch(() => setModels([]));
-  }, [selectedProvider, baseUrl]);
+  }, [selectedProvider, baseUrl, apiKey]);
 
   async function handleSave() {
     if (!apiKey && selectedManifest?.fields.some(f => f.required && f.key === 'apiKey')) return;

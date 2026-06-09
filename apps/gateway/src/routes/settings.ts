@@ -64,6 +64,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
   app.get('/api/settings/models', async (request) => {
     const p = (request.query as { provider?: string }).provider
     const baseUrl = (request.query as { baseUrl?: string }).baseUrl
+    const apiKey = (request.query as { apiKey?: string }).apiKey
     if (!p) return { models: [] }
 
     const manifest = providerRegistry.get(p)
@@ -76,7 +77,9 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     if (manifest.modelsEndpoint && baseUrl && isSafeBaseUrl(baseUrl)) {
       try {
         const url = `${baseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
-        const resp = await fetch(url)
+        const headers: Record<string, string> = {}
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+        const resp = await fetch(url, { headers })
         const data = await resp.json() as { models?: { name: string }[]; data?: { id: string }[] }
         // Handle both Ollama format ({ models: [{ name }] }) and OpenAI format ({ data: [{ id }] })
         if (data.models) return { models: data.models.map((m: { name: string }) => m.name) }

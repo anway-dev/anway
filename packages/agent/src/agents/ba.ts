@@ -23,7 +23,7 @@ export class BAAgent {
 
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Answer business query in JSON matching { query, summary, metrics: [{label, value, trend?: "up"|"down"|"stable"}], insights: string[], recommendations: string[] }. Return ONLY valid JSON.' },
-      { role: 'user', content: `Query: ${query}\nType: ${classification.content}\n${graphContext ? 'Context: ' + JSON.stringify(graphContext) : ''}` },
+      { role: 'user', content: `Query: ${query}\nType: ${classification.content}\n${graphContext ? `Context: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.slice(0, 5).map(e => e.name).join(', ')}` : ''}` },
     ], [], { model: 'claude-sonnet-4-6', maxTokens: 1500, temperature: 0 })
 
     try { return JSON.parse(result.content) as AnalysisReport } catch { return { query, summary: '', metrics: [], insights: [], recommendations: [] } }

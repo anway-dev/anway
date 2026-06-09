@@ -35,7 +35,7 @@ export class OncallAgent {
 
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Investigate this alert. What changed before it fired? Analyse timeline and suggest next steps.' },
-      { role: 'user', content: `Alert: ${alertTitle}\n${graphContext ? 'Context: ' + JSON.stringify(graphContext) : 'No context'}` },
+      { role: 'user', content: `Alert: ${alertTitle}\n${graphContext ? `Entity: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.slice(0, 5).map(e => e.name).join(', ')}. Recent: ${graphContext.recentEpisodes.slice(0, 5).map(e => e.text).join(' | ')}` : 'No context'}` },
     ], [], { model: 'claude-sonnet-4-6', maxTokens: 1000, temperature: 0 })
 
     return result.content

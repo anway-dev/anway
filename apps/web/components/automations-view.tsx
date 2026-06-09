@@ -140,6 +140,7 @@ export function AutomationsView() {
   const [triggers, setTriggers] = useState<TriggerRuleAPI[]>([]);
   const [monitors, setMonitors] = useState<CronMonitorAPI[]>([]);
   const [loading, setLoading] = useState(true);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -153,12 +154,22 @@ export function AutomationsView() {
   }, [])
 
   async function toggleTrigger(id: string, enabled: boolean) {
-    await fetch(`/api/automations/triggers/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    })
-    setTriggers(prev => prev.map(t => t.id === id ? { ...t, enabled } : t))
+    setToggleError(null)
+    try {
+      const resp = await fetch(`/api/automations/triggers/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: string }
+        setToggleError(err.error ?? `Failed to ${enabled ? 'enable' : 'disable'} trigger`)
+        return
+      }
+      setTriggers(prev => prev.map(t => t.id === id ? { ...t, enabled } : t))
+    } catch {
+      setToggleError('Network error — could not reach gateway')
+    }
   }
 
   const displayTriggers = triggers.map(toDisplayTrigger)
@@ -166,6 +177,14 @@ export function AutomationsView() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", overflow: "hidden" }}>
+      {/* Error toast */}
+      {toggleError && (
+        <div style={{ padding: "8px 20px", background: "rgba(239,68,68,0.1)", borderBottom: "1px solid rgba(239,68,68,0.2)", display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "11px", color: "#ef4444" }}>{toggleError}</span>
+          <button onClick={() => setToggleError(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "11px" }}>✕</button>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ padding: "16px 20px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "2px" }}>Agent Harness</div>

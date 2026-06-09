@@ -1,4 +1,5 @@
 import type { ExecutableTool } from '@anvay/agent'
+import type { AgentRole } from '@anvay/types'
 import { registerConnectorTool, listConnectorsTool } from './registry.js'
 
 /**
@@ -8,7 +9,7 @@ import { registerConnectorTool, listConnectorsTool } from './registry.js'
  * - register_connector: write action (gate approval required), admin role only
  * - list_connectors: read action, any authenticated user
  */
-export function makeRegistrationTools(tenantId: string): ExecutableTool[] {
+export function makeRegistrationTools(tenantId: string, role: AgentRole): ExecutableTool[] {
   return [
     {
       name: 'register_connector',
@@ -23,6 +24,9 @@ export function makeRegistrationTools(tenantId: string): ExecutableTool[] {
         },
       },
       async run(args: Record<string, unknown>) {
+        if (role !== 'admin') {
+          throw new Error('register_connector requires admin role')
+        }
         const type = args['type'] as 'mcp' | 'cli'
         const name = args['name'] as string
         const config = args['config'] as Record<string, unknown>

@@ -49,17 +49,19 @@ function instantiateAdapter(row: ConnectorRow, tenantId: string): McpConnector |
     onExec(entry: CliExecEntry) {
       void (async () => {
         try {
-          await prisma.auditEvent.create({
-            data: {
-              id: crypto.randomUUID(),
-              tenant_id: tenantId,
-              user_id: '',
-              session_id: '',
-              event_type: 'tool_call_allowed',
-              payload: JSON.parse(JSON.stringify(entry)),
-              created_at: new Date(),
-            },
-          })
+          await withTenant(prisma, tenantId, (tx) =>
+            tx.auditEvent.create({
+              data: {
+                id: crypto.randomUUID(),
+                tenant_id: tenantId,
+                user_id: '',
+                session_id: '',
+                event_type: 'tool_call_allowed',
+                payload: JSON.parse(JSON.stringify(entry)),
+                created_at: new Date(),
+              },
+            })
+          )
         } catch { /* swallow */ }
       })()
     },

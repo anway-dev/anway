@@ -279,7 +279,7 @@ export async function chatRoutes(app: FastifyInstance) {
         withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
-    const registrationTools = makeRegistrationTools(tenantId)
+    const registrationTools = makeRegistrationTools(tenantId, (role as AgentRole) ?? 'dev')
     const allTools = [...connectorTools, ...registrationTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)

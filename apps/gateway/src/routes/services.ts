@@ -15,6 +15,11 @@ interface RelRow {
   toEntityId: string
 }
 
+interface IncidentRow {
+  title: string
+  status: string
+}
+
 export async function serviceRoutes(app: FastifyInstance) {
   app.get('/api/services', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
@@ -32,6 +37,9 @@ export async function serviceRoutes(app: FastifyInstance) {
       const allRels = await tx.$queryRaw<RelRow[]>`
         SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
         FROM relationships
+      `
+      const activeIncidents = await tx.$queryRaw<IncidentRow[]>`
+        SELECT title, status FROM incidents WHERE status IN ('active', 'in_progress')
       `
 
       const entityById = new Map(allEntities.map(e => [e.id, e]))
@@ -68,7 +76,9 @@ export async function serviceRoutes(app: FastifyInstance) {
           description: (meta['description'] as string) ?? '',
           dependencies: depNames,
           callers: callerNames,
-          activeIncidents: 0,
+          activeIncidents: activeIncidents.filter(i =>
+            i.title.toLowerCase().includes(entity.name.toLowerCase())
+          ).length,
           metrics: {
             errorRate: (meta['errorRate'] as number) ?? 0,
             p99ms: (meta['p99ms'] as number) ?? 0,

@@ -33,7 +33,14 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
   const sreAgent = new SREAgent(provider, provider, cheapModelId, mainModelId)
   const incidentService = new IncidentService(prisma)
 
-  const sub: RedisClientType = createClient({ url: redisUrl }) as RedisClientType
+  const sub: RedisClientType = createClient({
+    url: redisUrl,
+    socket: {
+      reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000),
+    },
+  }) as RedisClientType
+
+  sub.on('error', (err) => log.error({ err }, 'IncidentSubscriber Redis error'))
   await sub.connect()
 
   await sub.subscribe('incident_created', (message) => {

@@ -807,7 +807,16 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
                   color: "#f59e0b", padding: "5px 8px", borderRadius: "3px", fontSize: "9px",
                   cursor: "pointer", fontFamily: "monospace",
                 }}
-                onClick={() => setGateRequired(null)}
+                onClick={() => {
+                  const gate = gateRequired
+                  if (!gate) return
+                  setGateRequired(null)
+                  fetch(`/api/gate/${gate.gateId}/decide`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ decision: 'approved' }),
+                  }).catch(() => { /* gate decision failed silently — orchestrator will timeout */ })
+                }}
               >
                 Approve
               </button>
@@ -817,7 +826,16 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
                   color: "#444", padding: "5px 8px", borderRadius: "3px", fontSize: "9px",
                   cursor: "pointer", fontFamily: "monospace",
                 }}
-                onClick={() => setGateRequired(null)}
+                onClick={() => {
+                  const gate = gateRequired
+                  if (!gate) return
+                  setGateRequired(null)
+                  fetch(`/api/gate/${gate.gateId}/decide`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ decision: 'rejected' }),
+                  }).catch(() => { /* gate decision failed silently — orchestrator will timeout */ })
+                }}
               >
                 Reject
               </button>

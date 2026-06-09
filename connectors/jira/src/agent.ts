@@ -7,7 +7,7 @@ const TOOLS: ConnectorTool[] = [
   { definition: { name: 'update_issue', description: 'Update issue status', parameters: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'status'] } }, execute: () => Promise.resolve({ ok: true }), write: true },
 ]
 
-export class LinearAgent implements IConnectorAgent {
-  readonly connectorType = 'linear'
+export class JiraAgent implements IConnectorAgent {
+  readonly connectorType = 'jira'
   readonly tools = TOOLS
 }

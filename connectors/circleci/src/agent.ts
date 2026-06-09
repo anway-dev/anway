@@ -6,7 +6,7 @@ const TOOLS: ConnectorTool[] = [
   { definition: { name: 'trigger_deploy', description: 'Trigger a deploy', parameters: { type: 'object', properties: { service: { type: 'string' }, env: { type: 'string' }, sha: { type: 'string' } }, required: ['service', 'env', 'sha'] } }, execute: () => Promise.resolve({ runId: 'run-1' }), write: true },
 ]
 
-export class ArgocdAgent implements IConnectorAgent {
-  readonly connectorType = 'argocd'
+export class CircleciAgent implements IConnectorAgent {
+  readonly connectorType = 'circleci'
   readonly tools = TOOLS
 }

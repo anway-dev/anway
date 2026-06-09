@@ -18,7 +18,7 @@ const TOOLS: ConnectorTool[] = [
   },
 ]
 
-export class DatadogAgent implements IConnectorAgent {
-  readonly connectorType = 'datadog'
+export class ElasticAgent implements IConnectorAgent {
+  readonly connectorType = 'elastic'
   readonly tools = TOOLS
 }

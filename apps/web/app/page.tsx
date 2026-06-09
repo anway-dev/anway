@@ -17,11 +17,13 @@ import { CloudView } from "@/components/cloud-view";
 import { IncidentView } from "@/components/incident-view";
 import { ServiceCatalog } from "@/components/service-catalog";
 import { AutomationsView } from "@/components/automations-view";
+import { K8sView } from "@/components/k8s-view";
+import { SettingsView } from "@/components/settings-view";
 import { ApprovalsView } from "@/components/approvals-view";
 import { StageNode } from "@/lib/mock";
 import { AUDIT_EVENTS, LIVE_ALERTS, CLOUD_PROVIDERS, INCIDENTS } from "@/lib/mock";
 
-type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations";
+type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings";
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "chat",        label: "Anvay",        icon: "✦" },
@@ -39,6 +41,7 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "connectors",  label: "Connectors",   icon: "⬡" },
   { id: "audit",       label: "Audit",        icon: "⊡" },
   { id: "access",      label: "Access",       icon: "⊞" },
+  { id: "settings", label: "Settings", icon: "⚙" },
   { id: "models",      label: "Models",       icon: "◈" },
   { id: "cloud",       label: "Cloud",        icon: "☁" },
   { id: "k8s",         label: "K8s",          icon: "☸" },
@@ -202,7 +205,8 @@ export default function App() {
           {view === "incident" && <IncidentView onTriggerOrchestrator={handleTriggerOrchestrator} />}
           {view === "catalog" && <ServiceCatalog onTriggerOrchestrator={handleTriggerOrchestrator} />}
           {view === "automations" && <AutomationsView />}
-          {view === "k8s" && <K8sPlaceholder />}
+          {view === "settings" && <SettingsView />}
+          {view === "k8s" && <K8sView />}
         </div>
 
         {/* AI Panel (only for lifecycle view) */}
@@ -218,45 +222,4 @@ export default function App() {
   );
 }
 
-function K8sPlaceholder() {
-  return (
-    <div style={{ padding: "24px", height: "100%", overflowY: "auto" }}>
-      <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Kubernetes</div>
-      <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", marginBottom: "8px" }}>Cluster Overview</h2>
-      <p style={{ fontSize: "12px", color: "#888", marginBottom: "24px" }}>Connect an EKS, GKE, or AKS cluster via the Connectors tab to see live workloads.</p>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", marginBottom: "24px" }}>
-        {[["Namespaces", "12", "#3b82f6"], ["Pods Running", "47", "#10b981"], ["Services", "31", "#8b5cf6"]].map(([label, val, color]) => (
-          <div key={String(label)} style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "16px" }}>
-            <div style={{ fontSize: "24px", fontWeight: 700, color: color as string }}>{val}</div>
-            <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>{label}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: "8px", overflow: "hidden" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #1a1a1a", display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "12px", color: "#888", fontWeight: 600 }}>payments namespace</span>
-          <span style={{ fontSize: "11px", color: "#555" }}>eks-us-east-1 · prod</span>
-        </div>
-        {[
-          ["payments-api", "3/3", "Running", "v2.2.9", "32m CPU · 128Mi"],
-          ["payments-worker", "2/2", "Running", "v2.2.9", "12m CPU · 64Mi"],
-          ["payments-db-proxy", "1/1", "Running", "v1.4.2", "8m CPU · 32Mi"],
-        ].map(([name, ready, status, version, resources]) => (
-          <div key={String(name)} style={{ padding: "10px 16px", borderBottom: "1px solid #111", display: "flex", alignItems: "center", gap: "16px", fontSize: "11px" }}>
-            <span style={{ color: "#d1d5db", minWidth: "160px", fontFamily: "monospace" }}>{name}</span>
-            <span style={{ color: "#10b981", minWidth: "40px" }}>{ready}</span>
-            <span style={{ color: "#10b981", minWidth: "60px" }}>{status}</span>
-            <span style={{ color: "#888", minWidth: "60px", fontFamily: "monospace" }}>{version}</span>
-            <span style={{ color: "#555" }}>{resources}</span>
-            <button style={{ marginLeft: "auto", background: "none", border: "1px solid #2a2a2a", color: "#888", padding: "2px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "10px" }}>
-              Logs
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 

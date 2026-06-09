@@ -31,7 +31,7 @@ interface ProviderManifest {
   openAICompatible: boolean;
 }
 
-export function ProviderConfig({ onConfigured, renderGearIn }: { onConfigured?: () => void; renderGearIn?: (gear: React.ReactNode) => React.ReactNode }) {
+export function ProviderConfig({ onConfigured, renderGearIn, inline }: { onConfigured?: () => void; renderGearIn?: (gear: React.ReactNode) => React.ReactNode; inline?: boolean }) {
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
   const [manifests, setManifests] = useState<ProviderManifest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +94,22 @@ export function ProviderConfig({ onConfigured, renderGearIn }: { onConfigured?: 
     } finally {
       setSaving(false);
     }
+  }
+
+  // Inline mode: render as config section without overlay
+  if (inline) {
+    return (
+      <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "24px" }}>
+        <div style={{ fontSize: "12px", color: "#e5e5e5", fontWeight: 600, marginBottom: "16px", fontFamily: "monospace" }}>
+          AI Provider {providerInfo?.configured ? `· ${providerInfo.provider} configured` : ''}
+        </div>
+        {providerInfo?.configured ? (
+          <div style={{ fontSize: "11px", color: "#10b981", fontFamily: "monospace", marginBottom: "12px" }}>
+            ● {providerInfo.provider}{providerInfo.defaultModel ? ` / ${providerInfo.defaultModel}` : ''}
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   // Full-screen overlay when not configured — blocks everything until set up

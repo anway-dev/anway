@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Raise file descriptor limit — Next.js webpack watches many files, hits macOS default 256
+ulimit -n 65536 2>/dev/null || true
+
+# Use polling for file watcher — macOS FSEvents/kqueue has per-process stream limit
+# Without this, file watching hits EMFILE and Next.js can't discover app routes
+export WATCHPACK_POLLING=true
+
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${GREEN}✓${NC} $1"; }
 warn() { echo -e "${YELLOW}⚠${NC} $1"; }

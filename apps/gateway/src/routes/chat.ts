@@ -98,6 +98,9 @@ export function providerConfigFromEnv(type: string): ProviderConfig | null {
   if (type === 'lmstudio' && process.env['LMSTUDIO_ENDPOINT']) {
     return { type: 'lmstudio', baseURL: process.env['LMSTUDIO_ENDPOINT'] }
   }
+  if (type === 'deepseek' && process.env['DEEPSEEK_API_KEY']) {
+    return { type: 'deepseek', apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com' }
+  }
   return null
 }
 
@@ -132,7 +135,7 @@ export function resolveProviderConfig(override?: ClientModelConfig): ProviderCon
     return config ? withDefaultModel(config, override.defaultModel) : null
   }
 
-  const providerOrder: string[] = ['anthropic', 'openai', 'groq', 'mistral', 'ollama', 'lmstudio']
+  const providerOrder: string[] = ['anthropic', 'openai', 'deepseek', 'groq', 'mistral', 'ollama', 'lmstudio']
   for (const type of providerOrder) {
     const config = providerConfigFromEnv(type)
     if (config) return config
@@ -206,7 +209,7 @@ export async function chatRoutes(app: FastifyInstance) {
             additionalProperties: false,
             required: ['type'],
             properties: {
-              type: { type: 'string', enum: ['anthropic', 'openai', 'ollama', 'groq', 'mistral', 'lmstudio'] },
+              type: { type: 'string', enum: ['anthropic', 'openai', 'deepseek', 'ollama', 'groq', 'mistral', 'lmstudio'] },
               defaultModel: { type: 'string', minLength: 1 },
             },
           },

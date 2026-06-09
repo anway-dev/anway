@@ -7,6 +7,209 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-09b -->
+## Review — 2026-06-09b | BLOCKING+HIGH fix pass + MEDIUM executor fixes
+
+### Scope
+
+16 source files changed across commits `1acbe55..1427366` (since review `2026-06-09`). Covers:
+- `apps/gateway/src/gate/redis-gate-sink.ts` — TTL fix, `record()` Postgres update added
+- `apps/gateway/src/connectors/registry.ts` — RLS fix on audit event, parallel `getTools()`
+- `apps/gateway/src/connectors/registration-tools.ts` — admin role guard added
+- `apps/gateway/src/events/incident-subscriber.ts` — Redis reconnect strategy + error handler
+- `apps/gateway/src/routes/chat.ts` — role forwarded to registration tools, redisUrl shadow removed
+- `apps/gateway/src/routes/services.ts` — `activeIncidents` now computed (was hardcoded 0)
+- `apps/web/lib/gateway-client.ts` — new shared `getDemoToken()` helper (was duplicated 6×)
+- `apps/web/app/api/gate/[id]/decide/route.ts` — new proxy for gate decisions
+- `apps/web/components/orchestrator-chat.tsx` — Approve/Reject now POST to `/api/gate/:id/decide`
+- `apps/web/components/automations-view.tsx` — `toggleTrigger` error handling + toast
+- `apps/web/components/incident-view.tsx` — ID truncation fixed (`slice(0,8)` → `slice(-8)`)
+- All 5 web proxy routes — now import from `gateway-client.ts`
+
+### Verdict: CONDITIONAL PASS — 0 BLOCKING, 1 HIGH, 3 MEDIUM, 4 LOW
+
+All three BLOCKING issues from the 2026-06-09 review are resolved. The gate flow is now end-to-end functional, RLS is enforced on all audit writes in the path, and the TTL is appropriate. One HIGH issue remains: the connector registry's audit event still writes invalid UUIDs (`''`) for `user_id`/`session_id`, silently dropping every CLI tool call audit event. Fix before next feature work touches `registry.ts`.
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | All previously blocked features now work end-to-end. `activeIncidents` computed. Gate approve/reject wired. `parseHelpOutput` unused params still unfixed (M4 from prior review). |
+| D2 Code Standards | 3/5 | `user_id: ''` and `session_id: ''` in registry.ts still cause silent UUID cast failures. `parseHelpOutput` params not prefixed with `_`. |
+| D3 Performance | 4/5 | `getToolsForTenant` now parallel. `getDemoToken()` consolidated but still uncached — fresh HTTP call per web request. |
+| D4 Security | 4/5 | RLS fix on audit write in registry. Admin role check on `register_connector`. Gate TTL adequate. Minor: gate decision fire-and-forget with no client error path. |
+| D5 Readability | 4/5 | Code clean overall. `record()` double-write (route + sink both update Postgres) is confusing — ownership unclear. |
+| D6 Clarity and Comments | 3/5 | `GATE_TTL_SECONDS` still undocumented invariant. `record()` docstring not updated to mention Postgres update. Gate button `.catch(() => {})` makes silent failure intent unclear. |
+
+---
+
+### Issues Found
+
+#### [HIGH] registry.ts — `user_id: ''` and `session_id: ''` are invalid UUIDs, audit event silently dropped
+
+**File:** `apps/gateway/src/connectors/registry.ts:57-58`
+
+**Issue:** Both `user_id` and `session_id` are `String? @db.Uuid` (nullable UUID columns). Prisma sends the empty string to Postgres which tries to cast `''::uuid` → throws `invalid input syntax for type uuid`. The `catch { /* swallow */ }` block eats the error. Every CLI tool call audit event is silently lost.
+
+```typescript
+// current — broken
+user_id: '',
+session_id: '',
+```
+
+**Fix:** Send `null` for both — the columns are nullable by design for system-generated events:
+
+```typescript
+user_id: null,
+session_id: null,
+```
+
+**Verify:** Run gateway, register a CLI connector, invoke a tool. Check `audit_events` table has a row. Previously it had none.
+
+---
+
+#### [MEDIUM] cli-adapter/discovery.ts — `parseHelpOutput` params `env` and `timeoutMs` unused, not prefixed with `_`
+
+**File:** `packages/cli-adapter/src/discovery.ts:49-50`
+
+**Issue:** `parseHelpOutput` accepts `env` and `timeoutMs` but uses neither in its body (only `binary` and `text` are used). Lint rule `no-unused-vars` / TypeScript `noUnusedParameters` will flag these.
+
+```typescript
+// current
+export function parseHelpOutput(
+  text: string,
+  binary: string,
+  env?: Record<string, string>,      // unused
+  timeoutMs?: number,                 // unused
+): DiscoveredCommand[]
+```
+
+**Fix:** Prefix with `_` to signal intentional non-use:
+
+```typescript
+export function parseHelpOutput(
+  text: string,
+  binary: string,
+  _env?: Record<string, string>,
+  _timeoutMs?: number,
+): DiscoveredCommand[]
+```
+
+**Verify:** `pnpm --filter @anvay/cli-adapter typecheck` passes with `noUnusedParameters: true`.
+
+---
+
+#### [MEDIUM] gateway-client.ts — `getDemoToken()` uncached: fresh HTTP `/auth/token` call on every web request
+
+**File:** `apps/web/lib/gateway-client.ts:5`
+
+**Issue:** Every call to `getDemoToken()` makes a synchronous HTTP POST to the gateway's `/auth/token`. Web proxy routes call it on every request (GET /api/services, GET /api/automations/triggers, etc.). The demo JWT has a long lifetime (likely 24h+) — fetching fresh every time adds unnecessary latency and gateway load.
+
+**Fix:** Add module-level cache with expiry. Parse the JWT `exp` claim and cache until `exp - 60s`:
+
+```typescript
+let _cachedToken: string | null = null
+let _tokenExpiry = 0
+
+export async function getDemoToken(): Promise<string | null> {
+  if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken
+  try {
+    const r = await fetch(`${GATEWAY_URL}/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: DEMO_EMAIL, tenantId: DEMO_TENANT_ID }),
+    })
+    if (!r.ok) return null
+    const body = await r.json() as { token?: string }
+    if (!body.token) return null
+    try {
+      const payload = JSON.parse(Buffer.from(body.token.split('.')[1], 'base64').toString()) as { exp?: number }
+      _tokenExpiry = payload.exp ? (payload.exp - 60) * 1000 : Date.now() + 3_600_000
+    } catch {
+      _tokenExpiry = Date.now() + 3_600_000
+    }
+    _cachedToken = body.token
+    return _cachedToken
+  } catch {
+    return null
+  }
+}
+```
+
+**Verify:** Two sequential calls to `/api/services` — second should not produce a `/auth/token` entry in gateway access log.
+
+---
+
+#### [MEDIUM] redis-gate-sink.ts — `record()` double-write: both route and sink update Postgres
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:79-88` and `apps/gateway/src/gate/gate-decide-route.ts:25-31`
+
+**Issue:** `gate-decide-route.ts` updates `gate_events.status` in Postgres first (with `AND status = 'pending'`), then calls `sink.record(...)`. `record()` now also updates Postgres. The second UPDATE finds 0 rows — harmless but wasteful. Ownership of "who updates Postgres" is split across two places.
+
+**Fix:** Remove the Postgres UPDATE from `record()`. Route owns the DB update; `record()` only sets Redis:
+
+```typescript
+async record(gateId: string, decision: 'approved' | 'rejected', _decidedBy: string): Promise<void> {
+  const pub = await this.getPub()
+  await pub.setEx(`${GATE_KEY_PREFIX}${gateId}:decision`, GATE_TTL_SECONDS, decision)
+}
+```
+
+Update the class docstring to reflect that `record` is Redis-only.
+
+**Verify:** Single UPDATE in Postgres query log per gate decision. No extra Redis GET before `setEx`.
+
+---
+
+#### [LOW] redis-gate-sink.ts:10 — `GATE_TTL_SECONDS` undocumented invariant
+
+**File:** `apps/gateway/src/gate/redis-gate-sink.ts:10`
+
+**Fix:** `const GATE_TTL_SECONDS = 600 // must exceed orchestrator poll timeout (default 5 min) + max human response window`
+
+---
+
+#### [LOW] redis-gate-sink.ts:17-18 — docstring not updated to reflect Postgres update in `record()`
+
+**Fix:** If keeping the Postgres path in `record()`, update the docstring: `- record: persists decision to Postgres + sets gate:<gateId>:decision in Redis`. If removing per the MEDIUM fix above, update to `- record: sets gate:<gateId>:decision in Redis (caller owns Postgres update)`.
+
+---
+
+#### [LOW] orchestrator-chat.tsx — gate fetch errors silently swallowed
+
+**File:** `apps/web/components/orchestrator-chat.tsx:819,835`
+
+**Fix:** `.catch((err) => { console.error('[gate] decision POST failed', err) })`
+
+---
+
+#### [LOW] orchestrator-chat.tsx — gate UI dismissed before fetch completes
+
+**File:** `apps/web/components/orchestrator-chat.tsx:811,827`
+
+`setGateRequired(null)` fires before fetch resolves. On fetch failure, gate is already gone — user cannot retry. Acceptable for V1 demo but document the limitation.
+
+---
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Title | Status |
+|------|-------|--------|
+| M0–M5 all tasks | Foundation through Automations | ✅ Complete |
+| — | Gate Approve/Reject → POST /api/gate/:id/decide | ✅ Complete (this cycle) |
+| — | Registry audit RLS fix | ✅ Complete (this cycle) |
+| — | `getDemoToken()` deduplicated | ✅ Complete (this cycle) |
+| — | `activeIncidents` computed | ✅ Complete (this cycle) |
+| — | `getToolsForTenant` parallelised | ✅ Complete (this cycle) |
+| — | `parseHelpOutput` unused params (`_` prefix) | ❌ Not done — Executor skipped M4 |
+| — | `getDemoToken()` module-level caching | ❌ Not started |
+| — | `record()` double-write cleanup | ❌ Not started |
+| — | `user_id: null` in registry audit (HIGH) | ❌ Not started |
+
+<!-- REVIEW SECTION END — 2026-06-09b -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-09 -->
 ## Review — 2026-06-09 | M3/M4/M5 milestone review — incident War Room, KB grounding, automations + service catalog wiring
 

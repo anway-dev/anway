@@ -11,7 +11,23 @@ import { DatadogBootstrap } from '@anvay/connector-datadog'
 import { LinearBootstrap } from '@anvay/connector-linear'
 import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
+import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 interface SubscriberLogger { warn(obj: unknown, msg?: string): void; info(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void }
+
+async function connectorCredential(tenantId: string, connectorType: string, envVar: string): Promise<string> {
+  const row = await withTenant(prisma, tenantId, (tx) =>
+    tx.$queryRaw<{ credentials: { token?: string; apiKey?: string } }[]>`
+      SELECT credentials FROM connector_config
+      WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${connectorType} AND enabled = true
+    `
+  ).catch(() => [])
+  if (row.length > 0) {
+    const creds = row[0]!.credentials
+    return creds.token ?? creds.apiKey ?? process.env[envVar] ?? ''
+  }
+  return process.env[envVar] ?? ''
+}
 
 const GRAPH_EVENT_CHANNELS = [
   'pr_merged', 'deploy_completed', 'incident_created',
@@ -59,11 +75,12 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       // Moving registry outside would require tenant-aware factory — correctness
       // is fine as-is, no optimisation needed.
       const kg = createKnowledgeGraph(event.tenantId as TenantId)
+      const tid = event.tenantId
       const bootstrapRegistry = new Map<string, IConnectorBootstrap>()
-      bootstrapRegistry.set('github', new GitHubBootstrap(kg, process.env['GH_TOKEN'] ?? ''))
+      bootstrapRegistry.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
       bootstrapRegistry.set('argocd', new ArgocdBootstrap(kg))
       bootstrapRegistry.set('datadog', new DatadogBootstrap(kg))
-      bootstrapRegistry.set('linear', new LinearBootstrap(kg, process.env['LINEAR_API_KEY']))
+      bootstrapRegistry.set('linear', new LinearBootstrap(kg, await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')))
       const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
       await agent.handle(event)
     })

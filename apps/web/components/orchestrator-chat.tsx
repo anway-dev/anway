@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { SCENARIOS, OrchestratorScenario, AgentActivity } from "@/lib/mock";
+import { ProviderConfig } from "@/components/provider-config";
 
 export interface OrchestratorContext {
   query: string;
@@ -313,6 +314,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const [contextSource, setContextSource] = useState<{ title: string; source: string } | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [gateRequired, setGateRequired] = useState<{ gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> } | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -560,7 +562,8 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const isEmpty = messages.length === 0;
 
   return (
-    <div style={{ display: "flex", height: "100%", background: "#050505", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100%", background: "#050505", overflow: "hidden", position: "relative" }}>
+      <ProviderConfig />
       <style>{`
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         @keyframes pulse-dot { 0%,100%{box-shadow:0 0 4px #10b981} 50%{box-shadow:0 0 12px #10b981} }
@@ -599,6 +602,38 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
           )}
 
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setShowSettings(!showSettings)}
+                style={{
+                  background: "transparent", border: "none", color: "#555", cursor: "pointer",
+                  fontSize: "11px", fontFamily: "monospace", padding: "2px",
+                }}
+                title="Provider settings"
+              >⚙</button>
+              {showSettings && (
+                <div style={{
+                  position: "absolute", top: "100%", right: 0, zIndex: 100,
+                  width: "300px", background: "#0e0e0e", border: "1px solid #1a1a1a",
+                  borderRadius: "6px", padding: "16px", marginTop: "6px",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)", fontSize: "11px", fontFamily: "monospace",
+                }}>
+                  <div style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", marginBottom: "8px" }}>
+                    Provider Settings
+                  </div>
+                  <div style={{ color: "#10b981", marginBottom: "12px" }}>
+                    ● configured
+                  </div>
+                  <button onClick={() => setShowSettings(false)}
+                    style={{
+                      background: "transparent", border: "1px solid #1a1a1a", color: "#555",
+                      padding: "6px 12px", borderRadius: "4px", fontSize: "10px", fontFamily: "monospace", cursor: "pointer",
+                    }}
+                  >
+                    Reconfigure
+                  </button>
+                </div>
+              )}
+            </div>
             {isThinking && (
               <div style={{ display: "flex", gap: "3px", alignItems: "center" }}>
                 {[0, 0.15, 0.3].map((delay, i) => (

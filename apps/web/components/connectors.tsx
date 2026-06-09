@@ -1,6 +1,11 @@
 "use client";
 import { CONNECTORS, Connector } from "@/lib/mock";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+interface ConnectorStatus {
+  connectorType: string;
+  enabled: boolean;
+}
 
 const CATEGORIES = ["All", "Cloud Health", "Observability", "Logging", "Kubernetes", "Code & CI", "Issue Tracking", "Deployment", "Infrastructure", "Alerting", "Docs"];
 
@@ -8,9 +13,42 @@ export function ConnectorsView() {
   const [filter, setFilter] = useState("All");
   const [modal, setModal] = useState<Connector | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [configuredMap, setConfiguredMap] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings/connectors")
+      .then(r => r.json())
+      .then((list: ConnectorStatus[]) => {
+        const map: Record<string, boolean> = {};
+        for (const c of list) map[c.connectorType] = c.enabled;
+        setConfiguredMap(map);
+      })
+      .catch(() => {});
+  }, []);
 
   const visible = filter === "All" ? CONNECTORS : CONNECTORS.filter((c) => c.category === filter);
-  const connected = CONNECTORS.filter((c) => c.connected).length;
+  const connected = CONNECTORS.filter((c) => configuredMap[c.id] || c.connected).length;
+
+  async function handleConnect() {
+    if (!modal) return;
+    setSaving(true);
+    try {
+      const credentials: Record<string, string> = {};
+      for (const field of modal.configFields) {
+        if (formValues[field.key]) credentials[field.key] = formValues[field.key];
+      }
+      await fetch(`/api/settings/connectors/${modal.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentials }),
+      });
+      setConfiguredMap(prev => ({ ...prev, [modal.id]: true }));
+      setModal(null);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div style={{ padding: "24px", height: "100%", overflowY: "auto" }}>
@@ -46,7 +84,7 @@ export function ConnectorsView() {
       {/* Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} onConnect={() => { setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} onConnect={() => { setModal(conn); setFormValues({}); }} />
         ))}
       </div>
 
@@ -92,10 +130,15 @@ export function ConnectorsView() {
                 Cancel
               </button>
               <button
-                onClick={() => setModal(null)}
-                style={{ flex: 1, background: "#10b981", border: "none", color: "#000", padding: "8px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: 700 }}
+                onClick={handleConnect}
+                disabled={saving}
+                style={{
+                  flex: 1, background: saving ? "#0a0a0a" : "#10b981", border: "none",
+                  color: saving ? "#444" : "#000", padding: "8px", borderRadius: "6px",
+                  cursor: saving ? "not-allowed" : "pointer", fontSize: "12px", fontWeight: 700,
+                }}
               >
-                Connect
+                {saving ? "Saving..." : "Connect"}
               </button>
             </div>
           </div>
@@ -105,10 +148,10 @@ export function ConnectorsView() {
   );
 }
 
-function ConnectorCard({ connector: c, onConnect }: { connector: Connector; onConnect: () => void }) {
+function ConnectorCard({ connector: c, configured, onConnect }: { connector: Connector; configured: boolean; onConnect: () => void }) {
   return (
     <div style={{
-      background: "#111", border: `1px solid ${c.connected ? "#1f2f1f" : "#1f1f1f"}`,
+      background: "#111", border: `1px solid ${configured ? "#1f2f1f" : "#1f1f1f"}`,
       borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px",
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -121,12 +164,16 @@ function ConnectorCard({ connector: c, onConnect }: { connector: Connector; onCo
             <div style={{ fontSize: "10px", color: "#555" }}>{c.category}</div>
           </div>
         </div>
-        {c.connected && (
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />
-            <span style={{ fontSize: "10px", color: "#10b981" }}>Live</span>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          <div style={{
+            width: "6px", height: "6px", borderRadius: "50%",
+            background: configured ? "#10b981" : "#444",
+            boxShadow: configured ? "0 0 4px #10b981" : "none",
+          }} />
+          <span style={{ fontSize: "10px", color: configured ? "#10b981" : "#555" }}>
+            {configured ? "Configured" : "Off"}
+          </span>
+        </div>
       </div>
 
       <div style={{ fontSize: "11px", color: "#888" }}>{c.description}</div>
@@ -140,21 +187,21 @@ function ConnectorCard({ connector: c, onConnect }: { connector: Connector; onCo
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        {c.connected ? (
-          <span style={{ fontSize: "10px", color: "#555" }}>Synced {c.lastSync}</span>
+        {configured ? (
+          <span style={{ fontSize: "10px", color: "#555" }}>✓ configured</span>
         ) : (
           <span style={{ fontSize: "10px", color: "#555" }}>Not connected</span>
         )}
         <button
           onClick={onConnect}
           style={{
-            background: c.connected ? "transparent" : "rgba(16,185,129,0.1)",
-            border: `1px solid ${c.connected ? "#2a2a2a" : "rgba(16,185,129,0.3)"}`,
-            color: c.connected ? "#555" : "#10b981",
+            background: configured ? "transparent" : "rgba(16,185,129,0.1)",
+            border: `1px solid ${configured ? "#2a2a2a" : "rgba(16,185,129,0.3)"}`,
+            color: configured ? "#555" : "#10b981",
             padding: "4px 10px", borderRadius: "4px", cursor: "pointer", fontSize: "11px",
           }}
         >
-          {c.connected ? "Configure" : "Connect"}
+          {configured ? "Reconfigure" : "Connect"}
         </button>
       </div>
     </div>

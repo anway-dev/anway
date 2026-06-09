@@ -139,3 +139,33 @@ model Incident {
   @@index([tenant_id, status])
   @@map("incidents")
 }
+
+model ProviderConfig {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id     String   @db.Uuid
+  provider      String   @db.VarChar(50)
+  api_key       String?  @text
+  base_url      String?  @text
+  default_model String?  @db.VarChar(100)
+  updated_at    DateTime @default(now()) @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id])
+  @@map("provider_config")
+}
+
+model ConnectorConfig {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id       String    @db.Uuid
+  connector_type  String    @db.VarChar(50)
+  credentials     Json      @default("{}")
+  enabled         Boolean   @default(false)
+  bootstrapped_at DateTime? @db.Timestamptz
+  updated_at      DateTime  @default(now()) @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, connector_type])
+  @@map("connector_config")
+}

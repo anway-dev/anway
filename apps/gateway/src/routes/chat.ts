@@ -21,6 +21,7 @@ import type {
 import type { ProviderConfig, ProviderType } from '@anvay/agent'
 import { TenantId, UserId, SessionId } from '@anvay/types'
 import type { AgentRole } from '@anvay/types'
+import type { PrismaClient } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { StructuralGraph } from '@anvay/agent'
 import type { IKnowledgeGraph } from '@anvay/agent'
@@ -79,7 +80,11 @@ export function providerConfigFromEnv(type: ProviderType): ProviderConfig | null
     return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
   }
   if (type === 'openai' && process.env['OPENAI_API_KEY']) {
-    return { type: 'openai', apiKey: process.env['OPENAI_API_KEY'] }
+    return {
+      type: 'openai',
+      apiKey: process.env['OPENAI_API_KEY'],
+      ...(process.env['OPENAI_BASE_URL'] ? { baseURL: process.env['OPENAI_BASE_URL'] } : {}),
+    }
   }
   if (type === 'groq' && process.env['GROQ_API_KEY']) {
     return { type: 'groq', apiKey: process.env['GROQ_API_KEY'] }
@@ -94,6 +99,27 @@ export function providerConfigFromEnv(type: ProviderType): ProviderConfig | null
     return { type: 'lmstudio', baseURL: process.env['LMSTUDIO_ENDPOINT'] }
   }
   return null
+}
+
+async function providerConfigForTenant(
+  tenantId: string,
+  client: PrismaClient,
+): Promise<ProviderConfig | null> {
+  const row = await withTenant(client, tenantId, (tx) =>
+    tx.$queryRaw<{ provider: string; api_key: string | null; base_url: string | null; default_model: string | null }[]>`
+      SELECT provider, api_key, base_url, default_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+    `
+  ).catch(() => [])
+  if (row.length > 0 && row[0]!.api_key) {
+    const r = row[0]!
+    return {
+      type: r.provider as ProviderConfig['type'],
+      apiKey: r.api_key!,
+      ...(r.base_url ? { baseURL: r.base_url } : {}),
+      ...(r.default_model ? { defaultModel: r.default_model } : {}),
+    }
+  }
+  return null  // fallback to env-based config
 }
 
 function withDefaultModel(config: ProviderConfig, defaultModel?: string): ProviderConfig {
@@ -195,10 +221,12 @@ export async function chatRoutes(app: FastifyInstance) {
     }
     const { query, sessionId, model: modelOverride } = request.body
 
-    // Resolve provider config — request body takes precedence over env
-    const providerConfig = resolveProviderConfig(modelOverride)
+    // Resolve provider config — try DB first, fallback to env
+    const providerConfig = modelOverride
+      ? resolveProviderConfig(modelOverride)
+      : (await providerConfigForTenant(tenantId, prisma)) ?? resolveProviderConfig()
     if (!providerConfig) {
-      return reply.code(503).send({ error: 'No LLM provider configured — set ANTHROPIC_API_KEY or OPENAI_API_KEY' })
+      return reply.code(503).send({ error: 'No LLM provider configured — set API key in UI or .env' })
     }
 
     // Load connectors + tenant in parallel — both are best-effort

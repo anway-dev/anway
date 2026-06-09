@@ -283,7 +283,6 @@ export async function chatRoutes(app: FastifyInstance) {
     const allTools = [...connectorTools, ...registrationTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
-    const redisUrl = process.env['REDIS_URL']
     const gateSink = redisUrl ? new RedisGateSink(redisUrl) : undefined
     if (!gateSink) {
       request.log.warn('REDIS_URL not set — gate approval bypassed (dev mode only)')

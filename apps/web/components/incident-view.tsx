@@ -117,7 +117,7 @@ function formatDuration(createdAt: string, resolvedAt?: string | null): string {
 
 function toDisplay(a: ApiIncident): DisplayIncident {
   return {
-    id: a.id.slice(0, 8),
+    id: a.id.slice(-8),
     title: a.title,
     severity: a.severity,
     status: a.status,

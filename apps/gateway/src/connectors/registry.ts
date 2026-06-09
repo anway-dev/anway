@@ -76,22 +76,17 @@ export async function getToolsForTenant(
     tx.connector.findMany({ where: { tenant_id: tenantId } })
   ) as unknown as ConnectorRow[]
 
-  const tools: ExecutableTool[] = []
-
-  for (const row of rows) {
+  const adapterEntries = rows.map(async (row) => {
     const key = cacheKey(tenantId, row.id)
     let adapter = adapterCache.get(key)
-
     if (!adapter) {
       adapter = instantiateAdapter(row, tenantId)
       adapterCache.set(key, adapter)
     }
-
-    const adapterTools = await adapter.getTools()
-    tools.push(...adapterTools)
-  }
-
-  return tools
+    return adapter.getTools()
+  })
+  const toolArrays = await Promise.all(adapterEntries)
+  return toolArrays.flat()
 }
 
 /** Registration tool: register_connector — write action, admin role only */

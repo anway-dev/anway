@@ -25,6 +25,11 @@ const INITIAL_PROVIDERS: Provider[] = [
     connected: false, envVar: "OPENAI_API_KEY",
   },
   {
+    id: "deepseek", name: "DeepSeek", type: "cloud", icon: "◈", color: "#4f46e5",
+    models: ["deepseek-chat", "deepseek-coder", "deepseek-reasoner"],
+    connected: false, envVar: "DEEPSEEK_API_KEY",
+  },
+  {
     id: "groq", name: "Groq", type: "cloud", icon: "⚡", color: "#f55036",
     models: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"],
     connected: false, envVar: "GROQ_API_KEY",

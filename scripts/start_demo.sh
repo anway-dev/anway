@@ -39,6 +39,13 @@ done
 cp apps/gateway/.env.example apps/gateway/.env
 log "Refreshed apps/gateway/.env from example"
 
+# Export vars into current shell so child processes inherit them
+# (tsx does not auto-load .env — reads process.env directly)
+set -a
+# shellcheck disable=SC1091
+source apps/gateway/.env
+set +a
+
 # ── Install deps ──
 log "Installing dependencies..."
 pnpm install --silent 2>/dev/null || pnpm install

@@ -195,7 +195,7 @@ export function ModelConfig() {
                   ) : (
                     <div style={{ padding: "10px 12px", background: "rgba(85,85,85,0.06)", border: "1px solid #1a1a1a", borderRadius: "7px" }}>
                       <div style={{ fontSize: "12px", color: "#555" }}>
-                        Not configured — set <code style={{ fontFamily: "monospace", color: "#888", background: "#111", padding: "1px 5px", borderRadius: "3px" }}>{provider.envVar}</code> in <code style={{ fontFamily: "monospace", color: "#888", background: "#111", padding: "1px 5px", borderRadius: "3px" }}>.env.local</code>
+                        Not configured — <a href="/settings" style={{ color: "#10b981", textDecoration: "underline", cursor: "pointer" }} onClick={e => { e.preventDefault(); window.location.href = '/?view=settings'; }}>configure in Settings → AI Provider</a> or set <code style={{ fontFamily: "monospace", color: "#888", background: "#111", padding: "1px 5px", borderRadius: "3px" }}>{provider.envVar}</code> in <code style={{ fontFamily: "monospace", color: "#888", background: "#111", padding: "1px 5px", borderRadius: "3px" }}>.env</code>
                       </div>
                     </div>
                   )}

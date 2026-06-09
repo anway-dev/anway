@@ -54,7 +54,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
       }
     }
     if (!providerConfig) {
-      return reply.code(503).send({ error: 'No LLM provider configured' })
+      return reply.code(503).send({ error: 'No LLM provider configured — configure in Settings > AI Provider in the web UI' })
     }
 
     const provider = ProviderFactory.create(providerConfig)

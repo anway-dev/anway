@@ -229,7 +229,7 @@ export async function chatRoutes(app: FastifyInstance) {
       ? resolveProviderConfig(modelOverride)
       : (await providerConfigForTenant(tenantId, prisma)) ?? resolveProviderConfig()
     if (!providerConfig) {
-      return reply.code(503).send({ error: 'No LLM provider configured — set API key in UI or .env' })
+      return reply.code(503).send({ error: 'No LLM provider configured — configure in Settings > AI Provider in the web UI' })
     }
 
     // Load connectors + tenant in parallel — both are best-effort

@@ -14,7 +14,7 @@ const GATE_TTL_SECONDS = 600 // must exceed orchestrator poll timeout (default 5
  *
  * - push: inserts pending row into gate_events, stores event in Redis, publishes gate:required
  * - poll: reads key `gate:<gateId>:decision` from Redis
- * - record: sets `gate:<gateId>:decision` = "approved" | "rejected" in Redis
+ * - record: sets `gate:<gateId>:decision` in Redis — Postgres update is gate-decide-route.ts responsibility
  */
 export class RedisGateSink implements IGateSink {
   private pub: ReturnType<typeof createClient> | null = null
@@ -23,7 +23,11 @@ export class RedisGateSink implements IGateSink {
 
   private async getPub(): Promise<ReturnType<typeof createClient>> {
     if (!this.pub) {
-      this.pub = createClient({ url: this.redisUrl })
+      this.pub = createClient({
+        url: this.redisUrl,
+        socket: { reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000) },
+      })
+      this.pub.on('error', (err) => log.error({ err }, 'RedisGateSink connection error'))
       await this.pub.connect()
     }
     return this.pub

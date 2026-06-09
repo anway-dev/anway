@@ -1,6 +1,21 @@
 "use client";
-import { useState } from "react";
-import { AUDIT_EVENTS, AuditEvent, AuditOutcome } from "@/lib/mock";
+import { useState, useEffect } from "react";
+
+// Types matching gateway /api/audit response
+type AuditOutcome = "root_cause_found" | "answer_provided" | "status_provided" | "analysis_provided" | "pr_created" | "gate_required" | "auto_approved" | "access_denied" | "rollback_initiated" | "blocked"
+
+interface AuditEvent {
+  id: string
+  timestamp: string
+  user: string
+  authRole: string
+  inferredRole: string
+  query: string
+  agents: string[]
+  outcome: AuditOutcome
+  detail: string
+  durationMs: number
+}
 
 const OUTCOME_CONFIG: Record<AuditOutcome, { label: string; color: string; bg: string }> = {
   root_cause_found: { label: "root_cause_found", color: "#10b981", bg: "rgba(16,185,129,0.08)" },
@@ -24,9 +39,7 @@ const ROLE_COLORS: Record<string, string> = {
   system: "#555",
 };
 
-const ALL_USERS = ["all", ...Array.from(new Set(AUDIT_EVENTS.map((e) => e.user)))];
-const ALL_ROLES = ["all", ...Array.from(new Set(AUDIT_EVENTS.map((e) => e.authRole)))];
-const ALL_OUTCOMES = ["all", ...Array.from(new Set(AUDIT_EVENTS.map((e) => e.outcome)))];
+
 
 function EventRow({ event, expanded, onToggle }: {
   event: AuditEvent;
@@ -177,8 +190,22 @@ export function AuditView() {
   const [filterRole, setFilterRole] = useState("all");
   const [filterOutcome, setFilterOutcome] = useState("all");
   const [search, setSearch] = useState("");
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = AUDIT_EVENTS.filter((e) => {
+  useEffect(() => {
+    fetch("/api/audit")
+      .then(r => r.json() as Promise<AuditEvent[]>)
+      .then(setEvents)
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const ALL_USERS = ["all", ...Array.from(new Set(events.map((e) => e.user)))];
+  const ALL_ROLES = ["all", ...Array.from(new Set(events.map((e) => e.authRole)))];
+  const ALL_OUTCOMES = ["all", ...Array.from(new Set(events.map((e) => e.outcome)))];
+
+  const filtered = events.filter((e) => {
     if (filterUser !== "all" && e.user !== filterUser) return false;
     if (filterRole !== "all" && e.authRole !== filterRole) return false;
     if (filterOutcome !== "all" && e.outcome !== filterOutcome) return false;
@@ -186,10 +213,18 @@ export function AuditView() {
     return true;
   });
 
-  const totalEvents = AUDIT_EVENTS.length;
-  const deniedEvents = AUDIT_EVENTS.filter((e) => e.outcome === "access_denied").length;
-  const gateEvents = AUDIT_EVENTS.filter((e) => e.outcome === "gate_required").length;
-  const autoEvents = AUDIT_EVENTS.filter((e) => e.outcome === "auto_approved").length;
+  const totalEvents = events.length;
+  const deniedEvents = events.filter((e) => e.outcome === "access_denied").length;
+  const gateEvents = events.filter((e) => e.outcome === "gate_required").length;
+  const autoEvents = events.filter((e) => e.outcome === "auto_approved").length;
+
+  if (loading) {
+    return (
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#080808", color: "#555", fontSize: "12px", fontFamily: "monospace" }}>
+        Loading audit events...
+      </div>
+    )
+  }
 
   return (
     <div style={{ height: "100%", overflowY: "auto", background: "#080808" }}>

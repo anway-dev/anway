@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LifecycleView } from "@/components/lifecycle";
 import { ConnectorsView } from "@/components/connectors";
 import { ApiClientView } from "@/components/apiclient";
@@ -21,7 +21,8 @@ import { K8sView } from "@/components/k8s-view";
 import { SettingsView } from "@/components/settings-view";
 import { ApprovalsView } from "@/components/approvals-view";
 import { StageNode } from "@/lib/mock";
-import { AUDIT_EVENTS, LIVE_ALERTS, CLOUD_PROVIDERS, INCIDENTS } from "@/lib/mock";
+// Remove mock imports once all views are wired — only StageNode still needed for lifecycle
+
 
 type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings";
 
@@ -47,17 +48,37 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "k8s",         label: "K8s",          icon: "☸" },
 ];
 
-const RECENT_QUERIES = AUDIT_EVENTS.slice(0, 3);
-
-const CRITICAL_COUNT = LIVE_ALERTS.filter(a => a.severity === "critical").length;
-const CLOUD_ISSUES = CLOUD_PROVIDERS.reduce((acc, p) => acc + p.criticalAlerts + p.securityFindings, 0);
-const ACTIVE_INCIDENTS = INCIDENTS.filter(i => i.status === "active" || i.status === "investigating").length;
-
 export default function App() {
   const [view, setView] = useState<View>("chat");
   const [activeNode, setActiveNode] = useState<StageNode | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [orchestratorContext, setOrchestratorContext] = useState<OrchestratorContext | undefined>(undefined);
+
+  // Sidebar data — fetched from gateway APIs
+  const [recentQueries, setRecentQueries] = useState<{ id: string; query: string }[]>([]);
+  const [criticalCount, setCriticalCount] = useState(0);
+  const [activeIncidents, setActiveIncidents] = useState(0);
+  const [cloudIssues, setCloudIssues] = useState(0);
+
+  useEffect(() => {
+    // Fetch critical alerts count
+    fetch("/api/alerts")
+      .then(r => r.json() as Promise<{ severity: string }[]>)
+      .then(list => setCriticalCount(list.filter(a => a.severity === "critical").length))
+      .catch(() => setCriticalCount(0))
+
+    // Fetch active incidents count
+    fetch("/api/incidents")
+      .then(r => r.json() as Promise<{ status: string }[]>)
+      .then(list => setActiveIncidents(list.filter(i => i.status === "active" || i.status === "investigating").length))
+      .catch(() => setActiveIncidents(0))
+
+    // Fetch recent audit events for sidebar
+    fetch("/api/audit")
+      .then(r => r.json() as Promise<{ id: string; query: string }[]>)
+      .then(list => setRecentQueries(list.slice(0, 3)))
+      .catch(() => setRecentQueries([]))
+  }, [])
 
   const handleNodeClick = (node: StageNode, action?: string) => {
     setActiveNode(node);
@@ -126,19 +147,19 @@ export default function App() {
               {item.id === "chat" && (
                 <span style={{ marginLeft: "auto", width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 4px #10b981" }} />
               )}
-              {item.id === "alerts" && CRITICAL_COUNT > 0 && (
+              {item.id === "alerts" && criticalCount > 0 && (
                 <span style={{ marginLeft: "auto", fontSize: "10px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", padding: "1px 5px", borderRadius: "10px", fontWeight: 700 }}>
-                  {CRITICAL_COUNT}
+                  {criticalCount}
                 </span>
               )}
-              {item.id === "incident" && ACTIVE_INCIDENTS > 0 && (
+              {item.id === "incident" && activeIncidents > 0 && (
                 <span style={{ marginLeft: "auto", fontSize: "10px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", padding: "1px 5px", borderRadius: "10px", fontWeight: 700 }}>
-                  {ACTIVE_INCIDENTS}
+                  {activeIncidents}
                 </span>
               )}
-              {item.id === "cloud" && CLOUD_ISSUES > 0 && (
+              {item.id === "cloud" && cloudIssues > 0 && (
                 <span style={{ marginLeft: "auto", fontSize: "10px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", padding: "1px 5px", borderRadius: "10px", fontWeight: 700 }}>
-                  {CLOUD_ISSUES}
+                  {cloudIssues}
                 </span>
               )}
             </button>
@@ -148,7 +169,7 @@ export default function App() {
           <div style={{ fontSize: "10px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "16px 8px 4px" }}>
             Recent
           </div>
-          {RECENT_QUERIES.map((evt) => (
+          {recentQueries.map((evt) => (
             <button
               key={evt.id}
               onClick={() => setView("chat")}

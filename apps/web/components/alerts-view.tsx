@@ -1,6 +1,32 @@
 "use client";
-import { useState } from "react";
-import { LIVE_ALERTS, LiveAlert, AlertSeverity, TriageStatus } from "@/lib/mock";
+import { useState, useEffect } from "react";
+
+// Types matching gateway /api/alerts response
+type AlertSeverity = "critical" | "high" | "medium" | "low"
+type TriageStatus = "auto_triaged" | "triaging" | "pending" | "escalated"
+
+interface LiveAlert {
+  id: string
+  kind: "alert" | "ticket" | "metric" | "customer" | "ci" | "error"
+  severity: AlertSeverity
+  title: string
+  source: string
+  sourceIcon: string
+  sourceColor: string
+  service: string
+  timestamp: string
+  triageStatus: TriageStatus
+  triageSummary?: string
+  confidence?: number
+  gateId?: string
+  gateStatus?: "pending_approval" | "auto_approved"
+  orchestratorQuery: string
+  branch?: string
+  commitSha?: string
+  runUrl?: string
+  errorCount?: number
+  firstSeen?: string
+}
 
 interface Props {
   onTriggerOrchestrator: (query: string, context: { title: string; source: string }) => void;
@@ -235,12 +261,30 @@ const SEV_ORDER: Record<AlertSeverity, number> = { critical: 0, high: 1, medium:
 export function AlertsView({ onTriggerOrchestrator }: Props) {
   const [tab, setTab] = useState<Tab>("all");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">("all");
+  const [alerts, setAlerts] = useState<LiveAlert[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const criticalCount = LIVE_ALERTS.filter(a => a.severity === "critical").length;
+  useEffect(() => {
+    fetch("/api/alerts")
+      .then(r => r.json() as Promise<LiveAlert[]>)
+      .then(setAlerts)
+      .catch(() => setAlerts([]))
+      .finally(() => setLoading(false))
+  }, [])
 
-  let items = tab === "all" ? LIVE_ALERTS : LIVE_ALERTS.filter(a => a.kind === tab);
+  const criticalCount = alerts.filter(a => a.severity === "critical").length;
+
+  let items = tab === "all" ? alerts : alerts.filter(a => a.kind === tab);
   if (severityFilter !== "all") items = items.filter(a => a.severity === severityFilter);
   items = [...items].sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+
+  if (loading) {
+    return (
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#080808", color: "#555", fontSize: "12px", fontFamily: "monospace" }}>
+        Loading signals...
+      </div>
+    )
+  }
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", overflow: "hidden" }}>

@@ -6483,3 +6483,35 @@ Classes exist, nothing schedules them. Per CLAUDE.md, use Trigger.dev or BullMQ 
 **`id: \`trigger-${Date.now()}\``** — collision risk on concurrent creates. Use `crypto.randomUUID()`.
 
 <!-- REVIEW SECTION END — 2026-06-07 -->
+
+<!-- REVIEW SECTION START — 2026-06-09d -->
+## Review — 2026-06-09d (commits up to `43035fd`)
+
+**Scope:** Full project review — M5 completeness check, typecheck, test run.
+
+### Status summary
+
+| Check | Result |
+|-------|--------|
+| `pnpm -r typecheck` | ✓ ALL PASS (10/10 packages) |
+| `pnpm -r test` | PARTIAL — types/web/agent/gateway all pass; argocd/datadog/linear fail (vitest missing) |
+| Cron scheduler (BullMQ) | ✓ Implemented + wired in server.ts |
+| TriggerEngine + subscriber | ✓ Implemented, tenant-isolated |
+| Trigger executor | ✓ Implemented, V1 gate-required for write actions |
+| Automations routes | ✓ Fully tenant-isolated, DB-backed |
+| DeployHealthReport | ✓ Fixed — queries `entities WHERE type='Deploy'` |
+| Gate flow | ✓ push/poll/record/decide all correct |
+
+### BLOCKING
+
+**T1 — `pnpm -r test` exits non-zero: argocd/datadog/linear missing vitest devDependency**
+
+`connectors/argocd/package.json`, `connectors/datadog/package.json`, `connectors/linear/package.json` each have `"test": "vitest run"` but vitest is not in devDependencies and no test files exist. `pnpm -r test` reports `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`. Fix: add vitest + minimal smoke tests, or change script to no-op. (Tracked in BRIDGE.md T1.)
+
+### HIGH
+
+**T2 — bootstrapRegistry passed as undefined in graph-builder subscriber**
+
+`apps/gateway/src/graph-builder/subscriber.ts` line ~44 passes `undefined` for the bootstrapRegistry arg to `GraphBuilderAgent`. `GitHubBootstrap` at `connectors/github/src/bootstrap.ts` exists but is never invoked. ArgoCD, Datadog, Linear connectors have no bootstrap implementations. `connector_registered` events seed a Connector entity in the graph but never bootstrap repos/apps/teams/monitors. Fix: implement bootstrap classes for each connector and wire the registry. (Tracked in BRIDGE.md T2.)
+
+<!-- REVIEW SECTION END — 2026-06-09d -->

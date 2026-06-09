@@ -35,11 +35,9 @@ until docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1; do
   sleep 1
 done
 
-# ── Env file ──
-if [ ! -f apps/gateway/.env ]; then
-  cp apps/gateway/.env.example apps/gateway/.env
-  log "Created apps/gateway/.env"
-fi
+# ── Env file — always refresh from example for demo ──
+cp apps/gateway/.env.example apps/gateway/.env
+log "Refreshed apps/gateway/.env from example"
 
 # ── Install deps ──
 log "Installing dependencies..."

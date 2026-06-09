@@ -7,6 +7,419 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-09g -->
+## Review — 2026-06-09g | Full codebase review — M0 through M5+M6 connector bootstraps
+
+### Scope
+
+Full review of all source files committed since 2026-06-07 (commits `49f1fc5` → `36e1d50`).
+Coverage: 70+ files across gateway, agent package, connector packages, web app, agent-service.
+
+### Verdict: 4 BLOCKING, 7 HIGH, 10 MEDIUM, 7 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | M0–M5+M6 wired. Bootstrap registry live. Missing: ArgoCD/Datadog/Linear bootstrap impl bodies are stubs (no-op). |
+| D2 Code Standards | 3/5 | `agents/graph-builder.ts` dead code class; `connectorId: c.type` scope collision for multi-connector; Linear auth header wrong. |
+| D3 Performance | 4/5 | Per-request `new RedisGateSink()` in gate-decide creates new Redis connection per request. |
+| D4 Security | 3/5 | `'in_progress'` wrong enum = silent wrong query. `kb_entries` missing FORCE RLS. GitHub bootstrap leaks `process.env` to child process. Linear auth header never sends "Bearer". |
+| D5 Readability | 4/5 | Generally clean. Dead file `agents/graph-builder.ts` adds confusion. |
+| D6 Clarity / Comments | 4/5 | Key invariants documented. BullMQ scheduler usage clear. |
+
+---
+
+### BLOCKING
+
+**B1 — `apps/gateway/src/routes/services.ts:42` — invalid incident status enum**
+
+Query filters on `'in_progress'` but Prisma schema (line 39) only defines `active`, `investigating`, `resolved`. `'in_progress'` does not exist — query returns 0 rows silently. Services page shows 0 active incidents for any service regardless of real state.
+
+```sql
+-- WRONG:
+WHERE status IN ('active', 'in_progress')
+-- FIX:
+WHERE status IN ('active', 'investigating')
+```
+
+Verify: seed an incident with status `investigating`, call `/api/services`, confirm `activeIncidents > 0`.
+
+---
+
+**B2 — `apps/gateway/prisma/migrations/` — `kb_entries` missing FORCE ROW LEVEL SECURITY**
+
+`entities` and `relationships` have `FORCE ROW LEVEL SECURITY` (migration 0013). `kb_entries` only has `ENABLE ROW LEVEL SECURITY` (migration 0003) — no FORCE. Without FORCE, table owners and superusers bypass RLS policies, violating tenant isolation during schema migrations, maintenance, and seeding.
+
+Fix: create migration `0016_kb_entries_force_rls`:
+```sql
+ALTER TABLE kb_entries FORCE ROW LEVEL SECURITY;
+```
+
+Verify: connect to DB as table owner, `SELECT * FROM kb_entries` without setting `app.tenant_id` — must return 0 rows.
+
+---
+
+**B3 — `apps/agent-service/src/routes/episodes.py:14` — tenant_id header not validated**
+
+`x_tenant_id: str = Header(...)` accepts any string. `graphiti.add_episode(group_id=x_tenant_id, ...)` passes it directly to Neo4j. Malformed or injected values corrupt the episodic graph namespace. No UUID format check.
+
+Fix:
+```python
+from pydantic import constr
+UUID_RE = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+x_tenant_id: constr(pattern=UUID_RE) = Header(...)
+```
+
+Apply same fix to `apps/agent-service/src/routes/facts.py:11`.
+
+Verify: POST `/episodes` with `X-Tenant-Id: '; DROP'` → must return 422.
+
+---
+
+**B4 — `packages/agent/src/agents/graph-builder.ts` — dead duplicate class, name collision**
+
+Two classes named `GraphBuilderAgent` exist:
+- `packages/agent/src/agents/graph-builder.ts` (103 lines) — bootstraps only, not exported from index
+- `packages/agent/src/graph-builder/builder.ts` (245 lines) — full event-driven impl, IS exported from index
+
+`packages/agent/src/index.ts:65` exports from `graph-builder/builder.ts`. The `agents/graph-builder.ts` file is dead code that creates a confusing naming collision. Any future import from the wrong path silently gets the wrong class.
+
+Fix: delete `packages/agent/src/agents/graph-builder.ts`. Ensure nothing imports from it (confirmed: zero imports).
+
+Verify: `grep -r "agents/graph-builder"` → 0 results; typecheck passes.
+
+---
+
+### HIGH
+
+**H1 — `apps/gateway/src/gate/gate-decide-route.ts:40` — new `RedisGateSink` per request**
+
+`const sink = new RedisGateSink(...)` inside request handler creates a new Redis client on every gate decision call. Each call opens a TCP connection, does auth, executes, and leaks the connection (no `quit()` / `disconnect()`). Under load this exhausts Redis file descriptors.
+
+Fix: create singleton at module level:
+```typescript
+// module-level, outside route handler:
+let _gateSink: RedisGateSink | undefined
+function getGateSink(redisUrl: string) {
+  return _gateSink ??= new RedisGateSink(redisUrl)
+}
+```
+Or inject as app-level decoration from `server.ts`.
+
+Verify: 100 concurrent gate decisions → Redis connection count stays bounded (< 5 connections).
+
+---
+
+**H2 — `connectors/linear/src/connector.ts:18` — Authorization header missing "Bearer" prefix**
+
+Linear GraphQL API requires `Authorization: Bearer <token>`. Current code sets `Authorization: token` (raw value). All Linear API calls return 401. Linear connector is non-functional.
+
+Fix: `Authorization: \`Bearer ${this.apiKey}\``
+
+Verify: mock Linear endpoint with valid token + correct header → returns 200; without Bearer → 401.
+
+---
+
+**H3 — `connectors/github/src/bootstrap.ts:26` — full `process.env` spread to child process**
+
+```typescript
+env: { ...process.env, GH_TOKEN: this.token }
+```
+
+Spreads all parent env vars (AWS_ACCESS_KEY_ID, OPENAI_API_KEY, DATABASE_URL, etc.) into the `gh` CLI subprocess. Any env-var-based credential in the gateway process is leaked to the subprocess and potentially visible in process listings.
+
+Fix: whitelist only required vars:
+```typescript
+env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin', GH_TOKEN: this.token }
+```
+
+Verify: set AWS_ACCESS_KEY_ID in env, run bootstrap, confirm child process does NOT have it.
+
+---
+
+**H4 — `apps/gateway/src/routes/chat.ts:223` — `connectorId: c.type` causes scope collision for multi-connector**
+
+`ConnectorScope.connectorId` is set to `c.type` (e.g. `"github"`, `"linear"`). If a tenant has two GitHub connectors registered (different repos, different modes), both get `connectorId: "github"` → second overwrites first in perimeter engine. User loses access to one connector silently.
+
+Fix: use `c.id` (UUID) as `connectorId`:
+```typescript
+connectorId: c.id,  // was: c.type
+```
+
+Apply same fix to the `manifests` array at line 238 (`connectorId: c.type` → `connectorId: c.id`).
+
+Verify: register two GitHub connectors, call `/api/chat`, confirm both connectors' tools are available.
+
+---
+
+**H5 — `packages/agent/src/agents/sre.ts` — SREAgent does not call Knowledge Graph first**
+
+Per CLAUDE.md (non-negotiable): "The Knowledge Graph is the mandatory starting point for every investigation, triage, debug, and action." `SREAgent.assembleContext()` directly calls `this.mainModel.chat(...)` without first calling `knowledgeGraph.resolveContextByName()`. Incident analysis has no graph coordinates, so any connector calls it recommends are scatter-gather.
+
+Fix: inject `IKnowledgeGraph` into `SREAgent` constructor and call `resolveContextByName(incidentTitle, tenantId)` before building the hypothesis prompt. Inject graph context into the system prompt.
+
+Verify: `assembleContext()` called with a known entity name → graph context block appears in model input messages.
+
+---
+
+**H6 — `apps/agent-service/src/routes/facts.py:10` — unvalidated query string to Neo4j**
+
+`query: str = Query(...)` passes directly to `graphiti.search(query=query, ...)`. If Graphiti passes this unescaped to Neo4j Cypher, injection is possible. Minimum: add length cap.
+
+Fix:
+```python
+query: str = Query(..., min_length=1, max_length=500)
+```
+
+Plus validate charset: reject if query contains Cypher control chars (`{`, `}`, `;`, `MATCH`, `RETURN` as standalone words).
+
+Verify: POST `/facts?query=MATCH+*+RETURN+*` → 400 or safe empty result.
+
+---
+
+**H7 — `apps/gateway/src/routes/automations.ts:48` — `actions` array not validated before DB insert**
+
+Fastify schema only checks `type: 'array'` on actions. No validation of array element structure. Arbitrary JSON objects stored in `actions JSONB` column. Trigger executor at `executor.ts:18` then type-checks on `action.type === 'notify_oncall'` etc. — malformed actions silently skipped.
+
+Fix: add Fastify JSON schema for action items:
+```typescript
+actions: {
+  type: 'array',
+  items: {
+    type: 'object',
+    required: ['type'],
+    properties: {
+      type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate'] },
+      params: { type: 'object' },
+    },
+  },
+}
+```
+
+Verify: POST trigger with `actions: [{ type: "exec", cmd: "..." }]` → 400.
+
+---
+
+### MEDIUM
+
+**M1 — `apps/gateway/src/jobs/bullmq-scheduler.ts:21` — no job deduplication on `register()`**
+
+`queue.add(job.name, ..., { repeat: { pattern: job.schedule } })` called multiple times on same job name creates duplicate repeatable jobs in BullMQ. If `createCronJobs()` is called twice (e.g., hot-reload), service-health-sweep runs at 2× frequency.
+
+Fix: before adding, remove existing repeatable job:
+```typescript
+const existing = await this.queue.getRepeatableJobs()
+const dup = existing.find(j => j.name === job.name)
+if (dup) await this.queue.removeRepeatableByKey(dup.key)
+```
+
+Verify: call `register()` twice with same job, confirm only one repeatable entry in Redis.
+
+---
+
+**M2 — `apps/gateway/src/jobs/scheduler.ts:32,46,63` — unbounded `SELECT DISTINCT tenant_id` query**
+
+All three cron runners do `SELECT DISTINCT tenant_id AS id FROM connectors` with no LIMIT. On a large multi-tenant deployment, this loads all tenant IDs into memory at once. Cron runs every 5 min; under high tenant count this is O(n) memory per run.
+
+Fix: add cursor-based pagination:
+```sql
+WHERE tenant_id > $cursor ORDER BY tenant_id LIMIT 100
+```
+And loop until no more rows.
+
+Verify: create 1000 tenants in dev DB, run cron job, confirm memory stable.
+
+---
+
+**M3 — `apps/gateway/src/graph-builder/subscriber.ts:54-58` — bootstrapRegistry created per event**
+
+`new Map()` + bootstrap constructors called inside `sub.subscribe()` callback — on every graph event, not just `connector_registered`. Overhead is minimal (no network calls), but creates unnecessary object churn.
+
+Fix: build the registry once at startup and pass it into the callback closure:
+```typescript
+const bootstrapRegistry = new Map<string, IConnectorBootstrap>()
+bootstrapRegistry.set('github', new GitHubBootstrap(kg_placeholder, process.env['GH_TOKEN'] ?? ''))
+// ...
+// In callback, use the closure's registry
+const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
+```
+
+Note: `kg` is tenant-scoped per event and must stay inside callback. Only registry construction moves out.
+
+Verify: no performance regression on event stream; memory profile stable.
+
+---
+
+**M4 — `apps/agent-service/src/main.py:13` — Graphiti init exception swallowed silently**
+
+```python
+except Exception:
+    app.state.graphiti = None
+```
+
+No logging. If Neo4j credentials wrong or connection refused, agent-service silently runs with `graphiti = None`. Every `/episodes` and `/facts` request returns 500 with unhelpful "Graphiti unavailable" message. Impossible to diagnose from logs.
+
+Fix:
+```python
+except Exception as e:
+    import logging
+    logging.error(f"Graphiti init failed: {e}", exc_info=True)
+    app.state.graphiti = None
+```
+
+Verify: start with wrong `NEO4J_URI`, logs show full traceback.
+
+---
+
+**M5 — `apps/agent-service/src/config.py:3-5` — hardcoded default Neo4j credentials**
+
+```python
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "anvay")
+```
+
+`"anvay"` default password ships in source. Any deployment without explicit env override uses this. Should fail loudly if not set, not silently use default.
+
+Fix: require all three env vars, no defaults:
+```python
+NEO4J_URI = os.environ["NEO4J_URI"]   # raises KeyError if missing
+NEO4J_USER = os.environ["NEO4J_USER"]
+NEO4J_PASSWORD = os.environ["NEO4J_PASSWORD"]
+```
+
+Verify: start agent-service without `NEO4J_PASSWORD` → process exits with clear error.
+
+---
+
+**M6 — `apps/gateway/src/routes/chat.ts:204-215` — `Promise.allSettled` masks connector load failure**
+
+If DB call for connectors fails, `dbConnectors` silently becomes `[]`, user gets no tools, no error surfaced to client. Session proceeds with empty tool set. From user perspective, AI responds as if no connectors exist — no indication anything went wrong.
+
+Fix: log failure with `request.log.error` so it appears in server logs. Optionally surface as `503` if connectors fail to load.
+
+Verify: revoke DB permissions for connector table, send chat request, confirm server logs show error.
+
+---
+
+**M7 — `packages/agent/src/kb/structural-graph.ts:148` — `upsertRelationship` returns `''` on insert failure**
+
+`upsertRelationship()` is declared to return `Promise<string>` (the relationship ID). If the raw query returns 0 rows (CONFLICT or constraint), it returns `''`. Callers in `builder.ts` don't check for empty string — silently lose the relationship without error.
+
+Fix: either throw on 0 rows, or return the existing row ID by adding `ON CONFLICT ... DO UPDATE ... RETURNING id`.
+
+Verify: insert same relationship twice, confirm second call returns non-empty ID, no silent failures.
+
+---
+
+**M8 — `connectors/argocd/src/bootstrap.ts`, `connectors/datadog/src/bootstrap.ts` — stub no-ops**
+
+Both bootstrap implementations return `{ entitiesUpserted: 0, ... }` unconditionally. No CLI calls made. Per CLAUDE.md, `connector_registered` must trigger real bootstrap: "Every connector registered in Anvay MUST provide a bootstrap implementation."
+
+These are stubs, not implementations. ArgoCD should list apps via `argocd app list`, Datadog should list monitors/dashboards.
+
+Fix (ArgoCD): call `argocd app list -o json`, parse output, upsert `Deploy` entities. Guard with `try/catch` — return no-op if CLI unavailable.
+
+Fix (Datadog): call Datadog API `/api/v1/monitor` using `DD_API_KEY` + `DD_APP_KEY` env vars. Return no-op if keys not set.
+
+Severity accepted at MEDIUM for now — stubs are safe (graceful no-op). Promoted if connector bootstrap is a required M5 deliverable.
+
+---
+
+**M9 — `apps/gateway/src/audit/postgres-sink.ts` — invalid UUIDs silently coerced to null**
+
+`isUUID(event.userId) ? event.userId : null` — if userId is not a valid UUID, audit record writes `user_id = NULL`. Audit event loses attribution. No log, no error.
+
+Fix: log a warning before coercing, or throw — audit events with no user are a red flag:
+```typescript
+if (!isUUID(event.userId)) {
+  this.onError?.(new Error(`audit: invalid userId "${event.userId}" — coercing to null`))
+}
+```
+
+Verify: call `auditSink.append()` with malformed userId → warning in logs, record still saved.
+
+---
+
+**M10 — `apps/gateway/src/routes/chat.ts:286-289` — gate bypass logged but not fatal in production-adjacent deploys**
+
+`if (!gateSink) request.log.warn('REDIS_URL not set — gate approval bypassed')` — in a production deploy without Redis (possible in limited setups), ALL write actions silently skip approval. V1 trust principle violated.
+
+Fix: in `NODE_ENV === 'production'` context, throw instead of warn if `gateSink` is undefined (already partially guarded at line 153-155 but only at route-setup time, not at request time with per-request `redisUrl` check).
+
+Verify: set `NODE_ENV=production`, unset `REDIS_URL`, send write-action query → 503 returned, not silent bypass.
+
+---
+
+### LOW
+
+**L1 — `apps/gateway/src/server.ts` — hardcoded Redis fallback `'redis://localhost:6379'` in 5 places**
+
+Extract to constant: `const REDIS_URL = process.env['REDIS_URL'] ?? 'redis://localhost:6379'` at top of file, use everywhere.
+
+**L2 — `apps/gateway/src/routes/chat.ts:355` + multiple files — `isValidUUID()` duplicated**
+
+Same UUID regex defined in `chat.ts:355`, `audit/postgres-sink.ts`, `trigger-subscriber.ts`, `graph-builder/subscriber.ts`. Extract to `apps/gateway/src/utils/validators.ts`.
+
+**L3 — `apps/gateway/src/triggers/engine.ts:35` — condition matching only does strict equality**
+
+`matchesCondition()` iterates keys and checks `payload[key] !== value` — exact string match only. No range checks, no nested paths, no array membership. Limits practical automation rule power. Not broken, but underpowered. Document limitation or add `$gt`/`$contains` operators.
+
+**L4 — `packages/agent/src/gate/gate.ts:41` — poll interval not configurable per call**
+
+`pollGate()` hardcodes `intervalMs = 500`. Under concurrent gates, Redis is polled at 500ms × N concurrent gates. Make configurable in `OrchestratorConfig` and pass through.
+
+**L5 — `apps/gateway/prisma/seed.ts:14` — `ON CONFLICT (slug) DO UPDATE SET id = ...` re-assigns UUID**
+
+Updating the primary key on conflict is unusual and potentially disruptive (FK references will break if anything references the old id). Change to `DO NOTHING` and use `RETURNING id` to fetch existing.
+
+**L6 — `apps/agent-service/src/routes/facts.py` — missing `app.state.graphiti` null guard**
+
+`GET /facts` handler calls `await app.state.graphiti.search(...)` without checking if graphiti is None. If init failed, this raises `AttributeError` → 500. Add: `if not request.app.state.graphiti: raise HTTPException(503, "Graphiti unavailable")`.
+
+**L7 — `connectors/linear/src/bootstrap.ts` — stub returns "SDK not wired" episodeHint**
+
+Both branches return 0 entities. The `apiKey` check is correct, but the "SDK not wired" hint is misleading — it implies the SDK exists but isn't connected, when really no bootstrap logic was written. Remove the hint or replace with `'Linear bootstrap not implemented'`.
+
+---
+
+### Pending Features (TASKS.md status)
+
+| Milestone | Status | Evidence |
+|-----------|--------|---------|
+| M0 — Foundation | ✓ Complete | DB migrations, auth, RLS, seed all present |
+| M1 — Orchestrator Core | ✓ Complete | `orchestrator.ts`, `runSession`, gate flow, SSE streaming wired |
+| M2 — Core Connectors | ✓ Complete | GitHub, ArgoCD, Datadog, Linear connectors + CLI/MCP adapters |
+| M3 — Incident War Room | ✓ Complete | Incident CRUD, Redis emit, SRE context, War Room UI |
+| M4 — Service Catalog + Knowledge Base | ✓ Complete | Services route, KB structural graph, Graphiti client, hybrid graph, grounding |
+| M5-T1 — Trigger.dev/BullMQ infrastructure | ✓ Complete | `BullMQScheduler`, `SchedulerFactory`, wired in server.ts |
+| M5-T2 — TriggerEngine event matching | ✓ Complete | `TriggerEngine`, subscriber, executor, DB-backed rules |
+| M5-T3 — Built-in cron monitors | ✓ Complete | `ServiceHealthSweep`, `SloBurnCheck`, `DeployHealthReport`, `OncallMorningBrief` |
+| M5-T4 — Automations UI wired to API | ✓ Complete | `automations-view.tsx` calls real gateway endpoints |
+| Connector bootstrap registry | ✓ Complete | `subscriber.ts` wires per-tenant bootstrapRegistry |
+| GitHub bootstrap | ✓ Complete | Calls `gh repo list`, upserts Repo entities |
+| ArgoCD bootstrap | ⚠ Stub | Returns no-op unconditionally |
+| Datadog bootstrap | ⚠ Stub | Returns no-op unconditionally |
+| Linear bootstrap | ⚠ Stub | Returns no-op unconditionally |
+| agent-service Graphiti endpoints | ✓ Complete | `/episodes`, `/facts` routes exist, Neo4j-backed |
+
+---
+
+### Issues for executor (BRIDGE.md)
+
+**BLOCKING (4):** B1 services.ts wrong enum · B2 kb_entries FORCE RLS missing · B3 episodes.py no UUID validation · B4 agents/graph-builder.ts dead duplicate class
+
+**HIGH (7):** H1 gate-decide per-request RedisGateSink · H2 Linear missing "Bearer" · H3 github bootstrap env leak · H4 connectorId c.type collision · H5 SREAgent skips graph call · H6 facts.py unvalidated query · H7 automations actions not schema-validated
+
+**MEDIUM (10):** M1 BullMQ no dedup · M2 unbounded tenant query · M3 bootstrapRegistry per-event · M4 agent-service exception swallowed · M5 hardcoded Neo4j password · M6 allSettled masks connector fail · M7 upsertRelationship returns '' · M8 ArgoCD/Datadog bootstrap stubs · M9 audit userId null coerce · M10 gate bypass warn not throw in prod
+
+**LOW (7):** L1 Redis URL constant · L2 UUID validator dedup · L3 condition matching limited · L4 poll interval hardcoded · L5 seed ON CONFLICT · L6 facts.py null guard · L7 Linear bootstrap hint
+
+<!-- REVIEW SECTION END — 2026-06-09g -->
+
 <!-- REVIEW SECTION START — 2026-06-09c -->
 ## Review — 2026-06-09c | Fix verification — registry null UUIDs, token cache, gate double-write, unused params
 

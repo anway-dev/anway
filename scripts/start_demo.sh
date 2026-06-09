@@ -85,7 +85,7 @@ log "Starting web on :3000..."
 WEB_PID=$!
 
 TRIES=0
-until curl -sf http://localhost:3000 > /dev/null 2>&1; do
+until curl -s http://localhost:3000 -o /dev/null -w "%{http_code}" 2>/dev/null | grep -qE '^[23]'; do
   TRIES=$((TRIES + 1))
   if [ $TRIES -ge 60 ]; then
     echo ""

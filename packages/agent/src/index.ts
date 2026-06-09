@@ -67,9 +67,25 @@ export type { GraphBuilderLogger } from './graph-builder/builder.js'
 export { GraphBuilderAgent } from './graph-builder/builder.js'
 export type { IConnectorBootstrap, ConnectorBootstrapResult } from './graph-builder/bootstrap.js'
 
-// SRE Agent
+// Agents
 export { SREAgent } from './agents/sre.js'
 export type { IncidentContext, TimelineEvent } from './agents/sre.js'
+export { ProductAgent } from './agents/product.js'
+export type { PRD, UserStory } from './agents/product.js'
+export { TechSpecAgent } from './agents/techspec.js'
+export type { TechSpec, Component, APIChange } from './agents/techspec.js'
+export { BootstrapAgent } from './agents/bootstrap.js'
+export type { BootstrapPlan, FileToCreate } from './agents/bootstrap.js'
+export { TestAgent } from './agents/test.js'
+export type { TestPlan, TestFile } from './agents/test.js'
+export { ReviewAgent } from './agents/review.js'
+export type { ReviewFindings, Finding } from './agents/review.js'
+export { DeployAgent } from './agents/deploy.js'
+export type { DeployPlan } from './agents/deploy.js'
+export { OncallAgent } from './agents/oncall.js'
+export type { ShiftBrief, IncidentSummary } from './agents/oncall.js'
+export { BAAgent } from './agents/ba.js'
+export type { AnalysisReport, MetricPoint } from './agents/ba.js'
 
 // Tools
 export { createGetIncidentContextTool } from './tools/incident-context.js'

@@ -6528,3 +6528,22 @@ T1/T2 from BRIDGE.md 2026-06-09d — verified correct.
 `connectors/github/src/connector.test.ts` mocks `spawnSync` but `connector.ts` imports and uses `execFile` (via `promisify`). Both tests fail: `No "execFile" export is defined on the "node:child_process" mock`. `pnpm -r test` exits non-zero. Fix: change mock to return `execFile` in callback form (promisify-compatible). (Tracked in BRIDGE.md T3.)
 
 <!-- REVIEW SECTION END — 2026-06-09e -->
+
+<!-- REVIEW SECTION START — 2026-06-09f -->
+## Review — 2026-06-09f (commit `36e1d50`)
+
+T3 fix verified.
+
+`vi.spyOn(GitHubConnector.prototype as any, 'runCli')` — correct. promisify preserves Node's `customPromisifySymbol`; vi.mock factory doesn't replicate it. Spy on the private method avoids the issue cleanly.
+
+### Result
+
+| Check | Result |
+|-------|--------|
+| `pnpm -r typecheck` | ✓ 10/10 packages |
+| `pnpm -r test` | ✓ 165/165 tests, 0 failures |
+| Open issues | 0 |
+
+**Project fully green.**
+
+<!-- REVIEW SECTION END — 2026-06-09f -->

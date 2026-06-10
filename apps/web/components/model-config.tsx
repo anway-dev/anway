@@ -69,7 +69,7 @@ export function ModelConfig() {
       });
   }, []);
 
-  const provider = providers.find((p) => p.id === selected)!;
+  const provider = providers.find((p) => p.id === selected);
 
   const handleModelSelect = (providerId: string, model: string) => {
     setProviders((prev) =>
@@ -150,6 +150,7 @@ export function ModelConfig() {
       </div>
 
       {/* Right: config panel */}
+      {provider && (
       <div style={{ flex: 1, overflow: "auto", padding: "24px 32px" }}>
         <div style={{ maxWidth: "600px" }}>
 
@@ -312,6 +313,7 @@ export function ModelConfig() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

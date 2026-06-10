@@ -9,6 +9,8 @@ import { GitHubBootstrap } from '@anvay/connector-github'
 import { ArgocdBootstrap } from '@anvay/connector-argocd'
 import { DatadogBootstrap } from '@anvay/connector-datadog'
 import { LinearBootstrap } from '@anvay/connector-linear'
+import { PrometheusBootstrap } from '@anvay/connector-prometheus'
+import { LokiBootstrap } from '@anvay/connector-loki'
 import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
@@ -81,6 +83,8 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       bootstrapRegistry.set('argocd', new ArgocdBootstrap(kg))
       bootstrapRegistry.set('datadog', new DatadogBootstrap(kg))
       bootstrapRegistry.set('linear', new LinearBootstrap(kg, await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')))
+      bootstrapRegistry.set('prometheus', new PrometheusBootstrap(kg))
+      bootstrapRegistry.set('loki', new LokiBootstrap(kg))
       const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
       await agent.handle(event)
     })

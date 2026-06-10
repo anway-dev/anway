@@ -49,4 +49,36 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       return { ok: true, gateId, decision }
     },
   )
+
+  // Create a gate (for seeding approvals in tests)
+  app.post<{ Body: { action: string; target: string; requestedBy?: string } }>(
+    '/api/gate',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['action', 'target'],
+          properties: {
+            action: { type: 'string' },
+            target: { type: 'string' },
+            requestedBy: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { action, target, requestedBy } = request.body
+      const { tenantId } = request.user as { tenantId: string }
+      const row = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          INSERT INTO gate_events (id, tenant_id, action, target, status, requested_by, created_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${action}, ${target}, 'pending',
+                  ${requestedBy ?? 'system'}, NOW())
+          RETURNING id
+        `
+      )
+      return reply.code(201).send({ ok: true, id: (row as Array<{ id: string }>)[0]?.id })
+    },
+  )
 }

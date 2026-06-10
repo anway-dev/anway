@@ -30,10 +30,11 @@ test.describe('Approvals UI', () => {
   test('approve action removes item from pending list', async ({ page, request }) => {
     const h = await authHeaders(request)
     // Seed a gate
-    await request.post(`${GATEWAY}/api/gate`, {
+    const seedResp = await request.post(`${GATEWAY}/api/gate`, {
       headers: { ...h, 'Content-Type': 'application/json' },
       data: { action: 'deploy', target: 'payments-api', requestedBy: 'e2e-test' },
     })
+    expect(seedResp.status()).toBe(201)
     await page.goto('/')
     await page.locator('text=Workflows').first().click()
     // After seeding, at least one pending approval should exist

@@ -7,6 +7,74 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10f -->
+## Review — 2026-06-10f | LOW items from 2026-06-10e resolved (841a507)
+
+### Scope
+
+Commit `841a507`. Files changed: connectors.tsx, settings.ts, audit.ts, k8s/agent.ts, github/agent.ts, grafana/agent.ts, linear/agent.ts, loki/agent.ts, pagerduty/agent.ts, prometheus/agent.ts.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 2 LOW
+
+All 5 LOWs from 2026-06-10e closed. Two new LOWs found.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | L-e1/L-e2/L1/L4 ✅. L3 partial — limit configurable but no cursor pagination. |
+| D2 Code Standards | 4/5 | `ConnectorCreds` interface duplicated across 7 agent files instead of shared from `@anvay/types`. |
+| D3 Performance | 5/5 | No regressions. Audit limit cap (200) prevents runaway queries. |
+| D4 Security | 5/5 | Limit capped to 200 via `Math.min` before use in raw query. No injection risk. |
+| D5 Readability | 5/5 | Clean mechanical changes. k8s comment is clear. |
+| D6 Clarity/Comments | 5/5 | All comments correct and current. |
+
+---
+
+### LOW
+
+**L-f1 — `audit.ts`: cursor pagination still missing — can't page past first N rows**
+
+`apps/gateway/src/routes/audit.ts`: commit added configurable `limit` (default 50, max 200). No `cursor` or `offset` param added. Users with >200 audit events can only see the most recent batch — no way to retrieve older events. The original L3 spec said "limit and cursor query params".
+
+Fix — add `offset` query param (simpler than cursor for append-only audit log):
+```typescript
+const limitClause = Math.min(Number((request.query as Record<string, string>)['limit']) || 50, 200)
+const offsetClause = Math.max(Number((request.query as Record<string, string>)['offset']) || 0, 0)
+// ...
+FROM audit_events ORDER BY created_at DESC LIMIT ${limitClause} OFFSET ${offsetClause}
+```
+Return `{ events, total, limit, offset }` so callers know how to paginate.
+
+Verify: `GET /api/audit?limit=10&offset=10` returns the second page.
+
+---
+
+**L-f2 — `ConnectorCreds` interface duplicated in all 7 agent files**
+
+Each of `connectors/*/src/agent.ts` defines its own identical `interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }`. If a new field is needed (e.g. `region`, `orgId`), all 7 files must be updated.
+
+Fix — export from `@anvay/types`:
+```typescript
+// packages/types/src/index.ts
+export interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
+```
+Import in each agent: `import type { ConnectorCreds } from '@anvay/types'`. Remove local declarations.
+
+Verify: `pnpm typecheck` clean after change.
+
+---
+
+### Pending Features (unchanged from 2026-06-10e)
+
+See 2026-06-10e section — no feature changes in this commit.
+
+<!-- REVIEW SECTION END — 2026-06-10f -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10e -->
 ## Review — 2026-06-10e | 2026-06-10d fixes — all BLOCKING + HIGH + MEDIUM + LOW resolved
 

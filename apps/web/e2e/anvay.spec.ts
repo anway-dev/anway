@@ -9,6 +9,7 @@ import { test, expect } from '@playwright/test'
 
 const GATEWAY = 'http://localhost:4000'
 const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
+const DEMO_EMAIL = 'dev@anvay.local'
 
 async function getToken(request: Parameters<Parameters<typeof test>[1]>[0]['request']): Promise<string> {
   const r = await request.get(`${GATEWAY}/api/auth/dev-token`)

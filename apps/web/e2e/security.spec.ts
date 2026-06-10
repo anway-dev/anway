@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY } from './fixtures'
+import { GATEWAY, authHeaders } from './fixtures'
 
 test.describe('Security surface', () => {
   test('SSRF block — 127.0.0.1 models fetch returns empty', async ({ request }) => {

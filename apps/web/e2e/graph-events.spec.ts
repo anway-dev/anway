@@ -11,7 +11,7 @@ test.describe('Graph Events', () => {
 })
 
 test.describe('Graph Events extended', () => {
-  test('POST /api/graph/events with invalid key returns 401', async ({ request }) => {
+  test('POST /api/graph/events with invalid key returns 401 or 400', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/graph/events`, {
       headers: { 'x-connector-key': 'invalid-key' },
       data: { type: 'pr_merged', tenantId: DEMO_TENANT },

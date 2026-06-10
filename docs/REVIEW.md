@@ -12,7 +12,7 @@ dated review pass — newest at the top.
 
 ### Scope
 
-Commits `c12df09` (fix: A3-A6) + `c1059a9` (bridge close). A1/A2 pre-existing — already applied before sweep task was posted.
+Commits `c12df09` (fix: A3-A6) + `c1059a9` (bridge close). A1/A2 posted in error — reviewer did not verify current state before writing sweep task. Both were already fixed. Process failure: always read affected files before posting bridge tasks.
 
 ### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW — CLEAN (1 nit)
 

@@ -3,5 +3,7 @@ route:
 receivers:
   - name: anvay
     webhook_configs:
-      - url: http://gateway:4000/api/events/alert
+      # gateway runs on macOS host (not in Docker), so use host.docker.internal
+      # For Linux hosts, replace with: http://172.17.0.1:4000/api/events/alert
+      - url: http://host.docker.internal:4000/api/events/alert
         send_resolved: true

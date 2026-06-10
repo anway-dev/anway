@@ -6,7 +6,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
 const ALLOWED_CONNECTOR_TYPES = new Set([
-  'github','datadog','linear','argocd','coralogix','notion','prometheus','newrelic',
+  'github','datadog','linear','argocd','coralogix','notion','prometheus','alertmanager','newrelic',
   'jira','loki','terraform','pagerduty','slack','grafana','elastic','dynatrace',
   'sentry','jenkins','circleci','vercel','k8s','vault','snyk','sonarqube',
   'opsgenie','launchdarkly','confluence','eks','gke','aws-cloudwatch',

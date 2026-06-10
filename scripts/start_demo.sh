@@ -44,6 +44,20 @@ until docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1; do
   sleep 1
 done
 
+# ── Start demo services (Prometheus, Loki, Grafana, Alertmanager, demo apps) ──
+log "Starting demo services (prometheus, alertmanager, loki, grafana, demo-apps)..."
+docker compose -p demo -f infra/demo/docker-compose.yml up -d 2>&1 | grep -v '^#' || \
+  warn "demo docker-compose failed — check infra/demo/docker-compose.yml"
+
+# Wait for Prometheus
+log "Waiting for Prometheus..."
+TRIES=0
+until curl -sf http://localhost:9090/-/ready > /dev/null 2>&1; do
+  TRIES=$((TRIES + 1))
+  [ $TRIES -ge 30 ] && { warn "Prometheus not ready after 30s"; break; }
+  sleep 1
+done
+
 # ── Env file — always refresh from example for demo ──
 cp apps/gateway/.env.example apps/gateway/.env
 log "Refreshed apps/gateway/.env from example"
@@ -157,5 +171,5 @@ echo ""
 
 open http://localhost:3000 2>/dev/null || true
 
-trap "kill $GATEWAY_PID $WEB_PID 2>/dev/null; echo ''; log 'Stopped.'" EXIT INT TERM
+trap "kill $GATEWAY_PID $WEB_PID 2>/dev/null; docker compose -p demo -f infra/demo/docker-compose.yml down 2>/dev/null; echo ''; log 'Stopped.'" EXIT INT TERM
 wait $GATEWAY_PID $WEB_PID

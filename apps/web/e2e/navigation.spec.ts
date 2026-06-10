@@ -7,7 +7,9 @@ test.describe('Navigation', () => {
       'Editor', 'Knowledge', 'Workflows', 'Approvals', 'Automations',
       'API Client', 'Connectors', 'Audit', 'Access', 'Cloud', 'K8s']
     for (const item of navItems) {
-      await expect(page.locator(`text=${item}`).first()).toBeVisible()
+      const loc = page.locator(`text=${item}`).first()
+      await loc.scrollIntoViewIfNeeded()
+      await expect(loc).toBeVisible()
     }
   })
 

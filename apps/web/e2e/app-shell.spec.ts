@@ -4,7 +4,7 @@ test.describe('App shell', () => {
   test('renders sidebar with navigation and logo', async ({ page }) => {
     await page.goto('/')
     // Logo
-    await expect(page.locator('text=anvay')).toBeVisible()
+    await expect(page.locator('text=anvay').first()).toBeVisible()
     // Nav items
     await expect(page.locator('text=Signals').first()).toBeVisible()
     await expect(page.locator('text=Services').first()).toBeVisible()

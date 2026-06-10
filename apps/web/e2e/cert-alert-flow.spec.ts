@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-const GATEWAY = 'http://localhost:4000'
+const GATEWAY = 'http://127.0.0.1:4000'
 const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 
 test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () => {

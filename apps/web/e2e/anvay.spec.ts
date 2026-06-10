@@ -7,7 +7,7 @@
 
 import { test, expect } from '@playwright/test'
 
-const GATEWAY = 'http://localhost:4000'
+const GATEWAY = 'http://127.0.0.1:4000'
 const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 const DEMO_EMAIL = 'dev@anvay.local'
 
@@ -417,7 +417,7 @@ test.describe('I extended: Web UI navigation', () => {
       const errors: string[] = []
       page.on('pageerror', e => errors.push(e.message))
       await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 60_000 })
-      await page.click(`text=${view.text}`, { timeout: 15_000 })
+      await page.locator(`text=${view.text}`).first().click({ timeout: 15_000 })
       await page.waitForTimeout(1000)
       expect(errors).toHaveLength(0)
     })

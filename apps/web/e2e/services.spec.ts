@@ -5,6 +5,6 @@ test.describe('Service Catalog', () => {
   test('GET /api/services returns list', async ({ request }) => {
     const h = await authHeaders(request)
     const resp = await request.get(`${GATEWAY}/api/services`, { headers: h })
-    expect([200, 404]).toContain(resp.status())
+    expect(resp.status()).toBe(200)
   })
 })

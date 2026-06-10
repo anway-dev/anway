@@ -30,6 +30,21 @@ test.describe('A: Health + Metrics', () => {
     expect(typeof body.uptime).toBe('number')
   })
 
+  test('A.1b GET /health/live returns 200', async ({ request }) => {
+    const resp = await request.get(`${GATEWAY}/health/live`)
+    expect(resp.status()).toBe(200)
+  })
+
+  test('A.1c GET /health/ready returns 200', async ({ request }) => {
+    const resp = await request.get(`${GATEWAY}/health/ready`)
+    expect(resp.status()).toBe(200)
+  })
+
+  test('A.1d GET /health/startup returns 200', async ({ request }) => {
+    const resp = await request.get(`${GATEWAY}/health/startup`)
+    expect(resp.status()).toBe(200)
+  })
+
   test('A.2 GET /metrics returns Prometheus text format', async ({ request }) => {
     const resp = await request.get(`${GATEWAY}/metrics`)
     expect(resp.status()).toBe(200)

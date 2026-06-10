@@ -17,6 +17,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [saving, setSaving] = useState(false);
+  const [devToken, setDevToken] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -30,6 +31,10 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
       })
       .catch(() => setProviderInfo({ configured: false }))
       .finally(() => setLoading(false));
+    fetch('/api/auth/dev-token')
+      .then(r => r.json())
+      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
+      .catch(() => {});
   }, []);
 
   const selectedManifest = manifests.find(m => m.id === selectedProvider);
@@ -41,7 +46,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
     if (needsKey && apiKey.length < 10) { setModels([]); return }
     fetch(`/api/settings/models?${new URLSearchParams({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) })}`)
       .then(r => r.json()).then((data: ModelList) => setModels(data.models)).catch(() => setModels([]));
-  }, [selectedProvider, baseUrl, apiKey, selectedManifest]);
+  }, [selectedProvider, baseUrl, apiKey, selectedManifest, devToken]);
 
   async function handleSave() {
     if (!apiKey && selectedManifest?.fields.some(f => f.required && f.key === 'apiKey')) return;
@@ -53,7 +58,12 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
       if (baseUrl) body.baseUrl = baseUrl;
       if (selectedModel) body.defaultModel = selectedModel;
       const resp = await fetch("/api/settings/provider", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(devToken ? { Authorization: `Bearer ${devToken}` } : {}),
+        },
+        body: JSON.stringify(body),
       });
       if (resp.ok) {
         setProviderInfo({ configured: true, provider: selectedProvider, defaultModel: selectedModel });

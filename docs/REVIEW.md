@@ -7,6 +7,56 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11e -->
+## Review — 2026-06-11e | B1/B3/M1/M2 (8d72224)
+
+### Scope
+
+Commit `8d72224` — gate create endpoint, provider guard, prometheus/loki bootstraps.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 1 MEDIUM, 0 LOW
+
+B1 and B3 clean. M1/M2 bootstrap implementations are correct but will silently fail at runtime due to undefined payload.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | B1/B3 complete. M1/M2 bootstrap logic correct but never executes — payload is undefined at call site. |
+| D2 Code Standards | 5/5 | Patterns correct, error handling present. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | No issues. |
+| D5 Readability | 5/5 | Clean. |
+| D6 Clarity/Comments | 5/5 | No spurious comments. |
+
+---
+
+### MEDIUM
+
+**M3** `apps/gateway/src/routes/connectors.ts:58` — bootstrap trigger publishes `{ tenantId, connectorType }` with no `payload` field. `GraphBuilderAgent.onConnectorRegistered` passes `event.payload` (undefined) to `bootstrap.bootstrap(...)`. Inside `PrometheusBootstrap` and `LokiBootstrap`, `payload['baseUrl']` throws `TypeError: Cannot read properties of undefined` before the `?? 'http://localhost:9090'` fallback. Error is swallowed by try-catch in builder — bootstrap silently returns, zero entities seeded.
+
+Fix in `apps/gateway/src/routes/connectors.ts` bootstrap route: read credentials from `connector_config` before publishing and include them as `payload`:
+
+```typescript
+const rows = await withTenant(prisma, tenantId, (tx) =>
+  tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
+    SELECT credentials FROM connector_config
+    WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+  `
+).catch(() => [])
+const creds = (rows[0]?.credentials ?? {}) as Record<string, unknown>
+await pub.publish('connector_registered', JSON.stringify({
+  tenantId,
+  connectorType: type,
+  connectorId: type,
+  payload: creds,
+}))
+```
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11d -->
 ## Review — 2026-06-11d | B4 fix (cd953b9)
 

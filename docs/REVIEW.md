@@ -7,6 +7,19 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11d -->
+## Review — 2026-06-11d | B4 fix (cd953b9)
+
+### Scope
+
+Commit `cd953b9` — remove `updated_at`, severity mapping.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+Both schema errors from B2 corrected exactly. INSERT now matches `incidents` schema. `warning → medium` mapping correct.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11c -->
 ## Review — 2026-06-11c | B2 fix (07d0831)
 

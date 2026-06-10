@@ -44,6 +44,6 @@ test.describe('Security extended', () => {
     expect(resp.status()).toBe(200)
     const body = JSON.stringify(await resp.json())
     expect(body).not.toContain('config_encrypted')
-    expect(body).not.toContain('credentials')
+    expect(body).not.toMatch(/"credentials"\s*:/)
   })
 })

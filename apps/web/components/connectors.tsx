@@ -17,9 +17,19 @@ export function ConnectorsView() {
   const [bootstrapInfo, setBootstrapInfo] = useState<Record<string, { bootstrapped: boolean; bootstrappedAt?: string }>>({});
   const [bootstrapping, setBootstrapping] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [devToken, setDevToken] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/connectors")
+    fetch('/api/auth/dev-token')
+      .then(r => r.json())
+      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
+      .catch(() => {});
+  }, []);
+
+  const authHeaders = devToken ? { Authorization: `Bearer ${devToken}` } : {} as Record<string, string>;
+
+  useEffect(() => {
+    fetch("/api/settings/connectors", { headers: authHeaders })
       .then(r => r.json())
       .then((list: ConnectorStatus[]) => {
         const map: Record<string, boolean> = {};
@@ -28,7 +38,7 @@ export function ConnectorsView() {
         // Fetch bootstrap status for each configured connector
         for (const c of list) {
           if (c.enabled) {
-            fetch(`/api/connectors/${c.connectorType}/bootstrap-status`)
+            fetch(`/api/connectors/${c.connectorType}/bootstrap-status`, { headers: authHeaders })
               .then(r => r.json())
               .then((data: { bootstrapped: boolean; bootstrappedAt?: string }) => {
                 if (data.bootstrapped) setBootstrapInfo(prev => ({ ...prev, [c.connectorType]: data }))
@@ -38,7 +48,7 @@ export function ConnectorsView() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [devToken]);
 
   const visible = filter === "All" ? CONNECTORS : CONNECTORS.filter((c) => c.category === filter);
   const connected = Object.values(configuredMap).filter(Boolean).length;
@@ -53,7 +63,10 @@ export function ConnectorsView() {
       }
       await fetch(`/api/settings/connectors/${modal.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
         body: JSON.stringify({ credentials }),
       });
       setConfiguredMap(prev => ({ ...prev, [modal.id]: true }));
@@ -97,7 +110,7 @@ export function ConnectorsView() {
       {/* Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST' }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', headers: authHeaders }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setModal(conn); setFormValues({}); }} />
         ))}
       </div>
 

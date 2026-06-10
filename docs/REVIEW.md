@@ -7707,3 +7707,23 @@ T3 fix verified.
 | Open issues | 3 |
 
 <!-- REVIEW SECTION END — 2026-06-10d -->
+
+<!-- REVIEW SECTION START — 2026-06-10e -->
+## Review 2026-06-10e — Gateway TypeScript compile errors
+
+**Reviewer:** Claude | **Scope:** `pnpm typecheck` in apps/gateway
+
+### BLOCKING
+
+| # | Location | Error |
+|---|----------|-------|
+| B1 | `apps/gateway/src/events/alert-subscriber.ts:6` | `import type { Severity } from '@prisma/client'` — no such export; schema defines `IncidentSeverity`. Change to `import type { IncidentSeverity }` and update `SEV_MAP` type. |
+| B2 | `apps/gateway/src/routes/audit.ts:13` | `AuditEvent.outcome` union missing `'action_executed'` and `'action_failed'`; both used in `DEMO_EVENTS` and `mapOutcome()`. Add both to union. |
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 2 |
+| Open issues | 2 |
+
+<!-- REVIEW SECTION END — 2026-06-10e -->

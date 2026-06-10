@@ -9,11 +9,11 @@ import { test, expect } from '@playwright/test'
 
 const GATEWAY = 'http://localhost:4000'
 const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
-const DEMO_EMAIL = 'admin@demo.anvay.dev'
 
 async function getToken(request: Parameters<Parameters<typeof test>[1]>[0]['request']): Promise<string> {
-  const r = await request.post(`${GATEWAY}/auth/token`, { data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT } })
-  return (await r.json()).token as string
+  const r = await request.get(`${GATEWAY}/api/auth/dev-token`)
+  const body = await r.json() as { token?: string }
+  return body.token ?? ''
 }
 
 // ---------------------------------------------------------------------------

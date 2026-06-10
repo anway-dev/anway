@@ -2,11 +2,36 @@ import type { FastifyInstance } from 'fastify'
 import { createClient } from 'redis'
 
 export async function eventRoutes(app: FastifyInstance) {
+  const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
+
   // Alertmanager webhook receiver
   app.post('/api/events/alert', async (request) => {
-    const payload = request.body as Record<string, unknown>
+    const body = request.body as {
+      alerts?: Array<{
+        labels?: { alertname?: string; severity?: string; service?: string; job?: string }
+        status?: string
+        annotations?: { summary?: string; description?: string }
+      }>
+      tenantId?: string
+    }
     const pub = await getEventPub()
-    if (pub) await pub.publish('alert_fired', JSON.stringify(payload))
+    if (!pub) return { ok: true }
+
+    if (body.alerts && Array.isArray(body.alerts)) {
+      for (const alert of body.alerts) {
+        if (alert.status !== 'firing') continue
+        const payload = {
+          tenantId: body.tenantId ?? DEMO_TENANT,
+          title: alert.labels?.alertname ?? 'Alert Fired',
+          severity: alert.labels?.severity ?? 'high',
+          service: alert.labels?.service ?? alert.labels?.job,
+          description: alert.annotations?.summary ?? alert.annotations?.description,
+        }
+        await pub.publish('alert_fired', JSON.stringify(payload))
+      }
+    } else {
+      await pub.publish('alert_fired', JSON.stringify(body))
+    }
     return { ok: true }
   })
 

@@ -112,6 +112,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     'circleci', 'vercel', 'k8s', 'vault', 'snyk', 'sonarqube',
     'opsgenie', 'launchdarkly', 'confluence',
     'eks', 'gke', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
+    'alertmanager',
   ]
 
   app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(

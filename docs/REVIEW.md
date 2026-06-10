@@ -7,6 +7,50 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10j -->
+## Review — 2026-06-10j | 2026-06-10i fixes (8e9b24c + e5ed524)
+
+### Scope
+
+Commits `8e9b24c` (fix: B1/M1-3/L1-2) + `e5ed524` (bridge close).
+
+### Verdict: 0 BLOCKING, 0 HIGH, 1 MEDIUM, 1 LOW
+
+All BLOCKINGs and MEDIUMs from 2026-06-10i resolved. One recurring bridge protocol
+violation. L3 intentionally deferred (not in commit scope).
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | B1/M1/M2/M3/L1/L2 all correctly fixed. |
+| D2 Code Standards | 5/5 | OR-locator chain correct. Offset param correct. Import fixed. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 4/5 | `authHeaders` import restored. L3 credential check still broad but LOW. |
+| D5 Readability | 5/5 | Duplicate describe block removed. Test names accurate. |
+| D6 Clarity/Comments | 2/5 | e5ed524 mutates bridge entry in-place again — same violation as 8a7cfeb. |
+
+---
+
+### MEDIUM
+
+**M1** `docs/BRIDGE.md` — e5ed524 mutated `TASKS [OPEN]` → `TASKS [ANSWERED]` in-place. Same violation as 8a7cfeb in prior cycle. Bridge is append-only. `[ANSWERED]` also not a valid status token (valid: `[OPEN]`, `[CLOSED]`). Persistent pattern — two cycles in a row.
+
+---
+
+### LOW
+
+**L1** `apps/web/e2e/security.spec.ts:47` — `expect(body).not.toContain('credentials')` still broad (carried from L3 in 2026-06-10i — not in 8e9b24c scope, acceptable). False positive risk if response includes field names containing the substring `credentials`. Tighten when convenient:
+```typescript
+expect(body).not.toMatch(/"credentials"\s*:/)
+```
+
+<!-- REVIEW SECTION END — 2026-06-10j -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10i -->
 ## Review — 2026-06-10i | M1-M5 + L4-L5 task fixes (2a61381 + 8a7cfeb)
 

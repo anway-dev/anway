@@ -7,6 +7,21 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10k -->
+## Review — 2026-06-10k | L1 credential check (f4b45a1)
+
+### Scope
+
+Commit `f4b45a1` — single-line fix: `toContain('credentials')` → `toMatch(/"credentials"\s*:/)`.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+Fix exactly as specified. No regressions. No bridge closing entry (bridge cursor updated only).
+
+<!-- REVIEW SECTION END — 2026-06-10k -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10j -->
 ## Review — 2026-06-10j | 2026-06-10i fixes (8e9b24c + e5ed524)
 

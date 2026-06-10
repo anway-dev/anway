@@ -7,6 +7,303 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10d -->
+## Review — 2026-06-10d | e2e certification + credential fixes + proxy routes + connector agents
+
+### Scope
+
+Commits `d4bb124` → `778bcf9`. Source files changed: events.ts, settings.ts, chat-stream.ts, audit.ts, alert-subscriber.ts, gateway-client.ts, all Next.js proxy routes (alerts, audit, incidents, providers, settings/*, connectors/*), connectors.tsx, all e2e spec files, all 4 connector agents (prometheus, loki, grafana, k8s), infra/docker-compose.yml, scripts/start_demo.sh, prisma/migrations/0003_kb/migration.sql.
+
+### Verdict: 1 BLOCKING, 4 HIGH, 5 MEDIUM, 6 LOW
+
+**Previous review BLOCKINGs resolved:** B1 (alert format mismatch) ✓, B2 (getToken) ✓, B3 (orchestrator selector) ✓, B4 (proxy try/catch) ✓, B5 (alertmanager KNOWN_CONNECTORS) ✓. **e2e suite: 50/50 passing.**
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | All 5 previous BLOCKINGs resolved. Alert → incident flow works end-to-end. 50/50 e2e certified. start_demo.sh env wipe (B1) breaks repeated-run workflow. |
+| D2 Code Standards | 3/5 | All connector agents use `(creds as any)`. `await` on sync call in bootstrap/route.ts. `_pub` has no reconnect strategy unlike subscriber. DEMO_TENANT function-scoped instead of module constant. |
+| D3 Performance | 4/5 | Token cache in gateway-client correctly uses inflight-dedup. Redis pub singleton correct. No pagination on audit (L3). |
+| D4 Security | 3/5 | `isSafeBaseUrl()` blocks `127.0.0.1`/`::1` but allows `localhost` (same address, bypasses the guard). K8s agent path traversal on pod name param. Unauthenticated deploy/pr-merged events publish unvalidated bodies to Redis. |
+| D5 Readability | 4/5 | Proxy routes consistent and clean. alert-subscriber clear. Connector agents simple. K8s agent function scope too long. |
+| D6 Clarity/Comments | 4/5 | `isSafeBaseUrl` comment misleads ("allow localhost for Ollama dev") but implementation inconsistently blocks the IP while allowing hostname. Loki stub not flagged as such. |
+
+---
+
+### BLOCKING
+
+**B1 — `start_demo.sh` line 58: overwrites `.env` on every run — destroys user-configured API keys**
+
+`scripts/start_demo.sh`:58 runs `cp apps/gateway/.env.example apps/gateway/.env` unconditionally. Every time the script runs, the `.env` is replaced with the blank example. Any LLM provider API key the user configured via Settings is lost. Users who run `start_demo.sh` a second time after saving a key will find the key gone and the chat endpoint returns 503.
+
+Fix — change line 58 to a no-clobber copy:
+```bash
+cp -n apps/gateway/.env.example apps/gateway/.env
+log "apps/gateway/.env initialized from example (existing file preserved)"
+```
+
+Verify: run `start_demo.sh` twice; confirm `.env` is not overwritten on the second run.
+
+---
+
+### HIGH
+
+**H1 — `settings.ts` `isSafeBaseUrl()` line 18: `localhost` not blocked — SSRF bypass**
+
+`apps/gateway/src/routes/settings.ts`:18:
+```typescript
+if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false
+```
+Comment says "allow localhost for Ollama dev". Code blocks the numeric IPs but `localhost` hostname is not in the block list and returns `true`. `http://localhost:9090` passes, allowing an authenticated user to make the gateway fetch internal services (e.g., Prometheus, Redis sentinel, internal APIs) via the models endpoint.
+
+Two valid fixes — pick one based on product intent:
+- **If localhost must be allowed for Ollama:** add `localhost` to the _allowed_ set but don't pretend to block it: remove `127.0.0.1` and `::1` from the block list too (they're equivalent). Add a comment explaining the trust decision.
+- **If loopback must be blocked:** add `'localhost'` to the block condition:
+```typescript
+if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === 'localhost') return false
+```
+Current comment is wrong regardless — fix it to match whichever policy is chosen.
+
+Verify: `isSafeBaseUrl('http://localhost:9090')` must either consistently return `true` (allowed) or `false` (blocked) — not differ from `isSafeBaseUrl('http://127.0.0.1:9090')`.
+
+---
+
+**H2 — `gateway-client.ts` line 1: `GATEWAY_URL` defaults to `http://localhost:4000` — IPv6 resolution failure on server**
+
+`apps/web/lib/gateway-client.ts`:1:
+```typescript
+export const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
+```
+Node.js v20.11.0 on macOS resolves `localhost` to `::1` (IPv6) first. The gateway listens on `0.0.0.0` (IPv4 only). Server-side route handlers calling `getDemoToken()` fail with `ECONNREFUSED ::1:4000`. The same `localhost` issue that broke e2e tests (now fixed to `127.0.0.1` in test files) exists here for all server-side proxy routes.
+
+Fix:
+```typescript
+export const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:4000'
+```
+
+Verify: stop gateway, start it, call `GET /api/alerts` from the Next.js app — should get 401 or 200, not 502.
+
+---
+
+**H3 — `connectors.tsx` `handleConnect()` line 64-65: save failure shows connector as configured**
+
+`apps/web/components/connectors.tsx`:64:
+```typescript
+setConfiguredMap(prev => ({ ...prev, [modal.id]: true }))
+setModal(null)
+```
+These run even when the PUT response is 4xx or 5xx. A failed save (e.g., unknown connector type, DB error) still marks the connector as configured in the UI and closes the modal. User has no feedback and believes the connector is saved.
+
+Fix — check response status before updating state:
+```typescript
+const resp = await fetch(`/api/settings/connectors/${modal.id}`, { ... })
+if (!resp.ok) {
+  const err = await resp.json().catch(() => ({}))
+  // surface error to user — add a saveError state field
+  setSaveError((err as { error?: string }).error ?? 'Save failed')
+  return
+}
+setConfiguredMap(prev => ({ ...prev, [modal.id]: true }))
+setModal(null)
+```
+Add `const [saveError, setSaveError] = useState<string | null>(null)` and render it in the modal.
+
+Verify: point gateway at a misconfigured connector type; confirm error appears in UI.
+
+---
+
+**H4 — `events.ts` `_pub` Redis client: no reconnect strategy — lost publishes silently swallowed**
+
+`apps/gateway/src/routes/events.ts`:63-73: `_pub` is created once via `createClient({ url })` with no `socket.reconnectStrategy`. The alert-subscriber (`alert-subscriber.ts`:21-23) correctly has `reconnectStrategy: (retries) => Math.min(retries * 100, 3000)`. If Redis drops and reconnects, `_pub` stays in a disconnected error state. `pub.publish(...)` throws; the `eventRoutes` handlers don't catch it (no try/catch); Fastify returns 500. Events are lost.
+
+Fix — add reconnect strategy and error handler to `getEventPub()`:
+```typescript
+_pub = createClient({
+  url,
+  socket: { reconnectStrategy: (retries) => Math.min(retries * 100, 3000) },
+}) as import('redis').RedisClientType
+_pub.on('error', (err) => log.error({ err }, 'EventPub Redis error'))
+await _pub.connect()
+```
+Also add try/catch in each event handler so Redis failures return `{ ok: true }` instead of 500.
+
+Verify: stop Redis, fire an alert webhook, confirm gateway returns 200 (not 500).
+
+---
+
+### MEDIUM
+
+**M1 — `events.ts` `/api/events/deploy` and `/api/events/pr-merged`: unvalidated body published to Redis**
+
+`apps/gateway/src/routes/events.ts`:39-52. Both endpoints publish `request.body` verbatim to Redis without any schema check. A malformed or malicious payload (e.g., `{"__proto__": {...}}`) reaches the trigger subscriber which calls `JSON.parse(message)` and then pattern-matches against the payload. While trigger-subscriber has UUID validation for `tenantId`, deploy and pr-merged subscribers may not. At minimum, validate that the body contains `tenantId` (valid UUID) before publishing.
+
+Fix — add tenantId validation:
+```typescript
+const payload = request.body as Record<string, unknown>
+if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId as string)) {
+  return reply.code(400).send({ error: 'tenantId required' })
+}
+```
+
+Verify: POST without tenantId returns 400; with valid UUID returns 200.
+
+---
+
+**M2 — `connectors/k8s/src/agent.ts` line 34: `params.pod` interpolated into URL without encoding — path traversal**
+
+`connectors/k8s/src/agent.ts`:34:
+```typescript
+const res = await fetch(`${base}/containers/${params.pod}/logs?...`)
+```
+`params.pod` is LLM-supplied. If the LLM passes `../info` or similar, the request path becomes `/containers/../info/logs` which traverses the Docker API path. While the Docker API is already restricted in scope, this is still a code standard violation.
+
+Fix:
+```typescript
+const podName = encodeURIComponent(String(params.pod))
+const res = await fetch(`${base}/containers/${podName}/logs?tail=${params.lines ?? 100}&stdout=true&stderr=true`)
+```
+
+Verify: tool call with `pod: "../info"` results in a 404 from Docker, not a different endpoint.
+
+---
+
+**M3 — `connectors/grafana/src/agent.ts` line 7: default password `'anvay'` wrong — should be `'admin'`**
+
+`connectors/grafana/src/agent.ts`:7:
+```typescript
+const auth = btoa(`admin:${(creds as any).password ?? 'anvay'}`)
+```
+If `password` is missing from credentials (fallback hit), the Basic auth header encodes `admin:anvay`. Grafana's actual default password is `admin`. The demo seeds `"password":"admin"` correctly, so this only breaks if the fallback is used (e.g., a user registers Grafana without the password field).
+
+Fix: change fallback to `'admin'`:
+```typescript
+const auth = btoa(`admin:${(creds as any).password ?? 'admin'}`)
+```
+
+Verify: remove `password` from Grafana connector credentials; confirm `get_dashboards` still authenticates.
+
+---
+
+**M4 — `connectors/loki/src/agent.ts` `get_log_volume` returns hardcoded stub — misleads LLM**
+
+`connectors/loki/src/agent.ts`:38-42:
+```typescript
+const res = await fetch(`${base}/loki/api/v1/query_range?query=count_over_time(${q}[1m])&limit=1`)
+if (!res.ok) return { points: [] }
+return { points: [{ t: Date.now(), v: 50 }] }  // ← hardcoded, ignores response
+```
+Response is fetched and discarded. Always returns `v: 50`. LLM will tell users their service has "50 log events/min" regardless of reality.
+
+Fix — parse the actual Loki response:
+```typescript
+const data = await res.json() as { data: { result: Array<{ values: [string, string][] }> } }
+const points = data.data.result.flatMap(r => r.values.map(([ts, v]) => ({ t: Number(ts) / 1e6, v: Number(v) })))
+return { points: points.length ? points : [{ t: Date.now(), v: 0 }] }
+```
+
+Verify: tool call against live Loki returns values reflecting actual log traffic.
+
+---
+
+**M5 — `start_demo.sh` line 81: gateway health check uses `localhost` not `127.0.0.1`**
+
+`scripts/start_demo.sh`:81:
+```bash
+until curl -sf http://localhost:4000/health > /dev/null 2>&1
+```
+Same IPv6 resolution issue as H2. On macOS with Node v20.11.0, `localhost` may resolve to `::1`. If gateway only listens on IPv4, curl will keep failing until the 40-retry timeout, then report "Gateway failed to start" even though it's running fine.
+
+Fix:
+```bash
+until curl -sf http://127.0.0.1:4000/health > /dev/null 2>&1
+```
+
+Verify: gateway start loop completes within a few retries.
+
+---
+
+### LOW
+
+**L1 — All connector agents: `(creds as any)` — use typed credentials interface**
+
+`connectors/*/src/agent.ts` all use `(creds as any).baseUrl`. Define a typed credentials shape:
+```typescript
+interface ConnectorCreds { baseUrl?: string; [k: string]: unknown }
+const c = creds as ConnectorCreds
+const base = c.baseUrl ?? 'http://localhost:9090'
+```
+Eliminates `any` while keeping flexibility.
+
+---
+
+**L2 — `events.ts` line 5: `DEMO_TENANT` function-scoped constant**
+
+`apps/gateway/src/routes/events.ts`:5: `const DEMO_TENANT = '...'` declared inside `eventRoutes()`. Re-created on module import (not per request — `eventRoutes` is called once at startup). No correctness issue but semantically should be a module-level constant outside the function.
+
+---
+
+**L3 — `audit.ts` line 53: hardcoded `LIMIT 50`, no pagination**
+
+`apps/gateway/src/routes/audit.ts`:53: `LIMIT 50` with no cursor or offset. As audit events accumulate in production, users can only see the 50 most recent. Add `limit` and `cursor` query params.
+
+---
+
+**L4 — `connectors/k8s/src/agent.ts`: Docker API calls, not Kubernetes API**
+
+Agent is named `k8s` and tools say "pods", "deployments", "namespaces" — but all calls go to Docker daemon (`/containers/json`). In production against real Kubernetes, this entire agent is non-functional. Acceptable for demo (uses docker-proxy container), but should be commented clearly and replaced when real K8s support is added.
+
+---
+
+**L5 — `bootstrap/route.ts` line 6: `await` on synchronous `.get()` call**
+
+`apps/web/app/api/connectors/[type]/bootstrap/route.ts`:6:
+```typescript
+const auth = (await _req.headers.get('authorization')) || ...
+```
+`Headers.get()` is synchronous and returns `string | null`. The `await` is harmless but confusing — suggests the author thought it was async. Remove `await`:
+```typescript
+const auth = _req.headers.get('authorization') || await getDemoToken().then(t => t ? `Bearer ${t}` : '')
+```
+
+---
+
+**L6 — `connectors.tsx` `authHeaders` not memoized**
+
+`apps/web/components/connectors.tsx`:25: `const authHeaders = devToken ? { ... } : {}` is recomputed on every render. Since `authHeaders` is used in effects with `[devToken]` dependency, effects re-run only when `devToken` changes — correctness is fine. Wrap in `useMemo` to prevent unnecessary object recreation if the component renders frequently.
+
+---
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| M0-T1 Monorepo root | ✅ Done | pnpm workspaces, turbo pipeline, .nvmrc |
+| M0-T2 Docker Compose infra | ✅ Done | postgres (pgvector), redis, neo4j. pgvector added this batch. |
+| M0-T3 packages/types | ✅ Done | @anvay/types exists |
+| M0-T4 DB schema — Prisma migrations | ✅ Done | 18 migrations applied, all tables up |
+| M0-T5 Gateway server skeleton | ✅ Done | /health, /metrics, /auth/token, structured logs |
+| M0-T6 Web API routes | ✅ Done | All proxy routes with try/catch |
+| M0-T7 CI pipeline | ⚠️ Unclear | .github/workflows/ not in diff — may not exist |
+| M0-T8 E2E smoke test | ✅ Done | 50/50 Playwright tests passing |
+| M1 Agent harness (@anvay/agent) | ⚠️ Partial | Provider factory, connector tool interface exist; orchestrator/specialist agents not built |
+| M1 Knowledge Graph | ❌ Not started | Apache AGE / Graphiti layer absent |
+| M1 Connector bootstrap contract | ❌ Not started | Bootstrap event seeded but graph not populated |
+| M2 SRE Agent | ❌ Not started | |
+| M2 Graph Builder Agent | ❌ Not started | |
+| M3 PM/Dev Agents | ❌ Not started | |
+| M4 Gate system (L2 Approve) | ⚠️ Partial | gate_events table exists, decide endpoint exists; no UI gate flow |
+| M5 Trigger engine | ⚠️ Partial | trigger_rules table + subscriber + engine exist; no UI to create rules |
+| Demo certification checks 1-2 | ✅ Done | health, auth, connectors, incidents, gate, automations, chat all pass |
+| Demo certification check 3 | ✅ Done | alert → Redis → incident flow e2e verified |
+| Demo certification checks 4-7 | ⚠️ Manual only | Require live Prometheus/Loki calls; not in automated suite |
+
+<!-- REVIEW SECTION END — 2026-06-10d -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10c -->
 ## Review — 2026-06-10c | e2e suite + demo services + prod compose + provider-config fix
 

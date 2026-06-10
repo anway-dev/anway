@@ -7683,3 +7683,27 @@ T3 fix verified.
 **Project fully green.**
 
 <!-- REVIEW SECTION END — 2026-06-09f -->
+
+<!-- REVIEW SECTION START — 2026-06-10d -->
+## Review 2026-06-10d — Demo Stack + Alertmanager + chat-stream
+
+**Reviewer:** Claude | **Scope:** Cert check 1 + 3 gaps, chat-stream consistency
+
+### BLOCKING
+
+| # | Location | Issue |
+|---|----------|-------|
+| B1 | `scripts/start_demo.sh` | Never starts `infra/demo/docker-compose.yml` — Prometheus, Alertmanager, Loki, Grafana, demo apps never launched. Cert check 1 fails: demo stacks not both running. |
+| B2 | `infra/demo/alertmanager/alertmanager.yml` | Webhook URL `http://gateway:4000` uses Docker network hostname unreachable from container when gateway runs locally. Cert check 3 (alert flow) can never succeed without real Alertmanager → gateway path. |
+| B3 | `apps/gateway/src/routes/chat-stream.ts:8` | `ALLOWED_CONNECTOR_TYPES` missing `alertmanager` — inconsistent with `settings.ts` KNOWN_CONNECTORS. Chat can't use alertmanager connector tools. |
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 3 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 0 |
+| Open issues | 3 |
+
+<!-- REVIEW SECTION END — 2026-06-10d -->

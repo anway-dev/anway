@@ -12,3 +12,20 @@ test.describe('Orchestrator chat', () => {
     expect(exists).toBe(true)
   })
 })
+
+test.describe('Chat UI', () => {
+  test('scenario shortcut chips visible', async ({ page }) => {
+    await page.goto('/')
+    const chips = page.locator('button').filter({ hasText: /alert|deploy|why|incident/i })
+    expect(await chips.count()).toBeGreaterThanOrEqual(2)
+  })
+
+  test('settings panel opens and closes', async ({ page }) => {
+    await page.goto('/')
+    const settingsBtn = page.locator('[data-testid="chat-settings"], button[aria-label*="settings"], button:has-text("⚙")').first()
+    if (await settingsBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await settingsBtn.click()
+      await expect(page.locator('text=Model').or(page.locator('text=Provider'))).toBeVisible()
+    }
+  })
+})

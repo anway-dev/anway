@@ -21,3 +21,16 @@ test.describe('Signals extended', () => {
     await expect(page.locator('text=critical').first()).toBeVisible()
   })
 })
+
+test.describe('Signals extended', () => {
+  test('severity badges visible on alert cards', async ({ page, request }) => {
+    await request.post(`${GATEWAY}/api/events/alert`, {
+      data: { tenantId: DEMO_TENANT, title: 'E2E-badge-test', severity: 'critical' },
+    })
+    await page.waitForTimeout(500)
+    await page.goto('/')
+    await page.locator('text=Signals').first().click()
+    const badge = page.locator('text=critical, text=high, text=warning, text=low').first()
+    await expect(badge).toBeVisible({ timeout: 5000 })
+  })
+})

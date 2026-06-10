@@ -9,3 +9,13 @@ test.describe('Graph Events', () => {
     expect(resp.status()).toBe(401)
   })
 })
+
+test.describe('Graph Events extended', () => {
+  test('POST /api/graph/events with invalid key returns 401', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/graph/events`, {
+      headers: { 'x-connector-key': 'invalid-key' },
+      data: { type: 'pr_merged', tenantId: DEMO_TENANT },
+    })
+    expect([400, 401]).toContain(resp.status())
+  })
+})

@@ -31,3 +31,15 @@ test.describe('Connectors extended', () => {
     expect(resp.status()).toBe(400)
   })
 })
+
+test.describe('UI', () => {
+  test('save error shows in modal on failed save', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('text=Connectors').first().click()
+    await page.locator('button:has-text("Connect")').first().click()
+    await page.locator('button:has-text("Save")').first().click({ timeout: 5000 }).catch(() => {})
+    const errorVisible = await page.locator('text=Save failed').isVisible({ timeout: 3000 }).catch(() => false)
+      || await page.locator('text=failed').isVisible({ timeout: 1000 }).catch(() => false)
+    expect(errorVisible).toBe(true)
+  })
+})

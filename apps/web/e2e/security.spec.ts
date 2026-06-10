@@ -36,3 +36,14 @@ test.describe('Security surface', () => {
     expect(text).not.toContain('JWT_SECRET')
   })
 })
+
+test.describe('Security extended', () => {
+  test('GET /api/connectors response does not include credentials', async ({ request }) => {
+    const h = await authHeaders(request)
+    const resp = await request.get(`${GATEWAY}/api/connectors`, { headers: h })
+    expect(resp.status()).toBe(200)
+    const body = JSON.stringify(await resp.json())
+    expect(body).not.toContain('config_encrypted')
+    expect(body).not.toContain('credentials')
+  })
+})

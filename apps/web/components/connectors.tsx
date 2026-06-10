@@ -18,6 +18,7 @@ export function ConnectorsView() {
   const [bootstrapping, setBootstrapping] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [devToken, setDevToken] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/auth/dev-token')
@@ -61,7 +62,7 @@ export function ConnectorsView() {
       for (const field of modal.configFields) {
         if (formValues[field.key]) credentials[field.key] = formValues[field.key];
       }
-      await fetch(`/api/settings/connectors/${modal.id}`, {
+      const resp = await fetch(`/api/settings/connectors/${modal.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -69,6 +70,12 @@ export function ConnectorsView() {
         },
         body: JSON.stringify({ credentials }),
       });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: string }
+        setSaveError((err as { error?: string }).error ?? 'Save failed')
+        return
+      }
+      setSaveError(null)
       setConfiguredMap(prev => ({ ...prev, [modal.id]: true }));
       setModal(null);
     } finally {
@@ -147,6 +154,12 @@ export function ConnectorsView() {
               <span>🔒</span>
               <span>Credentials are encrypted at rest. Anvay only reads — it never writes to your tools unless a workflow hook explicitly requires it.</span>
             </div>
+
+            {saveError && (
+              <div style={{ fontSize: "11px", color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "4px", padding: "6px 10px", marginBottom: "12px" }}>
+                ⚠ {saveError}
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: "8px" }}>
               <button

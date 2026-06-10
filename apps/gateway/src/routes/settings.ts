@@ -14,8 +14,8 @@ function isSafeBaseUrl(raw: string): boolean {
     const u = new URL(raw)
     if (!['http:', 'https:'].includes(u.protocol)) return false
     const host = u.hostname
-    // Block cloud metadata + RFC-1918 private ranges + loopback — allow localhost for Ollama dev
-    if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false
+    // Block RFC-1918 private ranges + loopback IPs. localhost blocked too — consistency with 127.0.0.1
+    if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === 'localhost') return false
     if (/^(169\.254\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(host)) return false
     return true
   } catch { return false }

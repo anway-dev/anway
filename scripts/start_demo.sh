@@ -59,8 +59,8 @@ until curl -sf http://localhost:9090/-/ready > /dev/null 2>&1; do
 done
 
 # ── Env file — always refresh from example for demo ──
-cp apps/gateway/.env.example apps/gateway/.env
-log "Refreshed apps/gateway/.env from example"
+cp -n apps/gateway/.env.example apps/gateway/.env
+log "apps/gateway/.env initialized from example (existing file preserved)"
 
 # Export vars into current shell so child processes inherit them
 # (tsx does not auto-load .env — reads process.env directly)

@@ -7,6 +7,235 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10g -->
+## Review — 2026-06-10g | e2e Wave 1+2+3 test expansion (cbe643c + 17c3ab9)
+
+### Scope
+
+Commits `cbe643c` (Wave 1) + `17c3ab9` (Wave 2+3). Files: fixtures.ts (new), audit-view.spec.ts, cert-alert-flow.spec.ts, connectors.spec.ts, signals-view.spec.ts, provider-config.spec.ts + 14 new spec files.
+
+### Verdict: 4 BLOCKING, 3 HIGH, 5 MEDIUM, 5 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2/5 | 4 files have duplicate imports/const — TypeScript compile errors, tests won't run. 2 of 3 Wave 1 gaps from plan not filled (infra health subpaths, orchestrator chips). Wave 3 specs are render-only shells. |
+| D2 Code Standards | 2/5 | Imports mid-file (B2/B3/B4). `const` redeclaration after import (B1). Unused import (`DEMO_TENANT` in signals-view). |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 3/5 | SSRF tests exist but assert too weakly — `Array.isArray` passes for any response including unblocked ones. Cross-tenant JWT and credential exposure tests not written. |
+| D5 Readability | 3/5 | Empty test body (H1) misleads — looks like a test, does nothing. |
+| D6 Clarity/Comments | 4/5 | Commit message describes waves accurately. Comment in empty test says "Direct API test" but no test follows. |
+
+---
+
+### BLOCKING
+
+**B1 — `cert-alert-flow.spec.ts`:4-5 — `const GATEWAY` / `const DEMO_TENANT` redeclared after import**
+
+Lines 2-5:
+```typescript
+import { GATEWAY, authHeaders, DEMO_TENANT } from './fixtures'  // line 2 — imports GATEWAY, DEMO_TENANT
+const GATEWAY = 'http://127.0.0.1:4000'                         // line 4 — REDECLARE
+const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'       // line 5 — REDECLARE
+```
+TypeScript error: `Cannot redeclare block-scoped variable 'GATEWAY'` / `'DEMO_TENANT'`. Tests will not compile.
+
+Fix — delete lines 4 and 5 (the const declarations). Values already available from fixtures import.
+
+---
+
+**B2 — `cert-alert-flow.spec.ts`:47 — second `import` statement mid-file**
+
+Line 47 (after a `test.describe` block closes):
+```typescript
+import { GATEWAY, DEMO_TENANT } from './fixtures'
+```
+Imports must be at top of file before any statements. TypeScript rejects top-level `import` after `test.describe`. Also duplicates the import already on line 2.
+
+Fix — delete line 47 entirely. Already imported at line 2.
+
+---
+
+**B3 — `connectors.spec.ts`:23 — second `import` statement mid-file**
+
+```typescript
+import { GATEWAY, authHeaders } from './fixtures'  // duplicate, mid-file
+```
+Fix — delete this line. Already imported at line 2.
+
+---
+
+**B4 — `provider-config.spec.ts`:20 — second `import` statement mid-file**
+
+```typescript
+import { GATEWAY, authHeaders } from './fixtures'  // duplicate, mid-file
+```
+Fix — delete this line. Already imported at line 2.
+
+---
+
+### HIGH
+
+**H1 — `audit-view.spec.ts`: `?limit=5 returns at most 5 events` test body is empty**
+
+```typescript
+test('?limit=5 returns at most 5 events', async ({ page }) => {
+  await page.goto('/?view=audit')
+  // The component doesn't pass query params — this verifies the API supports it
+  // Direct API test
+})
+```
+No assertion. Test passes vacuously. The comment says "Direct API test" but the body calls `page.goto` (a UI call) and asserts nothing.
+
+Fix — replace with an actual API assertion using `request` fixture:
+```typescript
+test('?limit=5 returns at most 5 events', async ({ request }) => {
+  const h = await authHeaders(request)
+  const resp = await request.get(`${GATEWAY}/api/audit?limit=5`, { headers: h })
+  expect(resp.status()).toBe(200)
+  const body = await resp.json() as unknown[]
+  expect(body.length).toBeLessThanOrEqual(5)
+})
+```
+
+---
+
+**H2 — `security.spec.ts` SSRF tests: assertion too weak — `Array.isArray` passes for unblocked URLs too**
+
+All three SSRF tests assert only `Array.isArray(body.models)`. An empty array `[]` satisfies this. A valid (unblocked) URL that returns no models also satisfies this. The test cannot distinguish "blocked and returned empty" from "valid but no models configured". Also: no status code check.
+
+Fix — assert both status 200 and length 0:
+```typescript
+expect(resp.status()).toBe(200)
+expect(body.models).toHaveLength(0)
+```
+
+---
+
+**H3 — `services.spec.ts`: accepts 404 — hides missing route**
+
+```typescript
+expect([200, 404]).toContain(resp.status())
+```
+If `/api/services` route is unregistered or throws, 404 passes. This test certifies nothing meaningful.
+
+Fix:
+```typescript
+expect(resp.status()).toBe(200)
+```
+
+---
+
+### MEDIUM
+
+**M1 — `connectors.spec.ts` save error test doesn't test UI behaviour**
+
+The `save error shows on failed connect` test calls `page.request.put(...)` directly — it checks the API returns 400, not whether the `saveError` banner appears in the UI. The plan specified: open modal → fill invalid type → submit → assert error banner visible in modal.
+
+Fix — rewrite as UI test:
+```typescript
+test('save error shows on failed connect', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('text=Connectors').first().click()
+  // Click first connector's Connect button
+  await page.locator('button:has-text("Connect")').first().click()
+  // Submit with empty/bad credentials — gateway returns 4xx
+  await page.locator('button:has-text("Save")').first().click()
+  // Error banner visible
+  await expect(page.locator('text=Save failed').or(page.locator('[data-testid="save-error"]'))).toBeVisible()
+})
+```
+Adjust selectors to match actual component markup.
+
+---
+
+**M2 — `signals-view.spec.ts` severity badge test fragile — fails on empty DB**
+
+```typescript
+await expect(page.locator('text=critical').first()).toBeVisible()
+```
+If no alerts are seeded, page shows empty state and test fails. Should seed an alert first or accept any severity.
+
+Fix — create an alert before checking, or use a looser assertion:
+```typescript
+// Create alert first
+await request.post(`${GATEWAY}/api/events/alert`, { data: { tenantId: DEMO_TENANT, title: 'test', severity: 'critical' } })
+await page.waitForTimeout(500)
+await page.goto('/')
+await page.locator('text=Signals').first().click()
+// Check any severity badge
+const badge = page.locator('text=critical,text=high,text=warning').first()
+await expect(badge).toBeVisible()
+```
+
+---
+
+**M3 — `infra.spec.ts` not updated — health subpath + counter tests missing**
+
+`/health/live`, `/health/ready`, `/health/startup` and request-counter-increment tests not added. Specified in Wave 1 plan.
+
+Fix — add to `apps/web/e2e/anvay.spec.ts` or new `infra.spec.ts`:
+```typescript
+test('GET /health/live returns 200', async ({ request }) => {
+  expect((await request.get(`${GATEWAY}/health/live`)).status()).toBe(200)
+})
+test('GET /health/ready returns 200', async ({ request }) => {
+  expect((await request.get(`${GATEWAY}/health/ready`)).status()).toBe(200)
+})
+test('GET /health/startup returns 200', async ({ request }) => {
+  expect((await request.get(`${GATEWAY}/health/startup`)).status()).toBe(200)
+})
+```
+
+---
+
+**M4 — `orchestrator-chat.spec.ts` additions missing**
+
+Scenario shortcut chips, click chip → populates input, settings panel open/close — not added. Specified in Wave 1 plan.
+
+---
+
+**M5 — `graph-events.spec.ts` incomplete — valid payload and invalid payload tests missing**
+
+Only has the 401 (no connector key) test. Plan specified: valid key + valid payload → 200; invalid payload → 400.
+
+---
+
+### LOW
+
+**L1 — Wave 3 specs (10 files): render-only shells, no content assertions**
+
+All 10 are identical: navigate → wait 1s → assert zero JS errors. This is better than nothing but misses plan-specified assertions: stage labels visible (lifecycle), L1/L2/L3/L4 options (workflow), entity list (kb), method selector (api-client), user list (access), etc. Acceptable as baseline; fill in per plan when time allows.
+
+**L2 — `approvals.spec.ts`: UI flow missing**
+
+Gate approve/reject via browser (clicking Approve/Reject buttons in ApprovalsView) not tested. Only API tests.
+
+**L3 — `audit-view.spec.ts`: `?offset` pagination test missing**
+
+`?limit=5&offset=5` second-page test specified in plan, not written.
+
+**L4 — `security.spec.ts`: cross-tenant JWT and credential exposure tests missing**
+
+Plan specified: token from tenant A cannot access tenant B incidents; `GET /api/connectors` response must not contain `credentials`/`config_encrypted`.
+
+**L5 — `signals-view.spec.ts`: unused import `DEMO_TENANT`**
+
+Imported but never used in the added test. Minor lint issue.
+
+---
+
+### Pending Features (unchanged)
+
+See 2026-06-10f section.
+
+<!-- REVIEW SECTION END — 2026-06-10g -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10f -->
 ## Review — 2026-06-10f | LOW items from 2026-06-10e resolved (841a507)
 

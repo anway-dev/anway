@@ -117,7 +117,7 @@ export function ConnectorsView() {
       {/* Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', headers: authHeaders }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', headers: authHeaders }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
         ))}
       </div>
 

@@ -76,7 +76,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     // Static model list
     if (Array.isArray(manifest.models)) return { models: manifest.models }
 
-    // Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata, allow localhost for Ollama)
+    // Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata + loopback)
     const effectiveBaseUrl = baseUrl ?? manifest.defaultBaseUrl
     if (manifest.modelsEndpoint && effectiveBaseUrl && isSafeBaseUrl(effectiveBaseUrl)) {
       try {

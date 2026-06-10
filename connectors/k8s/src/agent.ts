@@ -1,10 +1,13 @@
+// Demo only: calls Docker daemon API (unix socket proxied on port 2375), not real Kubernetes API
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+
+interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
 
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_pods', description: 'List pods (Docker containers)', parameters: { type: 'object', properties: { namespace: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/containers/json?all=true`)
         if (!res.ok) return { pods: [] }
@@ -17,7 +20,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_deployments', description: 'List running containers', parameters: { type: 'object', properties: { namespace: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/containers/json?all=true`)
         if (!res.ok) return { deployments: [] }
@@ -30,7 +33,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_pod_logs', description: 'Get container logs', parameters: { type: 'object', properties: { pod: { type: 'string' }, lines: { type: 'number', optional: true } }, required: ['pod'] } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:2375'
       try {
         const podName = encodeURIComponent(String(params.pod))
         const res = await fetch(`${base}/containers/${podName}/logs?tail=${params.lines ?? 100}&stdout=true&stderr=true`)
@@ -43,7 +46,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_events', description: 'List recent Docker events', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/events?since=${Math.floor(Date.now()/1000)-300}`)
         if (!res.ok) return { events: [] }

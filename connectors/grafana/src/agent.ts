@@ -1,11 +1,13 @@
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
+interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
+
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_dashboards', description: 'List Grafana dashboards', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:3001'
-      const auth = btoa(`admin:${(creds as any).password ?? 'admin'}`)
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
+      const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
       try {
         const res = await fetch(`${base}/api/search?type=dash-db`, { headers: { Authorization: `Basic ${auth}` } })
         if (!res.ok) return { dashboards: [] }
@@ -17,8 +19,8 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_alerts', description: 'List Grafana alerts', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:3001'
-      const auth = btoa(`admin:${(creds as any).password ?? 'admin'}`)
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
+      const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
       try {
         const res = await fetch(`${base}/api/alerts`, { headers: { Authorization: `Basic ${auth}` } })
         if (!res.ok) return { alerts: [] }
@@ -30,8 +32,8 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_datasources', description: 'List Grafana datasources', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://localhost:3001'
-      const auth = btoa(`admin:${(creds as any).password ?? 'admin'}`)
+      const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
+      const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
       try {
         const res = await fetch(`${base}/api/datasources`, { headers: { Authorization: `Basic ${auth}` } })
         if (!res.ok) return { datasources: [] }

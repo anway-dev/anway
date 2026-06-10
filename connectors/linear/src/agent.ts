@@ -1,12 +1,14 @@
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
+interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
+
 const LINEAR_API = 'https://api.linear.app/graphql'
 
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_issues', description: 'List issues for a team', parameters: { type: 'object', properties: { team: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['team'] } },
     execute: async (params, creds) => {
-      const token = (creds as any).apiKey
+      const token = (creds as ConnectorCreds).apiKey
       if (!token) return { issues: [] }
       const query = `query { issues(filter: { team: { key: { eq: "${params.team}" } } }, first: ${params.limit ?? 25}) { nodes { id title state { name } priority assignee { name } } } }`
       const res = await fetch(LINEAR_API, {
@@ -24,7 +26,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_projects', description: 'List projects', parameters: { type: 'object', properties: { team: { type: 'string' }, first: { type: 'number', optional: true } }, required: ['team'] } },
     execute: async (params, creds) => {
-      const token = (creds as any).apiKey
+      const token = (creds as ConnectorCreds).apiKey
       if (!token) return { projects: [] }
       const query = `query { projects(first: ${params.first ?? 10}, filter: { teams: { key: { eq: "${params.team}" } } }) { nodes { id name description state { name } } } }`
       const res = await fetch(LINEAR_API, {

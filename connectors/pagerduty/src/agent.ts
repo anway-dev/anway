@@ -1,12 +1,14 @@
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
+interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
+
 const PD_API = 'https://api.pagerduty.com'
 
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_active_incidents', description: 'List active incidents', parameters: { type: 'object', properties: { service: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
-      const token = (creds as any).apiKey
+      const token = (creds as ConnectorCreds).apiKey
       if (!token) return { incidents: [] }
       const url = `${PD_API}/incidents?statuses[]=triggered&statuses[]=acknowledged${params.service ? `&service_ids[]=${params.service}` : ''}`
       const res = await fetch(url, { headers: { Authorization: `Token token=${token}`, Accept: 'application/vnd.pagerduty+json;version=2' } })
@@ -19,7 +21,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_oncall', description: 'Get oncall engineer', parameters: { type: 'object', properties: { team: { type: 'string' } }, required: ['team'] } },
     execute: async (params, creds) => {
-      const token = (creds as any).apiKey
+      const token = (creds as ConnectorCreds).apiKey
       if (!token) return { engineer: null }
       const res = await fetch(`${PD_API}/oncalls?team_ids[]=${params.team}&include[]=users`, {
         headers: { Authorization: `Token token=${token}`, Accept: 'application/vnd.pagerduty+json;version=2' },

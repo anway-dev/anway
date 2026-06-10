@@ -1,8 +1,10 @@
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
+interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
+
 function ghConfig(creds: Record<string, unknown>): { baseUrl: string; authHeader: string; apiPrefix: string; token: string } {
-  const token = (creds as any).token ?? ''
-  const baseUrl = (creds as any).baseUrl ?? 'https://api.github.com'
+  const token = (creds as ConnectorCreds).token ?? ''
+  const baseUrl = (creds as ConnectorCreds).baseUrl ?? 'https://api.github.com'
   const isGitea = baseUrl.includes('gitea') || baseUrl.includes(':3000')
   return { token, baseUrl, authHeader: isGitea ? `token ${token}` : `Bearer ${token}`, apiPrefix: isGitea ? '/api/v1' : '' }
 }

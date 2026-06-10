@@ -48,11 +48,12 @@ export async function auditRoutes(app: FastifyInstance) {
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
 
-    // Query audit_events from DB — RLS filters by tenant
+    // Query audit_events from DB — RLS filters by tenant (limit param, max 200)
+    const limitClause = Math.min(Number((request.query as Record<string, string>)['limit']) || 50, 200)
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
-        FROM audit_events ORDER BY created_at DESC LIMIT 50
+        FROM audit_events ORDER BY created_at DESC LIMIT ${limitClause}
       `
     ).catch(() => [] as AuditRow[])
 

@@ -7,4 +7,13 @@ test.describe('Service Catalog', () => {
     const resp = await request.get(`${GATEWAY}/api/services`, { headers: h })
     expect(resp.status()).toBe(200)
   })
+
+  test('renders service cards in UI', async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', e => errors.push(e.message))
+    await page.goto('/')
+    await page.locator('text=Services').first().click()
+    await expect(page.locator('text=Service').or(page.locator('text=Dependencies')).or(page.locator('text=Catalog')).first()).toBeVisible({ timeout: 5000 })
+    expect(errors).toHaveLength(0)
+  })
 })

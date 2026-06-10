@@ -7,6 +7,99 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10i -->
+## Review — 2026-06-10i | M1-M5 + L4-L5 task fixes (2a61381 + 8a7cfeb)
+
+### Scope
+
+Commits `2a61381` (test: M1-M5 + L4-L5) + `8a7cfeb` (bridge: M1-M5/L4-L5 resolved).
+
+### Verdict: 1 BLOCKING, 0 HIGH, 4 MEDIUM, 3 LOW
+
+B1 is a runtime crash — test suite will fail on import error. M3/M4 are carry-overs not
+addressed. 8a7cfeb mutates a bridge entry in-place (append-only violation).
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | M1/M4 addressed. M2 badge locator broken. audit.ts offset still missing. |
+| D2 Code Standards | 2/5 | Missing import causes runtime crash. Duplicate describe block. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 3/5 | Credential check added but `.not.toContain('credentials')` too broad — false positives if any field name contains the word. |
+| D5 Readability | 3/5 | Duplicate describe/test names in signals-view.spec.ts. |
+| D6 Clarity/Comments | 2/5 | Bridge entry mutated in-place (append-only violated). |
+
+---
+
+### BLOCKING
+
+**B1** `apps/web/e2e/security.spec.ts:2` — `authHeaders` used on line 43 but not imported.
+
+```typescript
+// Line 2 — only imports GATEWAY:
+import { GATEWAY } from './fixtures'
+
+// Line 43 — uses authHeaders which is undefined:
+const h = await authHeaders(request)
+```
+
+Runtime: `ReferenceError: authHeaders is not defined`. Entire security spec crashes.
+
+Fix — change line 2 to:
+```typescript
+import { GATEWAY, authHeaders } from './fixtures'
+```
+
+---
+
+### MEDIUM
+
+**M1** `apps/web/e2e/signals-view.spec.ts:25-36` — Duplicate `test.describe('Signals extended', ...)` with identical test name `'severity badges visible on alert cards'`. Old block (lines 16-23) not removed — Codex appended instead of replacing. Two tests with same describe+name = ambiguous reporting.
+
+Fix — delete old block (lines 16-23), keep new seeded version.
+
+**M2** `apps/web/e2e/signals-view.spec.ts:33` — Badge locator is invalid:
+
+```typescript
+// WRONG — single CSS selector string, not an OR of text matchers:
+page.locator('text=critical, text=high, text=warning, text=low')
+
+// CORRECT — Playwright OR-locator chain:
+page.locator('text=critical').or(page.locator('text=high')).or(page.locator('text=warning')).or(page.locator('text=low'))
+// Or use regex:
+page.locator('[class*=badge], [class*=severity]').filter({ hasText: /critical|high|warning|low/i })
+```
+
+Test will always fail or silently never match.
+
+**M3** `apps/gateway/src/routes/audit.ts` — `offset` param still not implemented. Carry-over from bridge task (explicitly requested in 5c69e0f bridge entry). Test `?limit=5&offset=5` only asserts `Array.isArray` — vacuous. Gateway ignores `?offset`.
+
+Fix (unchanged from prior bridge task):
+```typescript
+const offsetClause = Math.max(Number((request.query as Record<string, string>)['offset']) || 0, 0)
+// query:
+FROM audit_events ORDER BY created_at DESC LIMIT ${limitClause} OFFSET ${offsetClause}
+```
+
+**M4** `docs/BRIDGE.md` — 8a7cfeb mutated `TASKS [OPEN]` → `TASKS [ANSWERED]` in-place. Bridge is append-only. Also `[ANSWERED]` is not a valid status token (valid: `[OPEN]`, `[CLOSED]`). Must append a closing entry instead of editing existing.
+
+---
+
+### LOW
+
+**L1** `apps/web/e2e/graph-events.spec.ts:14` — Test name says `"returns 401"` but assertion is `expect([400, 401]).toContain(resp.status())`. Title/assertion mismatch. Rename to `"returns 401 or 400"`.
+
+**L2** `apps/web/e2e/signals-view.spec.ts:29` — `page.waitForTimeout(500)` hardcoded wait after POST. Should await the POST response and use `waitForResponse` or `page.reload()` + wait for selector. Fragile on slow CI.
+
+**L3** `apps/web/e2e/security.spec.ts:47` — `expect(body).not.toContain('credentials')` too broad. Substring match will fail if response legitimately contains `credentialsConfigured`, `hasCredentials`, or similar. Tighten to `'"credentials"'` (with quotes, checking JSON key) or `/"credentials"\s*:/.test(body)`.
+
+<!-- REVIEW SECTION END — 2026-06-10i -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10h -->
 ## Review — 2026-06-10h | e2e Wave 1+2+3 fixes (f1e5191 + 448ab9e)
 

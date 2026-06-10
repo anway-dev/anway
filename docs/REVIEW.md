@@ -7,6 +7,19 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11f -->
+## Review — 2026-06-11f | M3 fix (89e3020)
+
+### Scope
+
+Commit `89e3020` — pass connector credentials as payload in bootstrap trigger.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+Fix correct. Also patches a second pre-existing bug: original publish omitted `type: 'connector_registered'`, so `switch (event.type)` in builder never matched — bootstrap was silently skipped even before M1/M2. Both `type` and `payload` now present. Full bootstrap pipeline functional.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11e -->
 ## Review — 2026-06-11e | B1/B3/M1/M2 (8d72224)
 

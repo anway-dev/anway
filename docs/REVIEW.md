@@ -7,6 +7,249 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10b -->
+## Review — 2026-06-10b | DeepSeek + Phase 4 UI wiring + FIX-1-5 from bridge-2026-06-10b
+
+### Scope
+
+All commits from `dd1885d` → `47b053f`. 23 files changed across gateway routes, web components, provider registry, and BFF proxy routes.
+
+### Verdict: 3 BLOCKING, 6 HIGH, 7 MEDIUM, 3 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2/5 | Signals view crashes on undefined `LIVE_ALERTS`. Alerts + audit routes return mock data with no tenant scope. Gate Approve/Decline are no-ops. Bootstrap-status proxy always 401. |
+| D2 Code Standards | 3/5 | `chat.ts` has trailing import at EOF. Two divergent connector allowlists. No Fastify schema on settings POST or connector PUT. Unused `ConnectorTool` import. |
+| D3 Performance | 3/5 | BFF alert + audit routes re-fetch a new JWT on every request instead of forwarding browser token. |
+| D4 Security | 2/5 | API key in query string. SSRF misses `127.0.0.1`/`::1`. `/api/settings/models` unauthenticated. Full audit bypass on chat-stream. XSS in parseMarkdown. No provider validation on POST. |
+| D5 Readability | 4/5 | Code structure clear. Component boundaries sensible. Inline styles consistent. |
+| D6 Clarity/Comments | 3/5 | Good intent comments (`"V1 trust violation"`, `"Swap to DB query"`). No TODO ticket links on mock-data blocks. Gate-bypass error logged but not enforced. |
+
+---
+
+### Certification Check Status
+
+| # | Check | Status | Blocking issue(s) |
+|---|-------|--------|-------------------|
+| 1 | `start_demo.sh` starts both stacks cleanly | likely passing | No blockers in reviewed files |
+| 2 | Chat view loads, dev token obtained | likely passing | dev-token correctly guarded by `NODE_ENV` |
+| 3 | Prometheus alert → gateway → incident → War Room | unknown | alert-subscriber still missing (bridge-2026-06-10d) |
+| 4 | "What's wrong with checkout-api?" → real data | at risk | chat-stream has no audit/perimeter; `/api/chat` path may work |
+| 5 | Connectors show connected + bootstrap summary | **BLOCKED** | B2: bootstrap-status proxy drops auth header |
+| 6 | KG populated: entities for 3 services | unknown | not in reviewed files |
+| 7 | UI views show real data, not lib/mock.ts | **BLOCKED** | B1: Signals crash on `LIVE_ALERTS`; B3: alerts+audit return tenant-unscoped mock data |
+
+---
+
+### BLOCKING
+
+**B1 — `apps/web/components/alerts-view.tsx:331-332` — `LIVE_ALERTS` undefined — Signals view crashes at runtime**
+
+`LIVE_ALERTS` referenced on lines 331–332 (tab count + `hasCritical`) but never imported after mock removal. `ReferenceError` on load — entire Signals view unusable.
+
+```tsx
+// Line 331:
+const count = t.id === "all" ? alerts.length : alerts.filter(a => a.kind === t.id).length;
+// Line 332:
+const hasCritical = t.id !== "all" && alerts.some(a => a.kind === t.id && a.severity === "critical");
+```
+
+Verify: `pnpm build` passes. Load Signals tab — no console errors, tab badges show counts.
+
+---
+
+**B2 — `apps/web/app/api/connectors/[type]/bootstrap-status/route.ts:5` — auth header never forwarded → gateway always returns 401**
+
+Proxy calls gateway without `Authorization`. Bootstrap status never loads. Certification check 5 permanently blocked.
+
+```typescript
+export async function GET(request: Request, { params }: { params: Promise<{ type: string }> }) {
+  const { type } = await params
+  const authHeader = request.headers.get('Authorization')
+  const resp = await fetch(`${GATEWAY_URL}/api/connectors/${type}/bootstrap-status`, {
+    headers: authHeader ? { Authorization: authHeader } : {},
+  })
+  return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
+}
+```
+
+Verify: Configure connector; bootstrap badge appears. Network tab shows 200, not 401.
+
+---
+
+**B3 — `apps/gateway/src/routes/alerts.ts` + `audit.ts` — hardcoded mock data returned to all tenants; no DB query**
+
+Both routes authenticate the user but ignore the JWT and return the same static blob to every tenant. Data isolation violation + certification blocker for check 7. Replace with DB queries scoped by `tenantId`. Until dedicated `alerts` table exists, query `incidents`:
+
+```typescript
+const { tenantId } = request.user as { tenantId: string }
+const rows = await withTenant(prisma, tenantId, (tx) =>
+  tx.$queryRaw<...>`SELECT id, title, severity, status, description, created_at, suggested_root_cause
+    FROM incidents WHERE tenant_id = ${tenantId}::uuid AND status IN ('active','investigating')
+    ORDER BY created_at DESC LIMIT 50`
+).catch(() => [])
+return rows.map(i => ({ id: i.id, kind: 'alert', severity: i.severity, title: i.title, ... }))
+```
+
+Verify: Two tenants with different incidents; GET `/api/alerts` returns only that tenant's data.
+
+---
+
+### HIGH
+
+**H1 — `apps/gateway/src/routes/settings.ts:47-61` — no provider allowlist on POST; no Fastify schema**
+
+`provider` written to DB as-is. Add schema validation:
+```typescript
+schema: { body: { type: 'object', required: ['provider'], properties: {
+  provider: { type: 'string', enum: ['anthropic','openai','deepseek','groq','mistral','ollama','lmstudio'] },
+  apiKey: { type: 'string', maxLength: 512 },
+  baseUrl: { type: 'string', maxLength: 2048 },
+  defaultModel: { type: 'string', maxLength: 128 },
+}, additionalProperties: false } }
+```
+Also: `if (!providerRegistry.get(provider)) return reply.code(400).send({ error: 'Unknown provider' })`
+
+Verify: `POST { "provider": "evil" }` → 400.
+
+---
+
+**H2 — `apps/gateway/src/routes/settings.ts:67` — API key in query string; leaks into server logs**
+
+`?apiKey=sk-ant-...` appears in HTTP access logs, browser history, Referer headers. Move to header:
+```typescript
+// Gateway: const apiKey = request.headers['x-api-key'] as string | undefined
+// Client: headers: { ...(apiKey ? { 'X-Api-Key': apiKey } : {}) }
+```
+
+Verify: API key does not appear in gateway access log for the models request.
+
+---
+
+**H3 — `apps/gateway/src/routes/settings.ts:12-19` — SSRF misses `127.0.0.1`, `::1`, `0.0.0.0`**
+
+`http://127.0.0.1:6379` passes `isSafeBaseUrl`. Add to block list:
+```typescript
+if (h !== 'localhost' && (h === '127.0.0.1' || h === '::1' || h === '0.0.0.0')) return false
+```
+
+Verify: `isSafeBaseUrl('http://127.0.0.1:6379')` → `false`. `isSafeBaseUrl('http://localhost:11434')` → `true`.
+
+---
+
+**H4 — `apps/gateway/src/routes/chat-stream.ts` — no audit trail, no perimeter enforcement**
+
+Every tool call via `/api/chat/stream` is invisible to audit log and bypasses gate enforcement. Add `PostgresAuditSink`; log every tool call before and after execution.
+
+Verify: Tool called via `/api/chat/stream` → row in `audit_events`.
+
+---
+
+**H5 — `apps/web/components/orchestrator-chat.tsx:192` — `dangerouslySetInnerHTML` with unsanitized LLM output (XSS)**
+
+```typescript
+function parseMarkdown(text: string): string {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return escaped.replace(/```([\s\S]*?)```/g, '<pre ...><code>$1</code></pre>')
+  // remaining substitutions on escaped
+}
+```
+
+Or: `DOMPurify.sanitize(parseMarkdown(text))`.
+
+Verify: LLM returns `<img src=x onerror=alert(1)>` — renders as literal text.
+
+---
+
+**H6 — `apps/web/app/api/alerts/route.ts` + `audit/route.ts` — BFF fetches own JWT per-request instead of forwarding browser token**
+
+Redundant auth round-trip per request. In production this acts as a demo user bypassing real user's perimeter. Forward the browser's `Authorization` header instead:
+```typescript
+const authHeader = request.headers.get('Authorization')
+if (!authHeader) return new Response('[]', { status: 401, headers: { 'Content-Type': 'application/json' } })
+const resp = await fetch(`${GATEWAY_URL}/api/alerts`, { headers: { Authorization: authHeader } })
+```
+
+---
+
+**H7 — `apps/gateway/src/routes/chat.ts:390` — bare `import` after function body**
+
+`import { isValidUUID }` at EOF, after closing brace. Move to import block at top.
+
+Verify: Import appears at top; `tsc --noEmit` passes.
+
+---
+
+### MEDIUM
+
+**M1 — `apps/gateway/src/routes/chat.ts:320-323` — gate sink absent in dev; V1 write bypass unenforced**
+
+Return 503 in production if `REDIS_URL` absent rather than proceeding gate-less.
+
+---
+
+**M2 — `apps/gateway/src/routes/settings.ts:64` — `/api/settings/models` unauthenticated**
+
+Add `{ preHandler: [app.authenticate] }`. Verify: request without JWT → 401.
+
+---
+
+**M3 — `chat-stream.ts` vs `settings.ts` — two divergent connector allowlists**
+
+`ALLOWED_CONNECTOR_TYPES` in `chat-stream.ts` missing `coralogix`, `notion`, `newrelic`, `jira`, `loki`. Extract to `packages/types/src/connectors.ts` as single source of truth.
+
+---
+
+**M4 — `apps/web/components/alerts-view.tsx` — Gate Approve/Decline buttons are no-ops**
+
+Add `onClick={() => void approveGate(gateId!)}` calling `POST /api/gates/{gateId}/decide`. Add web proxy route.
+
+---
+
+**M5 — `apps/web/components/audit-view.tsx:5` — `AuditOutcome` type missing gateway values; runtime crash**
+
+Frontend missing `'action_executed'`, `'action_failed'`, `'escalated'`, `'handed_off'`. Add to type + `OUTCOME_CONFIG`. Move to `@anvay/types`.
+
+---
+
+**M6 — `apps/gateway/src/routes/settings.ts:121-128` — no size limit on connector `credentials` JSON**
+
+Add Fastify schema: `maxProperties: 20, additionalProperties: { type: 'string', maxLength: 2048 }`.
+
+---
+
+**M7 — `apps/web/app/page.tsx:189-198` — hardcoded `alex@acme.dev` / `Admin` in sidebar**
+
+Decode JWT and display real user email + role.
+
+---
+
+### LOW
+
+**L1 — `apps/gateway/src/routes/chat-stream.ts:4` — `ConnectorTool` imported but unused**
+
+Remove from import line.
+
+---
+
+**L2 — `packages/agent/src/providers/registry.ts:46` — `claude-haiku-4-5` duplicated with `claude-haiku-4-5-20251001`**
+
+Remove undated alias. Keep `claude-haiku-4-5-20251001` only.
+
+---
+
+**L3 — `apps/web/app/page.tsx:189` — hardcoded user identity in sidebar**
+
+Same as M7 — decode JWT, show real identity.
+
+<!-- REVIEW SECTION END — 2026-06-10b -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10 -->
 ## Review — 2026-06-10 | Bridge 2026-06-10a phases 1–3: demo stack + real connectors + event bus
 

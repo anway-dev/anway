@@ -51,9 +51,13 @@ test.describe('Security extended', () => {
 test.describe('Cross-tenant', () => {
   test('JWT from one tenant rejected for other tenant resources', async ({ request }) => {
     const h = await authHeaders(request)
-    const resp = await request.get(`${GATEWAY}/api/audit`, {
+    // Request own audit events — should succeed
+    const ownResp = await request.get(`${GATEWAY}/api/audit`, { headers: h })
+    expect(ownResp.status()).toBe(200)
+    // Same JWT with different tenant header — RLS must block cross-tenant read
+    const crossResp = await request.get(`${GATEWAY}/api/audit`, {
       headers: { ...h, 'x-tenant-id': '00000000-0000-0000-0000-000000000002' },
     })
-    expect([200, 401, 403]).toContain(resp.status())
+    expect([401, 403]).toContain(crossResp.status())
   })
 })

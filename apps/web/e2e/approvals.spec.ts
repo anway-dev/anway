@@ -27,13 +27,19 @@ test.describe('Approvals', () => {
 })
 
 test.describe('Approvals UI', () => {
-  test('approve action removes item from pending list', async ({ page }) => {
+  test('approve action removes item from pending list', async ({ page, request }) => {
+    const h = await authHeaders(request)
+    // Seed a gate
+    await request.post(`${GATEWAY}/api/gate`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { action: 'deploy', target: 'payments-api', requestedBy: 'e2e-test' },
+    })
     await page.goto('/')
     await page.locator('text=Workflows').first().click()
+    // After seeding, at least one pending approval should exist
     const approveBtn = page.locator('button:has-text("Approve"), button:has-text("Confirm")').first()
-    if (await approveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await approveBtn.click()
-      await expect(approveBtn).not.toBeVisible({ timeout: 3000 })
-    }
+    await expect(approveBtn).toBeVisible({ timeout: 5000 })
+    await approveBtn.click()
+    await expect(approveBtn).not.toBeVisible({ timeout: 5000 })
   })
 })

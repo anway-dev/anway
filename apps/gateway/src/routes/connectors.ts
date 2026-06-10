@@ -53,9 +53,23 @@ export async function connectorsRoutes(app: FastifyInstance) {
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
+        SELECT credentials FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+      `
+    ).catch(() => [])
+    const creds = (rows[0]?.credentials ?? {}) as Record<string, unknown>
+
     const pub = await getBootstrapPub()
     if (pub) {
-      await pub.publish('connector_registered', JSON.stringify({ tenantId, connectorType: type }))
+      await pub.publish('connector_registered', JSON.stringify({
+        type: 'connector_registered',
+        tenantId,
+        connectorType: type,
+        connectorId: type,
+        payload: creds,
+      }))
     }
     return { ok: true, message: `Bootstrap triggered for ${type}` }
   })

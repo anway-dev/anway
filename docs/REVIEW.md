@@ -7,6 +7,44 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11c -->
+## Review — 2026-06-11c | B2 fix (07d0831)
+
+### Scope
+
+Commit `07d0831` — alertmanager webhook inserts incident to DB.
+
+### Verdict: 1 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW
+
+Logic correct. Two schema mismatches cause every alert INSERT to fail.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2/5 | Flow correct conceptually. INSERT fails at runtime — `updated_at` column does not exist in schema. |
+| D2 Code Standards | 4/5 | Idempotency via `ON CONFLICT DO NOTHING` correct. Enum cast issue. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | No issues. |
+| D5 Readability | 5/5 | Clean. |
+| D6 Clarity/Comments | 5/5 | Good comment on the INSERT line. |
+
+---
+
+### BLOCKING
+
+**B4** `apps/gateway/src/routes/events.ts:65` — INSERT fails with two schema errors:
+
+1. **`updated_at` column does not exist** in `incidents` table (schema: `id, tenant_id, title, severity, status, description, suggested_root_cause, created_at, resolved_at`). Every alertmanager webhook will throw `column "updated_at" of relation "incidents" does not exist`.
+
+2. **Alertmanager sends `warning` severity** — not a valid `IncidentSeverity` enum value (`critical | high | medium | low`). Needs mapping: `warning → medium`. Insert as `${mappedSeverity}::incident_severity` not `::text`.
+
+Fix: remove `updated_at` from INSERT, add severity mapping before the query.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11b -->
 ## Review — 2026-06-11b | Demo chaos wiring + provider.color crash
 

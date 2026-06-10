@@ -7,6 +7,58 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10h -->
+## Review — 2026-06-10h | e2e Wave 1+2+3 fixes (f1e5191 + 448ab9e)
+
+### Scope
+
+Commits `f1e5191` (B1-B4/H1-H3/M3 fixes) + `448ab9e` (3 files corrupted by f1e5191 repaired directly). `4f1a3d8` is documentation-only (REVIEW.md marker update — "ALL RESOLVED" claim is inaccurate, corrected here).
+
+### Verdict: 0 BLOCKING, 0 HIGH, 4 MEDIUM, 4 LOW
+
+All BLOCKINGs and HIGHs from 2026-06-10g resolved. 4 MEDIUMs and 4 LOWs remain open from 2026-06-10g — NOT all resolved despite the marker in 4f1a3d8.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | B1-B4/H1-H3/M3 fixed. f1e5191 introduced 3 new syntax errors immediately repaired in 448ab9e. M1/M2/M4/M5 still open. |
+| D2 Code Standards | 4/5 | 448ab9e restored correct structure. No lingering syntax issues. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 4/5 | SSRF tests now check `toHaveLength(0)`. Cross-tenant JWT + credential exposure tests still missing. |
+| D5 Readability | 4/5 | Audit test now properly uses `request` fixture. |
+| D6 Clarity/Comments | 3/5 | 4f1a3d8 "ALL RESOLVED" header claim is wrong — M1/M2/M4/M5/L2/L4/L5 still open. |
+
+---
+
+### Carried-over MEDIUM (from 2026-06-10g, not yet fixed)
+
+**M1** `connectors.spec.ts` — save error test checks API response (400), not UI `saveError` banner. Needs browser test: `page.goto` → click Connect → submit → assert error visible in modal.
+
+**M2** `signals-view.spec.ts` — `text=critical` assertion fails on empty DB. Seed an alert first or match any of `critical|high|warning`.
+
+**M4** `orchestrator-chat.spec.ts` — scenario chips visible, click chip → populates input, settings panel open/close — not added.
+
+**M5** `graph-events.spec.ts` — only 401 test. Valid connector key + valid payload → 200 and invalid payload → 400 tests missing.
+
+---
+
+### Carried-over LOW (from 2026-06-10g, not yet fixed)
+
+**L2** `approvals.spec.ts` — UI flow missing (click Approve/Reject in browser, verify item removed from list).
+
+**L4** `security.spec.ts` — cross-tenant JWT test and credential exposure test (`GET /api/connectors` must not include `credentials` field) missing.
+
+**L5** `signals-view.spec.ts` — unused `DEMO_TENANT` import.
+
+**L-f1** (carried from 2026-06-10f) `audit.ts` — `offset` query param still not implemented in gateway. The test in 448ab9e now passes `?offset=5` but gateway ignores it (no OFFSET clause). Test asserts `Array.isArray` only — currently vacuous until gateway implements offset.
+
+<!-- REVIEW SECTION END — 2026-06-10h -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10g -->
 ## Review — 2026-06-10g | e2e Wave 1+2+3 test expansion (cbe643c + 17c3ab9) [RESOLVED in f1e5191]
 

@@ -7,6 +7,93 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10e -->
+## Review — 2026-06-10e | 2026-06-10d fixes — all BLOCKING + HIGH + MEDIUM + LOW resolved
+
+### Scope
+
+Commits `5fcf9d0` + `5101916`. Files changed: events.ts, settings.ts, gateway-client.ts, connectors.tsx, bootstrap/route.ts, start_demo.sh, k8s/agent.ts, grafana/agent.ts, loki/agent.ts.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 2 LOW
+
+All 13 issues from 2026-06-10d closed. Two LOW residuals remain.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | All 13 prior issues resolved. B1 env wipe ✅ H1 SSRF ✅ H2 IPv6 ✅ H3 save error ✅ H4 Redis reconnect ✅ M1-M5 ✅ L2/L5/L6 ✅ |
+| D2 Code Standards | 4/5 | (creds as any) (L1) still present across all 8 connector agents. L3 audit LIMIT 50 still no pagination. |
+| D3 Performance | 5/5 | Redis publisher reconnect strategy added. No regressions. |
+| D4 Security | 5/5 | localhost SSRF blocked. tenantId UUID validation on deploy/pr-merged. K8s pod path traversal fixed. |
+| D5 Readability | 5/5 | All fixes clean. No dead code. |
+| D6 Clarity/Comments | 4/5 | settings.ts:79 comment still says "allow localhost for Ollama" after localhost was blocked. |
+
+---
+
+### LOW
+
+**L-e1 — `connectors.tsx` line 120: `saveError` not cleared on modal re-open**
+
+`apps/web/components/connectors.tsx`:120: `onConnect` handler is `() => { setModal(conn); setFormValues({}) }` — does not call `setSaveError(null)`. If a save fails (H3 fix shows the error), user closes the modal, then reopens it — the previous error message is still visible before they've attempted anything. `setSaveError(null)` runs only on the success path (line 78), not on modal open.
+
+Fix — add `setSaveError(null)` to the `onConnect` callback in `ConnectorCard` usage:
+```typescript
+onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }}
+```
+
+Verify: save fails, error shown; close modal; reopen — error is gone.
+
+---
+
+**L-e2 — `settings.ts` line 79: stale comment contradicts implementation**
+
+`apps/gateway/src/routes/settings.ts`:79: comment reads `// Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata, allow localhost for Ollama)`. After H1 fix (commit 5fcf9d0), `isSafeBaseUrl` now blocks `localhost`. The comment says "allow localhost for Ollama" but the code blocks it. Misleads future readers about the intended security policy.
+
+Fix — update comment to match implementation:
+```typescript
+// Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata + loopback)
+```
+
+Verify: no functional change — comment only.
+
+---
+
+### Carried-over LOW (not fixed in this batch, not regressed)
+
+- **L1** — `(creds as any)` in all 8 connector agents (github, grafana, pagerduty, k8s, loki, linear, prometheus). Type-safe `ConnectorCreds` interface not yet added.
+- **L3** — `audit.ts` LIMIT 50 with no pagination cursor.
+- **L4** — `k8s/agent.ts` calls Docker daemon API (`/containers/json`), not real Kubernetes. Acceptable for demo; needs comment or replacement before real K8s support.
+
+---
+
+### Pending Features (from docs/TASKS.md)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| M0-T1 Monorepo root | ✅ Done | pnpm workspaces, turbo, .nvmrc |
+| M0-T2 Docker Compose infra | ✅ Done | pgvector image, redis, neo4j |
+| M0-T3 packages/types | ✅ Done | @anvay/types |
+| M0-T4 DB schema — Prisma migrations | ✅ Done | 18 migrations applied |
+| M0-T5 Gateway server skeleton | ✅ Done | /health, /metrics, /auth/token |
+| M0-T6 Web API routes | ✅ Done | All proxy routes with try/catch |
+| M0-T7 CI pipeline | ⚠️ Unclear | .github/workflows/ not verified |
+| M0-T8 E2E smoke test | ✅ Done | 50/50 Playwright passing |
+| M1 Agent harness (@anvay/agent) | ⚠️ Partial | Provider factory exists; orchestrator/specialist agents not built |
+| M1 Knowledge Graph | ❌ Not started | Apache AGE / Graphiti absent |
+| M1 Connector bootstrap contract | ❌ Not started | Event seeded; graph not populated |
+| M2 SRE Agent | ❌ Not started | |
+| M2 Graph Builder Agent | ❌ Not started | |
+| M3 PM/Dev Agents | ❌ Not started | |
+| M4 Gate system (L2 Approve) | ⚠️ Partial | Table + endpoint exist; no UI gate flow |
+| M5 Trigger engine | ⚠️ Partial | Table + subscriber + engine exist; no UI |
+
+<!-- REVIEW SECTION END — 2026-06-10e -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10d -->
 ## Review — 2026-06-10d | e2e certification + credential fixes + proxy routes + connector agents [RESOLVED]
 

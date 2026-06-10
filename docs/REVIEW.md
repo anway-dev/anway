@@ -7,6 +7,182 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10c -->
+## Review — 2026-06-10c | e2e suite + demo services + prod compose + provider-config fix
+
+### Scope
+
+Commits `6ad07ea` → `d4bb124`. 946c380 (4-item milestone: demo counters, prod compose, start_demo.sh, e2e), 7e18366 (provider-config auth split), d4bb124 (bridge close).
+
+### Verdict: 5 BLOCKING, 3 HIGH, 2 MEDIUM, 2 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2/5 | Alert flow broken end-to-end (B1). e2e tests will all fail on auth (B2) and wrong selectors (B3). alertmanager connector not registerable (B5). Cert checks 3-7 not tested. |
+| D2 Code Standards | 3/5 | 7 proxy routes still have no try/catch. Alert event route publishes raw Alertmanager format but subscriber expects different shape. |
+| D3 Performance | 4/5 | Demo services dynamic counters correctly implemented. start_demo.sh solid structure. |
+| D4 Security | 4/5 | Provider-config now properly auth-gated. No regressions. |
+| D5 Readability | 4/5 | anvay.spec.ts is thorough and well-organised. playwright.config.ts clean. |
+| D6 Clarity/Comments | 3/5 | start_demo.sh comments good. alert-subscriber/events.ts format mismatch not commented. |
+
+---
+
+### BLOCKING
+
+**B1 — Alertmanager → alert-subscriber format mismatch (cert check 3 completely broken)**
+
+`apps/gateway/src/routes/events.ts` `POST /api/events/alert` publishes raw Alertmanager payload to Redis `alert_fired` channel. Alertmanager sends `{ "alerts": [{ "labels": { "alertname": "...", "severity": "...", "service": "..." }, "status": "firing", "annotations": { "summary": "..." } }], ... }`.
+
+`apps/gateway/src/events/alert-subscriber.ts` reads `.tenantId` and `.title` from the message. Alertmanager payloads have neither. Subscriber logs "invalid payload — skipping" for every real alert. **No incident is ever created from Alertmanager.**
+
+Fix in `apps/gateway/src/routes/events.ts` `POST /api/events/alert`:
+```typescript
+const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
+
+app.post('/api/events/alert', async (request) => {
+  const body = request.body as {
+    alerts?: Array<{
+      labels?: { alertname?: string; severity?: string; service?: string; job?: string }
+      status?: string
+      annotations?: { summary?: string; description?: string }
+    }>
+    tenantId?: string
+  }
+  const pub = await getEventPub()
+  if (!pub) return { ok: true }
+
+  if (body.alerts && Array.isArray(body.alerts)) {
+    // Standard Alertmanager webhook format — transform per alert
+    for (const alert of body.alerts) {
+      if (alert.status !== 'firing') continue
+      const payload = {
+        tenantId: body.tenantId ?? DEMO_TENANT,
+        title: alert.labels?.alertname ?? 'Alert Fired',
+        severity: alert.labels?.severity ?? 'high',
+        service: alert.labels?.service ?? alert.labels?.job,
+        description: alert.annotations?.summary ?? alert.annotations?.description,
+      }
+      await pub.publish('alert_fired', JSON.stringify(payload))
+    }
+  } else {
+    // Direct internal format (tests, internal calls)
+    await pub.publish('alert_fired', JSON.stringify(body))
+  }
+  return { ok: true }
+})
+```
+
+**B2 — anvay.spec.ts `getToken()` uses email that is never seeded — all API test suites fail**
+
+`apps/web/e2e/anvay.spec.ts` line 13: `const DEMO_EMAIL = 'admin@demo.anvay.dev'`.
+`getToken()` calls `POST /auth/token` with this email. The dev-token seeds `dev@anvay.local` as admin. No user with `admin@demo.anvay.dev` exists → 401 → all suites B.1-H.3 fail.
+
+Fix: replace `getToken()`:
+```typescript
+const DEV_TOKEN_URL = `${GATEWAY}/api/auth/dev-token`
+
+async function getToken(request: Parameters<Parameters<typeof test>[1]>[0]['request']): Promise<string> {
+  const r = await request.get(DEV_TOKEN_URL)
+  const body = await r.json() as { token?: string }
+  return body.token ?? ''
+}
+```
+Remove `DEMO_TENANT` and `DEMO_EMAIL` constants (now unused).
+
+**B3 — orchestrator-chat.spec.ts wrong placeholder selector**
+
+`apps/web/e2e/orchestrator-chat.spec.ts` checks `input[placeholder*="query"]`. Actual placeholder in `orchestrator-chat.tsx` is `"ask anvay anything..."`. Selector never matches → `exists = false` → test fails.
+
+Fix:
+```typescript
+const input = page.locator('input[placeholder*="anvay"]').first()
+const textarea = page.locator('textarea[placeholder*="anvay"]').first()
+```
+
+**B4 — 7 Next.js proxy routes missing try/catch → 500 on ECONNREFUSED**
+
+When gateway is not running, every call to these routes throws `ECONNREFUSED` → Next.js returns unhandled 500. User sees "500 Internal Server Error" instead of "gateway unavailable". Files:
+- `apps/web/app/api/settings/provider/route.ts` (GET + POST)
+- `apps/web/app/api/settings/provider-manifests/route.ts`
+- `apps/web/app/api/settings/models/route.ts`
+- `apps/web/app/api/settings/connectors/route.ts`
+- `apps/web/app/api/settings/connectors/[type]/route.ts`
+- `apps/web/app/api/connectors/[type]/bootstrap-status/route.ts`
+- `apps/web/app/api/providers/route.ts`
+
+Each handler needs:
+```typescript
+try {
+  const resp = await fetch(...)
+  return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
+} catch (err) {
+  const msg = err instanceof Error ? err.message : 'proxy error'
+  return Response.json({ error: msg }, { status: 502 })
+}
+```
+
+**B5 — `alertmanager` missing from `KNOWN_CONNECTORS` → start_demo.sh seeding fails for alertmanager**
+
+`apps/gateway/src/routes/settings.ts` `KNOWN_CONNECTORS` array (lines 108-116) does not include `'alertmanager'`. `start_demo.sh` attempts `PUT /api/settings/connectors/alertmanager` → 400 "Unknown connector type" → connector never seeded.
+
+Fix: add `'alertmanager'` to the `KNOWN_CONNECTORS` array.
+
+---
+
+### HIGH
+
+**H1 — Cert check 3 (alert flow) needs e2e test**
+
+Create `apps/web/e2e/cert-alert-flow.spec.ts` that:
+1. Calls `GET /api/auth/dev-token` to get token
+2. Posts Alertmanager-format payload to `POST /api/events/alert` (no auth required)
+3. Waits 800ms for Redis → subscriber pipeline
+4. Gets `/api/incidents` with auth and asserts at least one incident has the expected title
+
+This is the only cert check coverable by API-level e2e. Do this AFTER fixing B1.
+
+**H2 — Cert checks 4-7 need `start_demo.sh` to work end-to-end**
+
+Cert checks 4-7 require the demo docker-compose stack. No additional e2e test file needed — they are verified manually by running `bash scripts/start_demo.sh`. Document in a `scripts/README.md` that checks 4-7 require demo stack.
+
+**H3 — `apps/web/app/api/settings/connectors/[type]/route.ts` not verified**
+
+This route is used by connector config save in the UI. It has no try/catch (covered by B4) and was not directly tested. Verify it proxies correctly after B4 fix.
+
+---
+
+### MEDIUM
+
+**M1 — Prod compose Postgres: Apache AGE extension not initialized**
+
+`infra/prod/docker-compose.yml` uses `postgres:16-alpine`. The structural graph requires Apache AGE Cypher extension. No init SQL is included. DB migrations may fail silently if AGE is required. Demo compose has the same issue but uses standard Postgres as well — the Cypher queries are deferred. Document clearly that AGE is required for graph features, add `# NOTE: Apache AGE extension required for graph features` comment in docker-compose.
+
+**M2 — `anvay.spec.ts` Suite D.1 allows 404 — fragile test**
+
+`expect([200, 404]).toContain(resp.status())` for `GET /api/incidents` is too permissive. If DB unreachable, returns 500 and test passes vacuously. Change to `expect(resp.status()).toBe(200)` — a seeded tenant with no incidents should still return `200 []`.
+
+---
+
+### LOW
+
+**L1 — anvay.spec.ts imports unused constants after B2 fix**
+
+After removing `DEMO_EMAIL` + `DEMO_TENANT` from `getToken()`, delete those constants.
+
+**L2 — start_demo.sh: bootstrap silently skips if Redis unavailable**
+
+The `POST /api/connectors/$connector/bootstrap` curl call uses `|| warn "... bootstrap skipped"`. If Redis is down at startup, bootstrap publishes nothing but returns `{ ok: true }`. The graph never populates. This is correct fallback behavior but should log more clearly. LOW priority.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-10c -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10b -->
 ## Review — 2026-06-10b | DeepSeek + Phase 4 UI wiring + FIX-1-5 from bridge-2026-06-10b
 

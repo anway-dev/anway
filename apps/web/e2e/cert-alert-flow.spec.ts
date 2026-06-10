@@ -1,4 +1,7 @@
-import { test, expect } from '@playwright/test'test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () => {
+import { test, expect } from '@playwright/test'
+import { GATEWAY, DEMO_TENANT, authHeaders } from './fixtures'
+
+test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () => {
   let token: string
 
   test.beforeAll(async ({ request }) => {
@@ -37,8 +40,6 @@ import { test, expect } from '@playwright/test'test.describe('Cert check 3 — A
     expect(found).toBe(true)
   })
 })
-
-import { GATEWAY, DEMO_TENANT } from './fixtures'
 
 test.describe('Cert check extended — event receivers', () => {
   test('POST /api/events/deploy without tenantId returns 400', async ({ request }) => {

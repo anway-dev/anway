@@ -19,7 +19,8 @@ test.describe('Connectors view', () => {
     await expect(page.locator('text=Prometheus').first()).toBeVisible()
   })
 })
-, () => {
+
+test.describe('Connectors extended', () => {
   test('save error shows on failed connect', async ({ page, request }) => {
     const h = await authHeaders(request)
     // PUT with invalid data should show error

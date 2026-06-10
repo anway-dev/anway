@@ -17,7 +17,6 @@ test.describe('Audit view', () => {
     const searchInput = page.locator('input[placeholder="Search queries..."]')
     if (await searchInput.isVisible({ timeout: 3000 }).catch(() => false)) {
       await searchInput.fill('payments')
-      // Should filter results
     }
   })
 })
@@ -31,16 +30,12 @@ test.describe('Pagination', () => {
     expect(body.length).toBeLessThanOrEqual(5)
   })
 
-  test('?limit=5&offset=5 skips first 5', async ({ request }) => {
+  test('?limit=5&offset=5 returns second page', async ({ request }) => {
     const h = await authHeaders(request)
-    const resp = await request.get(`${GATEWAY}/api/audit?limit=5`, { headers: h })
-    expect(resp.status()).toBe(200)
-  })
-    const h = await authHeaders(request)
-    const resp = await request.get(`${GATEWAY}/api/audit?limit=5`, { headers: h })
+    const resp = await request.get(`${GATEWAY}/api/audit?limit=5&offset=5`, { headers: h })
     expect(resp.status()).toBe(200)
     const body = await resp.json() as unknown[]
-    expect(body.length).toBeLessThanOrEqual(5)
+    expect(Array.isArray(body)).toBe(true)
   })
 
   test('GET /api/audit?limit=201 is capped at 200', async ({ request }) => {

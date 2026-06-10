@@ -4,7 +4,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'query_logs', description: 'Query logs using LogQL', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['query'] } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://loki:3100'
+      const base = (creds as any).baseUrl ?? 'http://localhost:3100'
       const q = encodeURIComponent(params.query as string)
       const end = Date.now() * 1e6
       const start = end - 3600 * 1e9
@@ -21,7 +21,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_labels', description: 'List available log labels', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://loki:3100'
+      const base = (creds as any).baseUrl ?? 'http://localhost:3100'
       try {
         const res = await fetch(`${base}/loki/api/v1/label`)
         if (!res.ok) return { labels: [] }
@@ -34,7 +34,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_log_volume', description: 'Get log volume for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, window: { type: 'string' } }, required: ['service'] } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://loki:3100'
+      const base = (creds as any).baseUrl ?? 'http://localhost:3100'
       const q = encodeURIComponent(`{container_name=~".*${params.service}.*"}`)
       try {
         const res = await fetch(`${base}/loki/api/v1/query_range?query=count_over_time(${q}[1m])&limit=1`)

@@ -4,7 +4,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'query_metrics', description: 'Run PromQL instant query', parameters: { type: 'object', properties: { query: { type: 'string' }, window: { type: 'string', optional: true } }, required: ['query'] } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://prometheus:9090'
+      const base = (creds as any).baseUrl ?? 'http://localhost:9090'
       const q = encodeURIComponent(params.query as string)
       try {
         const res = await fetch(`${base}/api/v1/query?query=${q}`)
@@ -18,7 +18,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_alerts', description: 'List active alerts', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://prometheus:9090'
+      const base = (creds as any).baseUrl ?? 'http://localhost:9090'
       try {
         const res = await fetch(`${base}/api/v1/alerts`)
         if (!res.ok) return { alerts: [] }
@@ -31,7 +31,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_targets', description: 'List scrape targets', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://prometheus:9090'
+      const base = (creds as any).baseUrl ?? 'http://localhost:9090'
       try {
         const res = await fetch(`${base}/api/v1/targets`)
         if (!res.ok) return { targets: [] }

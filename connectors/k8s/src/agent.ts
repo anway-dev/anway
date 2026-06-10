@@ -4,7 +4,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_pods', description: 'List pods (Docker containers)', parameters: { type: 'object', properties: { namespace: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/containers/json?all=true`)
         if (!res.ok) return { pods: [] }
@@ -17,7 +17,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_deployments', description: 'List running containers', parameters: { type: 'object', properties: { namespace: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/containers/json?all=true`)
         if (!res.ok) return { deployments: [] }
@@ -30,7 +30,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_pod_logs', description: 'Get container logs', parameters: { type: 'object', properties: { pod: { type: 'string' }, lines: { type: 'number', optional: true } }, required: ['pod'] } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/containers/${params.pod}/logs?tail=${params.lines ?? 100}&stdout=true&stderr=true`)
         if (!res.ok) return { logs: [] }
@@ -42,7 +42,7 @@ const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_events', description: 'List recent Docker events', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
-      const base = (creds as any).baseUrl ?? 'http://docker-proxy:2375'
+      const base = (creds as any).baseUrl ?? 'http://localhost:2375'
       try {
         const res = await fetch(`${base}/events?since=${Math.floor(Date.now()/1000)-300}`)
         if (!res.ok) return { events: [] }

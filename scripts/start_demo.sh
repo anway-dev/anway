@@ -117,11 +117,11 @@ if [ -n "$DEV_TOKEN" ]; then
     log "Seeding connector: $connector"
     CREDENTIALS="{}"
     case "$connector" in
-      prometheus)    CREDENTIALS='{"url":"http://prometheus:9090"}' ;;
-      loki)          CREDENTIALS='{"url":"http://loki:3100"}' ;;
-      grafana)       CREDENTIALS='{"url":"http://admin:admin@grafana:3000","token":"admin"}' ;;
-      github)        CREDENTIALS='{"token":"demo-gitea-token","org":"anvay-demo"}' ;;
-      alertmanager)  CREDENTIALS='{"url":"http://alertmanager:9093"}' ;;
+      prometheus)    CREDENTIALS='{"baseUrl":"http://localhost:9090"}' ;;
+      loki)          CREDENTIALS='{"baseUrl":"http://localhost:3100"}' ;;
+      grafana)       CREDENTIALS='{"baseUrl":"http://localhost:3001","password":"admin"}' ;;
+      github)        CREDENTIALS='{"token":"demo-gitea-token","baseUrl":"http://localhost:3030","org":"anvay-demo"}' ;;
+      alertmanager)  CREDENTIALS='{"baseUrl":"http://localhost:9093"}' ;;
     esac
     curl -sf -X PUT "http://localhost:4000/api/settings/connectors/$connector" \
       -H "Content-Type: application/json" \

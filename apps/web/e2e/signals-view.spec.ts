@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { GATEWAY, authHeaders, DEMO_TENANT } from './fixtures'
 
 test.describe('Signals / Alerts view', () => {
   test('renders signals page with tabs', async ({ page }) => {
@@ -9,5 +10,14 @@ test.describe('Signals / Alerts view', () => {
     await expect(page.locator('button:has-text("All")').first()).toBeVisible()
     await expect(page.locator('button:has-text("Alerts")').first()).toBeVisible()
     await expect(page.locator('button:has-text("Errors")').first()).toBeVisible()
+  })
+})
+
+test.describe('Signals extended', () => {
+  test('severity badges visible on alert cards', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('text=Signals').first().click()
+    // At least one severity badge visible
+    await expect(page.locator('text=critical').first()).toBeVisible()
   })
 })

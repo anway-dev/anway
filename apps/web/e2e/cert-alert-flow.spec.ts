@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { GATEWAY, authHeaders, DEMO_TENANT } from './fixtures'
 
 const GATEWAY = 'http://127.0.0.1:4000'
 const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
@@ -40,5 +41,33 @@ test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () 
     const incidents = await incResp.json() as Array<{ title: string }>
     const found = incidents.some(i => i.title === alertName)
     expect(found).toBe(true)
+  })
+})
+
+import { GATEWAY, DEMO_TENANT } from './fixtures'
+
+test.describe('Cert check extended — event receivers', () => {
+  test('POST /api/events/deploy without tenantId returns 400', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/events/deploy`, { data: {} })
+    expect(resp.status()).toBe(400)
+  })
+
+  test('POST /api/events/deploy with valid tenantId returns 200', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/events/deploy`, {
+      data: { tenantId: DEMO_TENANT, app: 'payments-api', sha: 'abc123' },
+    })
+    expect(resp.status()).toBe(200)
+  })
+
+  test('POST /api/events/pr-merged without tenantId returns 400', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/events/pr-merged`, { data: {} })
+    expect(resp.status()).toBe(400)
+  })
+
+  test('POST /api/events/pr-merged with valid tenantId returns 200', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/events/pr-merged`, {
+      data: { tenantId: DEMO_TENANT, repo: 'test', pr: 1 },
+    })
+    expect(resp.status()).toBe(200)
   })
 })

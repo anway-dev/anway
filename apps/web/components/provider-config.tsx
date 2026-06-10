@@ -19,23 +19,30 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
   const [saving, setSaving] = useState(false);
   const [devToken, setDevToken] = useState<string | null>(null);
 
+  // Effect 1: fetch manifests + devToken on mount
   useEffect(() => {
-    Promise.all([
-      fetch("/api/settings/provider").then(r => r.json()),
-      fetch("/api/settings/provider-manifests").then(r => r.json()),
-    ])
-      .then(([prov, man]) => {
-        setProviderInfo(prov as ProviderInfo);
-        setManifests(man as ProviderManifest[]);
-        if (!(prov as ProviderInfo).configured) setShowPanel(true);
-      })
-      .catch(() => setProviderInfo({ configured: false }))
-      .finally(() => setLoading(false));
+    fetch("/api/settings/provider-manifests")
+      .then(r => r.json())
+      .then((man: ProviderManifest[]) => setManifests(man as ProviderManifest[]))
+      .catch(() => {});
     fetch('/api/auth/dev-token')
       .then(r => r.json())
       .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
-      .catch(() => {});
+      .catch(() => setLoading(false));
   }, []);
+
+  // Effect 2: fetch providerInfo once devToken is available
+  useEffect(() => {
+    if (devToken === null) return;
+    fetch("/api/settings/provider", { headers: { Authorization: `Bearer ${devToken}` } })
+      .then(r => r.ok ? r.json() : { configured: false })
+      .then((prov: ProviderInfo) => {
+        setProviderInfo(prov);
+        if (!prov.configured) setShowPanel(true);
+      })
+      .catch(() => setProviderInfo({ configured: false }))
+      .finally(() => setLoading(false));
+  }, [devToken]);
 
   const selectedManifest = manifests.find(m => m.id === selectedProvider);
 
@@ -44,8 +51,11 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
     // For API-key providers, wait until key looks complete (≥10 chars)
     const needsKey = selectedManifest?.fields.some(f => f.key === 'apiKey' && f.required)
     if (needsKey && apiKey.length < 10) { setModels([]); return }
-    fetch(`/api/settings/models?${new URLSearchParams({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) })}`)
-      .then(r => r.json()).then((data: ModelList) => setModels(data.models)).catch(() => setModels([]));
+    fetch(`/api/settings/models?${new URLSearchParams({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) })}`,
+      { headers: devToken ? { Authorization: `Bearer ${devToken}` } : {} })
+      .then(r => r.ok ? r.json() : { models: [] })
+      .then((data: ModelList) => setModels(data.models ?? []))
+      .catch(() => setModels([]));
   }, [selectedProvider, baseUrl, apiKey, selectedManifest, devToken]);
 
   async function handleSave() {

@@ -34,6 +34,11 @@ async function tryPublish(pub: import('redis').RedisClientType | null, channel: 
 
 const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 
+// Map alertmanager severity to IncidentSeverity enum
+const SEVERITY_MAP: Record<string, string> = {
+  critical: 'critical', high: 'high', warning: 'medium', low: 'low',
+}
+
 export async function eventRoutes(app: FastifyInstance) {
 
   // Alertmanager webhook receiver — writes incidents to DB + emits incident_created
@@ -60,12 +65,13 @@ export async function eventRoutes(app: FastifyInstance) {
       const tenantId = body.tenantId ?? DEMO_TENANT
 
       // Write incident to DB — this is what the War Room reads
+      const mappedSeverity = SEVERITY_MAP[severity] ?? 'medium'
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
-          INSERT INTO incidents (id, tenant_id, title, severity, status, description, suggested_root_cause, created_at, updated_at)
-          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${title}, ${severity}::text,
+          INSERT INTO incidents (id, tenant_id, title, severity, status, description, suggested_root_cause, created_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${title}, ${mappedSeverity}::incident_severity,
                   'active', ${description}, ${service ? `Possible root cause: ${service} service` : null},
-                  NOW(), NOW())
+                  NOW())
           ON CONFLICT DO NOTHING
           RETURNING id
         `

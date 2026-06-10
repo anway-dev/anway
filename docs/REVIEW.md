@@ -8,13 +8,13 @@ dated review pass — newest at the top.
 ---
 
 <!-- REVIEW SECTION START — 2026-06-10d -->
-## Review — 2026-06-10d | e2e certification + credential fixes + proxy routes + connector agents
+## Review — 2026-06-10d | e2e certification + credential fixes + proxy routes + connector agents [RESOLVED]
 
 ### Scope
 
 Commits `d4bb124` → `778bcf9`. Source files changed: events.ts, settings.ts, chat-stream.ts, audit.ts, alert-subscriber.ts, gateway-client.ts, all Next.js proxy routes (alerts, audit, incidents, providers, settings/*, connectors/*), connectors.tsx, all e2e spec files, all 4 connector agents (prometheus, loki, grafana, k8s), infra/docker-compose.yml, scripts/start_demo.sh, prisma/migrations/0003_kb/migration.sql.
 
-### Verdict: 1 BLOCKING, 4 HIGH, 5 MEDIUM, 6 LOW
+### Verdict: 1 BLOCKING, 4 HIGH, 5 MEDIUM, 6 LOW — ALL RESOLVED in 5fcf9d0 + 5101916
 
 **Previous review BLOCKINGs resolved:** B1 (alert format mismatch) ✓, B2 (getToken) ✓, B3 (orchestrator selector) ✓, B4 (proxy try/catch) ✓, B5 (alertmanager KNOWN_CONNECTORS) ✓. **e2e suite: 50/50 passing.**
 

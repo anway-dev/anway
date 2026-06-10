@@ -7,6 +7,83 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11a -->
+## Review — 2026-06-11a | T1-T3 coverage fixes (8a9f980 + ace995b)
+
+### Scope
+
+Commits `8a9f980` (fix: T1-T3) + `ace995b` (bridge close).
+
+### Verdict: 1 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW
+
+T1 and T2 clean. T3 has a BLOCKING gap — gateway missing `POST /api/gate` endpoint.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | T1/T2 correct. T3 seeds to non-existent route → test will timeout in CI. |
+| D2 Code Standards | 5/5 | T1 locator fixed correctly. T2 two-step isolation check correct. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | Cross-tenant now rejects 200 — real isolation assertion. |
+| D5 Readability | 5/5 | Clean. |
+| D6 Clarity/Comments | 5/5 | Bridge appended correctly. |
+
+---
+
+### BLOCKING
+
+**B1** `apps/gateway/src/gate/` — `POST /api/gate` does not exist.
+
+`approvals.spec.ts` T3 seeds via:
+```typescript
+await request.post(`${GATEWAY}/api/gate`, { ... })
+```
+
+Gateway only has `POST /api/gate/:gateId/decide` (in `gate-decide-route.ts`). No create endpoint exists. Seed returns 404 silently (no assertion on POST response). `gate_events` table stays empty. Workflows UI shows no pending approvals. `await expect(approveBtn).toBeVisible({ timeout: 5000 })` times out → test FAILS in CI.
+
+Fix — add `POST /api/gate` to `apps/gateway/src/gate/gate-decide-route.ts` (or a new file):
+
+```typescript
+app.post<{ Body: { action: string; target: string; requestedBy?: string } }>(
+  '/api/gate', {
+    preHandler: [app.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['action', 'target'],
+        properties: {
+          action: { type: 'string' },
+          target: { type: 'string' },
+          requestedBy: { type: 'string' },
+        },
+      },
+    },
+  },
+  async (request, reply) => {
+    const { action, target, requestedBy } = request.body
+    const { tenantId } = request.user as { tenantId: string }
+    const row = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO gate_events (id, tenant_id, action, target, status, requested_by, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${action}, ${target}, 'pending',
+                ${requestedBy ?? 'system'}, NOW())
+        RETURNING id
+      `
+    )
+    return reply.code(201).send({ ok: true, id: (row as Array<{ id: string }>)[0]?.id })
+  },
+)
+```
+
+After adding the route, `T3 approvals.spec.ts` should pass: seed creates a `pending` gate → UI renders approve button → test clicks and asserts removal.
+
+<!-- REVIEW SECTION END — 2026-06-11a -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10m -->
 ## Review — 2026-06-10m | S1-S11 shell spec enrichment (e7921b2 + 5703b44)
 

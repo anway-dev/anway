@@ -7727,3 +7727,23 @@ T3 fix verified.
 | Open issues | 2 |
 
 <!-- REVIEW SECTION END — 2026-06-10e -->
+
+<!-- REVIEW SECTION START — 2026-06-10f -->
+## Review 2026-06-10f — Connector credential key mismatch + Docker hostname fallbacks
+
+**Reviewer:** Claude | **Scope:** start_demo.sh seeding + connector agent defaults
+
+### BLOCKING
+
+| # | Location | Issue |
+|---|----------|-------|
+| B1 | `scripts/start_demo.sh:120-124` | Credentials seeded with key `url` but all connector agents read `(creds as any).baseUrl` → tools always fall back to Docker network hostnames unreachable from local gateway. Also grafana URL uses port 3000 but demo compose sets `GF_SERVER_HTTP_PORT: 3001`. |
+| B2 | `connectors/{prometheus,loki,grafana,k8s}/src/agent.ts` | Fallback defaults use Docker network hostnames (`http://prometheus:9090` etc.) — unreachable from macOS host when gateway runs locally. Should be `localhost` with the demo stack port. |
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 2 |
+| Open issues | 2 |
+
+<!-- REVIEW SECTION END — 2026-06-10f -->

@@ -1,6 +1,6 @@
 "use client";
 import { CONNECTORS, Connector } from "@/lib/mock";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 interface ConnectorStatus {
   connectorType: string;
@@ -27,7 +27,7 @@ export function ConnectorsView() {
       .catch(() => {});
   }, []);
 
-  const authHeaders = devToken ? { Authorization: `Bearer ${devToken}` } : {} as Record<string, string>;
+  const authHeaders = useMemo(() => devToken ? { Authorization: `Bearer ${devToken}` } : {} as Record<string, string>, [devToken]);
 
   useEffect(() => {
     fetch("/api/settings/connectors", { headers: authHeaders })

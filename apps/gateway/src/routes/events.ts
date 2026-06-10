@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { createClient } from 'redis'
 import pino from 'pino'
+import { UUID_RE } from '../utils/validators.js'
 
 const log = pino({ name: 'event-routes' })
 
@@ -29,8 +30,9 @@ async function tryPublish(pub: import('redis').RedisClientType | null, channel: 
   }
 }
 
+const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
+
 export async function eventRoutes(app: FastifyInstance) {
-  const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 
   // Alertmanager webhook receiver
   app.post('/api/events/alert', async (request) => {
@@ -63,16 +65,22 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Deploy event receiver
-  app.post('/api/events/deploy', async (request) => {
+  app.post('/api/events/deploy', async (request, reply) => {
     const payload = request.body as Record<string, unknown>
+    if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId)) {
+      return reply.code(400).send({ error: 'valid tenantId required' })
+    }
     const pub = await getEventPub()
     await tryPublish(pub, 'deploy_completed', payload)
     return { ok: true }
   })
 
   // PR merged webhook (Gitea/GitHub)
-  app.post('/api/events/pr-merged', async (request) => {
+  app.post('/api/events/pr-merged', async (request, reply) => {
     const payload = request.body as Record<string, unknown>
+    if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId)) {
+      return reply.code(400).send({ error: 'valid tenantId required' })
+    }
     const pub = await getEventPub()
     await tryPublish(pub, 'pr_merged', payload)
     return { ok: true }

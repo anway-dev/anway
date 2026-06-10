@@ -89,7 +89,7 @@ log "Starting gateway on :4000..."
 GATEWAY_PID=$!
 
 TRIES=0
-until curl -sf http://localhost:4000/health > /dev/null 2>&1; do
+until curl -sf http://127.0.0.1:4000/health > /dev/null 2>&1; do
   TRIES=$((TRIES + 1))
   if [ $TRIES -ge 40 ]; then
     echo ""

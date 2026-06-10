@@ -32,7 +32,8 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const base = (creds as any).baseUrl ?? 'http://localhost:2375'
       try {
-        const res = await fetch(`${base}/containers/${params.pod}/logs?tail=${params.lines ?? 100}&stdout=true&stderr=true`)
+        const podName = encodeURIComponent(String(params.pod))
+        const res = await fetch(`${base}/containers/${podName}/logs?tail=${params.lines ?? 100}&stdout=true&stderr=true`)
         if (!res.ok) return { logs: [] }
         return { logs: (await res.text()).split('\n').filter(Boolean) }
       } catch { return { logs: [] } }

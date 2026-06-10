@@ -39,7 +39,9 @@ const TOOLS: ConnectorTool[] = [
       try {
         const res = await fetch(`${base}/loki/api/v1/query_range?query=count_over_time(${q}[1m])&limit=1`)
         if (!res.ok) return { points: [] }
-        return { points: [{ t: Date.now(), v: 50 }] }
+        const lokiData = await res.json() as { data: { result: Array<{ values: [string, string][] }> } }
+        const points = lokiData.data.result.flatMap(r => r.values.map(([ts, v]) => ({ t: Number(ts) / 1e6, v: Number(v) })))
+        return { points: points.length ? points : [{ t: Date.now(), v: 0 }] }
       } catch { return { points: [] } }
     },
     write: false,

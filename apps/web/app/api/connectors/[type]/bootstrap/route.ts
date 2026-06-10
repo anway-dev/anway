@@ -3,7 +3,7 @@ import { getDemoToken, GATEWAY_URL } from '@/lib/gateway-client'
 export async function POST(_req: Request, { params }: { params: Promise<{ type: string }> }) {
   try {
     const { type } = await params
-    const auth = (await _req.headers.get('authorization')) || await getDemoToken().then(t => t ? `Bearer ${t}` : '')
+    const auth = _req.headers.get('authorization') || await getDemoToken().then(t => t ? `Bearer ${t}` : '')
     const resp = await fetch(`${GATEWAY_URL}/api/connectors/${type}/bootstrap`, {
       method: 'POST',
       headers: auth ? { Authorization: auth } : {},

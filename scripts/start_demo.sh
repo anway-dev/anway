@@ -16,6 +16,8 @@ err()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+command -v jq > /dev/null 2>&1 || err "jq not installed — brew install jq"
+
 # ── Check Docker is running ──
 docker info > /dev/null 2>&1 || err "Docker is not running — start Docker Desktop first"
 
@@ -84,6 +86,41 @@ until curl -sf http://localhost:4000/health > /dev/null 2>&1; do
   sleep 1
 done
 log "Gateway ready"
+
+# ── Seed demo connectors ──
+log "Fetching dev token..."
+DEV_TOKEN=$(curl -sf http://localhost:4000/api/auth/dev-token | jq -r '.token // empty' 2>/dev/null) || DEV_TOKEN=""
+if [ -z "$DEV_TOKEN" ]; then
+  # Fallback: POST to /auth/token
+  DEV_TOKEN=$(curl -sf -X POST http://localhost:4000/auth/token \
+    -H "Content-Type: application/json" \
+    -d '{"email":"dev@anvay.local","tenantId":"00000000-0000-0000-0000-000000000001"}' | jq -r '.token // empty' 2>/dev/null) || DEV_TOKEN=""
+fi
+
+if [ -n "$DEV_TOKEN" ]; then
+  AUTH="Authorization: Bearer $DEV_TOKEN"
+  for connector in prometheus loki grafana github alertmanager; do
+    log "Seeding connector: $connector"
+    CREDENTIALS="{}"
+    case "$connector" in
+      prometheus)    CREDENTIALS='{"url":"http://prometheus:9090"}' ;;
+      loki)          CREDENTIALS='{"url":"http://loki:3100"}' ;;
+      grafana)       CREDENTIALS='{"url":"http://admin:admin@grafana:3000","token":"admin"}' ;;
+      github)        CREDENTIALS='{"token":"demo-gitea-token","org":"anvay-demo"}' ;;
+      alertmanager)  CREDENTIALS='{"url":"http://alertmanager:9093"}' ;;
+    esac
+    curl -sf -X PUT "http://localhost:4000/api/settings/connectors/$connector" \
+      -H "Content-Type: application/json" \
+      -H "$AUTH" \
+      -d "{\"credentials\":$CREDENTIALS}" > /dev/null 2>&1 && log "  $connector configured" || warn "  $connector failed"
+
+    # Trigger bootstrap
+    curl -sf -X POST "http://localhost:4000/api/connectors/$connector/bootstrap" \
+      -H "$AUTH" > /dev/null 2>&1 && log "  $connector bootstrapped" || warn "  $connector bootstrap skipped"
+  done
+else
+  warn "No dev token — skipping connector seeding"
+fi
 
 # ── Start web ──
 log "Starting web on :3000..."

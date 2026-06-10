@@ -8,13 +8,13 @@ dated review pass — newest at the top.
 ---
 
 <!-- REVIEW SECTION START — 2026-06-10g -->
-## Review — 2026-06-10g | e2e Wave 1+2+3 test expansion (cbe643c + 17c3ab9)
+## Review — 2026-06-10g | e2e Wave 1+2+3 test expansion (cbe643c + 17c3ab9) [RESOLVED in f1e5191]
 
 ### Scope
 
 Commits `cbe643c` (Wave 1) + `17c3ab9` (Wave 2+3). Files: fixtures.ts (new), audit-view.spec.ts, cert-alert-flow.spec.ts, connectors.spec.ts, signals-view.spec.ts, provider-config.spec.ts + 14 new spec files.
 
-### Verdict: 4 BLOCKING, 3 HIGH, 5 MEDIUM, 5 LOW
+### Verdict: 4 BLOCKING, 3 HIGH, 5 MEDIUM, 5 LOW — ALL RESOLVED
 
 ---
 

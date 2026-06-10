@@ -7,6 +7,56 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11b -->
+## Review — 2026-06-11b | Demo chaos wiring + provider.color crash
+
+### Scope
+
+Codebase audit — demo event flow, provider.color TypeError, stub bootstraps.
+
+### Verdict: 2 BLOCKING, 0 HIGH, 2 MEDIUM, 0 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 1/5 | Alert pipeline broken — alertmanager webhook fires but no incident reaches DB. PrometheusBootstrap + LokiBootstrap are stubs. Chat returns mock data. |
+| D2 Code Standards | 4/5 | Real execute() in prometheus agent. Patterns consistent. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | No issues. |
+| D5 Readability | 5/5 | Clean. |
+| D6 Clarity/Comments | 5/5 | No spurious comments. |
+
+---
+
+### BLOCKING
+
+**B1** `apps/gateway/src/gate/gate-decide-route.ts` — `POST /api/gate` endpoint missing.
+(Carried from 2026-06-11a — bridge task already posted, executor has not yet implemented.)
+
+**B2** `apps/gateway/src/routes/events.ts` — `POST /api/events/alert` never writes to the
+`incidents` table. Alertmanager fires → Redis `alert_fired` published → no subscriber
+(not in `GRAPH_EVENT_CHANNELS`) → DB stays empty → War Room / Signals show nothing from
+chaos services. Full demo flow broken. Fix: on alert webhook, INSERT into `incidents` table
+directly (same request handler, before Redis publish), then publish `incident_created`
+(which IS in `GRAPH_EVENT_CHANNELS`).
+
+---
+
+### MEDIUM
+
+**M1** `connectors/prometheus/src/bootstrap.ts` — stub returning 0 entities. Prometheus
+bootstrap must call `GET /api/v1/label/job/values`, create a `Service` entity per job, and
+set `connectorCoordinates.prometheus.resourceIds.job`. Without this, `resolveContext()` has
+no coordinates and chat falls back to scatter-gather.
+
+**M2** `connectors/loki/src/bootstrap.ts` — same pattern. Call `GET /loki/api/v1/labels`,
+get `{service_name}` label values, upsert `Service` entities with loki coordinates.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11a -->
 ## Review — 2026-06-11a | T1-T3 coverage fixes (8a9f980 + ace995b)
 

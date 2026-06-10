@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { createClient } from 'redis'
 import pino from 'pino'
 import { UUID_RE } from '../utils/validators.js'
+import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 
 const log = pino({ name: 'event-routes' })
 
@@ -34,7 +36,7 @@ const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 
 export async function eventRoutes(app: FastifyInstance) {
 
-  // Alertmanager webhook receiver
+  // Alertmanager webhook receiver — writes incidents to DB + emits incident_created
   app.post('/api/events/alert', async (request) => {
     const body = request.body as {
       alerts?: Array<{
@@ -44,22 +46,42 @@ export async function eventRoutes(app: FastifyInstance) {
       }>
       tenantId?: string
     }
-    const pub = await getEventPub()
-    if (!pub) return { ok: true }
 
-    if (body.alerts && Array.isArray(body.alerts)) {
-      for (const alert of body.alerts) {
-        if (alert.status !== 'firing') continue
-        await tryPublish(pub, 'alert_fired', {
-          tenantId: body.tenantId ?? DEMO_TENANT,
-          title: alert.labels?.alertname ?? 'Alert Fired',
-          severity: alert.labels?.severity ?? 'high',
-          service: alert.labels?.service ?? alert.labels?.job,
-          description: alert.annotations?.summary ?? alert.annotations?.description,
+    if (!body.alerts || !Array.isArray(body.alerts)) return { ok: true }
+
+    const pub = await getEventPub()
+
+    for (const alert of body.alerts) {
+      if (alert.status !== 'firing') continue
+      const title = alert.labels?.alertname ?? 'Alert Fired'
+      const severity = alert.labels?.severity ?? 'high'
+      const service = alert.labels?.service ?? alert.labels?.job ?? null
+      const description = alert.annotations?.summary ?? alert.annotations?.description ?? null
+      const tenantId = body.tenantId ?? DEMO_TENANT
+
+      // Write incident to DB — this is what the War Room reads
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          INSERT INTO incidents (id, tenant_id, title, severity, status, description, suggested_root_cause, created_at, updated_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${title}, ${severity}::text,
+                  'active', ${description}, ${service ? `Possible root cause: ${service} service` : null},
+                  NOW(), NOW())
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `
+      ).catch(() => [])
+
+      const incidentId = (rows as Array<{ id: string }>)[0]?.id
+      if (incidentId && pub) {
+        await tryPublish(pub, 'incident_created', {
+          type: 'incident_created',
+          tenantId,
+          incidentId,
+          title,
+          severity,
+          serviceHint: service,
         })
       }
-    } else {
-      await tryPublish(pub, 'alert_fired', body as Record<string, unknown>)
     }
     return { ok: true }
   })

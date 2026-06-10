@@ -7,6 +7,50 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-10m -->
+## Review — 2026-06-10m | S1-S11 shell spec enrichment (e7921b2 + 5703b44)
+
+### Scope
+
+Commits `e7921b2` (test: S1-S11 real UI assertions + fixture dedup) + `5703b44` (bridge close).
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW — CLEAN (1 nit)
+
+All 10 shell specs enriched with real `toBeVisible` assertions. `anvay.spec.ts` deduped against `fixtures.ts`. Bridge properly closed with append + `[CLOSED]`.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | All S1-S11 addressed. |
+| D2 Code Standards | 4/5 | `kb.spec.ts` locator mixes CSS and `text=` engine in one string — invalid (see L1). |
+| D3 Performance | 5/5 | `waitForTimeout(1000)` removed. Real visibility checks used. |
+| D4 Security | 5/5 | No regressions. |
+| D5 Readability | 5/5 | Deduped fixtures, clean OR-locator chains. |
+| D6 Clarity/Comments | 5/5 | Bridge appended correctly. |
+
+---
+
+### LOW
+
+**L1** `apps/web/e2e/kb.spec.ts:9` — mixed selector engine in CSS string:
+
+```typescript
+// WRONG — 'text=Entity' is a Playwright selector engine prefix, not CSS.
+// When used in a comma-separated CSS string, it matches a literal <text> HTML tag
+// with attribute =Entity — which doesn't exist. Third option never fires.
+page.locator('input[placeholder*="Search"], input[placeholder*="search"], text=Entity')
+
+// CORRECT — use .or() for cross-engine OR:
+page.locator('input[placeholder*="earch"]').or(page.locator('text=Entity'))
+```
+
+<!-- REVIEW SECTION END — 2026-06-10m -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-10l -->
 ## Review — 2026-06-10l | LOW sweep A1-A6 (c12df09 + c1059a9)
 

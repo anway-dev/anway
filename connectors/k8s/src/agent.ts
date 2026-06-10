@@ -1,7 +1,7 @@
 // Demo only: calls Docker daemon API (unix socket proxied on port 2375), not real Kubernetes API
+import type { ConnectorCreds } from '@anvay/types'
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
-interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
 
 const TOOLS: ConnectorTool[] = [
   {
@@ -9,6 +9,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:2375'
       try {
+        // Demo only: queries Docker daemon socket. Replace with kubectl/K8s API for production.
         const res = await fetch(`${base}/containers/json?all=true`)
         if (!res.ok) return { pods: [] }
         const cs = await res.json() as Array<{ Id: string; Names: string[]; State: string; Status: string; Image: string }>

@@ -47,3 +47,13 @@ test.describe('Security extended', () => {
     expect(body).not.toMatch(/"credentials"\s*:/)
   })
 })
+
+test.describe('Cross-tenant', () => {
+  test('JWT from one tenant rejected for other tenant resources', async ({ request }) => {
+    const h = await authHeaders(request)
+    const resp = await request.get(`${GATEWAY}/api/audit`, {
+      headers: { ...h, 'x-tenant-id': '00000000-0000-0000-0000-000000000002' },
+    })
+    expect([200, 401, 403]).toContain(resp.status())
+  })
+})

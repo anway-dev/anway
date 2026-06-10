@@ -204,6 +204,15 @@ export interface ConnectorAction {
   readonly [key: string]: unknown
 }
 
+export interface ConnectorCreds {
+  baseUrl?: string
+  token?: string
+  apiKey?: string
+  password?: string
+  org?: string
+  [k: string]: unknown
+}
+
 export interface IConnector {
   readonly id: string
   readonly capabilities: CapabilityManifest

@@ -1,6 +1,6 @@
+import type { ConnectorCreds } from '@anvay/types'
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
-interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
 
 function ghConfig(creds: Record<string, unknown>): { baseUrl: string; authHeader: string; apiPrefix: string; token: string } {
   const token = (creds as ConnectorCreds).token ?? ''

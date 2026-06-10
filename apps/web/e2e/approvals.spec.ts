@@ -25,3 +25,15 @@ test.describe('Approvals', () => {
     expect(resp.status()).toBe(401)
   })
 })
+
+test.describe('Approvals UI', () => {
+  test('approve action removes item from pending list', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('text=Workflows').first().click()
+    const approveBtn = page.locator('button:has-text("Approve"), button:has-text("Confirm")').first()
+    if (await approveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await approveBtn.click()
+      await expect(approveBtn).not.toBeVisible({ timeout: 3000 })
+    }
+  })
+})

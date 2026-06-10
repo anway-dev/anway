@@ -1,6 +1,6 @@
+import type { ConnectorCreds } from '@anvay/types'
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
-interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
 
 const TOOLS: ConnectorTool[] = [
   {

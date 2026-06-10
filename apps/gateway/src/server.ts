@@ -12,6 +12,7 @@ import { createCronJobs } from './jobs/scheduler.js'
 import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
 import { startTriggerExecutor } from './triggers/executor.js'
 import { startIncidentSubscriber } from './events/incident-subscriber.js'
+import { startAlertSubscriber } from './events/alert-subscriber.js'
 
 const DEFAULT_REDIS_URL = 'redis://localhost:6379'
 const bootstrapLog = pino({ level: 'info' })
@@ -75,6 +76,11 @@ async function main() {
       await startIncidentSubscriber(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
     } catch (err) {
       app.log.warn({ err }, 'Incident subscriber not started — Redis may be unavailable')
+    }
+    try {
+      await startAlertSubscriber(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
+    } catch (err) {
+      app.log.warn({ err }, 'Alert subscriber not started — Redis may be unavailable')
     }
   } catch (err) {
     const log = app?.log ?? bootstrapLog

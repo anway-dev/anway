@@ -30,6 +30,7 @@ import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
 import { makeRegistrationTools } from '../connectors/registration-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
+import { isValidUUID } from '../utils/validators.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
 
@@ -387,4 +388,3 @@ export async function chatRoutes(app: FastifyInstance) {
   })
 }
 
-import { isValidUUID } from '../utils/validators.js'

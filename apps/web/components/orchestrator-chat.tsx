@@ -69,8 +69,15 @@ function now() {
   return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}.${String(d.getMilliseconds()).padStart(3,"0")}`;
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
 function parseMarkdown(text: string): string {
-  return text
+  // XSS guard: escape HTML before markdown substitutions — code blocks and inline code
+  // have their content pre-escaped; markdown patterns run on escaped text
+  const escaped = escapeHtml(text)
+  return escaped
     .replace(/```([\s\S]*?)```/g, '<pre style="display:block;background:#030303;border:1px solid #1a1a1a;border-left:2px solid #10b98166;border-radius:3px;padding:10px 12px;margin:8px 0;font-family:monospace;font-size:11px;color:#c9c9c9;white-space:pre-wrap">$1</pre>')
     .replace(/`([^`]+)`/g, '<code style="background:#0e0e0e;border:1px solid #2a2a2a;border-radius:3px;padding:1px 5px;font-family:monospace;font-size:11px;color:#10b981">$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#e5e5e5;font-weight:700">$1</strong>')

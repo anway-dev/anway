@@ -13,8 +13,10 @@ function isSafeBaseUrl(raw: string): boolean {
   try {
     const u = new URL(raw)
     if (!['http:', 'https:'].includes(u.protocol)) return false
-    // Block cloud metadata + RFC-1918 private ranges — allow localhost for Ollama dev
-    if (/^(169\.254\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(u.hostname)) return false
+    const host = u.hostname
+    // Block cloud metadata + RFC-1918 private ranges + loopback — allow localhost for Ollama dev
+    if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false
+    if (/^(169\.254\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(host)) return false
     return true
   } catch { return false }
 }
@@ -61,10 +63,11 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     },
   )
 
-  app.get('/api/settings/models', async (request) => {
+  app.get('/api/settings/models', { preHandler: [app.authenticate] }, async (request) => {
     const p = (request.query as { provider?: string }).provider
     const baseUrl = (request.query as { baseUrl?: string }).baseUrl
-    const apiKey = (request.query as { apiKey?: string }).apiKey
+    // apiKey sent via X-Api-Key header (not query string) to prevent SSRF via URL leak
+    const apiKey = request.headers['x-api-key'] as string | undefined
     if (!p) return { models: [] }
 
     const manifest = providerRegistry.get(p)

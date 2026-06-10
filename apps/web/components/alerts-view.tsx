@@ -328,8 +328,8 @@ export function AlertsView({ onTriggerOrchestrator }: Props) {
         {/* Tabs */}
         <div style={{ display: "flex", gap: "2px" }}>
           {TABS.map(t => {
-            const count = t.id === "all" ? LIVE_ALERTS.length : LIVE_ALERTS.filter(a => a.kind === t.id).length;
-            const hasCritical = t.id !== "all" && LIVE_ALERTS.some(a => a.kind === t.id && a.severity === "critical");
+            const count = t.id === "all" ? alerts.length : alerts.filter(a => a.kind === t.id).length;
+            const hasCritical = t.id !== "all" && alerts.some(a => a.kind === t.id && a.severity === "critical");
             return (
               <button
                 key={t.id}

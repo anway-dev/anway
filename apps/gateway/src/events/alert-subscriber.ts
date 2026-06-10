@@ -3,13 +3,13 @@ import type { RedisClientType } from 'redis'
 import { IncidentService } from '../services/incident.js'
 import { prisma } from '../db/client.js'
 import { UUID_RE } from '../utils/validators.js'
-import type { Severity } from '@prisma/client'
+import type { IncidentSeverity } from '@prisma/client'
 import pino from 'pino'
 
 const log = pino({ name: 'alert-subscriber' })
 
 // Severity mapping from alert payload to IncidentSeverity enum
-const SEV_MAP: Record<string, Severity> = {
+const SEV_MAP: Record<string, IncidentSeverity> = {
   critical: 'critical',
   high: 'high',
   medium: 'medium',

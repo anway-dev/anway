@@ -7,6 +7,36 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ai -->
+## Review — 2026-06-11ai | Fable 5th pass — FINAL GREEN SIGNOFF (HEAD: ccc6bba)
+
+**Reviewer:** Fable (independent pass)
+
+### Verdict: GREEN ✓
+
+All 15 previously-fixed issues verified resolved. No new BLOCKING or HIGH issues found.
+
+**Scanned clean:** specialist-agent, orchestrator, structural-graph, hybrid-knowledge-graph, graph-events, settings (SSRF), events (tenant JWT), subscriber (graph-builder), freshness-daemon, cron-monitors, scheduler, chat, gate/redis-gate-sink, gate-decide-route, all providers (anthropic/openai/ollama), automations, audit/postgres-sink.
+
+**FABLE PASS 5: GREEN — no BLOCKING or HIGH issues. All previously fixed issues verified.**
+
+---
+
+<!-- REVIEW SECTION START — 2026-06-11ah -->
+## Review — 2026-06-11ah | Commit ccc6bba (FA4 fixes)
+
+**Reviewer:** Claude
+
+### Verdict: CLEAN
+
+- FA4-H1: `specialist-agent.ts:112` — `systemPrompt` (KG-enriched local var) now used. Graph context reaches LLM. ✓
+- FA4-M1: `settings.ts:20` — `::ffff:172.*`, `::ffff:192.*`, `::ffff:169.*` all blocked. Cloud metadata SSRF vector closed. ✓
+- FA4-M2: `graph-events.ts:94` — `!== undefined && !== ''` guard. Empty-string tenant bypass closed. ✓
+
+No regressions.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ag -->
 ## Review — 2026-06-11ag | Fable 4th pass (HEAD: a0cfb4e)
 

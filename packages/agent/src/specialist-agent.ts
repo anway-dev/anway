@@ -76,7 +76,9 @@ async function* runSpecialist(
       const agentCtx = await config.knowledgeGraph.resolveContext(config.contextEntityId)
       const contextBlock = buildGroundedContextBlock(agentCtx)
       if (contextBlock) systemPrompt = contextBlock + '\n\n' + systemPrompt
-    } catch { /* KG unavailable — proceed without grounded context */ }
+    } catch (err) {
+      yield { type: 'error' as const, code: 'GRAPH_CONTEXT_FAILED', message: err instanceof Error ? err.message : String(err) }
+    }
   }
 
   const perimeterCtx: PerimeterCtx = {
@@ -132,14 +134,14 @@ async function* runSpecialist(
 
     if (!hasToolCalls) break
 
-    const toolResultParts: string[] = []
+    const toolResults = new Map<string, string>()
 
     for (const toolCall of collectedToolCalls) {
       const perimResult = await checkPerimeter(toolCall)
 
       if ('_tag' in perimResult && perimResult._tag === 'HardBlock') {
         yield { type: 'error', code: 'FORBIDDEN', message: perimResult.reason }
-        toolResultParts.push(`Tool "${toolCall.name}" blocked: ${perimResult.reason}`)
+        toolResults.set(toolCall.id, `Tool "${toolCall.name}" blocked: ${perimResult.reason}`)
         continue
       }
 
@@ -168,7 +170,7 @@ async function* runSpecialist(
             createdAt: new Date(),
           })
           const blockMsg = `Write action "${toolCall.name}" ${decision._tag === 'rejected' ? 'rejected by user' : 'timed out'}`
-          toolResultParts.push(blockMsg)
+          toolResults.set(toolCall.id, blockMsg)
           yield { type: 'tool_result', toolCallId: toolCall.id, result: blockMsg }
           continue
         }
@@ -188,14 +190,14 @@ async function* runSpecialist(
       }
 
       yield { type: 'tool_result', toolCallId: toolCall.id, result }
-      toolResultParts.push(`${toolCall.name} → ${JSON.stringify(result)}`)
+      toolResults.set(toolCall.id, `${toolCall.name} → ${JSON.stringify(result)}`)
     }
 
     for (const tc of collectedToolCalls) {
       messages.push(model.formatToolCall({ id: tc.id, name: tc.name, args: tc.args }))
     }
-    for (let i = 0; i < collectedToolCalls.length; i++) {
-      messages.push(model.formatToolResult(collectedToolCalls[i]!.id, toolResultParts[i] ?? ''))
+    for (const tc of collectedToolCalls) {
+      messages.push(model.formatToolResult(tc.id, toolResults.get(tc.id) ?? '(no result)'))
     }
   }
 

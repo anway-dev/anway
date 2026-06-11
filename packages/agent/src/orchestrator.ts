@@ -187,6 +187,7 @@ export async function* runSession(
         }).catch(() => {})
       }
       if (context?.primaryEntity) {
+        ctx = { ...ctx, contextEntityId: context.primaryEntity.id }
         const parts = [`Graph context for "${context.primaryEntity.name}" (${context.primaryEntity.type}):`]
         for (const rel of context.relationships.slice(0, 10)) {
           const fromName = rel.fromEntityId === context.primaryEntity.id

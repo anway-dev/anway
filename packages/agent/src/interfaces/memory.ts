@@ -15,6 +15,7 @@ export interface SessionContext {
   readonly effectiveRole: AgentRole
   readonly turns: ConversationTurn[]
   readonly summary?: string
+  readonly contextEntityId?: string
 }
 
 export type SessionMeta = Omit<SessionContext, 'turns'>

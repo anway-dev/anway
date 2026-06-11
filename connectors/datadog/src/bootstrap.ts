@@ -52,27 +52,12 @@ export class DatadogBootstrap implements IConnectorBootstrap {
       }
     }
 
-    // 3. Fetch service dependencies
-    const deps = await this.ddApi('/api/v1/service_dependencies', apiKey, appKey) as Record<string, string[]> | null
-    if (deps) {
-      for (const [fromSvc, toServices] of Object.entries(deps)) {
-        const fromCtx = await this.kg.resolveContextByName(fromSvc, tenantId, 1)
-        if (!fromCtx?.primaryEntity) continue
-        for (const toSvc of toServices) {
-          const toCtx = await this.kg.resolveContextByName(toSvc, tenantId, 1)
-          if (!toCtx?.primaryEntity) continue
-          await this.kg.upsertRelationship({
-            fromEntityId: fromCtx.primaryEntity.id,
-            relType: 'DEPENDS_ON',
-            toEntityId: toCtx.primaryEntity.id,
-            metadata: { source: 'datadog-service-map', confidence: 1.0 },
-          }, tenantId)
-          relationshipsUpserted++
-        }
-      }
-    }
+    // Service DEPENDS_ON edges not bootstrapped — Datadog APM service map requires Enterprise plan.
 
-    const hints = [`Datadog bootstrap: ${monitors?.length ?? 0} monitors, ${svcDefs?.data?.length ?? 0} services`]
+    const hints = [
+      `Datadog bootstrap: ${monitors?.length ?? 0} monitors, ${svcDefs?.data?.length ?? 0} services`,
+      'Datadog service map (DEPENDS_ON) skipped — requires APM Enterprise plan',
+    ]
     return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
   }
 }

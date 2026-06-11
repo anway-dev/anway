@@ -25,6 +25,7 @@ export const ErrorCode = {
   RATE_LIMITED: 'RATE_LIMITED',
   TOKEN_LIMIT_EXCEEDED: 'TOKEN_LIMIT_EXCEEDED',
   INTENT_CLASSIFICATION_FAILED: 'INTENT_CLASSIFICATION_FAILED',
+  GRAPH_CONTEXT_FAILED: 'GRAPH_CONTEXT_FAILED',
 } as const
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 

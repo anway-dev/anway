@@ -73,7 +73,7 @@ async function* runSpecialist(
   let systemPrompt = config.systemPrompt
   if (config.knowledgeGraph && config.contextEntityId) {
     try {
-      const agentCtx = await config.knowledgeGraph.resolveContext(config.contextEntityId)
+      const agentCtx = await config.knowledgeGraph.resolveContext(config.contextEntityId, ctx.tenantId)
       const contextBlock = buildGroundedContextBlock(agentCtx)
       if (contextBlock) systemPrompt = contextBlock + '\n\n' + systemPrompt
     } catch (err) {
@@ -193,9 +193,7 @@ async function* runSpecialist(
       toolResults.set(toolCall.id, `${toolCall.name} → ${JSON.stringify(result)}`)
     }
 
-    for (const tc of collectedToolCalls) {
-      messages.push(model.formatToolCall({ id: tc.id, name: tc.name, args: tc.args }))
-    }
+    messages.push(model.formatToolCall(collectedToolCalls))
     for (const tc of collectedToolCalls) {
       messages.push(model.formatToolResult(tc.id, toolResults.get(tc.id) ?? '(no result)'))
     }

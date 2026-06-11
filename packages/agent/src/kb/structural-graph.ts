@@ -92,11 +92,12 @@ export class StructuralGraph implements IKnowledgeGraph {
     ).catch(() => [])
     return rows.map(r => ({
       id: '',
+      tenantId: tenantId as string,
       source: 'kb_episodes',
       fetchedAt: r.created_at,
-      ttl: 86400,
-      freshness_score: 1.0,
-      data: { text: r.text, createdAt: r.created_at.toISOString() },
+      ttlSeconds: 86400,
+      freshnessScore: 1.0,
+      content: r.text,
     }))
   }
 

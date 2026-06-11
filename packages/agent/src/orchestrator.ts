@@ -140,7 +140,8 @@ export async function* runSession(
       { role: 'system', content: INTENT_SYSTEM_PROMPT },
       { role: 'user', content: input },
     ]
-    const intentResp = await model.chat(intentMessages, [], {
+    let intentResp: Awaited<ReturnType<typeof model.chat>> | null = null
+    intentResp = await model.chat(intentMessages, [], {
       model: cheapModel,
       maxTokens: 100,
       temperature: 0,
@@ -152,7 +153,7 @@ export async function* runSession(
     auditSink.append({
       id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
       sessionId: ctx.sessionId, eventType: 'intent_parse_failed',
-      payload: { raw: intentResp?.content ?? '', error: err instanceof Error ? err.message : String(err) },
+      payload: { error: err instanceof Error ? err.message : String(err) },
       createdAt: new Date(),
     }).catch(() => {})
     classifiedIntent = 'general'

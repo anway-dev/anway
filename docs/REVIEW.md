@@ -40,6 +40,19 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11am -->
+## Review — 2026-06-11am | Commit a0c7d8b (P1B-FIX — CODEOWNERS + stale marking)
+
+**Reviewer:** Claude
+
+### Verdict: GREEN for HIGHs ✓ | P1B-FIX-3 (MEDIUM) missed — rolled into P1C
+
+- P1B-FIX-1: `result.status !== 0` check removed. `execFileAsync` throws on failure, catch handles it. CODEOWNERS now parses. ✓
+- P1B-FIX-2: `markConnectorEntitiesStale` — UPDATE with `metadata->'connectorCoordinates' ? $2` (jsonb key-exists) correct. Interface + Hybrid delegate present. `onConnectorRemoved` uses count in episode. ✓
+- P1B-FIX-3: connector DELETE route — **not in commit**. Rolled into next bridge batch.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11al -->
 ## Review — 2026-06-11al | Commit de47ccb (P1B — GitHub CODEOWNERS, connector_removed)
 

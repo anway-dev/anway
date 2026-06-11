@@ -7,6 +7,31 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11aa -->
+## Review — 2026-06-11aa | FA-H1-3 (3614e0f)
+
+### Scope
+
+Commit `3614e0f` — incident tenantId stamp, registryCache bound, conditional spread.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM — CLEAN
+
+Remaining: FA-M1/M2 (security MEDIUMs), plus full LOW batch.
+
+---
+
+### Verified correct
+
+**FA-H1** — `/api/events/incident` extracts JWT tenantId, validates UUID, stamps payload. Pattern matches other event routes. ✓
+
+**FA-H2** — `MAX_REGISTRY_CACHE = 200`. Eviction check inside `if (!registryCache.has(tid))` — correct placement (only evict on new entry). Null-checks `k` before delete. ✓
+
+**FA-H3** — Conditional spread `...(config.knowledgeGraph !== undefined ? { knowledgeGraph: config.knowledgeGraph } : {})` — correct for `exactOptionalPropertyTypes`. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11aa -->
+
 <!-- REVIEW SECTION START — 2026-06-11z -->
 ## Review — 2026-06-11z | FA-B1-6 (415385c)
 

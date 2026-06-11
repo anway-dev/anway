@@ -7,6 +7,37 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11z -->
+## Review — 2026-06-11z | FA-B1-6 (415385c)
+
+### Scope
+
+Commit `415385c` — 6 BLOCKING TypeScript errors: resolveContext tenantId, formatToolCall array, intentResp scope, AuditEventType union, ErrorCode union, KBEntry shape.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM — CLEAN
+
+FA-H1/H2/H3 still pending.
+
+---
+
+### Verified correct
+
+**FA-B1** — `resolveContext(config.contextEntityId, ctx.tenantId)` — tenantId now passed. ✓
+
+**FA-B2** — `messages.push(model.formatToolCall(collectedToolCalls))` — full array passed, loop removed. ✓
+
+**FA-B3** — `let intentResp: ... | null = null` declared before try, `intentResp?.content` removed from catch payload. Scope resolved. ✓
+
+**FA-B4** — `'intent_parse_failed'` + `'graph_miss'` added to AuditEventType. ✓
+
+**FA-B5** — `GRAPH_CONTEXT_FAILED: 'GRAPH_CONTEXT_FAILED'` added to ErrorCode. ✓
+
+**FA-B6** — `search()` now returns `{ id, tenantId, source, fetchedAt, ttlSeconds, freshnessScore, content }` — matches KBEntry interface. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11z -->
+
 <!-- REVIEW SECTION START — 2026-06-11y -->
 ## Review — 2026-06-11y | Fable signoff audit (HEAD: 0cf3714)
 

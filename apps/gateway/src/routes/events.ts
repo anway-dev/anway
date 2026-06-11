@@ -40,7 +40,7 @@ const SEVERITY_MAP: Record<string, string> = {
 export async function eventRoutes(app: FastifyInstance) {
 
   // Alertmanager webhook receiver — writes incidents to DB + emits incident_created
-  app.post('/api/events/alert', { preHandler: [app.authenticate] }, async (request) => {
+  app.post('/api/events/alert', { preHandler: [app.authenticate] }, async (request, reply) => {
     const body = request.body as {
       alerts?: Array<{
         labels?: { alertname?: string; severity?: string; service?: string; job?: string }
@@ -51,7 +51,9 @@ export async function eventRoutes(app: FastifyInstance) {
 
     if (!body.alerts || !Array.isArray(body.alerts)) return { ok: true }
 
-    const { tenantId } = request.user as { tenantId: string }
+    const user = request.user as { tenantId?: string }
+    if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
+    const { tenantId } = user
     const pub = await getEventPub()
 
     for (const alert of body.alerts) {
@@ -91,7 +93,9 @@ export async function eventRoutes(app: FastifyInstance) {
 
   // Deploy event receiver
   app.post('/api/events/deploy', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const user = request.user as { tenantId?: string }
+    if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
+    const { tenantId } = user
     const payload = request.body as Record<string, unknown>
     payload.tenantId = tenantId
     const pub = await getEventPub()
@@ -101,7 +105,9 @@ export async function eventRoutes(app: FastifyInstance) {
 
   // PR merged webhook (Gitea/GitHub)
   app.post('/api/events/pr-merged', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const user = request.user as { tenantId?: string }
+    if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
+    const { tenantId } = user
     const payload = request.body as Record<string, unknown>
     payload.tenantId = tenantId
     const pub = await getEventPub()

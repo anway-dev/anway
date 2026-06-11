@@ -4,7 +4,7 @@ import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
 const TOOLS: ConnectorTool[] = [
   {
-    definition: { name: 'query_metrics', description: 'Run PromQL instant query', parameters: { type: 'object', properties: { query: { type: 'string' }, window: { type: 'string', optional: true } }, required: ['query'] } },
+    definition: { name: 'prometheus.query_metrics', description: 'Run PromQL instant query', parameters: { type: 'object', properties: { query: { type: 'string' }, window: { type: 'string', optional: true } }, required: ['query'] } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:9090'
       const q = encodeURIComponent(params.query as string)
@@ -18,7 +18,7 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'get_alerts', description: 'List active alerts', parameters: { type: 'object', properties: {} } },
+    definition: { name: 'prometheus.get_alerts', description: 'List active alerts', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:9090'
       try {
@@ -31,7 +31,7 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'get_targets', description: 'List scrape targets', parameters: { type: 'object', properties: {} } },
+    definition: { name: 'prometheus.get_targets', description: 'List scrape targets', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:9090'
       try {

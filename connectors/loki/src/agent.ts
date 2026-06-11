@@ -4,7 +4,7 @@ import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
 const TOOLS: ConnectorTool[] = [
   {
-    definition: { name: 'query_logs', description: 'Query logs using LogQL', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['query'] } },
+    definition: { name: 'loki.query_logs', description: 'Query logs using LogQL', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['query'] } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3100'
       const q = encodeURIComponent(params.query as string)
@@ -21,7 +21,7 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'get_labels', description: 'List available log labels', parameters: { type: 'object', properties: {} } },
+    definition: { name: 'loki.get_labels', description: 'List available log labels', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3100'
       try {
@@ -34,7 +34,7 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'get_log_volume', description: 'Get log volume for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, window: { type: 'string' } }, required: ['service'] } },
+    definition: { name: 'loki.get_log_volume', description: 'Get log volume for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, window: { type: 'string' } }, required: ['service'] } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3100'
       const q = encodeURIComponent(`{container_name=~".*${params.service}.*"}`)

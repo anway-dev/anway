@@ -32,8 +32,6 @@ async function tryPublish(pub: import('redis').RedisClientType | null, channel: 
   }
 }
 
-const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
-
 // Map alertmanager severity to IncidentSeverity enum
 const SEVERITY_MAP: Record<string, string> = {
   critical: 'critical', high: 'high', warning: 'medium', low: 'low',
@@ -42,18 +40,18 @@ const SEVERITY_MAP: Record<string, string> = {
 export async function eventRoutes(app: FastifyInstance) {
 
   // Alertmanager webhook receiver — writes incidents to DB + emits incident_created
-  app.post('/api/events/alert', async (request) => {
+  app.post('/api/events/alert', { preHandler: [app.authenticate] }, async (request) => {
     const body = request.body as {
       alerts?: Array<{
         labels?: { alertname?: string; severity?: string; service?: string; job?: string }
         status?: string
         annotations?: { summary?: string; description?: string }
       }>
-      tenantId?: string
     }
 
     if (!body.alerts || !Array.isArray(body.alerts)) return { ok: true }
 
+    const { tenantId } = request.user as { tenantId: string }
     const pub = await getEventPub()
 
     for (const alert of body.alerts) {
@@ -62,7 +60,6 @@ export async function eventRoutes(app: FastifyInstance) {
       const severity = alert.labels?.severity ?? 'high'
       const service = alert.labels?.service ?? alert.labels?.job ?? null
       const description = alert.annotations?.summary ?? alert.annotations?.description ?? null
-      const tenantId = body.tenantId ?? DEMO_TENANT
 
       // Write incident to DB — this is what the War Room reads
       const mappedSeverity = SEVERITY_MAP[severity] ?? 'medium'
@@ -93,22 +90,20 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Deploy event receiver
-  app.post('/api/events/deploy', async (request, reply) => {
+  app.post('/api/events/deploy', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
     const payload = request.body as Record<string, unknown>
-    if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId)) {
-      return reply.code(400).send({ error: 'valid tenantId required' })
-    }
+    payload.tenantId = tenantId
     const pub = await getEventPub()
     await tryPublish(pub, 'deploy_completed', payload)
     return { ok: true }
   })
 
   // PR merged webhook (Gitea/GitHub)
-  app.post('/api/events/pr-merged', async (request, reply) => {
+  app.post('/api/events/pr-merged', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
     const payload = request.body as Record<string, unknown>
-    if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId)) {
-      return reply.code(400).send({ error: 'valid tenantId required' })
-    }
+    payload.tenantId = tenantId
     const pub = await getEventPub()
     await tryPublish(pub, 'pr_merged', payload)
     return { ok: true }

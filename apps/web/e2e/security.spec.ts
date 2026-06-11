@@ -61,3 +61,67 @@ test.describe('Cross-tenant', () => {
     expect([401, 403]).toContain(crossResp.status())
   })
 })
+
+test.describe('Injection — incident API', () => {
+  let headers: Record<string, string>
+  const createdIds: string[] = []
+  test.beforeAll(async ({ request }) => { headers = await authHeaders(request) })
+  test.afterEach(async ({ request }) => {
+    for (const id of createdIds) {
+      await request.post(`${GATEWAY}/api/incidents/${id}/resolve`, { headers }).catch(() => {})
+    }
+    createdIds.length = 0
+  })
+
+  test('P0: SQL injection in incident title stored safely', async ({ request }) => {
+    const title = "E2E-SQL-'; DROP TABLE incidents; --"
+    const resp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers, data: { title, severity: 'low' },
+    })
+    expect(resp.status()).toBeOneOf([200, 201])
+    const { id } = await resp.json() as { id: string }
+    createdIds.push(id)
+    const getResp = await request.get(`${GATEWAY}/api/incidents/${id}`, { headers })
+    expect(getResp.status()).toBe(200)
+    expect((await getResp.json() as { title: string }).title).toBe(title)
+  })
+
+  test('P0: XSS payload in title — response must not contain raw script tag', async ({ request }) => {
+    const title = 'E2E-XSS-<script>alert(1)</script>'
+    const resp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers, data: { title, severity: 'low' },
+    })
+    expect(resp.status()).toBeOneOf([200, 201])
+    const { id } = await resp.json() as { id: string }
+    createdIds.push(id)
+    const text = await (await request.get(`${GATEWAY}/api/incidents/${id}`, { headers })).text()
+    expect(text).not.toContain('<script>')
+  })
+
+  test('P1: SSRF block — 10.x private IP returns empty models', async ({ request }) => {
+    const resp = await request.get(
+      `${GATEWAY}/api/settings/models?provider=openai&baseUrl=http://10.0.0.1:9090`,
+      { headers },
+    )
+    expect(resp.status()).toBe(200)
+    expect((await resp.json() as { models: unknown[] }).models).toHaveLength(0)
+  })
+
+  test('P1: SSRF block — 192.168.x returns empty models', async ({ request }) => {
+    const resp = await request.get(
+      `${GATEWAY}/api/settings/models?provider=openai&baseUrl=http://192.168.1.1:9090`,
+      { headers },
+    )
+    expect(resp.status()).toBe(200)
+    expect((await resp.json() as { models: unknown[] }).models).toHaveLength(0)
+  })
+
+  test('P1: SSRF block — decimal-encoded 127.0.0.1 returns empty models', async ({ request }) => {
+    const resp = await request.get(
+      `${GATEWAY}/api/settings/models?provider=openai&baseUrl=http://2130706433:9090`,
+      { headers },
+    )
+    expect(resp.status()).toBe(200)
+    expect((await resp.json() as { models: unknown[] }).models).toHaveLength(0)
+  })
+})

@@ -429,3 +429,67 @@ test.describe('I extended: Web UI navigation', () => {
     })
   }
 })
+
+// ---------------------------------------------------------------------------
+// P0 — Incidents CRUD
+// ---------------------------------------------------------------------------
+test.describe('P0: Incidents CRUD', () => {
+  let token: string
+  let headers: Record<string, string>
+
+  test.beforeAll(async ({ request }) => {
+    headers = await authHeaders(request)
+    token = headers.authorization?.replace('Bearer ', '') ?? ''
+  })
+
+  test('P0-3.1: Create incident — full roundtrip', async ({ request }) => {
+    const title = `E2E-test-${Date.now()}`
+    const resp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { title, severity: 'high', description: 'E2E test incident' },
+    })
+    expect(resp.status()).toBe(201)
+    const body = await resp.json() as { id: string; title: string; severity: string }
+    expect(body.id).toBeTruthy()
+    expect(body.title).toBe(title)
+    expect(body.severity).toBe('high')
+
+    // GET the incident
+    const getResp = await request.get(`${GATEWAY}/api/incidents/${body.id}`, { headers })
+    expect(getResp.status()).toBe(200)
+    const got = await getResp.json() as { title: string }
+    expect(got.title).toBe(title)
+  })
+
+  test('P0-3.2: Create incident — validation', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { severity: 'high' },
+    })
+    expect(resp.status()).toBe(400)
+  })
+
+  test('P0-3.3: Resolve incident', async ({ request }) => {
+    const title = `E2E-resolve-${Date.now()}`
+    const createResp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { title, severity: 'medium' },
+    })
+    const { id } = await createResp.json() as { id: string }
+
+    const resolveResp = await request.post(`${GATEWAY}/api/incidents/${id}/resolve`, { headers })
+    expect(resolveResp.status()).toBe(200)
+    const result = await resolveResp.json() as { ok: boolean }
+    expect(result.ok).toBe(true)
+
+    // Verify status changed
+    const getResp = await request.get(`${GATEWAY}/api/incidents/${id}`, { headers })
+    const got = await getResp.json() as { status: string }
+    expect(got.status).toBe('resolved')
+  })
+
+  test('P0-3.4: Get non-existent incident', async ({ request }) => {
+    const resp = await request.get(`${GATEWAY}/api/incidents/00000000-0000-0000-0000-000000000099`, { headers })
+    expect(resp.status()).toBe(404)
+  })
+})

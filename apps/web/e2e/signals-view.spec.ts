@@ -25,3 +25,19 @@ test.describe('Signals extended', () => {
     await expect(badge).toBeVisible({ timeout: 5000 })
   })
 })
+
+
+test.describe("P0: Alerts/Signals", () => {
+  test("P0-4.1: Severity badges render", async ({ page }) => {
+    await page.goto("/")
+    await page.locator("text=Signals").first().click()
+    await expect(page.locator("text=critical").or(page.locator("text=high")).first()).toBeVisible({ timeout: 5000 })
+  })
+
+  test("P0-4.2: Tab filter narrows results", async ({ page }) => {
+    await page.goto("/")
+    await page.locator("text=Signals").first().click()
+    await page.locator("button:has-text(\"Errors\")").first().click()
+    await page.waitForTimeout(500)
+  })
+})

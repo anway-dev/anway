@@ -91,3 +91,22 @@ test.describe('Connectors API — POST /api/connectors/:type/reconnect', () => {
     expect(body.ok).toBe(true)
   })
 })
+
+
+test.describe("P0: Connectors CRUD", () => {
+  test("P0-5.1: Configure + bootstrap + reconnect lifecycle", async ({ request }) => {
+    const h = await authHeaders(request)
+    // Configure
+    const putResp = await request.put(`${GATEWAY}/api/settings/connectors/prometheus`, {
+      headers: { ...h, "Content-Type": "application/json" },
+      data: { credentials: { baseUrl: "http://localhost:9090" } },
+    })
+    expect(putResp.status()).toBe(200)
+    // Bootstrap
+    const bootResp = await request.post(`${GATEWAY}/api/connectors/prometheus/bootstrap`, { headers: h })
+    expect(bootResp.status()).toBe(200)
+    // Reconnect  
+    const reconnResp = await request.post(`${GATEWAY}/api/connectors/prometheus/reconnect`, { headers: h })
+    expect(reconnResp.status()).toBe(200)
+  })
+})

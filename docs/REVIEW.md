@@ -7,6 +7,56 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11y -->
+## Review — 2026-06-11y | Fable signoff audit (HEAD: 0cf3714)
+
+**Reviewer:** Fable (general-purpose agent, independent pass) | **Scope:** Full codebase post-fix audit
+
+### Verdict: RED — 6 BLOCKING, 3 HIGH, 4 MEDIUM, 2 LOW
+
+All six BLOCKINGs are TypeScript compile errors confirmed by `tsc --noEmit`.
+
+---
+
+### BLOCKING
+
+| # | File | Issue |
+|---|------|-------|
+| FA-B1 | `packages/agent/src/specialist-agent.ts:76` | `resolveContext(config.contextEntityId)` — missing required `tenantId` arg. Interface: `(entityId, tenantId, depth?)`. TS2554. |
+| FA-B2 | `packages/agent/src/specialist-agent.ts:197` | `formatToolCall({ id, name, args })` — passes single plain object; interface requires `ToolCall[]`. TS2353. |
+| FA-B3 | `packages/agent/src/orchestrator.ts:155` | `intentResp?.content` in `catch` block — `intentResp` declared inside `try`, out of scope in `catch`. TS2304 + runtime ReferenceError. |
+| FA-B4 | `packages/agent/src/orchestrator.ts:154,185` | `'intent_parse_failed'` and `'graph_miss'` not in `AuditEventType` union in `interfaces/audit.ts`. TS compile error. |
+| FA-B5 | `packages/agent/src/specialist-agent.ts:80` | `'GRAPH_CONTEXT_FAILED'` not in `ErrorCode` union in `@anvay/types`. TS compile error. |
+| FA-B6 | `packages/agent/src/kb/structural-graph.ts:93-100` | `search()` returns `{ ttl, freshness_score, data }` — wrong shape. `KBEntry` requires `{ ttlSeconds, freshnessScore, content, tenantId }`. TS2322. |
+
+### HIGH
+
+| # | File | Issue |
+|---|------|-------|
+| FA-H1 | `apps/gateway/src/routes/events.ts:119-125` | `/api/events/incident` publishes raw `request.body` without extracting+pinning `tenantId` from JWT. Cross-tenant graph poisoning via GraphBuilderSubscriber. |
+| FA-H2 | `apps/gateway/src/graph-builder/subscriber.ts:40` | `registryCache` module-level Map has no size bound — grows unbounded with tenant churn. |
+| FA-H3 | `packages/agent/src/specialist-agent.ts:43` | `knowledgeGraph?: IKnowledgeGraph` spread with `exactOptionalPropertyTypes: true` — spread of optional undefined fails typecheck. |
+
+### MEDIUM
+
+| # | File | Issue |
+|---|------|-------|
+| FA-M1 | `apps/gateway/src/routes/settings.ts:18-19` | SSRF guard misses decimal/octal IP notation (`http://2130706433/` = `127.0.0.1`). |
+| FA-M2 | `connectors/loki/src/agent.ts:40` | `{container_name=~".*${params.service}.*"}` — `params.service` injected into LogQL regex without sanitization. |
+| FA-M3 | `packages/agent/src/kb/hybrid-knowledge-graph.ts:54` | `search()` calls `graphiti.getFacts(query)` without `tenantId`. Functionally isolated via constructor-bound tenantId on client, but arg inconsistency. |
+| FA-M4 | `apps/gateway/src/routes/chat.ts:46-47` | `InMemorySessionMemory` turns/metas Maps unbounded (dev-only, but no guard). |
+
+### LOW
+
+| # | File | Issue |
+|---|------|-------|
+| FA-L1 | `apps/gateway/src/jobs/scheduler.ts:32,46,63` | `LIMIT 1000` on tenant queries — silently skips tenants beyond 1000, no pagination. |
+| FA-L2 | `apps/gateway/src/routes/services.ts:92-96` | `activeIncidents.filter` is O(services × incidents) in JS — SQL join would eliminate. |
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11y -->
+
 <!-- REVIEW SECTION START — 2026-06-11x -->
 ## Review — 2026-06-11x | B4 (0cf3714)
 

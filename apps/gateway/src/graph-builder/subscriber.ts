@@ -76,10 +76,10 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       }
       // bootstrapRegistry is rebuilt per event because kg is per-tenant.
       const tid = event.tenantId
+      const kg = createKnowledgeGraph(tid as TenantId)
 
       // Cache bootstrap registry per tenant — avoids rebuilding on every event
       if (!registryCache.has(tid)) {
-        const kg = createKnowledgeGraph(tid as TenantId)
         const reg = new Map<string, IConnectorBootstrap>()
         reg.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
         reg.set('argocd', new ArgocdBootstrap(kg))

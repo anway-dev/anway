@@ -19,7 +19,6 @@ export class GraphBuilderAgent {
   constructor(
     private readonly kg: IKnowledgeGraph,
     private readonly model: IModelProvider,
-    private readonly cheapModel: string,
     private readonly logger?: GraphBuilderLogger,
     private readonly bootstrapRegistry?: Map<string, IConnectorBootstrap>,
     private readonly redisPublisher?: { publish(channel: string, message: string): Promise<number> },
@@ -268,7 +267,7 @@ export class GraphBuilderAgent {
       { role: 'user', content: text.slice(0, 500) },
     ]
     const resp = await this.model.chat(messages, [], {
-      model: this.cheapModel,
+      model: this.model.cheapModelId,
       maxTokens: 30,
       temperature: 0,
     })

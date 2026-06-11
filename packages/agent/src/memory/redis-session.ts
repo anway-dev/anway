@@ -25,8 +25,9 @@ export class RedisSessionMemory implements ISessionMemory {
   constructor(
     private readonly redis: Redis,
     private readonly summariseProvider?: IModelProvider,
-    private readonly summariseModel = 'claude-haiku-4-5-20251001',
   ) {}
+
+  private get summariseModel(): string { return this.summariseProvider?.cheapModelId ?? 'claude-haiku-4-5-20251001' }
 
   /**
    * Initialise session metadata. Must be called once before the first append.

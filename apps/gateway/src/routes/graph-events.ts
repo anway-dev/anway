@@ -106,7 +106,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
     // KG is cheap — create per request so withTenant sets correct tenant_id GUC
     const kg = createKnowledgeGraph(event.tenantId as TenantId)
-    const agent = new GraphBuilderAgent(kg, provider, 'claude-haiku-3-5-20251001', app.log)
+    const agent = new GraphBuilderAgent(kg, provider, app.log)
 
     try {
       await agent.handle(event)

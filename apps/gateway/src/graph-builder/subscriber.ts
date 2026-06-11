@@ -56,7 +56,6 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
     return
   }
   const provider = ProviderFactory.create(providerConfig)
-  const cheapModel = process.env['CHEAP_MODEL'] ?? 'claude-haiku-3-5-20251001'
 
   const sub: RedisClientType = createClient({ url: redisUrl })
   await sub.connect()
@@ -98,7 +97,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         registryCache.set(tid, reg)
       }
       const bootstrapRegistry = registryCache.get(tid)!
-      const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
+      const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub)
       await agent.handle(event)
     })
   }

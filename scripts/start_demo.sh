@@ -28,25 +28,32 @@ check_service() {
 }
 
 # ── Interactive mode ──
-MODE="${1:-}"
-
-if [ -z "$MODE" ]; then
-  echo ""
-  echo "  Anvay Demo — what do you want to do?"
-  echo ""
-  echo "  1) Full start    (infra + demo docker + gateway + web)"
-  echo "  2) Gateway only  (kill :4000, restart gateway)"
-  echo "  3) Web only      (kill :3000, restart web)"
-  echo "  4) Docker only   (restart demo compose services)"
-  echo "  5) Infra only    (restart postgres/redis/neo4j)"
-  echo "  q) Quit"
-  echo ""
-  read -rp "  Choice [1]: " MODE
-  MODE="${MODE:-1}"
-fi
+echo ""
+echo "  Anvay Demo"
+echo ""
+PS3="  Choice: "
+options=(
+  "Full start    (infra + demo docker + gateway + web)"
+  "Gateway only  (kill :4000, restart gateway)"
+  "Web only      (kill :3000, restart web)"
+  "Docker only   (restart demo compose services)"
+  "Infra only    (restart postgres/redis/neo4j)"
+  "Quit"
+)
+select opt in "${options[@]}"; do
+  case "$REPLY" in
+    1) MODE=1; break ;;
+    2) MODE=2; break ;;
+    3) MODE=3; break ;;
+    4) MODE=4; break ;;
+    5) MODE=5; break ;;
+    6) exit 0 ;;
+    *) echo "  Invalid — enter 1-6" ;;
+  esac
+done
+echo ""
 
 case "$MODE" in
-  q|Q) exit 0 ;;
   2)   # ── Gateway only ──
        lsof -ti :4000 2>/dev/null | xargs kill -9 2>/dev/null || true
        sleep 1

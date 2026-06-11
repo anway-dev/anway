@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { createClient } from 'redis'
+import { UUID_RE } from '../utils/validators.js'
 
 export async function connectorsRoutes(app: FastifyInstance) {
   app.get('/api/connectors', {
@@ -78,6 +79,35 @@ export async function connectorsRoutes(app: FastifyInstance) {
     }
     return { ok: true, message: `Bootstrap triggered for ${type}` }
   })
+
+  // DELETE connector — emits connector_removed for stale marking
+  app.delete<{ Params: { id: string } }>(
+    '/api/connectors/:id',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { id } = request.params
+      if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<{ connector_type: string }[]>`
+          DELETE FROM connector_config
+          WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+          RETURNING connector_type
+        `
+      ).catch(() => [])
+      if (rows.length === 0) return reply.code(404).send({ error: 'not found' })
+      const pub = await getBootstrapPub()
+      if (pub) {
+        await pub.publish('connector_removed', JSON.stringify({
+          type: 'connector_removed',
+          tenantId,
+          connectorId: id,
+          connectorType: rows[0]!.connector_type,
+        }))
+      }
+      return reply.code(204).send()
+    },
+  )
 }
 
 let _pub: import('redis').RedisClientType | null = null

@@ -21,6 +21,8 @@
     "@anvay/connector-datadog": "workspace:*",
     "@anvay/connector-github": "workspace:*",
     "@anvay/connector-linear": "workspace:*",
+    "@anvay/connector-prometheus": "workspace:*",
+    "@anvay/connector-loki": "workspace:*",
     "@anvay/types": "workspace:*",
     "@fastify/cors": "^11.0.0",
     "@fastify/jwt": "^9.0.0",

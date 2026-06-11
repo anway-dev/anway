@@ -61,6 +61,7 @@ case "$MODE" in
        set -a; source apps/gateway/.env 2>/dev/null || true; set +a
        pnpm install --silent 2>/dev/null || pnpm install
        (cd apps/gateway && pnpm dev) > /tmp/anvay-gateway.log 2>&1 &
+       TRIES=0; until curl -sf http://127.0.0.1:4000/health > /dev/null 2>&1; do sleep 1; TRIES=$((TRIES+1)); [ $TRIES -ge 15 ] && break; done
        echo ""; echo "  Status:"
        check_service "Gateway  :4000" "curl -sf http://127.0.0.1:4000/health"
        echo ""
@@ -71,6 +72,7 @@ case "$MODE" in
        lsof -ti :3000 2>/dev/null | xargs kill -9 2>/dev/null || true
        sleep 1
        (cd apps/web && env -u PORT pnpm dev) > /tmp/anvay-web.log 2>&1 &
+       TRIES=0; until curl -s http://localhost:3000 -o /dev/null -w "%{http_code}" 2>/dev/null | grep -qE '^[23]'; do sleep 1; TRIES=$((TRIES+1)); [ $TRIES -ge 15 ] && break; done
        echo ""; echo "  Status:"
        check_service "Web      :3000" "curl -sf http://localhost:3000"
        echo ""

@@ -35,6 +35,12 @@ importers:
       '@anvay/connector-linear':
         specifier: workspace:*
         version: link:../../connectors/linear
+      '@anvay/connector-loki':
+        specifier: workspace:*
+        version: link:../../connectors/loki
+      '@anvay/connector-prometheus':
+        specifier: workspace:*
+        version: link:../../connectors/prometheus
       '@anvay/mcp-adapter':
         specifier: workspace:*
         version: link:../../packages/mcp-adapter

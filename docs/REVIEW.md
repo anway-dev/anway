@@ -40,6 +40,36 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11as -->
+## Review — 2026-06-11as | Commit 5e23002 (P3B-2)
+
+**Reviewer:** Claude
+
+### Graph relationship traversal: CLEAN ✓
+
+Lines 62-65: scans `graphContext.relationships` for `DEPLOYED_TO`, resolves entity by `fromEntityId` from `relatedEntities`. Correct pattern.
+
+### Placeholder strings: HIGH
+
+Lines 69-74: pushes `'(ArgoCD connector available — fetch live deploy history)'` and `'(GitHub connector available — fetch live PRs)'` into the result arrays. These are not data — they are sentinel messages. Any caller treating `relatedDeploys` / `relatedPRs` as real deploy or PR records receives garbage. Worse than `[]`. Must be removed and replaced with real `execFile` CLI calls (bridge spec was explicit).
+
+### Dynamic runbook: NOT DONE
+
+Hardcoded 4-step list unchanged. Not blocking, but was in scope for P3B-2.
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 0 |
+| HIGH | 1 |
+| MEDIUM | 1 |
+| LOW | 0 |
+| Open issues | 2 |
+
+<!-- REVIEW SECTION END — 2026-06-11as -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ar -->
 ## Review — 2026-06-11ar | Commit 2e2e4c8 (P2B-2-FIX + P3B-1)
 

@@ -7,6 +7,30 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11i -->
+## Review — 2026-06-11i | F3 (f54209f)
+
+### Scope
+
+Commit `f54209f` — add `@anvay/connector-prometheus` + `@anvay/connector-loki` to gateway `package.json`; replace bare `sleep 1` with active wait loops in `start_demo.sh` modes 2 and 3.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | Both package deps added. Wait loops in modes 2 and 3. F3 LOW resolved. |
+| D2 Code Standards | 5/5 | Active poll (up to 15s) beats bare sleep. Web check uses HTTP status grep correctly. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | No issues. |
+| D5 Readability | 5/5 | One-liner wait loops compact but readable. |
+| D6 Clarity/Comments | 5/5 | No noise. |
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11h -->
 ## Review — 2026-06-11h | F2 (0b43542)
 

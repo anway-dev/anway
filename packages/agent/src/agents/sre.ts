@@ -65,13 +65,6 @@ export class SREAgent {
           if (deployEntity?.name) relatedDeploys.push(deployEntity.name)
         }
       }
-      // Check connectorCoordinates for live data sources
-      if (graphContext.connectorCoordinates?.argocd) {
-        relatedDeploys.push('(ArgoCD connector available — fetch live deploy history)')
-      }
-      if (graphContext.connectorCoordinates?.github) {
-        relatedPRs.push('(GitHub connector available — fetch live PRs)')
-      }
     }
 
     return {

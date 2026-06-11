@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Lifecycle view', () => {
-  test('renders stage flow labels', async ({ page }) => {
+  test('P0: renders stage flow labels', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

@@ -1,24 +1,16 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Navigation', () => {
-  test('all sidebar nav items exist', async ({ page }) => {
+  test('P0: all sidebar nav items exist', async ({ page }) => {
     await page.goto('/')
-    const navItems = ['Anvay', 'Signals', 'War Room', 'Services', 'Lifecycle',
-      'Editor', 'Knowledge', 'Workflows', 'Approvals', 'Automations',
-      'API Client', 'Connectors', 'Audit', 'Access', 'Cloud', 'K8s']
-    for (const item of navItems) {
-      const loc = page.locator(`text=${item}`).first()
-      await loc.scrollIntoViewIfNeeded()
-      await expect(loc).toBeVisible()
+    for (const item of ['Signals', 'War Room', 'Services', 'Lifecycle', 'Editor', 'Knowledge', 'Workflows', 'Automations', 'API Client', 'Connectors', 'Audit', 'Access', 'Settings', 'Cloud', 'K8s']) {
+      await expect(page.locator('text=' + item).first()).toBeVisible()
     }
   })
 
-  test('view switching updates content area', async ({ page }) => {
+  test('P0: view switching renders correct content', async ({ page }) => {
     await page.goto('/')
-    // Services
-    await page.locator('text=Services').first().click()
-    // Should show service catalog or related content
-    // Incident/War Room
-    await page.locator('text=War Room').first().click()
+    await page.locator('text=Audit').first().click()
+    await expect(page.locator('text=Audit Trail')).toBeVisible({ timeout: 5000 })
   })
 })

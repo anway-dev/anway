@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('K8s view', () => {
-  test('renders namespace or pod section', async ({ page }) => {
+  test('P0: renders without JS errors', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

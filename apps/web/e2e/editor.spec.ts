@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Editor view', () => {
-  test('renders editor panel with findings section', async ({ page }) => {
+  test('P0: renders editor panel', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

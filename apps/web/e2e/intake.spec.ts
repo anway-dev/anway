@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Intake/Routing view', () => {
-  test('renders routing rules or L1 Assist section', async ({ page }) => {
+  test('P0: renders routing rules', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

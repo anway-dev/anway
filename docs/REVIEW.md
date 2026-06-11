@@ -40,6 +40,22 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11an -->
+## Review — 2026-06-11an | Commit a72c7a2 (P1B-FIX-3 + P1C-1)
+
+**Reviewer:** Claude
+
+### Verdict: GREEN for what's here | P1C-2 (ArgoCD) missing | 1 MEDIUM security gap
+
+**P1B-FIX-3 (DELETE route):** UUID validation ✓, tenant-scoped DELETE ✓, `connector_removed` published ✓, 404/204 responses correct ✓. Uses existing `getBootstrapPub()` helper ✓.
+Missing: admin role check. `settings.ts` guards provider writes with `if (user.role !== 'admin')`. Connector deletion is equally sensitive — any authenticated user can currently delete any connector in their tenant.
+
+**P1C-1 (Datadog bootstrap):** `ddApi` helper ✓, monitors graceful null ✓, service catalog → Service entities with `connectorCoordinates` ✓, `DEPENDS_ON` via `resolveContextByName` + `upsertRelationship` ✓. Service names from catalog should match freshly seeded entities — acceptable approach.
+
+**P1C-2 (ArgoCD — Deploy→DEPLOYED_TO→Service + Pipeline):** Not in commit. ArgoCD bootstrap still Deploy entities only, `relationshipsUpserted: 0`. Rolling into next bridge.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11am -->
 ## Review — 2026-06-11am | Commit a0c7d8b (P1B-FIX — CODEOWNERS + stale marking)
 

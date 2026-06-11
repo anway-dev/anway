@@ -75,7 +75,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'freshness_decay',
     schedule: '*/5 * * * *',
     async run() {
-      return runFreshnessDecay()
+      return runFreshnessDecay(redisUrl)
     },
   })
 

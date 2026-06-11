@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import type { ConnectorCreds } from '@anvay/types'
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
@@ -49,8 +50,24 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'create_pr', description: 'Create a pull request', parameters: { type: 'object', properties: { repo: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, base: { type: 'string' }, head: { type: 'string' } }, required: ['repo', 'title', 'base', 'head'] } },
-    execute: () => Promise.resolve({ url: 'https://github.com/org/repo/pull/1' }),
+    definition: { name: 'create_pr', description: 'Create a pull request', parameters: { type: 'object', properties: { repo: { type: 'string' }, title: { type: 'string' }, body: { type: 'string', optional: true }, base: { type: 'string' }, head: { type: 'string' } }, required: ['repo', 'title', 'base', 'head'] } },
+    execute: async (params, creds) => {
+      const token = (creds as ConnectorCreds).token ?? process.env['GH_TOKEN'] ?? ''
+      const result = spawnSync('gh', [
+        'pr', 'create',
+        '--repo', String(params.repo),
+        '--title', String(params.title),
+        '--body', String(params.body ?? ''),
+        '--base', String(params.base ?? 'main'),
+        '--head', String(params.head),
+      ], {
+        env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin', GH_TOKEN: token },
+        encoding: 'utf-8',
+        timeout: 30_000,
+      })
+      if (result.status !== 0) throw new Error(result.stderr || 'gh pr create failed')
+      return { url: result.stdout.trim(), ok: true }
+    },
     write: true,
   },
 ]

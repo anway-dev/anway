@@ -12,11 +12,15 @@ import type {
   GroundingSource,
   ConnectorCoordinates,
 } from '../interfaces/knowledge-graph.js'
+import type { IEmbeddingProvider } from '../interfaces/provider.js'
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<unknown[]>
 
 export class StructuralGraph implements IKnowledgeGraph {
-  constructor(private readonly queryFn: QueryFn) {}
+  constructor(
+    private readonly queryFn: QueryFn,
+    private readonly embedder?: IEmbeddingProvider,
+  ) {}
 
   private async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
     return this.queryFn(sql, params) as Promise<T[]>
@@ -84,6 +88,36 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async search(query: string, tenantId: TenantId, topK: number): Promise<KBEntry[]> {
+    if (this.embedder) {
+      try {
+        const vecs = await this.embedder.embed([query])
+        const vec = vecs[0]
+        if (vec && vec.length > 0) {
+          const vectorLiteral = `[${vec.join(',')}]`
+          const rows = await this.query<{
+            id: string; content: string; fetched_at: Date
+            ttl_seconds: number; freshness_score: number; source: string
+          }>(
+            `SELECT id, content, fetched_at, ttl_seconds, freshness_score, source
+             FROM kb_entries
+             WHERE tenant_id = $1
+             ORDER BY embedding <=> $2::vector
+             LIMIT $3`,
+            [tenantId, vectorLiteral, topK],
+          ).catch(() => [])
+          return rows.map(r => ({
+            id: r.id,
+            tenantId: tenantId as string,
+            source: r.source,
+            fetchedAt: r.fetched_at,
+            ttlSeconds: r.ttl_seconds,
+            freshnessScore: r.freshness_score,
+            content: r.content,
+          }))
+        }
+      } catch { /* fall through to ILIKE */ }
+    }
+    // Fallback: ILIKE on kb_episodes
     const rows = await this.query<{ text: string; created_at: Date }>(
       `SELECT text, created_at FROM kb_episodes
        WHERE tenant_id = $1 AND text ILIKE $2

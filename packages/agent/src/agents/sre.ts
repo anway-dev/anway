@@ -55,6 +55,25 @@ export class SREAgent {
       { role: 'user', content: `Alert: ${alertTitle}\nDescription: ${alertDescription}\nEntities identified: ${entities.join(', ')}\n\n${graphBlock}` },
     ], [], { model: this.mainModelId, maxTokens: 500, temperature: 0 })
 
+    // Populate relatedDeploys and relatedPRs from graph context
+    const relatedDeploys: string[] = []
+    const relatedPRs: string[] = []
+    if (graphContext) {
+      for (const rel of graphContext.relationships) {
+        if (rel.relType === 'DEPLOYED_TO') {
+          const deployEntity = graphContext.relatedEntities.find(e => e.id === rel.fromEntityId)
+          if (deployEntity?.name) relatedDeploys.push(deployEntity.name)
+        }
+      }
+      // Check connectorCoordinates for live data sources
+      if (graphContext.connectorCoordinates?.argocd) {
+        relatedDeploys.push('(ArgoCD connector available — fetch live deploy history)')
+      }
+      if (graphContext.connectorCoordinates?.github) {
+        relatedPRs.push('(GitHub connector available — fetch live PRs)')
+      }
+    }
+
     return {
       hypothesis: hypothesisResult.content,
       timeline: [{
@@ -62,8 +81,8 @@ export class SREAgent {
         source: 'alert',
         event: `${alertTitle}: ${alertDescription}`,
       }],
-      relatedDeploys: [],
-      relatedPRs: [],
+      relatedDeploys,
+      relatedPRs,
       suggestedRunbook: [
         'Check service health metrics',
         'Review recent deploys',

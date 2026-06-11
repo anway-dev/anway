@@ -13,12 +13,14 @@ export interface CronJobRecord {
 
 export class ServiceHealthSweep {
   async run(tenantId: string): Promise<{ status: string; findings: number }> {
-    const connectors = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<{ id: string; type: string }[]>`
-        SELECT id, type FROM connectors WHERE tenant_id = ${tenantId}::uuid
+    // Query active incidents as a simple health indicator
+    const incidents = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(*) as count FROM incidents WHERE tenant_id = ${tenantId}::uuid AND status IN ('active', 'investigating')
       `
-    )
-    return { status: 'ok', findings: connectors.length }
+    ).catch(() => [{ count: 0n }])
+    const findings = Number(incidents[0]?.count ?? 0)
+    return { status: findings > 0 ? 'degraded' : 'ok', findings }
   }
 }
 

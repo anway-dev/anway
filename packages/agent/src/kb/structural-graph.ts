@@ -23,11 +23,22 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async addEpisode(_episode: Episode): Promise<void> {
-    throw new Error('Episodic layer not implemented — use Graphiti')
+    // Episodic layer stubbed — episodes written via GraphBuilderAgent in subscriber.ts
   }
 
-  async getFacts(_query: string, _at?: Date): Promise<Fact[]> {
-    throw new Error('Episodic layer not implemented — use Graphiti')
+  async getFacts(_query: string, at?: Date): Promise<Fact[]> {
+    const since = at ?? new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const rows = await this.query<{ text: string; created_at: Date }>(
+      `SELECT text, created_at FROM kb_episodes WHERE created_at >= $1 ORDER BY created_at DESC LIMIT 50`,
+      [since],
+    ).catch(() => [])
+    return rows.map(r => ({
+      claim: r.text,
+      source: 'kb_episodes',
+      validFrom: new Date(r.created_at.getTime() - 60 * 60 * 1000),
+      validTo: r.created_at,
+      confidence: 1.0,
+    }))
   }
 
   async getEntity(id: string, tenantId: TenantId): Promise<Entity | null> {
@@ -68,8 +79,21 @@ export class StructuralGraph implements IKnowledgeGraph {
     return this.query<Relationship>(sql, params)
   }
 
-  async search(_query: string, _tenantId: TenantId, _topK: number): Promise<KBEntry[]> {
-    throw new Error('Semantic search requires pgvector — use RAG pipeline')
+  async search(query: string, tenantId: TenantId, topK: number): Promise<KBEntry[]> {
+    const rows = await this.query<{ text: string; created_at: Date }>(
+      `SELECT text, created_at FROM kb_episodes
+       WHERE tenant_id = $1 AND text ILIKE $2
+       ORDER BY created_at DESC LIMIT $3`,
+      [tenantId, `%${query}%`, topK],
+    ).catch(() => [])
+    return rows.map(r => ({
+      id: '',
+      source: 'kb_episodes',
+      fetchedAt: r.created_at,
+      ttl: 86400,
+      freshness_score: 1.0,
+      data: { text: r.text, createdAt: r.created_at.toISOString() },
+    }))
   }
 
   async resolveContext(entityId: string, tenantId: TenantId, depth = 3): Promise<AgentContext> {

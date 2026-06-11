@@ -7,6 +7,44 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11w -->
+## Review — 2026-06-11w | M12-r (bbc2712)
+
+### Scope
+
+Commit `bbc2712` — per-tenantId bootstrapRegistry cache in subscriber.ts.
+
+### Verdict: 1 BLOCKING — NEEDS FIX
+
+---
+
+### BLOCKING
+
+**B4** `apps/gateway/src/graph-builder/subscriber.ts:82,93` — `const kg` declared inside `if (!registryCache.has(tid))` block (line 82) but used on line 93 outside the block. When the cache is warm (second+ event for same tenant), the `if` branch is skipped, `kg` is never declared, TypeScript error: `Cannot find name 'kg'`.
+
+Fix: move `kg` creation before the `if` block:
+```typescript
+const tid = event.tenantId
+const kg = createKnowledgeGraph(tid as TenantId)   // ← move here
+
+if (!registryCache.has(tid)) {
+  const reg = new Map<string, IConnectorBootstrap>()
+  reg.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
+  // ... rest unchanged
+  registryCache.set(tid, reg)
+}
+const bootstrapRegistry = registryCache.get(tid)!
+const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
+```
+
+`kg` is cheap to create per-event; only the registry (with async credential lookups) needs caching.
+
+Commit: `fix: B4 — move kg outside if block in subscriber`
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11w -->
+
 <!-- REVIEW SECTION START — 2026-06-11v -->
 ## Review — 2026-06-11v | B3+M-ep2 (e51b5dc)
 

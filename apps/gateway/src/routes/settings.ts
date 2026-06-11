@@ -132,6 +132,13 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         return reply.code(400).send({ error: 'Unknown connector type' })
       }
       const { credentials } = request.body
+
+      // Check if this is a first registration vs credential update
+      const existing = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM connector_config WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid LIMIT 1`
+      ).catch(() => [])
+      const isNew = existing.length === 0
+
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
           INSERT INTO connector_config (tenant_id, connector_type, credentials, enabled)
@@ -141,8 +148,8 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         `
       )
 
-      // Emit connector_registered event for graph builder
-      if (opts?.pub) {
+      // Emit connector_registered only on first registration (not credential update)
+      if (isNew && opts?.pub) {
         await opts.pub.publish('connector_registered', JSON.stringify({ tenantId, connectorType: type }))
       }
 

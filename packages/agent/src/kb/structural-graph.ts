@@ -151,7 +151,7 @@ export class StructuralGraph implements IKnowledgeGraph {
 
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
     const rows = await this.query<{ id: string }>(
-      `SELECT id FROM entities WHERE tenant_id = $1 AND name ILIKE $2 LIMIT 1`,
+      `SELECT id FROM entities WHERE tenant_id = $1 AND name ILIKE $2 ORDER BY metadata->>'confidence' DESC LIMIT 1`,
       [tenantId, `%${name}%`],
     )
     if (rows.length === 0) return null

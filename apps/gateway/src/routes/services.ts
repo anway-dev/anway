@@ -27,19 +27,19 @@ export async function serviceRoutes(app: FastifyInstance) {
     return withTenant(prisma, tenantId, async (tx) => {
       // RLS filters by tenant — no need to repeat tenant_id in WHERE
       const entities = await tx.$queryRaw<EntityRow[]>`
-        SELECT id, name, type, metadata FROM entities WHERE type = 'Service' ORDER BY name
+        SELECT id, name, type, metadata FROM entities WHERE type = 'Service' ORDER BY name LIMIT 500
       `
       if (entities.length === 0) return []
 
       const allEntities = await tx.$queryRaw<EntityRow[]>`
-        SELECT id, name, type, metadata FROM entities
+        SELECT id, name, type, metadata FROM entities LIMIT 1000
       `
       const allRels = await tx.$queryRaw<RelRow[]>`
         SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
-        FROM relationships
+        FROM relationships LIMIT 2000
       `
       const activeIncidents = await tx.$queryRaw<IncidentRow[]>`
-        SELECT title, status FROM incidents WHERE status IN ('active', 'investigating')
+        SELECT title, status FROM incidents WHERE status IN ('active', 'investigating') ORDER BY created_at DESC LIMIT 100
       `
 
       const entityById = new Map(allEntities.map(e => [e.id, e]))

@@ -174,6 +174,13 @@ export async function* runSession(
     const entityName = entityResp.content.trim()
     if (entityName) {
       const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 2)
+      if (!context?.primaryEntity) {
+        await config.auditSink.append({
+          id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
+          sessionId: ctx.sessionId, eventType: 'graph_miss',
+          payload: { entityName }, createdAt: new Date(),
+        }).catch(() => {})
+      }
       if (context?.primaryEntity) {
         const parts = [`Graph context for "${context.primaryEntity.name}" (${context.primaryEntity.type}):`]
         for (const rel of context.relationships.slice(0, 10)) {

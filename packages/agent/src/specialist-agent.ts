@@ -191,11 +191,12 @@ async function* runSpecialist(
       toolResultParts.push(`${toolCall.name} → ${JSON.stringify(result)}`)
     }
 
-    const assistantContent = collectedToolCalls
-      .map((tc) => `[tool_call id="${tc.id}" name="${tc.name}"] ${JSON.stringify(tc.args)}`)
-      .join('\n')
-    messages.push({ role: 'assistant', content: assistantContent })
-    messages.push({ role: 'user', content: toolResultParts.join('\n') })
+    for (const tc of collectedToolCalls) {
+      messages.push(model.formatToolCall({ id: tc.id, name: tc.name, args: tc.args }))
+    }
+    for (let i = 0; i < collectedToolCalls.length; i++) {
+      messages.push(model.formatToolResult(collectedToolCalls[i]!.id, toolResultParts[i] ?? ''))
+    }
   }
 
   yield { type: 'done', inputTokens: totalInputTokens, outputTokens: totalOutputTokens }

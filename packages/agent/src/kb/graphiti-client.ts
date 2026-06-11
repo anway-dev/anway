@@ -32,15 +32,19 @@ export class GraphitiClient {
 
   async getFacts(query: string, _tenantId?: string, at?: Date): Promise<Fact[]> {
     const params = new URLSearchParams({ query, ...(at ? { at: at.toISOString() } : {}) })
-    const resp = await fetch(`${this.config.baseUrl}/facts?${params}`, {
-      headers: { 'X-Tenant-Id': this.config.tenantId },
-      signal: AbortSignal.timeout(this.config.timeoutMs ?? DEFAULT_TIMEOUT),
-    })
-    if (!resp.ok) return []
-    try {
-      return (await resp.json()) as Fact[]
-    } catch {
-      return []
+    const lastErr: unknown[] = []
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 500 * attempt))
+      try {
+        const resp = await fetch(`${this.config.baseUrl}/facts?${params}`, {
+          headers: { 'X-Tenant-Id': this.config.tenantId },
+          signal: AbortSignal.timeout(this.config.timeoutMs ?? DEFAULT_TIMEOUT),
+        })
+        if (!resp.ok) { lastErr.push(resp.status); continue }
+        const data = await resp.json() as Fact[]
+        return data
+      } catch (err) { lastErr.push(err); continue }
     }
+    return []
   }
 }

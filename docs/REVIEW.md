@@ -69,6 +69,46 @@ Phase 4 complete. All P1–P4 batches done. Ready for fable final signoff.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-12b -->
+## Review — 2026-06-12b | Commit 0bd69ce (P5A)
+
+**Reviewer:** Claude
+
+### P5A-1 — connector_reconnected: CLEAN ✓
+
+- `ConnectorReconnected` interface + union type in `events.ts` ✓
+- `case 'connector_reconnected'` in `handle()` switch → `onConnectorReconnected` ✓
+- `onConnectorReconnected`: fetches bootstrapper, re-runs bootstrap, emits episode ✓
+- `graph:updated` publish fires from outer `handle()` after switch — reconnected case gets it ✓
+- `GRAPH_EVENT_CHANNELS` updated to 7 ✓
+- `POST /api/connectors/:type/reconnect` gateway route — VALID_BOOTSTRAP_TYPES check, creds fetch, Redis publish ✓
+
+### P5A-2 — recentEpisodes + groundingSources: CLEAN ✓
+
+- `getRecentEpisodesForEntity`: ILIKE query on `kb_episodes` last 24h, limit 20, `.catch(() => [])` ✓
+- `buildGroundingSources`: TTL_BY_CONNECTOR map, defensive `instanceof Date` check for `resolvedAt` ✓
+- Both wired into `resolveContext` return ✓
+
+### subscriber.test.ts: Fixed directly
+
+Count updated 6→7, `connector_reconnected` assertion added. All 36 gateway tests GREEN.
+
+### P5B (Datadog fix + InMemoryGateSink): NOT IN THIS COMMIT
+
+Bridge P5B posted.
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| Open issues | 0 |
+
+<!-- REVIEW SECTION END — 2026-06-12b -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-12a -->
 ## Review — 2026-06-12a | Fable final audit — YELLOW verdict
 

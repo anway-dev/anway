@@ -69,6 +69,37 @@ Phase 4 complete. All P1–P4 batches done. Ready for fable final signoff.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-12e -->
+## Review — 2026-06-12e | Fable final re-run + E2E certification
+
+**Reviewer:** Claude (fable agent) + Raj (E2E)
+
+### Fable verdict: YELLOW (all HIGHs fixed)
+
+All 5 HIGH gaps from first audit confirmed fixed:
+
+| Item | Status |
+|------|--------|
+| `connector_reconnected` end-to-end | FIXED ✓ |
+| `recentEpisodes` always `[]` in `resolveContext` | FIXED ✓ |
+| `groundingSources` always `[]` in `resolveContext` | FIXED ✓ |
+| Datadog `/api/v1/service_dependencies` bad endpoint | FIXED ✓ |
+| `InMemoryGateSink` gate bypass when no Redis | FIXED ✓ |
+
+2 pre-existing MEDIUMs deferred (not regressed):
+- `GraphitiClient.getFacts` silently swallows 5xx — no retry
+- `StructuralGraph.search` ILIKE only — no pgvector semantic search
+
+No regressions found in new code.
+
+### E2E certified by Raj — 2026-06-12 ✓
+
+**Final test counts: 79/79 agent, 36/36 gateway — all GREEN**
+
+<!-- REVIEW SECTION END — 2026-06-12e -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-12d -->
 ## Review — 2026-06-12d | Commit ce5d4a3 (P5B-2-FIX) + gate-decide-route fix
 

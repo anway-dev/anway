@@ -7,6 +7,56 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ag -->
+## Review — 2026-06-11ag | Fable 4th pass (HEAD: a0cfb4e)
+
+**Reviewer:** Fable (independent pass)
+
+### Verdict: RED — 1 HIGH + 2 MEDIUM
+
+---
+
+### HIGH
+
+**NEW-H1 — `specialist-agent.ts:112` — Graph context silently dropped**
+`runSpecialist` builds local `systemPrompt` (lines 77–86) prepending KG context block. But `messages` array at line 112 uses `config.systemPrompt` (original) not `systemPrompt` (updated). KG lookup runs, costs DB round-trip, output discarded. Hard violation of CLAUDE.md: "Knowledge Graph is the mandatory starting point... skipping is a hard violation."
+```typescript
+// line 112 — BUG
+{ role: 'system', content: config.systemPrompt }  // should be: systemPrompt
+```
+Fix: change `config.systemPrompt` → `systemPrompt` on line 112.
+
+---
+
+### MEDIUM
+
+**NEW-M1 — `settings.ts:20` — IPv6-mapped private ranges not blocked**
+`isSafeBaseUrl` blocks `::ffff:127.*` and `::ffff:10.*` but not `::ffff:172.16–31.*`, `::ffff:192.168.*`, or `::ffff:169.254.*`. Cloud metadata `169.254.169.254` reachable via `http://[::ffff:169.254.169.254]/`.
+Fix: add `host.startsWith('::ffff:172.') || host.startsWith('::ffff:192.') || host.startsWith('::ffff:169.')` to the block list.
+
+**NEW-M2 — `graph-events.ts:94` — Empty-tenant binding bypassed**
+`if (boundTenant && event.tenantId !== boundTenant)` — empty string is falsy. Malformed key in `CONNECTOR_API_KEYS` (e.g. `mykey:`) maps to `""`, binding check skipped, connector can write events for any tenant.
+Fix: `if (boundTenant !== undefined && boundTenant !== '' && event.tenantId !== boundTenant)`
+
+---
+
+<!-- REVIEW SECTION START — 2026-06-11af -->
+## Review — 2026-06-11af | Commit a0cfb4e (FA3-H1 IPv6 SSRF fix)
+
+**Reviewer:** Claude
+
+### Verdict: CLEAN
+
+`isSafeBaseUrl` in `apps/gateway/src/routes/settings.ts`:
+- `u.hostname.replace(/^\[|\]$/g, '')` strips `[` / `]` brackets before comparison — `http://[::1]/` now correctly blocked
+- IPv4-mapped loopback `::ffff:127.*` and `::ffff:10.*` blocked
+- Decimal-encoded IP `/^\d+$/` blocked
+- All prior RFC-1918 / loopback checks intact
+
+No regressions. FA3-H1 resolved.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ae -->
 ## Review — 2026-06-11ae | Fable 3rd pass (HEAD: 12f23b8)
 

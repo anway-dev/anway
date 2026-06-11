@@ -41,7 +41,7 @@ export async function pollGate(
   intervalMs?: number,
   opts?: { timeoutMs?: number; intervalMs?: number },
 ): Promise<GateDecision> {
-  const resolvedInterval = opts?.intervalMs ?? intervalMs ?? 500
+  const resolvedInterval = opts?.intervalMs ?? intervalMs ?? 2000
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     const decision = await sink.poll(gateId)

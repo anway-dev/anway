@@ -85,11 +85,12 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     // Static model list
     if (Array.isArray(manifest.models)) return { models: manifest.models }
 
-    // Dynamic: fetch from endpoint — SSRF-safe (block cloud metadata + loopback)
+    // Dynamic: fetch from endpoint — SSRF-safe (validate full composed URL)
     const effectiveBaseUrl = baseUrl ?? manifest.defaultBaseUrl
-    if (manifest.modelsEndpoint && effectiveBaseUrl && isSafeBaseUrl(effectiveBaseUrl)) {
+    if (manifest.modelsEndpoint && effectiveBaseUrl) {
+      const url = `${effectiveBaseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
+      if (!isSafeBaseUrl(url)) return { models: [] }
       try {
-        const url = `${effectiveBaseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
         const headers: Record<string, string> = {}
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
         const resp = await fetch(url, { headers })

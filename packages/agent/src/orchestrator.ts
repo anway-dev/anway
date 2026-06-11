@@ -148,8 +148,13 @@ export async function* runSession(
     })
     const parsed = JSON.parse(intentResp.content) as { intent?: unknown }
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
-  } catch {
-    // Best-effort — continue with default intent on failure
+  } catch (err) {
+    auditSink.append({
+      id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
+      sessionId: ctx.sessionId, eventType: 'intent_parse_failed',
+      payload: { raw: intentResp?.content ?? '', error: err instanceof Error ? err.message : String(err) },
+      createdAt: new Date(),
+    }).catch(() => {})
     classifiedIntent = 'general'
   }
 

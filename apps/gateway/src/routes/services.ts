@@ -18,6 +18,7 @@ interface RelRow {
 interface IncidentRow {
   title: string
   status: string
+  suggested_root_cause: string | null
 }
 
 export async function serviceRoutes(app: FastifyInstance) {
@@ -39,18 +40,30 @@ export async function serviceRoutes(app: FastifyInstance) {
         FROM relationships LIMIT 2000
       `
       const activeIncidents = await tx.$queryRaw<IncidentRow[]>`
-        SELECT title, status FROM incidents WHERE status IN ('active', 'investigating') ORDER BY created_at DESC LIMIT 100
+        SELECT title, status, suggested_root_cause FROM incidents WHERE status IN ('active', 'investigating') ORDER BY created_at DESC LIMIT 100
       `
 
       const entityById = new Map(allEntities.map(e => [e.id, e]))
 
+      // Pre-build relationship lookup Maps — eliminates O(N×M) find/filter per service
+      const relsByFrom = new Map<string, typeof allRels>()
+      const relsByTo = new Map<string, typeof allRels>()
+      for (const r of allRels) {
+        if (!relsByFrom.has(r.fromEntityId)) relsByFrom.set(r.fromEntityId, [])
+        relsByFrom.get(r.fromEntityId)!.push(r)
+        if (!relsByTo.has(r.toEntityId)) relsByTo.set(r.toEntityId, [])
+        relsByTo.get(r.toEntityId)!.push(r)
+      }
+
       return entities.map(entity => {
         const meta = (entity.metadata ?? {}) as Record<string, unknown>
+        const fromRels = relsByFrom.get(entity.id) ?? []
+        const toRels = relsByTo.get(entity.id) ?? []
 
-        const ownedByRel = allRels.find(r => r.fromEntityId === entity.id && r.relType === 'OWNED_BY')
-        const hostedInRel = allRels.find(r => r.fromEntityId === entity.id && r.relType === 'HOSTED_IN')
-        const depRels = allRels.filter(r => r.fromEntityId === entity.id && r.relType === 'DEPENDS_ON')
-        const callerRels = allRels.filter(r => r.toEntityId === entity.id && r.relType === 'DEPENDS_ON')
+        const ownedByRel = fromRels.find(r => r.relType === 'OWNED_BY')
+        const hostedInRel = fromRels.find(r => r.relType === 'HOSTED_IN')
+        const depRels = fromRels.filter(r => r.relType === 'DEPENDS_ON')
+        const callerRels = toRels.filter(r => r.relType === 'DEPENDS_ON')
 
         const teamEntity = ownedByRel ? entityById.get(ownedByRel.toEntityId) : undefined
         const repoEntity = hostedInRel ? entityById.get(hostedInRel.toEntityId) : undefined
@@ -77,7 +90,8 @@ export async function serviceRoutes(app: FastifyInstance) {
           dependencies: depNames,
           callers: callerNames,
           activeIncidents: activeIncidents.filter(i =>
-            i.title.toLowerCase().includes(entity.name.toLowerCase())
+            i.title.toLowerCase().includes(entity.name.toLowerCase()) ||
+            (i.suggested_root_cause?.toLowerCase().includes(entity.name.toLowerCase()) ?? false)
           ).length,
           metrics: {
             errorRate: (meta['errorRate'] as number) ?? 0,

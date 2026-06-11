@@ -40,6 +40,36 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11at -->
+## Review — 2026-06-11at | Commit f2070ad (P3B-2-FIX)
+
+**Reviewer:** Claude
+
+### HIGH resolved ✓
+
+Placeholder sentinel strings removed. `relatedDeploys`/`relatedPRs` no longer receive garbage strings.
+
+### Real CLI calls: NOT DONE (MEDIUM)
+
+Bridge spec was explicit: remove placeholders AND add `execFileAsync('argocd', ['app', 'history', ...])` + `execFileAsync('gh', ['pr', 'list', ...])` in their place. Executor only deleted — did not add the replacement. `relatedPRs` still always `[]`. `relatedDeploys` only populated from graph DEPLOYED_TO relationships, not live ArgoCD history.
+
+### Dynamic runbook: NOT DONE (MEDIUM)
+
+Hardcoded 4-step list unchanged.
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 0 |
+| HIGH | 0 |
+| MEDIUM | 2 |
+| LOW | 0 |
+| Open issues | 2 |
+
+<!-- REVIEW SECTION END — 2026-06-11at -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11as -->
 ## Review — 2026-06-11as | Commit 5e23002 (P3B-2)
 

@@ -18,11 +18,12 @@ export class HybridKnowledgeGraph implements IKnowledgeGraph {
 
   async addEpisode(episode: Episode): Promise<void> {
     if (this.graphiti) return this.graphiti.addEpisode(episode)
+    return this.structural.addEpisode(episode)
   }
 
   async getFacts(query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
-    if (this.graphiti) return this.graphiti.getFacts(query, at)
-    return []
+    if (this.graphiti) return this.graphiti.getFacts(query, tenantId, at)
+    return this.structural.getFacts(query, tenantId, at)
   }
 
   // Structural delegates

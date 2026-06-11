@@ -7,6 +7,38 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11r -->
+## Review — 2026-06-11r | MEDIUM batch 1 (a966e62)
+
+### Scope
+
+Commit `a966e62` — M1/M7/M9/M10/M11. SSRF full-URL check, intent audit, relationship Maps, incident match, gate interval.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW — CLEAN
+
+M12/M1-l/M1-o/M2-l/M3-M6 still pending from MEDIUM batch.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | M10 partial — still substring scan, just extended to two fields. |
+| D2 Code Standards | 5/5 | Clean. |
+| D3 Performance | 5/5 | M9 Map pre-build eliminates O(N×M). M11 4× fewer Redis calls. |
+| D4 Security | 5/5 | M1 check now on full composed URL before fetch. |
+| D5 Readability | 5/5 | |
+| D6 Clarity/Comments | 5/5 | Inline comment on M9 Map is accurate. |
+
+---
+
+### LOW
+
+**L1** `apps/gateway/src/routes/services.ts:90-93` — M10 expands incident matching to `suggested_root_cause` but still scans per service. No schema change, no FK. Acceptable for now since `LIMIT 100` caps the scan size. Full fix deferred until incidents table gets a `service_id` column.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11q -->
 ## Review — 2026-06-11q | S7+P3 (cddcde2) + M1-k (e22f1a4)
 

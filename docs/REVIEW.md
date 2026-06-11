@@ -7,6 +7,69 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11o -->
+## Review — 2026-06-11o | HIGH batch 2 (200a082)
+
+### Scope
+
+Commit `200a082` — D3/D5/FD3/FD5 fixes + redundant P1-B1 mention. S7 and P3 not in this commit.
+
+### Verdict: 1 BLOCKING, 0 HIGH, 2 MEDIUM, 0 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | FD3 publish broken (BLOCKING). D5 partial. S7/P3 still pending. |
+| D2 Code Standards | 3/5 | FD3 regresses M3 fix. D3 index alignment fragile. |
+| D3 Performance | 4/5 | LIMITs added. O(N²) loop unchanged (MEDIUM). |
+| D4 Security | 5/5 | No regressions. |
+| D5 Readability | 4/5 | Clean otherwise. |
+| D6 Clarity/Comments | 5/5 | Comments accurate. |
+
+---
+
+### BLOCKING
+
+**B1** `apps/gateway/src/routes/settings.ts:153` — FD3 publish payload missing `type` field and `payload` (credentials). Current:
+```typescript
+JSON.stringify({ tenantId, connectorType: type })
+```
+The graph builder subscriber (`subscriber.ts`) does `switch (event.type)` — without `type: 'connector_registered'` the switch never matches and bootstrap silently fails. Also missing `payload: creds` so bootstrap can't access credentials. Must match the correct format from `connectors.ts:71-75` (the M3 fix):
+```typescript
+JSON.stringify({
+  type: 'connector_registered',
+  tenantId,
+  connectorType: type,
+  connectorId: type,
+  payload: credentials,  // the connector credentials object
+})
+```
+`credentials` must be read from the upserted connector's credentials field (same as `connectors.ts` does via `connector_config` query).
+
+Commit: `fix: FD3-B1 — restore type + payload in connector_registered publish`
+
+---
+
+### MEDIUM
+
+**M1** `packages/agent/src/specialist-agent.ts` — D3 fix indexes `toolResultParts[i]` by position, assuming 1:1 alignment with `collectedToolCalls[i]`. If a tool is perimeter-blocked or throws before pushing to `toolResultParts`, indices diverge → wrong result matched to wrong tool call → silent LLM confusion. Fix: build `toolResults` as `Map<string, string>` keyed on `toolCallId`, then look up by id when pushing `formatToolResult`.
+
+**M2** `apps/gateway/src/routes/services.ts:50-53` — D5 added LIMITs but `allRels.find`/`allRels.filter` per-service still O(N×M). Pre-build relationship lookup Map once before the service loop:
+```typescript
+const relsByFrom = new Map<string, RelRow[]>()
+const relsByTo   = new Map<string, RelRow[]>()
+for (const r of allRels) {
+  ;(relsByFrom.get(r.fromEntityId) ?? relsByFrom.set(r.fromEntityId, []).get(r.fromEntityId)!).push(r)
+  ;(relsByTo.get(r.toEntityId) ?? relsByTo.set(r.toEntityId, []).get(r.toEntityId)!).push(r)
+}
+// Then replace allRels.find/filter calls with relsByFrom.get(entity.id)?.find(...)
+```
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11n -->
 ## Review — 2026-06-11n | P1-B1 (8b115d4)
 

@@ -7,6 +7,29 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11v -->
+## Review — 2026-06-11v | B3+M-ep2 (e51b5dc)
+
+### Scope
+
+Commit `e51b5dc` — hybrid getFacts arg order, addEpisode structural fallback.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM — CLEAN
+
+M12-r (per-tenantId bootstrapRegistry cache) still pending.
+
+---
+
+### Verified correct
+
+**B3** — `getFacts` now forwards `(query, tenantId, at)` to graphiti. Also falls back to `structural.getFacts(query, tenantId, at)` instead of returning empty array. ✓
+
+**M-ep2** — `addEpisode` now falls back to `structural.addEpisode(episode)` when graphiti absent. Structural-only mode now writes episodes. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11v -->
+
 <!-- REVIEW SECTION START — 2026-06-11u -->
 ## Review — 2026-06-11u | B1+B2+M-ep1 (0615a60)
 

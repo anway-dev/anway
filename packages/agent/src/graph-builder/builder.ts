@@ -39,6 +39,8 @@ export class GraphBuilderAgent {
           await this.onDeployCompleted(event); break
         case 'ticket_created':
           await this.onTicketCreated(event); break
+        case 'connector_removed':
+          await this.onConnectorRemoved(event); break
       }
       // Emit graph:updated after successful handling
       await this.redisPublisher?.publish('graph:updated', JSON.stringify({
@@ -220,6 +222,17 @@ export class GraphBuilderAgent {
         tenantId,
       )
     }
+  }
+
+  private async onConnectorRemoved(event: GraphEvent & { type: 'connector_removed' }): Promise<void> {
+    const tenantId = this.tid(event.tenantId)
+    // Mark all entities from this connector as stale
+    // Use kg.search or direct entity query — for now upsert a marker episode
+    await this.kg.addEpisode({
+      text: `Connector ${event.connectorType} removed — entities from this source are now stale`,
+      source: 'graph-builder',
+      timestamp: new Date(),
+    }).catch(() => {})
   }
 
   // -- helpers ---------------------------------------------------------------

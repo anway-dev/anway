@@ -34,7 +34,7 @@ async function connectorCredential(tenantId: string, connectorType: string, envV
 
 const GRAPH_EVENT_CHANNELS = [
   'pr_merged', 'deploy_completed', 'incident_created',
-  'ticket_created', 'connector_registered',
+  'ticket_created', 'connector_registered', 'connector_removed',
 ]
 
 // Cache bootstrap registry per tenant — avoids rebuilding on every Redis event

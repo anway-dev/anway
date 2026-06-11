@@ -25,9 +25,20 @@ const PROVIDER_META: Record<string, { icon: string; color: string }> = {
 
 type TestState = "idle" | "testing" | "success" | "fail";
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 export function ModelConfig() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selected, setSelected] = useState("anthropic");
+  const [devToken, setDevToken] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
+
+  useEffect(() => {
+    fetch('/api/auth/dev-token')
+      .then(r => r.json())
+      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/settings/provider-manifests")
@@ -105,6 +116,29 @@ export function ModelConfig() {
       prev.map((p) => p.id === providerId ? { ...p, connected: false, activeModel: undefined } : p)
     );
     setTestState((s) => ({ ...s, [providerId]: "idle" }));
+  };
+
+  const handleSave = async (providerId: string) => {
+    const p = providers.find(pr => pr.id === providerId);
+    if (!p) return;
+    setSaveState(s => ({ ...s, [providerId]: "saving" }));
+    try {
+      const body: Record<string, string> = { provider: providerId };
+      if (p.activeModel) body['defaultModel'] = p.activeModel;
+      if (p.type === "local" && endpoints[providerId]) body['baseUrl'] = endpoints[providerId]!;
+      const resp = await fetch('/api/settings/provider', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(devToken ? { Authorization: `Bearer ${devToken}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      setSaveState(s => ({ ...s, [providerId]: resp.ok ? "saved" : "error" }));
+      if (resp.ok) setTimeout(() => setSaveState(s => ({ ...s, [providerId]: "idle" })), 2000);
+    } catch {
+      setSaveState(s => ({ ...s, [providerId]: "error" }));
+    }
   };
 
   const activeProvider = providers.find((p) => p.connected && p.activeModel);
@@ -266,6 +300,13 @@ export function ModelConfig() {
                   {testState[provider.id] === "testing" ? "Testing…" : "Test connection"}
                 </button>
                 <button
+                  onClick={() => handleSave(provider.id)}
+                  disabled={saveState[provider.id] === "saving"}
+                  style={{ flex: 1, padding: "10px 16px", borderRadius: "7px", cursor: saveState[provider.id] === "saving" ? "default" : "pointer", border: "none", background: saveState[provider.id] === "saved" ? "rgba(16,185,129,0.15)" : saveState[provider.id] === "error" ? "rgba(239,68,68,0.15)" : "#10b981", color: saveState[provider.id] === "saved" ? "#10b981" : saveState[provider.id] === "error" ? "#ef4444" : "#000", fontSize: "12px", fontWeight: 700, opacity: saveState[provider.id] === "saving" ? 0.7 : 1 }}
+                >
+                  {saveState[provider.id] === "saving" ? "Saving…" : saveState[provider.id] === "saved" ? "✓ Saved" : saveState[provider.id] === "error" ? "Save failed" : "Save"}
+                </button>
+                <button
                   onClick={() => handleDisconnect(provider.id)}
                   style={{ padding: "10px 16px", borderRadius: "7px", cursor: "pointer", border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.05)", color: "#ef4444", fontSize: "12px" }}
                 >
@@ -284,6 +325,11 @@ export function ModelConfig() {
           {testState[provider.id] === "fail" && (
             <div style={{ marginTop: "12px", padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "7px", fontSize: "11px", color: "#ef4444" }}>
               ✗ Connection failed — check your {provider.type === "cloud" ? "environment variable" : "endpoint URL and that the server is running"}
+            </div>
+          )}
+          {saveState[provider.id] === "error" && (
+            <div style={{ marginTop: "12px", padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "7px", fontSize: "11px", color: "#ef4444" }}>
+              ✗ Save failed — gateway offline or not authenticated
             </div>
           )}
 

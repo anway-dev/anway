@@ -69,6 +69,39 @@ Phase 4 complete. All P1–P4 batches done. Ready for fable final signoff.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-12c -->
+## Review — 2026-06-12c | Commit b5c3e96 (P5B)
+
+**Reviewer:** Claude
+
+### P5B-1 — Datadog bootstrap fix: CLEAN ✓
+
+`/api/v1/service_dependencies` block removed. Comment + episodeHint added. Clean deletion.
+
+### P5B-2 — InMemoryGateSink: PARTIAL (MEDIUM)
+
+`packages/agent/src/gate/in-memory-gate-sink.ts` created — correct implementation (push/poll/record/clear). But:
+
+1. Not exported from `packages/agent/src/index.ts` — callers can't import it
+2. `apps/gateway/src/gate/memory-gate-fallback.ts` not created
+3. `apps/gateway/src/routes/chat.ts` still has `gateSink = redisUrl ? new RedisGateSink(redisUrl) : undefined` — gate still bypassed when no Redis
+4. `apps/gateway/src/gate/gate-decide-route.ts` still `gateSink = redisUrl ? new RedisGateSink(redisUrl) : undefined`
+
+**Additional nuance for gate-decide-route.ts:** When using InMemoryGateSink, the Postgres `UPDATE gate_events` (line 34) will set `affected=0` because InMemoryGateSink never INSERTs to `gate_events`. Route will return 404. Fix: when no Redis, skip the Postgres UPDATE and call `sink.record()` directly — the orchestrator's `pollGate()` is what matters, not the DB row.
+
+Bridge P5B-2-FIX posted.
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 0 |
+| MEDIUM | 1 |
+| Open issues | 1 |
+
+<!-- REVIEW SECTION END — 2026-06-12c -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-12b -->
 ## Review — 2026-06-12b | Commit 0bd69ce (P5A)
 

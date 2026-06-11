@@ -7,6 +7,21 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11p -->
+## Review — 2026-06-11p | FD3-B1 (d861e22)
+
+### Scope
+
+Commit `d861e22` — restore `type + payload` in `connector_registered` publish in settings.ts.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+Fix correct. Payload now matches M3 format: `type: 'connector_registered'`, `connectorId: type`, `payload: credPayload`. Credentials fetched from just-upserted row. Graph builder subscriber switch will match.
+
+M1-k (events.ts JWT tenantId cast) was not included — carry-forward still open.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11o -->
 ## Review — 2026-06-11o | HIGH batch 2 (200a082)
 

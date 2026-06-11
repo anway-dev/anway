@@ -5,6 +5,7 @@
 
 export type GraphEvent =
   | ConnectorRegistered
+  | ConnectorReconnected
   | ConnectorRemoved
   | PrMerged
   | IncidentCreated
@@ -45,6 +46,14 @@ export interface DeployCompleted {
   sha: string
   env: string
   status: 'success' | 'failed'
+}
+
+export interface ConnectorReconnected {
+  type: 'connector_reconnected'
+  connectorId: string
+  connectorType: string
+  tenantId: string
+  payload: Record<string, unknown>
 }
 
 export interface ConnectorRemoved {

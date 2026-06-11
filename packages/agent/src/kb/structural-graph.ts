@@ -159,11 +159,36 @@ export class StructuralGraph implements IKnowledgeGraph {
       primaryEntity: entity,
       relatedEntities: [...relatedEntitiesMap.values()],
       relationships: allRelationships,
-      recentEpisodes: [],
+      recentEpisodes: await this.getRecentEpisodesForEntity(entity.name, tenantId),
       connectorCoordinates,
-      groundingSources: [] as GroundingSource[],
+      groundingSources: this.buildGroundingSources(connectorCoordinates),
       freshness: 1.0,
     }
+  }
+
+  private async getRecentEpisodesForEntity(entityName: string, tenantId: TenantId): Promise<Episode[]> {
+    const rows = await this.query<{ text: string; created_at: Date }>(
+      `SELECT text, created_at FROM kb_episodes
+       WHERE tenant_id = $1
+         AND created_at >= NOW() - INTERVAL '24 hours'
+         AND text ILIKE '%' || $2 || '%'
+       ORDER BY created_at DESC LIMIT 20`,
+      [tenantId, entityName],
+    ).catch(() => [])
+    return rows.map(r => ({ text: r.text, source: 'kb_episodes', timestamp: new Date(r.created_at) }))
+  }
+
+  private buildGroundingSources(coords: Record<string, ConnectorCoordinates>): GroundingSource[] {
+    const TTL_BY_CONNECTOR: Record<string, number> = {
+      datadog: 60, prometheus: 60, k8s: 30, github: 120,
+      argocd: 60, linear: 300, pagerduty: 120,
+    }
+    return Object.entries(coords).map(([connType, coord]) => ({
+      source: connType,
+      fetchedAt: coord.resolvedAt instanceof Date ? coord.resolvedAt : new Date(),
+      ttl: TTL_BY_CONNECTOR[connType] ?? 300,
+      confidence: typeof coord.confidence === 'number' ? coord.confidence : 1.0,
+    }))
   }
 
   async upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string> {

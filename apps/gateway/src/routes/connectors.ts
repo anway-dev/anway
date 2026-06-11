@@ -110,6 +110,35 @@ export async function connectorsRoutes(app: FastifyInstance) {
       return reply.code(204).send()
     },
   )
+
+  // POST /api/connectors/:type/reconnect — triggers re-bootstrap
+  app.post<{ Params: { type: string } }>('/api/connectors/:type/reconnect', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { type } = request.params
+    if (!VALID_BOOTSTRAP_TYPES.has(type)) {
+      return reply.code(400).send({ error: `unknown connector type: ${type}` })
+    }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
+        SELECT credentials FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+      `
+    ).catch(() => [])
+    const creds = (rows[0]?.credentials ?? {}) as Record<string, unknown>
+    const pub = await getBootstrapPub()
+    if (pub) {
+      await pub.publish('connector_reconnected', JSON.stringify({
+        type: 'connector_reconnected',
+        tenantId,
+        connectorType: type,
+        connectorId: type,
+        payload: creds,
+      }))
+    }
+    return { ok: true, message: `Reconnect triggered for ${type}` }
+  })
 }
 
 let _pub: import('redis').RedisClientType | null = null

@@ -41,6 +41,8 @@ export class GraphBuilderAgent {
           await this.onTicketCreated(event); break
         case 'connector_removed':
           await this.onConnectorRemoved(event); break
+        case 'connector_reconnected':
+          await this.onConnectorReconnected(event as GraphEvent & { type: 'connector_reconnected' }); break
       }
       // Emit graph:updated after successful handling
       await this.redisPublisher?.publish('graph:updated', JSON.stringify({
@@ -229,6 +231,25 @@ export class GraphBuilderAgent {
     const n = await this.kg.markConnectorEntitiesStale(event.connectorType, tenantId)
     await this.kg.addEpisode({
       text: `Connector ${event.connectorType} removed — ${n} entities marked stale`,
+      source: 'graph-builder',
+      timestamp: new Date(),
+    }).catch(() => {})
+  }
+
+  private async onConnectorReconnected(event: GraphEvent & { type: 'connector_reconnected' }): Promise<void> {
+    const tenantId = this.tid(event.tenantId)
+    const bootstrap = this.bootstrapRegistry?.get(event.connectorType)
+    if (!bootstrap) {
+      await this.kg.addEpisode({
+        text: `Connector reconnected: ${event.connectorType} (no bootstrapper)`,
+        source: 'graph-builder',
+        timestamp: new Date(),
+      }).catch(() => {})
+      return
+    }
+    const result = await bootstrap.bootstrap(tenantId, event.connectorId, event.payload)
+    await this.kg.addEpisode({
+      text: `Connector reconnected and re-bootstrapped: ${event.connectorType}. ${result.episodeHints.join('. ')}`,
       source: 'graph-builder',
       timestamp: new Date(),
     }).catch(() => {})

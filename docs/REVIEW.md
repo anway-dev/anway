@@ -40,6 +40,20 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ak -->
+## Review — 2026-06-11ak | Commit 7feaf38 (P1A-FIX — relationships wired)
+
+**Reviewer:** Claude
+
+### Verdict: CLEAN ✓
+
+- K8s: `nsId` + `svcId` captured from `upsertEntity`, `upsertRelationship(svcId→HOSTED_IN→nsId)` called, `relationshipsUpserted++` ✓
+- Linear: `ticketId` captured, `resolveContextByName(word, tenantId, 1)` replaces broken `kg.search()`, `upsertRelationship(ticketId→RELATES_TO→serviceId, confidence: 0.6)` called, breaks on first match ✓
+
+P1A complete. Graph now seeds edges from both connectors.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11aj -->
 ## Review — 2026-06-11aj | Commit 754a508 (P1A — K8s + Linear bootstrap)
 

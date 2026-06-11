@@ -28,6 +28,16 @@ export function ConnectorsView() {
   }, []);
 
   const authHeaders = useMemo(() => devToken ? { Authorization: `Bearer ${devToken}` } : {} as Record<string, string>, [devToken]);
+  const [liveConnectors, setLiveConnectors] = useState<{ id: string; type: string }[]>([]);
+
+  // Fetch live connector instances from API
+  useEffect(() => {
+    if (!devToken) return
+    fetch("/api/connectors", { headers: authHeaders })
+      .then(r => r.json() as Promise<{ id: string; type: string }[]>)
+      .then(setLiveConnectors)
+      .catch(() => {})
+  }, [devToken]);
 
   useEffect(() => {
     fetch("/api/settings/connectors", { headers: authHeaders })
@@ -52,7 +62,8 @@ export function ConnectorsView() {
   }, [devToken]);
 
   const visible = filter === "All" ? CONNECTORS : CONNECTORS.filter((c) => c.category === filter);
-  const connected = Object.values(configuredMap).filter(Boolean).length;
+  const isLive = (id: string) => liveConnectors.some(lc => lc.type === id) || !!configuredMap[id];
+  const connected = liveConnectors.length || Object.values(configuredMap).filter(Boolean).length;
 
   async function handleConnect() {
     if (!modal) return;
@@ -117,7 +128,7 @@ export function ConnectorsView() {
       {/* Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={!!configuredMap[conn.id]} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', headers: authHeaders }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={isLive(conn.id)} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', headers: authHeaders }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
         ))}
       </div>
 

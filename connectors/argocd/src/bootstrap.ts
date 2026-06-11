@@ -28,20 +28,36 @@ export class ArgocdBootstrap implements IConnectorBootstrap {
     }
 
     let entitiesUpserted = 0
+    let relationshipsUpserted = 0
     for (const app of apps) {
       const name = app.metadata?.name
       if (!name) continue
-      await this.kg.upsertEntity({
-        type: 'Deploy',
-        name,
-        metadata: {
-          namespace: app.spec?.destination?.namespace ?? '',
-          syncStatus: app.status?.sync?.status ?? 'unknown',
-        },
+
+      const deployId = await this.kg.upsertEntity({
+        type: 'Deploy', name,
+        metadata: { namespace: app.spec?.destination?.namespace ?? '', syncStatus: app.status?.sync?.status ?? 'unknown' },
       }, tenantId)
       entitiesUpserted++
+
+      const svcId = await this.kg.upsertEntity({
+        type: 'Service', name,
+        metadata: { connectorCoordinates: { argocd: { resourceIds: { app: name } } } },
+      }, tenantId)
+      entitiesUpserted++
+
+      await this.kg.upsertRelationship({ fromEntityId: deployId, relType: 'DEPLOYED_TO', toEntityId: svcId, metadata: {} }, tenantId)
+      relationshipsUpserted++
+
+      const pipelineId = await this.kg.upsertEntity({
+        type: 'Pipeline', name: `argocd/${name}`,
+        metadata: { provider: 'argocd', connectorCoordinates: { argocd: { resourceIds: { app: name } } } },
+      }, tenantId)
+      entitiesUpserted++
+
+      await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'DEPLOYED_BY', toEntityId: pipelineId, metadata: {} }, tenantId)
+      relationshipsUpserted++
     }
 
-    return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`ArgoCD bootstrap: found ${apps.length} apps`] }
+    return { entitiesUpserted, relationshipsUpserted, episodeHints: [`ArgoCD bootstrap: found ${apps.length} apps with service/pipeline edges`] }
   }
 }

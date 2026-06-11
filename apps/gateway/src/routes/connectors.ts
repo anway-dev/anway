@@ -85,7 +85,8 @@ export async function connectorsRoutes(app: FastifyInstance) {
     '/api/connectors/:id',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
-      const { tenantId } = request.user as { tenantId: string }
+      const user = request.user as { tenantId: string; role?: string }
+      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
       const { id } = request.params
       if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
       const rows = await withTenant(prisma, tenantId, (tx) =>

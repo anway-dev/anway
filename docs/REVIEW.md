@@ -7,6 +7,39 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ac -->
+## Review — 2026-06-11ac | Fable final signoff (HEAD: df58548)
+
+**Reviewer:** Fable (independent pass) | **Scope:** Final green-light check post all fixes
+
+### Verdict: RED — 2 real BLOCKINGs (1 false alarm dismissed)
+
+Fable reported 3 BLOCKINGs. One is a false alarm.
+
+---
+
+### False alarm — dismissed
+
+**Fable B1** — `packages/types/dist/index.d.ts` stale, missing `GRAPH_CONTEXT_FAILED`. **Not a code defect.** `turbo.json` sets `typecheck: { dependsOn: ["^build"] }` — turbo builds `@anvay/types` before running typecheck on dependents. Source is correct (`packages/types/src/index.ts` has `GRAPH_CONTEXT_FAILED`). Fable ran against a stale local dist that predated the fix. No action needed.
+
+---
+
+### BLOCKING
+
+**FA2-B1** `packages/agent/src/specialist-agent.ts:51,81` — `buildGroundedContextBlock(ctx: Record<string, unknown>)` called with `AgentContext` at line 81. `AgentContext` is a typed interface with no index signature. TS2345: not assignable. Fix: change param type to `AgentContext`.
+
+**FA2-B2** `connectors/prometheus/package.json` + `connectors/loki/package.json` — Both have `"main": "dist/index.js"` but no `"types"` field. TypeScript cannot resolve type declarations → TS2307 `Cannot find module` in any consumer. Both packages have `"build": "tsc"` scripts. Fix: add `"types": "dist/index.d.ts"` to both package.json files.
+
+---
+
+### Still verified GREEN
+
+All items from previous round remain correct. Only the two above need fixes.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11ac -->
+
 <!-- REVIEW SECTION START — 2026-06-11ab -->
 ## Review — 2026-06-11ab | FA-M1/M2 + L1-L8 (c818418)
 

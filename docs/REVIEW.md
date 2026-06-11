@@ -7,6 +7,27 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11x -->
+## Review — 2026-06-11x | B4 (0cf3714)
+
+### Scope
+
+Commit `0cf3714` — kg scope fix in subscriber.ts.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM — CLEAN
+
+All BLOCKING and MEDIUM issues from full audit now resolved. Proceeding to LOW batch + fable signoff.
+
+---
+
+### Verified correct
+
+**B4** — `kg` moved to outer scope (line 79, after `const tid`). Used correctly inside `if` block (registry build) and after it (agent construction). ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11x -->
+
 <!-- REVIEW SECTION START — 2026-06-11w -->
 ## Review — 2026-06-11w | M12-r (bbc2712)
 

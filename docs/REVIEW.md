@@ -7,6 +7,35 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ae -->
+## Review — 2026-06-11ae | Fable 3rd pass (HEAD: 12f23b8)
+
+**Reviewer:** Fable (independent pass)
+
+### Verdict: RED — 1 HIGH security issue
+
+---
+
+### HIGH
+
+**FA3-H1** `apps/gateway/src/routes/settings.ts:18` — `isSafeBaseUrl` checks `host === '::1'` but `URL.hostname` for `http://[::1]/` returns `'[::1]'` (bracket-wrapped per WHATWG URL spec). IPv6 loopback check is dead code. `http://[::1]:PORT/` and `http://[::ffff:127.0.0.1]/` bypass the SSRF guard. Confirmed: `new URL('http://[::1]/').hostname === '[::1]'`. Fix: strip brackets before comparison.
+
+---
+
+### LOW
+
+**FA3-L1** `connectors/linear/src/bootstrap.ts:15` — `LinearBootstrap.bootstrap()` upserts zero entities and returns `episodeHints: ['Linear bootstrap: not implemented']`. Silent functional stub — no crash, no error — but Linear connector registration silently does nothing. Low priority: Linear-specific, dev-visible via episode hint text. Fix when LinearBootstrap is properly implemented.
+
+---
+
+### All other items: GREEN
+
+Every BLOCKING and HIGH from all prior passes verified fixed. No remaining `throw new Error('not implemented')` stubs in production paths.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11ae -->
+
 <!-- REVIEW SECTION START — 2026-06-11ad -->
 ## Review — 2026-06-11ad | FA2-B1/B2 (12f23b8)
 

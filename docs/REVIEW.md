@@ -40,6 +40,68 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ar -->
+## Review — 2026-06-11ar | Commit 2e2e4c8 (P2B-2-FIX + P3B-1)
+
+**Reviewer:** Claude
+
+### P2B-2-FIX — ArgoCD `read()` restored: CLEAN ✓
+
+All 4 cases restored with async `execFile`: `list_applications`, `get_application`, `get_application_history`, `get_sync_status`. Proper TTL variation (30s for sync_status, 120s for others). `query.name` accessed as `String(query.name ?? '')` — safe given `ConnectorQuery`'s index signature.
+
+### P3B-1 — Trigger operators + `surface_context`: PARTIAL ✓
+
+`surface_context` Redis publish to `session:context` — CLEAN ✓.
+
+Condition operators (`gt/lt/contains/exists/eq`): MEDIUM design inconsistency. New format uses `entry.field` to look up payload key, making the outer loop `key` irrelevant. Natural expectation: `{ severity: { operator: 'gt', value: 3 } }` uses `key` as the field. Current format requires `{ anyKey: { field: 'severity', operator: 'gt', value: 3 } }`. Functionally works if callers match the expected format, but inconsistent with legacy. No tests cover the new operators.
+
+### P3B-2 — SREAgent live connector calls: NOT DONE
+
+`sre.ts` still returns `relatedDeploys: []`, `relatedPRs: []`, hardcoded runbook. `connectorCoordinates` from `graphContext` never used to make targeted ArgoCD/GitHub calls. Bridge entry posted.
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 0 |
+| HIGH | 0 |
+| MEDIUM | 1 |
+| LOW | 0 |
+| Open issues | 1 |
+
+<!-- REVIEW SECTION END — 2026-06-11ar -->
+
+---
+
+<!-- REVIEW SECTION START — 2026-06-11aq -->
+## Review — 2026-06-11aq | Commit 575c11a (P2B + P3A)
+
+**Reviewer:** Claude
+
+### P2B-1 — GitHub `create_pr` via `gh` CLI: CLEAN ✓
+
+Real `gh pr create` invocation with `--title`, `--body`, `--base`, `--head` args. Throws on CLI error (execFileAsync semantics). Clean.
+
+### P3A-1 — Freshness decay curve + Redis stale signal: CLEAN ✓
+
+`runFreshnessDecay` does real `UPDATE kb_entries SET freshness_score = ...` with `GREATEST(0, ...)` decay formula. Collects entries below 0.2 threshold, publishes each as `kb:stale` event to Redis. Scheduler passes `REDIS_URL` through. Clean.
+
+### P2B-2 — ArgoCD `read()`: MEDIUM REGRESSION
+
+Executor replaced all 4 cases with `throw new Error('ArgoCD reads are handled by specialist agents')`. Previous working code removed. Will be fixed in next commit (P2B-2-FIX bridge).
+
+### Open issues
+| Category | Count |
+|----------|-------|
+| BLOCKING | 0 |
+| HIGH | 0 |
+| MEDIUM | 1 |
+| LOW | 0 |
+| Open issues | 1 |
+
+<!-- REVIEW SECTION END — 2026-06-11aq -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ap -->
 ## Review — 2026-06-11ap | Commit 7b5d819 (P2A-FIX)
 

@@ -32,6 +32,9 @@ importers:
       '@anvay/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
+      '@anvay/connector-k8s':
+        specifier: workspace:*
+        version: link:../../connectors/k8s
       '@anvay/connector-linear':
         specifier: workspace:*
         version: link:../../connectors/linear

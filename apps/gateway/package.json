@@ -23,6 +23,7 @@
     "@anvay/connector-linear": "workspace:*",
     "@anvay/connector-prometheus": "workspace:*",
     "@anvay/connector-loki": "workspace:*",
+    "@anvay/connector-k8s": "workspace:*",
     "@anvay/types": "workspace:*",
     "@fastify/cors": "^11.0.0",
     "@fastify/jwt": "^9.0.0",

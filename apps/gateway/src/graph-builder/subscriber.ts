@@ -11,6 +11,7 @@ import { DatadogBootstrap } from '@anvay/connector-datadog'
 import { LinearBootstrap } from '@anvay/connector-linear'
 import { PrometheusBootstrap } from '@anvay/connector-prometheus'
 import { LokiBootstrap } from '@anvay/connector-loki'
+import { KubernetesBootstrap } from '@anvay/connector-k8s'
 import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
@@ -92,6 +93,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         reg.set('linear', new LinearBootstrap(kg, await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')))
         reg.set('prometheus', new PrometheusBootstrap(kg))
         reg.set('loki', new LokiBootstrap(kg))
+        reg.set('k8s', new KubernetesBootstrap(kg))
         registryCache.set(tid, reg)
       }
       const bootstrapRegistry = registryCache.get(tid)!

@@ -32,18 +32,24 @@ export class GraphitiClient {
 
   async getFacts(query: string, _tenantId?: string, at?: Date): Promise<Fact[]> {
     const params = new URLSearchParams({ query, ...(at ? { at: at.toISOString() } : {}) })
-    const lastErr: unknown[] = []
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 500 * attempt))
+    const delays = [500, 1000]
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+      if (attempt > 0) await new Promise<void>((r) => setTimeout(r, delays[attempt - 1]!))
+      let resp: Response
       try {
-        const resp = await fetch(`${this.config.baseUrl}/facts?${params}`, {
+        resp = await fetch(`${this.config.baseUrl}/facts?${params}`, {
           headers: { 'X-Tenant-Id': this.config.tenantId },
           signal: AbortSignal.timeout(this.config.timeoutMs ?? DEFAULT_TIMEOUT),
         })
-        if (!resp.ok) { lastErr.push(resp.status); continue }
-        const data = await resp.json() as Fact[]
-        return data
-      } catch (err) { lastErr.push(err); continue }
+      } catch {
+        if (attempt < delays.length) continue
+        return []
+      }
+      if (resp.ok) {
+        try { return (await resp.json()) as Fact[] } catch { return [] }
+      }
+      if (resp.status < 500) return []          // 4xx — no retry
+      if (attempt === delays.length) return []  // 5xx retries exhausted
     }
     return []
   }

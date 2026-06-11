@@ -336,7 +336,7 @@ export async function* runSession(
           toolName: toolCall.name,
           args: toolCall.args,
         }
-        const decision = await pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000)
+        const decision = await pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000, signal ? { signal } : undefined)
         if (decision._tag !== 'approved') {
           await auditSink.append({
             id: crypto.randomUUID(),

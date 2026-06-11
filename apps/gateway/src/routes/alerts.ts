@@ -74,8 +74,11 @@ export async function alertRoutes(app: FastifyInstance) {
       orchestratorQuery: `Explain: ${r.title}`,
     }))
 
-    // If no incidents in DB (fresh demo), return seed signals
-    if (fromDb.length === 0) return DEMO_SIGNALS
+    // dev fallback: no incidents in DB — return seed signals for demo visibility
+    if (fromDb.length === 0) {
+      request.log.warn('alerts: no incidents in DB — returning demo seed signals')
+      return DEMO_SIGNALS
+    }
 
     return fromDb
   })

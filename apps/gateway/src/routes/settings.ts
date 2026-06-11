@@ -16,6 +16,8 @@ function isSafeBaseUrl(raw: string): boolean {
     const host = u.hostname
     // Block RFC-1918 private ranges + loopback IPs. localhost blocked too — consistency with 127.0.0.1
     if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === 'localhost') return false
+    // Block decimal-encoded IPs (e.g. http://2130706433/ → 127.0.0.1)
+    if (/^\d+$/.test(host)) return false
     if (/^(169\.254\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(host)) return false
     return true
   } catch { return false }

@@ -15,7 +15,7 @@ for (const entry of (process.env['CONNECTOR_API_KEYS'] ?? '').split(',').map(k =
     CONNECTOR_KEY_TENANT_MAP.set(entry.slice(0, colonIdx), entry.slice(colonIdx + 1))
   }
 }
-const VALID_API_KEYS = new Set(CONNECTOR_KEY_TENANT_MAP.keys())
+const VALID_API_KEYS = new Set([...CONNECTOR_KEY_TENANT_MAP.keys()].filter(k => k.length > 0))
 
 function warnIfNoKeys(app: FastifyInstance): void {
   if (CONNECTOR_KEY_TENANT_MAP.size === 0) {

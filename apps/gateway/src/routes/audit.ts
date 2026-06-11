@@ -58,7 +58,11 @@ export async function auditRoutes(app: FastifyInstance) {
       `
     ).catch(() => [] as AuditRow[])
 
-    if (rows.length === 0) return DEMO_EVENTS
+    // dev fallback: no audit events in DB — return seed data for demo visibility
+    if (rows.length === 0) {
+      request.log?.warn?.('audit: no events in DB — returning demo seed events')
+      return DEMO_EVENTS
+    }
 
     // Map DB records to frontend AuditEvent format
     return rows.map(r => {

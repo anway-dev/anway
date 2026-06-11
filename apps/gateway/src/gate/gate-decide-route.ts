@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { RedisGateSink } from './redis-gate-sink.js'
+import { UUID_RE } from '../utils/validators.js'
 
 const redisUrl = process.env['REDIS_URL']
 const gateSink = redisUrl ? new RedisGateSink(redisUrl) : undefined
@@ -22,6 +23,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       const { gateId } = request.params
+      if (!UUID_RE.test(gateId)) return reply.code(400).send({ error: 'invalid gateId' })
       const { decision } = request.body
       const { sub: userId, tenantId } = request.user as { sub: string; tenantId: string }
 

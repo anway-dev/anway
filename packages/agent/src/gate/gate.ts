@@ -39,11 +39,12 @@ export async function pollGate(
   gateId: string,
   timeoutMs: number,
   intervalMs?: number,
-  opts?: { timeoutMs?: number; intervalMs?: number },
+  opts?: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal },
 ): Promise<GateDecision> {
   const resolvedInterval = opts?.intervalMs ?? intervalMs ?? 2000
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
+    if (opts?.signal?.aborted) return { _tag: 'timeout' }
     const decision = await sink.poll(gateId)
     if (decision === 'approved') return { _tag: 'approved' }
     if (decision === 'rejected') return { _tag: 'rejected', reason: 'User rejected' }

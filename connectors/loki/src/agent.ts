@@ -37,7 +37,8 @@ const TOOLS: ConnectorTool[] = [
     definition: { name: 'loki.get_log_volume', description: 'Get log volume for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, window: { type: 'string' } }, required: ['service'] } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3100'
-      const q = encodeURIComponent(`{container_name=~".*${params.service}.*"}`)
+      const escapedService = String(params.service).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/"/g, '\\"')
+      const q = encodeURIComponent(`{container_name=~".*${escapedService}.*"}`)
       try {
         const res = await fetch(`${base}/loki/api/v1/query_range?query=count_over_time(${q}[1m])&limit=1`)
         if (!res.ok) return { points: [] }

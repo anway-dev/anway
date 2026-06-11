@@ -39,6 +39,9 @@ export class HybridKnowledgeGraph implements IKnowledgeGraph {
   resolveContextByName(name: string, tenantId: TenantId, depth?: number): Promise<AgentContext | null> {
     return this.structural.resolveContextByName(name, tenantId, depth)
   }
+  markConnectorEntitiesStale(connectorType: string, tenantId: TenantId): Promise<number> {
+    return this.structural.markConnectorEntitiesStale(connectorType, tenantId)
+  }
   upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string> {
     return this.structural.upsertEntity(entity, tenantId)
   }

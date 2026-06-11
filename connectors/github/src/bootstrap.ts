@@ -29,7 +29,7 @@ export class GitHubBootstrap implements IConnectorBootstrap {
         env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin', GH_TOKEN: this.token },
         timeout: 10_000,
       })
-      if (result.status !== 0) return null
+      // execFileAsync throws on non-zero exit — no status check needed
       return Buffer.from(result.stdout.trim(), 'base64').toString('utf-8')
     } catch {
       return null

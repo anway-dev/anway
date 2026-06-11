@@ -191,6 +191,19 @@ export class StructuralGraph implements IKnowledgeGraph {
     return rows[0]!.id
   }
 
+  async markConnectorEntitiesStale(connectorType: string, tenantId: TenantId): Promise<number> {
+    const now = new Date().toISOString()
+    const rows = await this.query<{ id: string }>(
+      `UPDATE entities
+       SET metadata = metadata || $3::jsonb, updated_at = NOW()
+       WHERE tenant_id = $1
+         AND metadata->'connectorCoordinates' ? $2
+       RETURNING id`,
+      [tenantId, connectorType, JSON.stringify({ stale: true, staleAt: now, staleSince: connectorType })],
+    ).catch(() => [])
+    return rows.length
+  }
+
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
     const rows = await this.query<{ id: string }>(
       `SELECT id FROM entities WHERE tenant_id = $1 AND name ILIKE $2 ORDER BY metadata->>'confidence' DESC LIMIT 1`,

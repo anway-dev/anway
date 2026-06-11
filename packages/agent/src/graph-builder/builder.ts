@@ -226,10 +226,9 @@ export class GraphBuilderAgent {
 
   private async onConnectorRemoved(event: GraphEvent & { type: 'connector_removed' }): Promise<void> {
     const tenantId = this.tid(event.tenantId)
-    // Mark all entities from this connector as stale
-    // Use kg.search or direct entity query — for now upsert a marker episode
+    const n = await this.kg.markConnectorEntitiesStale(event.connectorType, tenantId)
     await this.kg.addEpisode({
-      text: `Connector ${event.connectorType} removed — entities from this source are now stale`,
+      text: `Connector ${event.connectorType} removed — ${n} entities marked stale`,
       source: 'graph-builder',
       timestamp: new Date(),
     }).catch(() => {})

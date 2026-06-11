@@ -93,6 +93,7 @@ export interface IKnowledgeGraph {
   search(query: string, tenantId: TenantId, topK: number): Promise<KBEntry[]>
   resolveContext(entityId: string, tenantId: TenantId, depth?: number): Promise<AgentContext>
   resolveContextByName(name: string, tenantId: TenantId, depth?: number): Promise<AgentContext | null>
+  markConnectorEntitiesStale(connectorType: string, tenantId: TenantId): Promise<number>
   getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null>
   upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string>
   upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<string>

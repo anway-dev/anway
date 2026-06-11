@@ -7,6 +7,44 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11s -->
+## Review — 2026-06-11s | MEDIUM batch 2 (080eb5e)
+
+### Scope
+
+Commit `080eb5e` — M1-l/M1-o/M2-l. KG error yield in specialist agent, keyed toolResults Map, contextEntityId wiring.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+M12/M3/M4/M5/M6 still pending.
+
+---
+
+### Changes verified
+
+**M1-l** (`packages/agent/src/specialist-agent.ts`) — KG catch now yields `{ type: 'error' as const, code: 'GRAPH_CONTEXT_FAILED', message: String(err) }`. No longer silent. Correct.
+
+**M1-o** (`packages/agent/src/specialist-agent.ts`) — `toolResults = new Map<string, string>()`. All four result-push sites (`execTool.run`, blocked, gate-rejected, gate-timeout) call `toolResults.set(toolCall.id, ...)`. Final loop pushes via `toolResults.get(tc.id) ?? '(no result)'`. Positional fragility eliminated. Correct.
+
+**M2-l** (`packages/agent/src/orchestrator.ts` + `packages/agent/src/interfaces/memory.ts`) — `contextEntityId?: string` added to `SessionContext`. Orchestrator sets `ctx = { ...ctx, contextEntityId: context.primaryEntity.id }` after resolving graph context. Correct.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | M3/M4 (episodic layer) still unimplemented. |
+| D2 Code Standards | 5/5 | Clean. `as const` on error type is correct. |
+| D3 Performance | 5/5 | |
+| D4 Security | 5/5 | |
+| D5 Readability | 5/5 | Map-based approach cleaner than positional array. |
+| D6 Clarity/Comments | 5/5 | |
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11s -->
+
 <!-- REVIEW SECTION START — 2026-06-11r -->
 ## Review — 2026-06-11r | MEDIUM batch 1 (a966e62)
 

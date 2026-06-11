@@ -150,7 +150,20 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
 
       // Emit connector_registered only on first registration (not credential update)
       if (isNew && opts?.pub) {
-        await opts.pub.publish('connector_registered', JSON.stringify({ tenantId, connectorType: type }))
+        const creds = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
+            SELECT credentials FROM connector_config
+            WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid LIMIT 1
+          `
+        ).catch(() => [])
+        const credPayload = (creds[0]?.credentials ?? {}) as Record<string, unknown>
+        await opts.pub.publish('connector_registered', JSON.stringify({
+          type: 'connector_registered',
+          tenantId,
+          connectorType: type,
+          connectorId: type,
+          payload: credPayload,
+        }))
       }
 
       return { ok: true }

@@ -40,7 +40,11 @@ export interface SpecialistAgent {
 export function createSpecialistAgent(config: SpecialistAgentConfig): SpecialistAgent {
   return {
     name: config.name,
-    run: (input: string, ctx: SessionContext) => runSpecialist({ ...config, knowledgeGraph: config.knowledgeGraph, contextEntityId: config.contextEntityId }, input, ctx),
+    run: (input: string, ctx: SessionContext) => runSpecialist({
+      ...config,
+      ...(config.knowledgeGraph !== undefined ? { knowledgeGraph: config.knowledgeGraph } : {}),
+      ...(config.contextEntityId !== undefined ? { contextEntityId: config.contextEntityId } : {}),
+    }, input, ctx),
   }
 }
 

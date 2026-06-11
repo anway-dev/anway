@@ -116,8 +116,11 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Internal incident event
-  app.post('/api/events/incident', { preHandler: [app.authenticate] }, async (request) => {
+  app.post('/api/events/incident', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const user = request.user as { tenantId?: string }
+    if (!user.tenantId || !UUID_RE.test(user.tenantId)) return reply.code(401).send({ error: 'invalid tenant' })
     const payload = request.body as Record<string, unknown>
+    payload.tenantId = user.tenantId
     const pub = await getEventPub()
     await tryPublish(pub, 'incident_created', payload)
     return { ok: true }

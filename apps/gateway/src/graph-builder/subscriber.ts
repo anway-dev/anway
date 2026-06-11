@@ -37,6 +37,7 @@ const GRAPH_EVENT_CHANNELS = [
 ]
 
 // Cache bootstrap registry per tenant — avoids rebuilding on every Redis event
+const MAX_REGISTRY_CACHE = 200
 const registryCache = new Map<string, Map<string, IConnectorBootstrap>>()
 
 function resolveProviderConfig(): ProviderConfig | null {
@@ -80,6 +81,10 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
 
       // Cache bootstrap registry per tenant — avoids rebuilding on every event
       if (!registryCache.has(tid)) {
+        if (registryCache.size >= MAX_REGISTRY_CACHE) {
+          const k = registryCache.keys().next().value
+          if (k !== undefined) registryCache.delete(k)
+        }
         const reg = new Map<string, IConnectorBootstrap>()
         reg.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
         reg.set('argocd', new ArgocdBootstrap(kg))

@@ -10632,3 +10632,111 @@ T3 fix verified.
 | Open issues | 2 |
 
 <!-- REVIEW SECTION END — 2026-06-10f -->
+
+<!-- REVIEW SECTION START — 2026-06-12f -->
+## Review 2026-06-12f — Fable Gap Analysis (post P6A + e2e)
+
+**Date:** 2026-06-12  
+**Verdict:** YELLOW — 8 HIGH, 11 MEDIUM, 7 LOW
+
+---
+
+### HIGH (must fix before production)
+
+**H1 — `apps/gateway/src/routes/graph-events.ts` — Auth bypass on malformed CONNECTOR_API_KEYS**
+`VALID_API_KEYS` filters empty strings but `CONNECTOR_KEY_TENANT_MAP` can contain `""` key. If `VALID_API_KEYS.size > 0` but all entries have empty `boundTenant`, the tenant binding check at line 93 (`boundTenant !== undefined && boundTenant !== ''`) silently passes, allowing any tenantId. Fix: after key lookup, explicitly assert `boundTenant` is non-empty, else return 403.
+
+**H2 — `packages/agent/src/kb/structural-graph.ts:29-34` — `addEpisode` silent data loss**
+INSERT uses `current_setting('app.tenant_id')::uuid` (GUC) not a param. Any caller not wrapped in `withTenant` triggers a Postgres error caught by `.catch(() => {})` — episode silently dropped. Fix: accept `tenantId` as explicit `$1` param; remove GUC dependency in addEpisode.
+
+**H3 — `apps/gateway/src/kb/freshness-daemon.ts` — RLS bypass crosses tenant boundary**
+Daemon runs `SET LOCAL row_security = off`, then decays/purges kb_entries across all tenants without tenant scoping. Fix: remove RLS bypass; run decay queries within `withTenant` per tenant, or scope to a `freshness_daemon` Postgres role.
+
+**H4 — `apps/gateway/src/routes/graph-events.ts:70-75` + `connectors.ts:144-154` — Redis singleton race**
+`getBootstrapPub()` is not concurrency-safe — multiple concurrent callers pass `if (!_pub)` before `connect()` resolves, creating multiple Redis clients. Fix: construction promise pattern `_pubPromise = _pubPromise ?? createAndConnect()`.
+
+**H5 — `packages/agent/src/kb/structural-graph.ts` — `resolveContext` relationship query missing tenant_id filter**
+The non-CTE relationship query at line 161 lacks `AND tenant_id = $2`. Relationships from other tenants touching the same entity UUID (UUID collision: astronomically unlikely but schema allows it) could bleed across tenants. Fix: add `AND tenant_id = $2` to the relationship SELECT inside `resolveContext`.
+
+**H6 — `apps/gateway/src/gate/redis-gate-sink.ts` — Split-brain: Redis set without guaranteed Postgres audit**
+`record()` only writes Redis; Postgres UPDATE happens separately in gate-decide-route. If Postgres fails after Redis succeeds, write action executes without audit record. Fix: ensure Postgres UPDATE succeeds before calling `record()`; have `record()` be the Redis-only step, always after a confirmed DB write.
+
+**H7 — `packages/agent/src/specialist-agent.ts:82-85` — Graph context failure continues agentic loop (hard violation)**
+When `resolveContext` throws, specialist agent yields error event but does NOT return — continues executing without grounding. CLAUDE.md: "Skipping the graph step is a hard violation." Fix: `return` after yielding the error event, or audit-log and document as intentional graceful degradation.
+
+**H8 — `packages/agent/src/kb/structural-graph.ts:138-200` — `freshness: 1.0` always hardcoded**
+`resolveContext` returns `freshness: 1.0` regardless of entity age. Orchestrator checks `freshness < 0.5` (line 207) to set staleness flag — never fires. Agents use stale context without warning. Fix: compute freshness from `entities.updated_at`; select `updated_at` in CTE, propagate min across entities.
+
+---
+
+### MEDIUM
+
+**M1 — `packages/agent/src/gate/gate.ts:51` — `pollGate` sleep not abort-aware**
+On client disconnect, abort signal fires but sleep continues for up to 2000ms. Fix: abort-aware sleep using `AbortSignal` inside `setTimeout` promise.
+
+**M2 — `packages/agent/src/gate/in-memory-gate-sink.ts` — No TTL eviction, unbounded memory**
+`push()` never evicts timed-out entries. Fix: schedule `setTimeout` in `push()` to delete entry after gate TTL.
+
+**M3 — `packages/agent/src/kb/hybrid-knowledge-graph.ts:55-68` — KBEntry `id: ''` on graphiti path**
+Search results from graphiti are unaddressable (empty `id`). Fix: generate stable hash from `(claim, source, validFrom)`.
+
+**M4 — `apps/gateway/src/graph-builder/subscriber.ts:85-100` — Bootstrap registry race on concurrent same-tenant events**
+Two concurrent events for same tenant both enter `if (!registryCache.has(tid))` block, double-construct registry, second write clobbers first. Fix: in-flight promise map as sentinel.
+
+**M5 — `packages/agent/src/kb/structural-graph.ts:37-49` — `getFacts` ignores `query` param**
+Returns all episodes since `at`; `_query` never used. Context bloat in multi-service tenants. Fix: ILIKE/pgvector filter on query, or document as time-windowed only.
+
+**M6 — `apps/gateway/src/graph-builder/subscriber.ts:91` — Bootstrap registry caches stale credentials**
+Credentials fetched once at cache-population; never refreshed. After token rotation, bootstraps silently fail. Fix: TTL on registry entries (1h) or no caching (one DB query per event).
+
+**M7 — `packages/agent/src/graph-builder/builder.ts:46-56` — `graph:updated` published even when handler throws**
+False positive update events cause agents to serve context that was not actually populated. Fix: only publish `graph:updated` when handler completes without error.
+
+**M8 — PagerDuty bootstrap is a stub**
+`PagerDutyBootstrap` returns `{ entitiesUpserted: 0 }` placeholder. `Team→ONCALL→Engineer` edges never seeded. Fix: implement bootstrap using PD API key from payload credentials.
+
+**M9 — `apps/gateway/src/routes/connectors.ts:57-80` — Bootstrap triggers without verifying connector is registered/enabled**
+Any authenticated user can trigger bootstrap for any connector type even with no credentials. Fix: check `enabled = true` in `connector_config`; return 404 if not found.
+
+**M10 — `apps/gateway/src/routes/chat.ts:340` — Token budget silently falls back to 1M on DB error**
+Tenant lookup failure silently uses tier1 default. Fix: explicit error or lowest-safe-default with warning log.
+
+**M11 — `packages/agent/src/orchestrator.ts` — Token budget shared object mutated across concurrent sessions**
+`sessionUsed`/`tenantDailyUsed` mutated directly on shared budget object under concurrent requests. Fix: local counters flushed to DB on session end.
+
+---
+
+### LOW
+
+**L1 — `packages/agent/src/graph-builder/builder.ts:83` — Success-path log uses `warn` level**
+`warn` level on successful bootstrap triggers alert rules. Fix: change to `info`.
+
+**L2 — `packages/agent/src/kb/graphiti-client.ts:33` — `_tenantId` param silently ignored**
+Call-time tenantId override is ignored; always uses constructor config. Fix: use call-time param in `X-Tenant-Id` header if provided.
+
+**L3 — `apps/gateway/src/triggers/executor.ts:29-32` — `payload.eventType` always `'unknown'`**
+`eventType` never set in publisher. Fix: include `eventType: channel` in published payload.
+
+**L4 — `packages/agent/src/kb/structural-graph.ts:130-136` — ILIKE fallback returns `freshnessScore: 1.0`**
+Old episodes returned as fully fresh. Fix: compute score from `created_at` vs TTL.
+
+**L5 — `connectors/github/src/connector.ts:84-86` — `write()` throws instead of returning error**
+Breaks `IConnector` interface contract. Fix: return typed error result instead of throwing.
+
+**L6 — `packages/agent/src/orchestrator.ts:376` — Multi-tool-call messages batched incorrectly for some providers**
+Anthropic/OpenAI require all tool_result blocks in one user turn. Current code emits multiple user messages. Fix: batch all tool results per provider requirements.
+
+**L7 — `apps/gateway/src/routes/chat.ts:46-78` — `InMemorySessionMemory` shared across all tenants, no tenant keying or eviction**
+UUID collision risk (low) + unbounded memory growth. Fix: key as `${tenantId}:${sessionId}`, add TTL eviction.
+
+---
+
+### Verdict table
+
+| Severity | Count |
+|----------|-------|
+| HIGH | 8 |
+| MEDIUM | 11 |
+| LOW | 7 |
+
+<!-- REVIEW SECTION END — 2026-06-12f -->

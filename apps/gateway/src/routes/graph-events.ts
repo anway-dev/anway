@@ -66,13 +66,17 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
   app.post<{ Body: GraphEvent }>('/api/graph/events', {
     preHandler: async (request, reply) => {
-      // Connector API key auth with tenant binding
       if (VALID_API_KEYS.size === 0) {
         return reply.code(503).send({ error: 'connector API keys not configured' })
       }
-      const key = request.headers['x-connector-key']
-      if (!key || !VALID_API_KEYS.has(key as string)) {
+      const key = request.headers['x-connector-key'] as string | undefined
+      if (!key || !VALID_API_KEYS.has(key)) {
         return reply.code(401).send({ error: 'unauthorized — missing or invalid x-connector-key' })
+      }
+      // Validate tenant binding immediately
+      const boundTenant = CONNECTOR_KEY_TENANT_MAP.get(key)
+      if (!boundTenant) {
+        return reply.code(401).send({ error: 'unauthorized — key has no tenant binding' })
       }
     },
     schema: {
@@ -88,12 +92,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const event = request.body
     const apiKey = request.headers['x-connector-key'] as string
-
-    // Enforce tenant binding — key can only write to its own tenant
-    const boundTenant = CONNECTOR_KEY_TENANT_MAP.get(apiKey)
-    if (boundTenant !== undefined && boundTenant !== '' && event.tenantId !== boundTenant) {
-      return reply.code(403).send({ error: 'forbidden — API key is not authorized for this tenantId' })
-    }
+    const boundTenant = CONNECTOR_KEY_TENANT_MAP.get(apiKey)!
 
     if (!provider) {
       return reply.code(503).send({ error: 'GraphBuilderAgent not configured — no LLM provider' })

@@ -4,8 +4,8 @@ export class InMemoryGateSink implements IGateSink {
   private readonly store = new Map<string, 'approved' | 'rejected' | 'pending'>()
 
   async push(event: GateEvent): Promise<string> {
-    this.store.set(event.gateId, 'pending')
-    return event.gateId
+    this.store.set(event.id, 'pending')
+    return event.id
   }
 
   async poll(gateId: string): Promise<'approved' | 'rejected' | null> {

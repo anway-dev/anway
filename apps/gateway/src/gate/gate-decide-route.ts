@@ -73,12 +73,13 @@ export async function gateDecideRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       const { action, target, requestedBy } = request.body
-      const { tenantId } = request.user as { tenantId: string }
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const toolArgs = JSON.stringify({ target, requestedBy: requestedBy ?? 'system' })
       const row = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
-          INSERT INTO gate_events (id, tenant_id, action, target, status, requested_by, created_at)
-          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${action}, ${target}, 'pending',
-                  ${requestedBy ?? 'system'}, NOW())
+          INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
+                  ${action}, ${toolArgs}::jsonb, 'test', 'pending', NOW())
           RETURNING id
         `
       )

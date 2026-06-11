@@ -58,6 +58,7 @@ function makeMockKG() {
     getEntityByExternalRef: async () => null,
     upsertEntity: async () => 'e1',
     upsertRelationship: async () => 'r1',
+    markConnectorEntitiesStale: async () => 0,
   }
 }
 

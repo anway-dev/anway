@@ -7,6 +7,46 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11k -->
+## Review — 2026-06-11k | S1/S2/S3/D2 (6eb4f2b)
+
+### Scope
+
+Commit `6eb4f2b` — JWT auth on event endpoints, tenantId from JWT, graph-events guard, prometheus/loki tool name prefixes.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 1 MEDIUM, 0 LOW
+
+D1 (token budget) and FD1 (specialist agent graph injection) were not in this commit — still open in current BLOCKING batch.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | S1/S2/S3/D2 all addressed correctly. |
+| D2 Code Standards | 4/5 | Unsafe JWT cast flagged (M1 below). |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | Auth added, demo tenant fallback removed, empty-key guard added, tool prefixes correct. |
+| D5 Readability | 5/5 | Clean. |
+| D6 Clarity/Comments | 5/5 | No noise. |
+
+---
+
+### MEDIUM
+
+**M1** `apps/gateway/src/routes/events.ts:54,94,104` — `request.user as { tenantId: string }` is an unsafe TypeScript cast. If the JWT was issued without a `tenantId` claim, or with a non-UUID value, this silently passes `undefined` (or an invalid string) to Postgres. Fix: validate at runtime before use:
+```typescript
+const user = request.user as Record<string, unknown>
+if (typeof user.tenantId !== 'string' || !UUID_RE.test(user.tenantId)) {
+  return reply.code(401).send({ error: 'invalid token — tenantId missing' })
+}
+const { tenantId } = user
+```
+Apply to all three routes. `UUID_RE` is already imported from `../utils/validators.js`.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11j -->
 ## Review — 2026-06-11j | Full Audit (multi-file)
 

@@ -7,6 +7,39 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11q -->
+## Review — 2026-06-11q | S7+P3 (cddcde2) + M1-k (e22f1a4)
+
+### Scope
+
+Commit `cddcde2` — chat-stream deleted, recursive CTE in resolveContext.
+Commit `e22f1a4` — UUID validation on events.ts tenantId.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW — CLEAN
+
+All HIGH tasks now resolved. MEDIUM batch posted to bridge.
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | S7 deleted cleanly. P3 CTE correct. M1-k validation all 3 routes. |
+| D2 Code Standards | 5/5 | UI updated to /api/chat with correct body shape. |
+| D3 Performance | 5/5 | 2 parallel queries regardless of depth. Bounded LIMIT 500 on relationships. |
+| D4 Security | 5/5 | Unguarded path gone. UUID validation correct. |
+| D5 Readability | 5/5 | CTE readable. |
+| D6 Clarity/Comments | 5/5 | No noise. |
+
+---
+
+### LOW
+
+**L1** `packages/agent/src/kb/structural-graph.ts` — Relationship rows mapped with `id: ''` (empty string). If any downstream consumer uses `relationship.id` as a lookup key, this silently breaks. Relationships are currently display-only in context building so this is LOW risk, but should use a real id if the schema has one or `crypto.randomUUID()` as a stable placeholder.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11p -->
 ## Review — 2026-06-11p | FD3-B1 (d861e22)
 

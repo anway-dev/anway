@@ -69,6 +69,28 @@ Phase 4 complete. All P1–P4 batches done. Ready for fable final signoff.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-12d -->
+## Review — 2026-06-12d | Commit ce5d4a3 (P5B-2-FIX) + gate-decide-route fix
+
+**Reviewer:** Claude
+
+### P5B-2-FIX: CLEAN ✓ (with direct fix applied)
+
+- `InMemoryGateSink` exported from `packages/agent/src/index.ts` ✓
+- `memory-gate-fallback.ts` created — module-level singleton ✓
+- `chat.ts`: `getMemoryGateSink()` used as fallback, error→warn log ✓
+- `gate-decide-route.ts`: NOT updated in executor's commit
+
+**Direct fix applied:** `gate-decide-route.ts` updated to use `getMemoryGateSink()` on no-Redis path. Postgres `UPDATE gate_events` branch-guarded by `if (redisUrl)` — in-memory path calls `getMemoryGateSink().record()` directly, resolving `pollGate()` in the orchestrator. All 36 gateway tests GREEN.
+
+**All P5 items DONE. All tests GREEN: 79/79 agent, 36/36 gateway.**
+
+Fable re-run warranted — all fable gaps now addressed.
+
+<!-- REVIEW SECTION END — 2026-06-12d -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-12c -->
 ## Review — 2026-06-12c | Commit b5c3e96 (P5B)
 

@@ -18,6 +18,80 @@ cd "$REPO_ROOT"
 
 command -v jq > /dev/null 2>&1 || err "jq not installed — brew install jq"
 
+check_service() {
+  local name="$1" check_cmd="$2"
+  if eval "$check_cmd" > /dev/null 2>&1; then
+    echo -e "    ${GREEN}●${NC} ${name} (ready)"
+  else
+    echo -e "    ${RED}✗${NC} ${name} (not responding)"
+  fi
+}
+
+# ── Interactive mode ──
+MODE="${1:-}"
+
+if [ -z "$MODE" ]; then
+  echo ""
+  echo "  Anvay Demo — what do you want to do?"
+  echo ""
+  echo "  1) Full start    (infra + demo docker + gateway + web)"
+  echo "  2) Gateway only  (kill :4000, restart gateway)"
+  echo "  3) Web only      (kill :3000, restart web)"
+  echo "  4) Docker only   (restart demo compose services)"
+  echo "  5) Infra only    (restart postgres/redis/neo4j)"
+  echo "  q) Quit"
+  echo ""
+  read -rp "  Choice [1]: " MODE
+  MODE="${MODE:-1}"
+fi
+
+case "$MODE" in
+  q|Q) exit 0 ;;
+  2)   # ── Gateway only ──
+       lsof -ti :4000 2>/dev/null | xargs kill -9 2>/dev/null || true
+       sleep 1
+       cp -n apps/gateway/.env.example apps/gateway/.env 2>/dev/null || true
+       set -a; source apps/gateway/.env 2>/dev/null || true; set +a
+       pnpm install --silent 2>/dev/null || pnpm install
+       (cd apps/gateway && pnpm dev) > /tmp/anvay-gateway.log 2>&1 &
+       echo ""; echo "  Status:"
+       check_service "Gateway  :4000" "curl -sf http://127.0.0.1:4000/health"
+       echo ""
+       log "Gateway restarting — tail -f /tmp/anvay-gateway.log"
+       exit 0
+       ;;
+  3)   # ── Web only ──
+       lsof -ti :3000 2>/dev/null | xargs kill -9 2>/dev/null || true
+       sleep 1
+       (cd apps/web && env -u PORT pnpm dev) > /tmp/anvay-web.log 2>&1 &
+       echo ""; echo "  Status:"
+       check_service "Web      :3000" "curl -sf http://localhost:3000"
+       echo ""
+       log "Web restarting — tail -f /tmp/anvay-web.log"
+       exit 0
+       ;;
+  4)   # ── Docker only ──
+       docker compose -p demo -f infra/demo/docker-compose.yml restart
+       echo ""; echo "  Status:"
+       check_service "Prometheus" "curl -sf http://localhost:9090/-/ready"
+       check_service "Loki"      "curl -sf http://localhost:3100/ready"
+       log "Demo docker services restarted"
+       exit 0
+       ;;
+  5)   # ── Infra only ──
+       docker compose -p infra -f infra/docker-compose.yml restart postgres redis neo4j
+       echo ""; echo "  Status:"
+       docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1 && echo -e "    ${GREEN}●${NC} Postgres (ready)" || echo -e "    ${RED}✗${NC} Postgres"
+       echo ""; log "Infra (postgres/redis/neo4j) restarted"
+       exit 0
+       ;;
+  1|*) : ;; # fall through to full start
+esac
+
+# ═══════════════════════════════════════════════════
+# FULL START (mode 1)
+# ═══════════════════════════════════════════════════
+
 # ── Check Docker is running ──
 docker info > /dev/null 2>&1 || err "Docker is not running — start Docker Desktop first"
 
@@ -30,7 +104,6 @@ for name in infra-gateway-1 infra-web-1; do
 done
 
 # ── Start infra (postgres, redis, neo4j) ──
-# Use project name 'infra' to match any existing containers
 log "Starting infra services (postgres, redis, neo4j)..."
 docker compose -p infra -f infra/docker-compose.yml up -d postgres redis neo4j 2>&1 | grep -v '^#' || \
   err "docker compose failed — check infra/docker-compose.yml"
@@ -58,15 +131,12 @@ until curl -sf http://localhost:9090/-/ready > /dev/null 2>&1; do
   sleep 1
 done
 
-# ── Env file — always refresh from example for demo ──
-cp -n apps/gateway/.env.example apps/gateway/.env
+# ── Env file ──
+cp -n apps/gateway/.env.example apps/gateway/.env 2>/dev/null || true
 log "apps/gateway/.env initialized from example (existing file preserved)"
 
-# Export vars into current shell so child processes inherit them
-# (tsx does not auto-load .env — reads process.env directly)
 set -a
-# shellcheck disable=SC1091
-source apps/gateway/.env
+source apps/gateway/.env 2>/dev/null || true
 set +a
 
 # ── Install deps ──
@@ -105,7 +175,6 @@ log "Gateway ready"
 log "Fetching dev token..."
 DEV_TOKEN=$(curl -sf http://localhost:4000/api/auth/dev-token | jq -r '.token // empty' 2>/dev/null) || DEV_TOKEN=""
 if [ -z "$DEV_TOKEN" ]; then
-  # Fallback: POST to /auth/token
   DEV_TOKEN=$(curl -sf -X POST http://localhost:4000/auth/token \
     -H "Content-Type: application/json" \
     -d '{"email":"dev@anvay.local","tenantId":"00000000-0000-0000-0000-000000000001"}' | jq -r '.token // empty' 2>/dev/null) || DEV_TOKEN=""
@@ -128,7 +197,6 @@ if [ -n "$DEV_TOKEN" ]; then
       -H "$AUTH" \
       -d "{\"credentials\":$CREDENTIALS}" > /dev/null 2>&1 && log "  $connector configured" || warn "  $connector failed"
 
-    # Trigger bootstrap
     curl -sf -X POST "http://localhost:4000/api/connectors/$connector/bootstrap" \
       -H "$AUTH" > /dev/null 2>&1 && log "  $connector bootstrapped" || warn "  $connector bootstrap skipped"
   done
@@ -138,7 +206,6 @@ fi
 
 # ── Start web ──
 log "Starting web on :3000..."
-# Unset PORT so Next.js uses its default (:3000), not the gateway's PORT=4000
 (cd apps/web && env -u PORT pnpm dev) > /tmp/anvay-web.log 2>&1 &
 WEB_PID=$!
 
@@ -160,8 +227,12 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo -e "${GREEN}  Anvay demo is running${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "  Open:    http://localhost:3000"
-echo "  Gateway: http://localhost:4000/health"
+echo "  Status:"
+check_service "Gateway  :4000"  "curl -sf http://127.0.0.1:4000/health"
+check_service "Web      :3000"  "curl -sf http://localhost:3000"
+check_service "Postgres"       "docker exec infra-postgres-1 pg_isready -U anvay"
+check_service "Prometheus"     "curl -sf http://localhost:9090/-/ready"
+check_service "Loki"           "curl -sf http://localhost:3100/ready"
 echo ""
 echo "  Logs:  tail -f /tmp/anvay-gateway.log"
 echo "         tail -f /tmp/anvay-web.log"

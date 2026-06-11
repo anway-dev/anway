@@ -7,6 +7,36 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11g -->
+## Review — 2026-06-11g | F1 (56885da)
+
+### Scope
+
+Commit `56885da` — interactive restart menu + health checks in start_demo.sh.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | Menu, non-interactive args, health checks all present. |
+| D2 Code Standards | 5/5 | `eval`-based helper clean. Fall-through to full start correct. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | No issues. |
+| D5 Readability | 5/5 | Clear mode labels and comments. |
+| D6 Clarity/Comments | 5/5 | Comments minimal and useful. |
+
+---
+
+### LOW
+
+**L1** `scripts/start_demo.sh` modes 2/3 — health check runs immediately after backgrounding the process. Gateway/web not up yet → always shows ✗. Add `sleep 3` before `check_service` in modes 2 and 3, or print "starting (check logs)" instead of a live probe.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11f -->
 ## Review — 2026-06-11f | M3 fix (89e3020)
 

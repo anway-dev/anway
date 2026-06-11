@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, DEMO_TENANT, authHeaders } from './fixtures'
+import { GATEWAY, authHeaders } from './fixtures'
 
 test.describe('Auth — API', () => {
   test('P0: GET /api/auth/dev-token returns 200 with token + tenantId', async ({ request }) => {

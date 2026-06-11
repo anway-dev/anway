@@ -40,6 +40,60 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ao -->
+## Review — 2026-06-11ao | Commit a5d1502 (P1C-2 + security + P2A)
+
+**Reviewer:** Claude
+
+### Verdict: RED — 1 HIGH + 1 MEDIUM
+
+**P1C-2 (ArgoCD bootstrap):** CLEAN ✓ — `let relationshipsUpserted`, all 4 upsert+relationship calls correct, IDs captured.
+
+**K8s agent:** CLEAN ✓ — real `kubectl` via `spawnSync`, all 5 tools implemented, `restart_deployment` properly gated as `write: true`.
+
+---
+
+### HIGH
+
+**`apps/gateway/src/routes/connectors.ts:88-92` — `tenantId` undeclared**
+
+`const { tenantId } = request.user` was replaced with `const user = request.user` but `tenantId` was never extracted from `user`. Lines 92, 95, 104 all reference bare `tenantId` — TypeScript compile error / runtime `ReferenceError`.
+
+Fix — add extraction after user:
+```typescript
+const user = request.user as { tenantId: string; role?: string }
+const { tenantId } = user   // ADD THIS
+if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+```
+
+### MEDIUM
+
+**`connectors/datadog/src/agent.ts:45-46` — `get_logs` query never sent**
+
+`const query = \`service:...\`` built but discarded. `/api/v2/logs/events/search` is a **POST** endpoint — `ddApi` only does GET (no body param). Query is silently dropped.
+
+Fix — update `ddApi` to support POST with body, then call it:
+```typescript
+async function ddApi(path: string, creds: Record<string, unknown>, body?: unknown): Promise<unknown | null> {
+  // ...
+  const resp = await fetch(`${DD_API}${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+```
+
+Then in `get_logs`:
+```typescript
+const query = `service:${params.service} ${params.query}`
+const data = await ddApi('/api/v2/logs/events/search', creds, {
+  filter: { query, from: 'now-1h', to: 'now' },
+  page: { limit: params.limit ?? 50 },
+}) as { data?: Array<{ attributes: { timestamp: string; status: string; message: string } }> } | null
+```
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11an -->
 ## Review — 2026-06-11an | Commit a72c7a2 (P1B-FIX-3 + P1C-1)
 

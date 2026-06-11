@@ -65,24 +65,30 @@ export class LinearBootstrap implements IConnectorBootstrap {
 
       for (const issue of issues) {
         const issueName = `${issue.identifier}: ${issue.title}`
-        await this.kg.upsertEntity({
+        const ticketId = await this.kg.upsertEntity({
           type: 'Ticket',
           name: issueName,
           metadata: { externalId: issue.id, source: 'linear', status: 'open' },
         }, tenantId)
         entitiesUpserted++
 
-        // Attempt service name extraction from title/description
-        const searchText = `${issue.title} ${issue.description ?? ''}`
-        try {
-          const entries = await this.kg.search(searchText, tenantId, 1)
-          if (entries.length > 0 && entries[0]!.content) {
-            const serviceName = entries[0]!.content.trim()
-            if (serviceName) {
-              // Relate ticket to matched service (graph upsertRelationship handles this)
+        // Match ticket title words against known Service entities
+        const words = issue.title.split(/\s+/).filter((w: string) => w.length > 3)
+        for (const word of words.slice(0, 3)) {
+          try {
+            const ctx = await this.kg.resolveContextByName(word, tenantId, 1)
+            if (ctx && ctx.primaryEntity?.type === 'Service') {
+              await this.kg.upsertRelationship({
+                fromEntityId: ticketId,
+                relType: 'RELATES_TO',
+                toEntityId: ctx.primaryEntity.id,
+                metadata: { confidence: 0.6, source: 'linear-title-match' },
+              }, tenantId)
+              relationshipsUpserted++
+              break
             }
-          }
-        } catch { /* search unavailable — skip */ }
+          } catch { /* no match — skip */ }
+        }
       }
 
       const hints = [`Linear bootstrap: ${teams.length} teams, ${projects.length} projects, ${issues.length} recent tickets`]

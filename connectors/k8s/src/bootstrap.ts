@@ -28,25 +28,18 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
       const labels = pod.metadata.labels ?? {}
       const appLabel = labels['app'] ?? labels['app.kubernetes.io/name'] ?? pod.metadata.name
 
-      // Upsert Namespace entity (idempotent — merge on name)
-      await this.kg.upsertEntity({ type: 'Namespace', name: ns, metadata: {} }, tenantId)
-
-      // Upsert Service entity
-      await this.kg.upsertEntity({
+      const nsId = await this.kg.upsertEntity({ type: 'Namespace', name: ns, metadata: {} }, tenantId)
+      const svcId = await this.kg.upsertEntity({
         type: 'Service',
         name: appLabel,
         metadata: {
           namespace: ns,
-          connectorCoordinates: {
-            k8s: { resourceIds: { namespace: ns, selector: `app=${appLabel}` } },
-          },
+          connectorCoordinates: { k8s: { resourceIds: { namespace: ns, selector: `app=${appLabel}` } } },
         },
       }, tenantId)
-
-      // Upsert Service→HOSTED_IN→Namespace relationship
-      // (using upsertRelationship — graph handles dedup)
-
+      await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'HOSTED_IN', toEntityId: nsId, metadata: {} }, tenantId)
       entitiesUpserted++
+      relationshipsUpserted++
     }
 
     // 2. Get services

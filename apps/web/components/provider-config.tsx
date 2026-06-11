@@ -16,6 +16,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
   const [baseUrl, setBaseUrl] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
+  const [cheapModel, setCheapModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [devToken, setDevToken] = useState<string | null>(null);
 
@@ -67,6 +68,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
       if (apiKey) body.apiKey = apiKey;
       if (baseUrl) body.baseUrl = baseUrl;
       if (selectedModel) body.defaultModel = selectedModel;
+      if (cheapModel) body.cheapModel = cheapModel;
       const resp = await fetch("/api/settings/provider", {
         method: "POST",
         headers: {
@@ -107,8 +109,15 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
           <>
             <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace" }}>Model</label>
             <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-              style={{ width: "100%", background: "#080808", border: "1px solid #1a1a1a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "12px", fontFamily: "monospace", marginBottom: "24px", outline: "none" }}>
+              style={{ width: "100%", background: "#080808", border: "1px solid #1a1a1a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "12px", fontFamily: "monospace", marginBottom: "16px", outline: "none" }}>
               <option value="">—</option>
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace" }}>Cheap model (optional)</label>
+            <select value={cheapModel} onChange={e => setCheapModel(e.target.value)}
+              style={{ width: "100%", background: "#080808", border: "1px solid #1a1a1a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "12px", fontFamily: "monospace", marginBottom: "24px", outline: "none" }}>
+              <option value="">— (use main model)</option>
               {models.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </>

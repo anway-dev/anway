@@ -27,9 +27,6 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
   }
 
   const provider = ProviderFactory.create(providerConfig)
-  const cheapModelId = process.env['CHEAP_MODEL'] ?? 'claude-haiku-3-5-20251001'
-  const mainModelId = process.env['MAIN_MODEL'] ?? 'claude-sonnet-4-6'
-
   const incidentService = new IncidentService(prisma)
 
   const sub: RedisClientType = createClient({
@@ -65,7 +62,7 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
 
       try {
         const kg = createKnowledgeGraph(tenantId as TenantId)
-        const sre = new SREAgent(provider, provider, kg, cheapModelId, mainModelId)
+        const sre = new SREAgent(provider, provider, kg)
         const context = await sre.assembleContext(title, description ?? '', tenantId as TenantId)
         await incidentService.setRootCause(id, tenantId, context.hypothesis)
         log.info({ incidentId: id, tenantId }, 'incident-subscriber: root cause written')

@@ -7,6 +7,54 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ab -->
+## Review — 2026-06-11ab | FA-M1/M2 + L1-L8 (c818418)
+
+### Scope
+
+Commit `c818418` — SSRF decimal IP, LogQL escape, dev fallback logs, empty API key filter, gateId UUID, pollGate abort signal.
+
+### Verdict: 1 BLOCKING — NEEDS FIX
+
+---
+
+### BLOCKING
+
+**B1** `packages/agent/src/orchestrator.ts:339` — `pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000, signal ? { signal } : undefined)` — 4th positional arg is `intervalMs?: number`. `{ signal: AbortSignal } | undefined` is not `number | undefined`. TypeScript error: `Argument of type '{ signal: AbortSignal } | undefined' is not assignable to parameter of type 'number | undefined'`.
+
+Fix: pass `undefined` for `intervalMs`, put signal in `opts` (5th arg):
+```typescript
+const decision = await pollGate(
+  config.gateSink, gateId, config.gateTimeoutMs ?? 30_000,
+  undefined,
+  signal ? { signal } : undefined,
+)
+```
+
+---
+
+### Verified correct
+
+**FA-M1** — `/^\d+$/.test(host)` blocks pure decimal-encoded IPs. ✓
+
+**FA-M2** — `replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/"/g, '\\"')` — regex special chars + quotes escaped. ✓
+
+**L1** — `request.log.warn(...)` on demo fallback. ✓
+
+**L2** — `.filter(k => k.length > 0)` on VALID_API_KEYS. ✓
+
+**L3** — `UUID_RE.test(gateId)` → 400 before DB cast. ✓
+
+**L4 (gate.ts)** — `opts?.signal?.aborted` check in poll loop correct. Orchestrator call-site is the problem (B1 above).
+
+**L5/L6** — Executor confirmed already handled. ✓
+
+**L7/L8** — Deferred. Acceptable.
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11ab -->
+
 <!-- REVIEW SECTION START — 2026-06-11aa -->
 ## Review — 2026-06-11aa | FA-H1-3 (3614e0f)
 

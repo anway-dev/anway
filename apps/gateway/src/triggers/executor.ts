@@ -26,6 +26,10 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
       }
       // Read-only actions (surface_context) execute immediately
       if (action.type === 'surface_context') {
+        await pub.publish('session:context', JSON.stringify({
+          tenantId: payload.tenantId,
+          context: { eventType: payload.eventType ?? 'unknown', payload },
+        })).catch(() => {})
         log.info({ tenantId: payload.tenantId }, 'surface_context triggered')
       }
     }

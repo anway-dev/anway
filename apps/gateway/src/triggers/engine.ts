@@ -12,6 +12,8 @@ export interface TriggerAction {
   params: Record<string, unknown>
 }
 
+interface ConditionEntry { field: string; operator?: string; value: unknown }
+
 export class TriggerEngine {
   private rules: TriggerRule[] = []
 
@@ -31,10 +33,24 @@ export class TriggerEngine {
     return matched
   }
 
-  // V1: exact equality match only. Range/nested/array operators not supported.
   private matchesCondition(condition: Record<string, unknown>, payload: Record<string, unknown>): boolean {
     for (const [key, value] of Object.entries(condition)) {
-      if (payload[key] !== value) return false
+      // Support new format: { field: 'severity', operator: 'gt', value: 3 }
+      const entry = value as ConditionEntry
+      if (entry && typeof entry === 'object' && 'field' in entry) {
+        const actual = payload[entry.field]
+        switch (entry.operator ?? 'eq') {
+          case 'eq': if (actual !== entry.value) return false; break
+          case 'gt': if (typeof actual !== 'number' || actual <= Number(entry.value)) return false; break
+          case 'lt': if (typeof actual !== 'number' || actual >= Number(entry.value)) return false; break
+          case 'contains': if (typeof actual !== 'string' || !actual.includes(String(entry.value))) return false; break
+          case 'exists': if (actual === undefined || actual === null) return false; break
+          default: if (actual !== entry.value) return false
+        }
+      } else {
+        // Legacy format: plain key-value equality
+        if (payload[key] !== value) return false
+      }
     }
     return true
   }

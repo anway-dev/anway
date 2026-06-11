@@ -21,19 +21,45 @@ export class ArgoCDConnector implements IConnector {
     return result.stdout
   }
 
-  async read(_query: ConnectorQuery): Promise<ConnectorResult> {
-    throw new Error('ArgoCD reads are handled by specialist agents')
+  async read(query: ConnectorQuery): Promise<ConnectorResult> {
+    let data: unknown
+    switch (query.type) {
+      case 'list_applications': {
+        const out = await this.runCli('argocd', ['app', 'list', '-o', 'json'])
+        data = JSON.parse(out)
+        break
+      }
+      case 'get_application': {
+        const out = await this.runCli('argocd', ['app', 'get', String(query.name ?? ''), '-o', 'json'])
+        data = JSON.parse(out)
+        break
+      }
+      case 'get_application_history': {
+        const out = await this.runCli('argocd', ['app', 'history', String(query.name ?? ''), '-o', 'json'])
+        data = JSON.parse(out)
+        break
+      }
+      case 'get_sync_status': {
+        const name = String(query.name ?? '')
+        const out = await this.runCli('argocd', ['app', 'get', name, '-o', 'json'])
+        const app = JSON.parse(out)
+        data = { name, syncStatus: app.status?.sync?.status, healthStatus: app.status?.health?.status }
+        break
+      }
+      default:
+        throw new Error(`ArgoCD connector: unknown query type '${query.type}'`)
+    }
+    const ttl = query.type === 'get_sync_status' ? 30 : 120
+    return { source: `argocd:${this.id}`, fetched_at: new Date(), ttl, freshness_score: 1.0, data }
   }
 
   async write(action: ConnectorAction): Promise<ConnectorResult> {
     const appName = action.params?.['app'] as string
     if (!appName) { return { source: 'argocd', fetched_at: new Date(), ttl: 60, freshness_score: 1.0, data: { error: 'app name required' } } }
-
     if (action.type === 'syncApp') {
       await this.runCli('argocd', ['app', 'sync', appName])
       return { source: 'argocd', fetched_at: new Date(), ttl: 60, freshness_score: 1.0, data: { status: 'synced' } }
     }
-
     throw new Error(`Unknown ArgoCD action: ${action.type}`)
   }
 

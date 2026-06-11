@@ -7,6 +7,68 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11u -->
+## Review — 2026-06-11u | B1+B2+M-ep1 (0615a60)
+
+### Scope
+
+Commit `0615a60` — scheduler arity fix, getFacts tenant filter, addEpisode insert.
+
+### Verdict: 1 BLOCKING, 0 HIGH, 1 MEDIUM — NEEDS FIX
+
+---
+
+### BLOCKING
+
+**B3** `packages/agent/src/kb/hybrid-knowledge-graph.ts:24` — `this.graphiti.getFacts(query, at)` passes `at: Date | undefined` as the second parameter `_tenantId?: string`. Interface changed to `getFacts(query, tenantId?, at?)` but hybrid didn't update the call — `at` (Date) lands in the `tenantId` (string) slot. TypeScript error: `Type 'Date | undefined' is not assignable to type 'string | undefined'`.
+
+Fix:
+```typescript
+async getFacts(query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
+  if (this.graphiti) return this.graphiti.getFacts(query, tenantId, at)
+  return []
+}
+```
+
+---
+
+### Verified correct
+
+**B1** `scheduler.ts:78` — `runFreshnessDecay()` call site fixed. ✓
+
+**B2** `structural-graph.ts` — `getFacts` now queries `WHERE tenant_id = $1 AND created_at >= $2`. Interface updated with `tenantId?`. ✓. Note: empty-string fallback (`tenantId ?? ''`) is safe — no UUID matches empty string.
+
+**M-ep1** `structural-graph.ts:addEpisode` — inserts `(current_setting('app.tenant_id')::uuid, text, metadata, timestamp)`. Correct given Episode has no tenantId field — RLS session variable is the right approach. Silent failure via `.catch(() => {})` acceptable for episodic writes. ✓
+
+---
+
+### MEDIUM
+
+**M-ep2** `packages/agent/src/kb/hybrid-knowledge-graph.ts:19-21` — `addEpisode` only delegates to Graphiti. When `this.graphiti` is absent (structural-only mode), episodes are silently dropped — `structural.addEpisode` is never called. Fix: add fallback:
+```typescript
+async addEpisode(episode: Episode): Promise<void> {
+  if (this.graphiti) return this.graphiti.addEpisode(episode)
+  return this.structural.addEpisode(episode)
+}
+```
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | addEpisode functional (with caveats). getFacts tenant-scoped. |
+| D2 Code Standards | 3/5 | Stale call in hybrid not updated to match new signature |
+| D3 Performance | 5/5 | |
+| D4 Security | 5/5 | B2 tenant filter correct. |
+| D5 Readability | 5/5 | |
+| D6 Clarity/Comments | 5/5 | |
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11u -->
+
 <!-- REVIEW SECTION START — 2026-06-11t -->
 ## Review — 2026-06-11t | MEDIUM batch 3 (d7e9c9d)
 

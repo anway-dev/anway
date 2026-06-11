@@ -40,6 +40,35 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11aw -->
+## Review — 2026-06-11aw | Commit 1197662 (P4A-1) + test fixes
+
+**Reviewer:** Claude
+
+### P4A-1 — connectors.tsx live status: CLEAN ✓
+
+- `liveConnectors` state + `useEffect` fetching `GET /api/connectors` with auth headers ✓
+- `isLive(id)` merges live API result (`lc.type === id`) with existing `configuredMap` fallback ✓
+- `connected` count uses `liveConnectors.length` with `configuredMap` fallback ✓
+- `ConnectorCard configured` prop updated to `isLive(conn.id)` ✓
+- Static `CONNECTORS` catalog kept for display metadata (name, color, icon, category, configFields) ✓
+- Minor: `authHeaders` not in `useEffect` deps array (lint only — functionally correct since `authHeaders` is always in sync with `devToken`) ✓
+
+### Test fixes applied (not executor-delivered)
+
+- `connectors/prometheus/package.json`: added `exports` field — Vite ESM resolution required it
+- `connectors/loki/package.json`: same fix
+- `connectors/k8s/package.json`: same fix + `types` field
+- `subscriber.test.ts`: updated channel count 5→6, added `connector_removed` assertion (stale test — `connector_removed` channel was added in P1B but test never updated)
+
+**All tests GREEN: 79/79 agent, 36/36 gateway**
+
+Phase 4 complete. All P1–P4 batches done. Ready for fable final signoff.
+
+<!-- REVIEW SECTION END — 2026-06-11aw -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11av -->
 ## Review — 2026-06-11av | Commit c0d595c phase assessment — P4A scope
 

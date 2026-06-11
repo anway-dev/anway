@@ -53,17 +53,18 @@ describe('startGraphBuilderSubscriber', () => {
     Object.assign(process.env, prev)
   })
 
-  it('subscribes to all 5 graph event channels when provider available', async () => {
+  it('subscribes to all 6 graph event channels when provider available', async () => {
     process.env['ANTHROPIC_API_KEY'] = 'test-key'
     await startGraphBuilderSubscriber('redis://localhost:6379', mockLog as any)
 
-    expect(mockSubscribe).toHaveBeenCalledTimes(5)
+    expect(mockSubscribe).toHaveBeenCalledTimes(6)
     const channels = mockSubscribe.mock.calls.map((c: unknown[]) => c[0])
     expect(channels).toContain('pr_merged')
     expect(channels).toContain('deploy_completed')
     expect(channels).toContain('incident_created')
     expect(channels).toContain('ticket_created')
     expect(channels).toContain('connector_registered')
+    expect(channels).toContain('connector_removed')
     expect(mockLog.info).toHaveBeenCalled()
   })
 

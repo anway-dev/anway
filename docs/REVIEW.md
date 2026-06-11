@@ -7,6 +7,50 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11l -->
+## Review — 2026-06-11l | D1+FD1 (10c282a)
+
+### Scope
+
+Commit `10c282a` — `token_usage_daily` table + real budget loading (D1), knowledge graph context injection in specialist agents (FD1).
+
+### Verdict: 0 BLOCKING, 0 HIGH, 2 MEDIUM, 1 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 4/5 | D1 correct. FD1 capability built but `createSpecialistAgent` has no callers — dead code path. |
+| D2 Code Standards | 4/5 | UPSERT correct. Silent KG catch violates audit requirement. |
+| D3 Performance | 4/5 | DB round-trip on every chat request for token load. Acceptable but noted. |
+| D4 Security | 5/5 | RLS on new table. Migration clean. |
+| D5 Readability | 5/5 | Clear. |
+| D6 Clarity/Comments | 5/5 | Comment on KG injection is on-point. |
+
+---
+
+### MEDIUM
+
+**M1** `packages/agent/src/specialist-agent.ts:78-80` — KG resolution failure is swallowed silently: `catch { /* KG unavailable — proceed without grounded context */ }`. CLAUDE.md: "Skipping the graph step is a hard violation — audit-logged and surfaced as a system error." Must emit an audit event on failure (same pattern as orchestrator lines ~205-215). The orchestrator correctly audit-logs `graph_context_failed` — specialist agent should do the same. Since specialist agents don't have `auditSink` in config, pass it as optional param or yield a `graph_context_failed` stream event.
+
+**M2** `packages/agent/src/specialist-agent.ts` — `createSpecialistAgent` with `knowledgeGraph`/`contextEntityId` has no callers in production code (`grep createSpecialistAgent` returns only the definition and the export). FD1 is complete at the API level but the wiring from the orchestrator's resolved `primaryEntity.id` to specialist agent creation does not exist. The orchestrator's own graph injection loop is the live path. FD1 should either: (a) wire the orchestrator to pass `contextEntityId` when spawning specialist agents, or (b) accept this is an API-ready-but-unwired state and document it explicitly.
+
+---
+
+### LOW
+
+**L1** `apps/gateway/src/routes/chat.ts:392-403` — Token usage persistence is best-effort (`catch { /* best-effort */ }`). In a billing context, silent DB failure means tokens consumed but not counted — tenant bypasses daily limit until next successful write. Acceptable tradeoff for now but should be logged: `request.log.warn({ err }, 'token usage persist failed')`.
+
+---
+
+### Carry-forward MEDIUM (from 2026-06-11k)
+
+**M1-k** `apps/gateway/src/routes/events.ts:54,94,104` — unsafe `request.user as { tenantId: string }` cast. Not yet fixed. See review k for full detail and fix pattern.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11k -->
 ## Review — 2026-06-11k | S1/S2/S3/D2 (6eb4f2b)
 

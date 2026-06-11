@@ -40,6 +40,40 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11av -->
+## Review — 2026-06-11av | Commit c0d595c phase assessment — P4A scope
+
+**Reviewer:** Claude
+
+Phase 3 fully complete. All P1–P3 tasks CLEAN. Bridge P4A posted.
+
+P4A scope is `connectors.tsx` only — other views (`access-view`, `workflow-view`, `kb-view`) have no matching gateway endpoints and stay on mock data per CLAUDE.md prototype guidance. `orchestrator-chat.tsx` SCENARIOS is UI sugar, not data — leave mock.
+
+<!-- REVIEW SECTION END — 2026-06-11av -->
+
+---
+
+<!-- REVIEW SECTION START — 2026-06-11au -->
+## Review — 2026-06-11au | Commit c0d595c (P3B-2-FIX-2)
+
+**Reviewer:** Claude
+
+### Verdict: CLEAN ✓
+
+- `execFileAsync` import + promisify — correct ✓
+- Graph DEPLOYED_TO traversal unchanged — correct ✓
+- ArgoCD CLI: `argocd app history <app> -o json`, `timeout: 10_000`, slice to 3, wrapped in try/catch — correct ✓
+- GitHub CLI: `gh pr list --repo <repo> --limit 5 --json ...`, `timeout: 10_000`, mapped to PR strings, wrapped in try/catch — correct ✓
+- Dynamic runbook: Datadog first, deploy/PR lines conditionally appended, logs+deps always appended — correct ✓
+
+`timeout: 10_000` is a good addition beyond spec — prevents CLI stall.
+
+Phase 3 complete. P4A (UI live data) is next.
+
+<!-- REVIEW SECTION END — 2026-06-11au -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11at -->
 ## Review — 2026-06-11at | Commit f2070ad (P3B-2-FIX)
 

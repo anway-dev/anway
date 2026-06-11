@@ -86,6 +86,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
     { preHandler: [app.authenticate] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
+      const { tenantId } = user
       if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
       const { id } = request.params
       if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })

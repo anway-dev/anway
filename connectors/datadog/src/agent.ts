@@ -3,13 +3,15 @@ import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
 const DD_API = 'https://api.datadoghq.com'
 
-async function ddApi(path: string, creds: Record<string, unknown>): Promise<unknown | null> {
+async function ddApi(path: string, creds: Record<string, unknown>, body?: Record<string, unknown>): Promise<unknown | null> {
   const apiKey = (creds as ConnectorCreds).apiKey
   const appKey = (creds as ConnectorCreds).app_key
   if (!apiKey || !appKey) return null
   try {
     const resp = await fetch(`${DD_API}${path}`, {
-      headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey },
+      method: body ? 'POST' : 'GET',
+      headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
     })
     if (!resp.ok) return null
     return await resp.json() as unknown
@@ -43,7 +45,7 @@ const TOOLS: ConnectorTool[] = [
     definition: { name: 'get_logs', description: 'Search logs for a service', parameters: { type: 'object', properties: { service: { type: 'string' }, query: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['service', 'query'] } },
     execute: async (params, creds) => {
       const query = `service:${params.service} ${params.query}`
-      const data = await ddApi(`/api/v2/logs/events/search?limit=${params.limit ?? 50}`, creds) as { data?: Array<{ attributes: { timestamp: string; status: string; message: string } }> } | null
+      const data = await ddApi('/api/v2/logs/events/search', creds, { filter: { query }, limit: params.limit ?? 50 }) as { data?: Array<{ attributes: { timestamp: string; status: string; message: string } }> } | null
       if (!data?.data) return { lines: [] }
       const lines = data.data.map(d => ({ ts: d.attributes.timestamp, level: d.attributes.status, msg: d.attributes.message }))
       return { lines }

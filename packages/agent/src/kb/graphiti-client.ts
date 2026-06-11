@@ -30,7 +30,7 @@ export class GraphitiClient {
     }
   }
 
-  async getFacts(query: string, at?: Date): Promise<Fact[]> {
+  async getFacts(query: string, _tenantId?: string, at?: Date): Promise<Fact[]> {
     const params = new URLSearchParams({ query, ...(at ? { at: at.toISOString() } : {}) })
     const resp = await fetch(`${this.config.baseUrl}/facts?${params}`, {
       headers: { 'X-Tenant-Id': this.config.tenantId },

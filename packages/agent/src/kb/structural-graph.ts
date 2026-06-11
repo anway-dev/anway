@@ -22,15 +22,19 @@ export class StructuralGraph implements IKnowledgeGraph {
     return this.queryFn(sql, params) as Promise<T[]>
   }
 
-  async addEpisode(_episode: Episode): Promise<void> {
-    // Episodic layer stubbed — episodes written via GraphBuilderAgent in subscriber.ts
+  async addEpisode(episode: Episode): Promise<void> {
+    await this.query(
+      `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at)
+       VALUES (current_setting('app.tenant_id')::uuid, $1, $2, $3)`,
+      [episode.text, JSON.stringify({ source: episode.source }), episode.timestamp],
+    ).catch(() => {})
   }
 
-  async getFacts(_query: string, at?: Date): Promise<Fact[]> {
+  async getFacts(_query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
     const since = at ?? new Date(Date.now() - 24 * 60 * 60 * 1000)
     const rows = await this.query<{ text: string; created_at: Date }>(
-      `SELECT text, created_at FROM kb_episodes WHERE created_at >= $1 ORDER BY created_at DESC LIMIT 50`,
-      [since],
+      `SELECT text, created_at FROM kb_episodes WHERE tenant_id = $1 AND created_at >= $2 ORDER BY created_at DESC LIMIT 50`,
+      [tenantId ?? '', since],
     ).catch(() => [])
     return rows.map(r => ({
       claim: r.text,

@@ -87,7 +87,7 @@ export interface GraphSeed {
 
 export interface IKnowledgeGraph {
   addEpisode(episode: Episode): Promise<void>
-  getFacts(query: string, at?: Date): Promise<Fact[]>
+  getFacts(query: string, tenantId?: string, at?: Date): Promise<Fact[]>
   getEntity(id: string, tenantId: TenantId): Promise<Entity | null>
   getRelationships(entityId: string, tenantId: TenantId, relType?: string): Promise<Relationship[]>
   search(query: string, tenantId: TenantId, topK: number): Promise<KBEntry[]>

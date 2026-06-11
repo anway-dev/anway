@@ -20,7 +20,7 @@ export class HybridKnowledgeGraph implements IKnowledgeGraph {
     if (this.graphiti) return this.graphiti.addEpisode(episode)
   }
 
-  async getFacts(query: string, at?: Date): Promise<Fact[]> {
+  async getFacts(query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
     if (this.graphiti) return this.graphiti.getFacts(query, at)
     return []
   }

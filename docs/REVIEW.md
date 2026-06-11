@@ -40,6 +40,21 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ap -->
+## Review — 2026-06-11ap | Commit 7b5d819 (P2A-FIX)
+
+**Reviewer:** Claude
+
+### Verdict: CLEAN ✓
+
+- `const { tenantId } = user` added at line 87 — all 3 usages of `tenantId` now resolved ✓
+- `ddApi` updated: `body?: Record<string, unknown>`, `method: body ? 'POST' : 'GET'`, `Content-Type` header, JSON body ✓
+- `get_logs` now passes `{ filter: { query }, limit }` as POST body — query reaches Datadog ✓
+
+P2A fully resolved. P2B+P3A bridge posted.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ao -->
 ## Review — 2026-06-11ao | Commit a5d1502 (P1C-2 + security + P2A)
 

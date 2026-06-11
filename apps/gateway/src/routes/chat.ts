@@ -144,15 +144,36 @@ export function resolveProviderConfig(override?: ClientModelConfig): ProviderCon
   return null
 }
 
-function buildTokenBudget(monthlyLimit = 1_000_000, sessionUsed = 0): TokenBudget {
+async function loadTokenUsage(tenantId: string): Promise<{ daily: number; monthly: number; }> {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    const monthStartStr = monthStart.toISOString().slice(0, 10)
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ daily: bigint; monthly: bigint }>>`
+        SELECT
+          COALESCE(SUM(CASE WHEN date = ${today}::date THEN tokens_used ELSE 0 END), 0) AS daily,
+          COALESCE(SUM(CASE WHEN date >= ${monthStartStr}::date THEN tokens_used ELSE 0 END), 0) AS monthly
+        FROM token_usage_daily WHERE tenant_id = ${tenantId}::uuid
+      `
+    ).catch(() => [])
+    if (rows.length > 0) {
+      return { daily: Number(rows[0]!.daily), monthly: Number(rows[0]!.monthly) }
+    }
+  } catch { /* table may not exist — return zeros */ }
+  return { daily: 0, monthly: 0 }
+}
+
+function buildTokenBudget(monthlyLimit = 1_000_000, sessionUsed = 0, dailyUsed = 0, monthlyUsed = 0): TokenBudget {
   return {
     perQueryHardLimit: 100_000,
     perSessionLimit: 500_000,
     perTenantDailyLimit: Math.ceil(monthlyLimit / 30),
     perTenantMonthlyLimit: monthlyLimit,
     sessionUsed,
-    tenantDailyUsed: 0,
-    tenantMonthlyUsed: 0,
+    tenantDailyUsed: dailyUsed,
+    tenantMonthlyUsed: monthlyUsed,
   }
 }
 
@@ -308,7 +329,8 @@ export async function chatRoutes(app: FastifyInstance) {
       request.log.error({ err }, 'audit write failed')
     })
     const sessionUsed = getSessionUsed(sessionId)
-    const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed)
+    const usage = await loadTokenUsage(tenantId)
+    const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed, usage.daily, usage.monthly)
 
     const knowledgeGraph: IKnowledgeGraph = new StructuralGraph(
       (sql: string, params?: unknown[]) =>
@@ -366,6 +388,20 @@ export async function chatRoutes(app: FastifyInstance) {
               },
               createdAt: new Date(),
             })
+            // Persist token usage to DB
+            if (totalTokens > 0) {
+              try {
+                const today = new Date().toISOString().slice(0, 10)
+                await withTenant(prisma, tenantId, (tx) =>
+                  tx.$executeRaw`
+                    INSERT INTO token_usage_daily (tenant_id, date, tokens_used)
+                    VALUES (${tenantId}::uuid, ${today}::date, ${totalTokens})
+                    ON CONFLICT (tenant_id, date)
+                    DO UPDATE SET tokens_used = token_usage_daily.tokens_used + ${totalTokens}, updated_at = NOW()
+                  `
+                )
+              } catch { /* token tracking is best-effort */ }
+            }
           }
           stream.push(`data: ${JSON.stringify(event)}\n\n`)
         }

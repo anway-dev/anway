@@ -9,6 +9,7 @@ import type { ExecutableTool } from './orchestrator.js'
 import { isWriteAction, pollGate } from './gate/gate.js'
 import type { IGateSink } from './gate/gate.js'
 import { connectorIdFromTool } from './tools/naming.js'
+import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
 
 export interface SpecialistAgentConfig {
   name: string
@@ -21,6 +22,8 @@ export interface SpecialistAgentConfig {
   maxSteps?: number
   gateSink?: IGateSink
   gateTimeoutMs?: number
+  knowledgeGraph?: IKnowledgeGraph
+  contextEntityId?: string
 }
 
 export interface SpecialistAgent {
@@ -37,7 +40,23 @@ export interface SpecialistAgent {
 export function createSpecialistAgent(config: SpecialistAgentConfig): SpecialistAgent {
   return {
     name: config.name,
-    run: (input: string, ctx: SessionContext) => runSpecialist(config, input, ctx),
+    run: (input: string, ctx: SessionContext) => runSpecialist({ ...config, knowledgeGraph: config.knowledgeGraph, contextEntityId: config.contextEntityId }, input, ctx),
+  }
+}
+
+function buildGroundedContextBlock(ctx: Record<string, unknown>): string {
+  try {
+    const primary = (ctx['primaryEntity'] as Record<string, unknown>) ?? {}
+    const related = (ctx['relatedEntities'] as Array<Record<string, unknown>>) ?? []
+    const coords = (ctx['connectorCoordinates'] as Record<string, Record<string, string>>) ?? {}
+    const parts: string[] = []
+    if (primary['name']) parts.push(`Primary entity: ${primary['name']} (${(primary['type'] as string) ?? 'unknown'})`)
+    if (related.length > 0) parts.push(`Related entities: ${related.slice(0, 5).map((e: Record<string, unknown>) => `${e['name']} (${e['type'] as string})`).join(', ')}`)
+    if (Object.keys(coords).length > 0) parts.push(`Connector coordinates: ${Object.entries(coords).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}`)
+    if (parts.length === 0) return ''
+    return `<grounded_context>\n${parts.join('\n')}\n</grounded_context>\n[Note: Facts above were retrieved from the knowledge graph. If current connector data contradicts them, the live data takes precedence.]`
+  } catch {
+    return ''
   }
 }
 
@@ -49,6 +68,16 @@ async function* runSpecialist(
   const { model, tools, perimeter, auditSink } = config
   const mainModel = config.defaultModel ?? 'claude-sonnet-4-6'
   const maxSteps = config.maxSteps ?? 10
+
+  // Inject knowledge graph context if available (CLAUDE.md: graph is mandatory first step)
+  let systemPrompt = config.systemPrompt
+  if (config.knowledgeGraph && config.contextEntityId) {
+    try {
+      const agentCtx = await config.knowledgeGraph.resolveContext(config.contextEntityId)
+      const contextBlock = buildGroundedContextBlock(agentCtx)
+      if (contextBlock) systemPrompt = contextBlock + '\n\n' + systemPrompt
+    } catch { /* KG unavailable — proceed without grounded context */ }
+  }
 
   const perimeterCtx: PerimeterCtx = {
     tenantId: ctx.tenantId,

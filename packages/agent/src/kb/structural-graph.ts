@@ -27,11 +27,19 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async addEpisode(episode: Episode): Promise<void> {
-    await this.query(
-      `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at)
-       VALUES (current_setting('app.tenant_id')::uuid, $1, $2, $3)`,
-      [episode.text, JSON.stringify({ source: episode.source }), episode.timestamp],
-    ).catch(() => {})
+    if (episode.tenantId) {
+      await this.query(
+        `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at)
+         VALUES ($1::uuid, $2, $3, $4)`,
+        [episode.tenantId, episode.text, JSON.stringify({ source: episode.source }), episode.timestamp],
+      ).catch(() => {})
+    } else {
+      await this.query(
+        `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at)
+         VALUES (current_setting('app.tenant_id', true)::uuid, $1, $2, $3)`,
+        [episode.text, JSON.stringify({ source: episode.source }), episode.timestamp],
+      ).catch(() => {})
+    }
   }
 
   async getFacts(_query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
@@ -189,6 +197,13 @@ export class StructuralGraph implements IKnowledgeGraph {
       }
     }
 
+    // Compute real freshness from kb_entries
+    const freshRows = await this.query<{ fs: number }>(
+      `SELECT freshness_score AS fs FROM kb_entries WHERE tenant_id = $1 AND content ILIKE $2 ORDER BY freshness_score ASC LIMIT 1`,
+      [tenantId, `%${entity.name}%`],
+    ).catch(() => [])
+    const freshness = freshRows.length > 0 ? freshRows[0]!.fs : 1.0
+
     return {
       primaryEntity: entity,
       relatedEntities: [...relatedEntitiesMap.values()],
@@ -196,7 +211,7 @@ export class StructuralGraph implements IKnowledgeGraph {
       recentEpisodes: await this.getRecentEpisodesForEntity(entity.name, tenantId),
       connectorCoordinates,
       groundingSources: this.buildGroundingSources(connectorCoordinates),
-      freshness: 1.0,
+      freshness,
     }
   }
 

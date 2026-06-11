@@ -142,13 +142,21 @@ export async function connectorsRoutes(app: FastifyInstance) {
 }
 
 let _pub: import('redis').RedisClientType | null = null
+let _pubPromise: Promise<import('redis').RedisClientType> | null = null
 
 async function getBootstrapPub(): Promise<import('redis').RedisClientType | null> {
   const url = process.env['REDIS_URL']
   if (!url) return null
   if (!_pub) {
-    _pub = createClient({ url }) as import('redis').RedisClientType
-    await _pub.connect()
+    if (!_pubPromise) {
+      _pubPromise = (async () => {
+        const client = createClient({ url }) as import('redis').RedisClientType
+        await client.connect()
+        _pub = client
+        return client
+      })()
+    }
+    return _pubPromise
   }
   return _pub
 }

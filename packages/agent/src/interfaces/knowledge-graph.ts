@@ -32,6 +32,7 @@ export interface Episode {
   text: string
   source: string
   timestamp: Date
+  tenantId?: string
 }
 
 export interface Fact {

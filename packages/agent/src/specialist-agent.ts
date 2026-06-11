@@ -82,6 +82,7 @@ async function* runSpecialist(
       if (contextBlock) systemPrompt = contextBlock + '\n\n' + systemPrompt
     } catch (err) {
       yield { type: 'error' as const, code: 'GRAPH_CONTEXT_FAILED', message: err instanceof Error ? err.message : String(err) }
+      return
     }
   }
 

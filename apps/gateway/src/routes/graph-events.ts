@@ -94,6 +94,11 @@ export async function graphEventRoutes(app: FastifyInstance) {
     const apiKey = request.headers['x-connector-key'] as string
     const boundTenant = CONNECTOR_KEY_TENANT_MAP.get(apiKey)!
 
+    // Enforce tenant binding — key can only write to its bound tenant
+    if (event.tenantId !== boundTenant) {
+      return reply.code(403).send({ error: 'forbidden — API key is not authorized for this tenantId' })
+    }
+
     if (!provider) {
       return reply.code(503).send({ error: 'GraphBuilderAgent not configured — no LLM provider' })
     }

@@ -36,6 +36,9 @@ const GRAPH_EVENT_CHANNELS = [
   'ticket_created', 'connector_registered',
 ]
 
+// Cache bootstrap registry per tenant — avoids rebuilding on every Redis event
+const registryCache = new Map<string, Map<string, IConnectorBootstrap>>()
+
 function resolveProviderConfig(): ProviderConfig | null {
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic' as const, apiKey: process.env['ANTHROPIC_API_KEY']! }
   if (process.env['OPENAI_API_KEY']) return { type: 'openai' as const, apiKey: process.env['OPENAI_API_KEY']! }
@@ -72,19 +75,21 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         return
       }
       // bootstrapRegistry is rebuilt per event because kg is per-tenant.
-      // GitHubBootstrap(kg, token) and LinearBootstrap(kg, apiKey) each capture
-      // a per-tenant IKnowledgeGraph instance, so registry must live in callback.
-      // Moving registry outside would require tenant-aware factory — correctness
-      // is fine as-is, no optimisation needed.
-      const kg = createKnowledgeGraph(event.tenantId as TenantId)
       const tid = event.tenantId
-      const bootstrapRegistry = new Map<string, IConnectorBootstrap>()
-      bootstrapRegistry.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
-      bootstrapRegistry.set('argocd', new ArgocdBootstrap(kg))
-      bootstrapRegistry.set('datadog', new DatadogBootstrap(kg))
-      bootstrapRegistry.set('linear', new LinearBootstrap(kg, await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')))
-      bootstrapRegistry.set('prometheus', new PrometheusBootstrap(kg))
-      bootstrapRegistry.set('loki', new LokiBootstrap(kg))
+
+      // Cache bootstrap registry per tenant — avoids rebuilding on every event
+      if (!registryCache.has(tid)) {
+        const kg = createKnowledgeGraph(tid as TenantId)
+        const reg = new Map<string, IConnectorBootstrap>()
+        reg.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
+        reg.set('argocd', new ArgocdBootstrap(kg))
+        reg.set('datadog', new DatadogBootstrap(kg))
+        reg.set('linear', new LinearBootstrap(kg, await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')))
+        reg.set('prometheus', new PrometheusBootstrap(kg))
+        reg.set('loki', new LokiBootstrap(kg))
+        registryCache.set(tid, reg)
+      }
+      const bootstrapRegistry = registryCache.get(tid)!
       const agent = new GraphBuilderAgent(kg, provider, cheapModel, log, bootstrapRegistry, graphPub)
       await agent.handle(event)
     })

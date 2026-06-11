@@ -7,6 +7,64 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11m -->
+## Review — 2026-06-11m | HIGH batch 1 (dcf3ad4)
+
+### Scope
+
+Commit `dcf3ad4` — S4/S5/S6/D4/D6/P1/P2. Static connector import map, auth rate limit, admin role guard, tool error role fix, bootstrap type guard, bounded caches.
+
+### Verdict: 1 BLOCKING, 0 HIGH, 2 MEDIUM, 2 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 3/5 | S7/D3/D5/P3/FD3/FD5 still pending. P1 fix has BLOCKING recursion bug. |
+| D2 Code Standards | 2/5 | Infinite recursion in registry.ts, duplicate destructure in auth.ts. |
+| D3 Performance | 4/5 | sessionTokenUsage bounded correctly. adapterCache fix broken. |
+| D4 Security | 4/5 | S4/S5/S6 correct. rateLimitMap itself unbounded (MEDIUM). |
+| D5 Readability | 4/5 | Static map is clean. |
+| D6 Clarity/Comments | 4/5 | No noise. |
+
+---
+
+### BLOCKING
+
+**B1** `apps/gateway/src/connectors/registry.ts:21-23` — `cacheSetAdapter` calls itself recursively instead of calling `adapterCache.set`. Infinite recursion → stack overflow on first adapter cache write. Crashes the gateway on any tool call. Fix:
+
+```typescript
+function cacheSetAdapter(key: string, val: McpConnector | CliConnector): void {
+  if (adapterCache.size >= MAX_ADAPTER_CACHE) {
+    const k = adapterCache.keys().next().value
+    if (k !== undefined) adapterCache.delete(k)
+  }
+  adapterCache.set(key, val)  // ← must be adapterCache.set, not cacheSetAdapter
+}
+```
+
+Commit: `fix: P1-B1 — cacheSetAdapter infinite recursion`
+
+---
+
+### MEDIUM
+
+**M1** `apps/gateway/src/routes/auth.ts:44-45` — Duplicate `const { email, tenantId } = request.body` (line 44 and 45). TypeScript will error on redeclaration. Remove the duplicate line. (Also: `rateLimitMap` is module-level unbounded Map — grows with unique IPs. Apply same `cacheSet` bounded pattern, cap at 1000 entries.)
+
+**M2** `apps/gateway/src/routes/chat-stream.ts:149` — D4 fix uses raw `{ role: 'tool', tool_call_id, name }` instead of `model.formatToolResult()`. The chat-stream route has a `provider` instance — call `provider.formatToolResult(tc.id, msg)` to get provider-correct message format. Raw `role: 'tool'` works for OpenAI but is wrong for Anthropic (expects `type: 'tool_result'` inside a content array). Fix alongside S7 when hardening chat-stream.
+
+---
+
+### LOW
+
+**L1** `apps/gateway/src/routes/chat-stream.ts` — S4 static import map uses `/src/agent.js` paths (e.g. `@anvay/connector-prometheus/src/agent.js`). Couples directly to internal src layout. Should use the package's exported entry point if `exports` field is defined in `package.json`. Verify each connector's `package.json` exports field.
+
+**L2** `apps/gateway/src/routes/auth.ts` — S5 in-memory rate limit works for single-instance only. Acceptable for V1 but document this constraint. If gateway scales horizontally, rate limit per instance = N × 5 req/min effective.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11l -->
 ## Review — 2026-06-11l | D1+FD1 (10c282a)
 

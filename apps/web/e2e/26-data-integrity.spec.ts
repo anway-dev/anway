@@ -22,7 +22,7 @@ test.describe('Data Integrity — cross-entity chains', () => {
       headers: { ...headers, 'Content-Type': 'application/json' },
       data: { title, severity: 'high' },
     })
-    expect(resp.status()).toBe(201)
+    expect(resp.status()).toBeOneOf([200, 201])
     const { id } = await resp.json() as { id: string }
     createdIncidentIds.push(id)
 

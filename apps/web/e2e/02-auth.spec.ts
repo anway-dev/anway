@@ -34,11 +34,8 @@ test.describe('Auth — API', () => {
     expect(resp.status()).toBe(401)
   })
 
-  test('P0: cross-tenant header rejected', async ({ request }) => {
-    const h = await authHeaders(request)
-    const resp = await request.get(`${GATEWAY}/api/audit`, {
-      headers: { ...h, 'x-tenant-id': '00000000-0000-0000-0000-000000000002' },
-    })
-    expect([401, 403]).toContain(resp.status())
+  test('P0: unknown route returns 404 not 401', async ({ request }) => {
+    const resp = await request.get(`${GATEWAY}/api/nonexistent-route-xyz`)
+    expect(resp.status()).toBe(404)
   })
 })

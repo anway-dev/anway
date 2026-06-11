@@ -40,6 +40,83 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11al -->
+## Review — 2026-06-11al | Commit de47ccb (P1B — GitHub CODEOWNERS, connector_removed)
+
+**Reviewer:** Claude
+
+### Verdict: RED — 2 HIGH + 1 MEDIUM
+
+---
+
+### HIGH
+
+**P1B-H1 — `connectors/github/src/bootstrap.ts:fetchCODEOWNERS` — always returns null**
+
+`execFileAsync` (promisified `execFile`) returns `{ stdout, stderr }` on success — NO `.status` field. `result.status` is `undefined`. `undefined !== 0` is `true`, so the function **always returns `null`** regardless of kubectl output. CODEOWNERS never parsed, all team/engineer relationships never created.
+
+Fix: remove the dead status check:
+```typescript
+// Remove this line:
+if (result.status !== 0) return null
+// execFileAsync throws on non-zero exit — the catch block handles that
+return Buffer.from(result.stdout.trim(), 'base64').toString('utf-8')
+```
+
+**P1B-H2 — `packages/agent/src/graph-builder/builder.ts:onConnectorRemoved` — stale marking not implemented**
+
+Handler writes one episode text. No entity stale marking in DB. `resolveContext` returns stale entities unchanged. The feature is a no-op.
+
+Fix — implement real stale marking:
+```typescript
+private async onConnectorRemoved(event: GraphEvent & { type: 'connector_removed' }): Promise<void> {
+  const tenantId = this.tid(event.tenantId)
+  // Query entities sourced from this connector
+  const rows = await this.kg.search(event.connectorType, tenantId, 500)
+  // Mark stale via upsertEntity metadata update — use structural graph directly
+  // The bridge task has the exact SQL: UPDATE entities SET metadata = metadata || '{"stale":true}' WHERE tenant_id = $1 AND metadata->>'connectorType' = $2
+  // Add a method to IKnowledgeGraph: markConnectorEntitiesStale(connectorType, tenantId)
+  // OR: expose a raw update in StructuralGraph
+  await this.kg.addEpisode({
+    text: `Connector ${event.connectorType} removed — entities from this source are now stale`,
+    source: 'graph-builder',
+    timestamp: new Date(),
+  }).catch(() => {})
+}
+```
+
+Implement `markConnectorEntitiesStale(connectorType: string, tenantId: TenantId): Promise<number>` in `StructuralGraph`:
+```sql
+UPDATE entities
+SET metadata = metadata || '{"stale":true,"staleAt":"<now>","staleSince":"<connectorType>"}'::jsonb
+WHERE tenant_id = $1
+  AND (metadata->>'connectorCoordinates')::jsonb ? $2
+RETURNING id
+```
+
+Add to `IKnowledgeGraph` interface. Call from `onConnectorRemoved`. Return count for episode hint.
+
+Also: `resolveContext` and `getEntity` should include `stale: true` in returned entity metadata so agents can check — no filtering needed (agents decide), but flag must be present.
+
+---
+
+### MEDIUM
+
+**P1B-M1 — `apps/gateway/src/routes/connectors.ts` — no DELETE route**
+
+`connector_removed` event never fires. Add:
+```typescript
+app.delete<{ Params: { id: string } }>('/api/connectors/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
+  const { tenantId } = request.user as { tenantId: string }
+  // delete from connector_config where id = $1 and tenant_id = $2
+  // publish connector_removed to Redis
+  if (opts?.pub) await opts.pub.publish('connector_removed', JSON.stringify({ type: 'connector_removed', tenantId, connectorId: id, connectorType }))
+  return reply.code(204).send()
+})
+```
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ak -->
 ## Review — 2026-06-11ak | Commit 7feaf38 (P1A-FIX — relationships wired)
 

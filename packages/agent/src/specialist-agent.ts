@@ -9,7 +9,7 @@ import type { ExecutableTool } from './orchestrator.js'
 import { isWriteAction, pollGate } from './gate/gate.js'
 import type { IGateSink } from './gate/gate.js'
 import { connectorIdFromTool } from './tools/naming.js'
-import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
+import type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph.js'
 
 export interface SpecialistAgentConfig {
   name: string
@@ -48,14 +48,14 @@ export function createSpecialistAgent(config: SpecialistAgentConfig): Specialist
   }
 }
 
-function buildGroundedContextBlock(ctx: Record<string, unknown>): string {
+function buildGroundedContextBlock(ctx: AgentContext): string {
   try {
-    const primary = (ctx['primaryEntity'] as Record<string, unknown>) ?? {}
-    const related = (ctx['relatedEntities'] as Array<Record<string, unknown>>) ?? []
-    const coords = (ctx['connectorCoordinates'] as Record<string, Record<string, string>>) ?? {}
+    const primary = ctx.primaryEntity
+    const related = ctx.relatedEntities ?? []
+    const coords = ctx.connectorCoordinates ?? {}
     const parts: string[] = []
-    if (primary['name']) parts.push(`Primary entity: ${primary['name']} (${(primary['type'] as string) ?? 'unknown'})`)
-    if (related.length > 0) parts.push(`Related entities: ${related.slice(0, 5).map((e: Record<string, unknown>) => `${e['name']} (${e['type'] as string})`).join(', ')}`)
+    if (primary?.name) parts.push(`Primary entity: ${primary.name} (${primary.type ?? 'unknown'})`)
+    if (related.length > 0) parts.push(`Related entities: ${related.slice(0, 5).map(e => `${e.name} (${e.type})`).join(', ')}`)
     if (Object.keys(coords).length > 0) parts.push(`Connector coordinates: ${Object.entries(coords).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}`)
     if (parts.length === 0) return ''
     return `<grounded_context>\n${parts.join('\n')}\n</grounded_context>\n[Note: Facts above were retrieved from the knowledge graph. If current connector data contradicts them, the live data takes precedence.]`

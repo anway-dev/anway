@@ -7,6 +7,36 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11h -->
+## Review — 2026-06-11h | F2 (0b43542)
+
+### Scope
+
+Commit `0b43542` — replace `read -rp` prompt with `select` menu, remove positional arg shortcut.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 5/5 | `select` menu always shown. Positional arg path removed. 6 options correct. |
+| D2 Code Standards | 5/5 | `case "$REPLY"` on 1-6, invalid loops back cleanly. |
+| D3 Performance | 5/5 | No regressions. |
+| D4 Security | 5/5 | No issues. |
+| D5 Readability | 5/5 | Options array readable, PS3 prompt clear. |
+| D6 Clarity/Comments | 5/5 | No superfluous comments. |
+
+---
+
+### LOW
+
+**L1** _(carried from 2026-06-11g L1, unresolved)_ `scripts/start_demo.sh` modes 2 and 3 — `sleep 1` before `check_service` is too short. Gateway and web are started with `& ` in background; 1 second is not enough. Probe always shows ✗. Change `sleep 1` to `sleep 3` on lines 59 and 72, or replace the live probe with a static "starting — check logs" message.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11g -->
 ## Review — 2026-06-11g | F1 (56885da)
 

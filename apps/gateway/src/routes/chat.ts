@@ -177,7 +177,13 @@ function buildTokenBudget(monthlyLimit = 1_000_000, sessionUsed = 0, dailyUsed =
   }
 }
 
-// Module-level session token usage tracking (clears on process restart — acceptable for V1)
+// Module-level caches — bounded to prevent memory leak
+const MAX_CACHE_ENTRIES = 200
+function cacheSet<K, V>(map: Map<K, V>, key: K, val: V): void {
+  if (map.size >= MAX_CACHE_ENTRIES) { const k = map.keys().next().value; if (k !== undefined) map.delete(k) }
+  map.set(key, val)
+}
+
 const sessionTokenUsage = new Map<string, { used: number; lastSeen: number }>()
 const SESSION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -193,7 +199,7 @@ function getSessionUsed(sessionId: string): number {
 
 function recordSessionUsed(sessionId: string, tokens: number): void {
   const prev = getSessionUsed(sessionId)
-  sessionTokenUsage.set(sessionId, { used: prev + tokens, lastSeen: Date.now() })
+  cacheSet(sessionTokenUsage, sessionId, { used: prev + tokens, lastSeen: Date.now() })
 }
 
 // Module-level singletons — one per gateway process

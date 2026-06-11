@@ -7,6 +7,23 @@ interface TokenBody {
   tenantId: string
 }
 
+// Simple in-memory rate limiter (5 req/min per IP)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT_MAX = 5
+const RATE_LIMIT_WINDOW_MS = 60_000
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitMap.get(ip)
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return true
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false
+  entry.count++
+  return true
+}
+
 export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: TokenBody }>('/auth/token', {
     schema: {
@@ -20,6 +37,11 @@ export async function authRoutes(app: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
+    const ip = request.ip
+    if (!checkRateLimit(ip)) {
+      return reply.code(429).send({ error: 'too many requests — try again in 1 minute' })
+    }
+    const { email, tenantId } = request.body
     const { email, tenantId } = request.body
 
     // Verify tenant exists

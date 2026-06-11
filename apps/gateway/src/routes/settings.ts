@@ -46,10 +46,19 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     return { configured: true, provider: config[0]!.provider, defaultModel: config[0]!.default_model }
   })
 
+  const VALID_PROVIDERS = new Set(['anthropic', 'openai', 'groq', 'deepseek', 'mistral', 'ollama', 'lmstudio'])
+
   app.post<{ Body: { provider: string; apiKey?: string; baseUrl?: string; defaultModel?: string } }>(
-    '/api/settings/provider', { preHandler: [app.authenticate] }, async (request) => {
-      const { tenantId } = request.user as { tenantId: string }
+    '/api/settings/provider', { preHandler: [app.authenticate] }, async (request, reply) => {
+      const user = request.user as { tenantId: string; role?: string }
+      if (user.role !== 'admin') {
+        return reply.code(403).send({ error: 'admin role required' })
+      }
       const { provider, apiKey, baseUrl, defaultModel } = request.body
+      if (!VALID_PROVIDERS.has(provider)) {
+        return reply.code(400).send({ error: `invalid provider: ${provider}. Valid: ${[...VALID_PROVIDERS].join(', ')}` })
+      }
+      const { tenantId } = user
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
           INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model)

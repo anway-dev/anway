@@ -5,13 +5,17 @@ import type { ProviderConfig, IConnectorAgent, ConnectorTool, ToolDefinition } f
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
-const ALLOWED_CONNECTOR_TYPES = new Set([
-  'github','datadog','linear','argocd','coralogix','notion','prometheus','alertmanager','newrelic',
-  'jira','loki','terraform','pagerduty','slack','grafana','elastic','dynatrace',
-  'sentry','jenkins','circleci','vercel','k8s','vault','snyk','sonarqube',
-  'opsgenie','launchdarkly','confluence','eks','gke','aws-cloudwatch',
-  'aws-health','gcp-monitoring','azure-monitor',
-])
+// Static import map — safe, no path traversal
+const CONNECTOR_AGENT_MAP: Record<string, () => Promise<Record<string, unknown>>> = {
+  prometheus:  () => import('@anvay/connector-prometheus/src/agent.js'),
+  loki:        () => import('@anvay/connector-loki/src/agent.js'),
+  github:      () => import('@anvay/connector-github/src/agent.js'),
+  datadog:     () => import('@anvay/connector-datadog/src/agent.js'),
+  linear:      () => import('@anvay/connector-linear/src/agent.js'),
+  argocd:      () => import('@anvay/connector-argocd/src/agent.js'),
+  grafana:     () => import('@anvay/connector-grafana/src/agent.js'),
+  k8s:         () => import('@anvay/connector-k8s/src/agent.js'),
+}
 
 const MAX_ITERATIONS = 5
 
@@ -80,11 +84,11 @@ export async function chatStreamRoutes(app: FastifyInstance) {
     const credMap = new Map<string, Record<string, unknown>>()
 
     for (const cc of connConfigs) {
-      if (!ALLOWED_CONNECTOR_TYPES.has(cc.connector_type) || /[./\\]/.test(cc.connector_type)) continue
+      const loader = CONNECTOR_AGENT_MAP[cc.connector_type]
+      if (!loader) continue
       credMap.set(cc.connector_type, cc.credentials as Record<string, unknown>)
       try {
-        const mod = await import(`../../../../connectors/${cc.connector_type}/src/agent.js`) as Record<string, unknown>
-        // Try default export or named export {XxxAgent}
+        const mod = await loader() as Record<string, unknown>
         const AgentClass = (Object.values(mod).find(v => typeof v === 'function' && (v as { prototype?: { connectorType?: string } }).prototype?.connectorType !== undefined)
           ?? Object.values(mod).find(v => typeof v === 'function')) as (new () => IConnectorAgent) | undefined
         if (AgentClass) {
@@ -145,7 +149,7 @@ export async function chatStreamRoutes(app: FastifyInstance) {
                 stream.push(`data: ${JSON.stringify({ type: 'tool_call', toolCallId: tc.id, toolName: tc.name, args: tc.args })}\n\n`)
               } catch (err) {
                 const msg = err instanceof Error ? err.message : 'tool execution failed'
-                llmMessages.push({ role: 'assistant' as const, content: `Error: ${msg}` })
+                llmMessages.push({ role: 'tool' as const, content: `Error: ${msg}`, tool_call_id: tc.id, name: tc.name })
                 stream.push(`data: ${JSON.stringify({ type: 'error', code: 'TOOL_ERROR', message: msg })}\n\n`)
               }
             }

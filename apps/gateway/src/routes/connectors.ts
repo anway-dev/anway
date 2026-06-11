@@ -47,12 +47,17 @@ export async function connectorsRoutes(app: FastifyInstance) {
     return { bootstrapped: row[0]!.bootstrapped_at !== null, bootstrappedAt: row[0]!.bootstrapped_at, summary: row[0]!.last_bootstrap_summary }
   })
 
+  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','pagerduty','k8s'])
+
   // T9: Trigger bootstrap
   app.post<{ Params: { type: string } }>('/api/connectors/:type/bootstrap', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
+    if (!VALID_BOOTSTRAP_TYPES.has(type)) {
+      return reply.code(400).send({ error: `unknown connector type: ${type}` })
+    }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
         SELECT credentials FROM connector_config

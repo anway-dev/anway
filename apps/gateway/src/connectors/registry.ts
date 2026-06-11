@@ -15,8 +15,13 @@ type ConnectorRow = {
   config_encrypted: Prisma.JsonValue
 }
 
-// Singleton cache per (tenantId, connectorId)
+// Singleton cache per (tenantId, connectorId) — bounded to prevent memory leak
 const adapterCache = new Map<string, McpConnector | CliConnector>()
+const MAX_ADAPTER_CACHE = 200
+function cacheSetAdapter(key: string, val: McpConnector | CliConnector): void {
+  if (adapterCache.size >= MAX_ADAPTER_CACHE) { const k = adapterCache.keys().next().value; if (k !== undefined) adapterCache.delete(k) }
+  cacheSetAdapter(key, val)
+}
 
 function cacheKey(tenantId: string, connectorId: string): string {
   return `${tenantId}:${connectorId}`
@@ -81,7 +86,7 @@ export async function getToolsForTenant(
     let adapter = adapterCache.get(key)
     if (!adapter) {
       adapter = instantiateAdapter(row, tenantId)
-      adapterCache.set(key, adapter)
+      cacheSetAdapter(key, adapter)
     }
     return adapter.getTools()
   })
@@ -111,7 +116,7 @@ export async function registerConnectorTool(
 
   const adapter = instantiateAdapter({ id: row.id, type, name, mode: 'read', config_encrypted: config as Prisma.JsonObject }, tenantId)
   const key = cacheKey(tenantId, row.id)
-  adapterCache.set(key, adapter)
+  cacheSetAdapter(key, adapter)
 
   const tools = await adapter.getTools()
   const toolNames = tools.map((t) => t.name)

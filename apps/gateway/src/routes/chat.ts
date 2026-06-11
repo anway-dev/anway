@@ -30,6 +30,7 @@ import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
 import { makeRegistrationTools } from '../connectors/registration-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
+import { getMemoryGateSink } from '../gate/memory-gate-fallback.js'
 import { isValidUUID } from '../utils/validators.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
@@ -347,9 +348,9 @@ export async function chatRoutes(app: FastifyInstance) {
     const allTools = [...connectorTools, ...registrationTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
-    const gateSink = redisUrl ? new RedisGateSink(redisUrl) : undefined
-    if (!gateSink) {
-      request.log.error('REDIS_URL not set — gate approval bypassed (V1 trust violation)')
+    const gateSink = redisUrl ? new RedisGateSink(redisUrl) : getMemoryGateSink()
+    if (!redisUrl) {
+      request.log.warn('REDIS_URL not set — using in-process gate sink (single-instance only)')
     }
 
     const orchestrator = createOrchestrator({

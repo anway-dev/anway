@@ -51,6 +51,8 @@ export { createSpecialistAgent } from './specialist-agent.js'
 // Gate (L2 Approve — V1 trust principle)
 export type { IGateSink, GateEvent, GateDecision } from './gate/gate.js'
 export { isWriteAction, pollGate } from './gate/gate.js'
+export { InMemoryGateSink } from './gate/in-memory-gate-sink.js'
+
 
 // Knowledge Graph
 export type { IKnowledgeGraph, AgentContext } from './interfaces/knowledge-graph.js'

@@ -7,6 +7,115 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11j -->
+## Review — 2026-06-11j | Full Audit (multi-file)
+
+### Scope
+
+Full codebase audit — `apps/gateway/src/`, `apps/web/`, `packages/agent/src/`, `connectors/prometheus/src/`, `connectors/loki/src/`. Five dimensions: feature completion, security, defects, performance, feature deviation.
+
+### Verdict: 6 BLOCKING, 17 HIGH, 12 MEDIUM, 8 LOW
+
+---
+
+### BLOCKING
+
+**S1** `apps/gateway/src/routes/events.ts` — `/api/events/alert`, `/api/events/deploy`, `/api/events/pr-merged` have zero authentication. Any unauthenticated caller can inject incidents into DB and flood Redis event bus. Multi-tenant system — BLOCKING.
+
+**S2** `apps/gateway/src/routes/events.ts:65` — Missing `tenantId` in alertmanager webhook silently falls back to `DEMO_TENANT`. All unauthenticated Alertmanager payloads without tenantId corrupt demo tenant in production.
+
+**S3** `apps/gateway/src/routes/graph-events.ts:21-24` — When `CONNECTOR_API_KEYS` env var is not set, endpoint accepts all requests (preHandler only rejects when key set is non-empty). Unset env = fully open `/api/graph/events`.
+
+**D1** `apps/gateway/src/routes/chat.ts:150-156` — `buildTokenBudget` sets `tenantDailyUsed: 0` and `tenantMonthlyUsed: 0` on every request. Never loaded from persistent store. Per-tenant daily/monthly hard limits are never enforced — any tenant can consume unlimited tokens.
+
+**D2** `connectors/prometheus/src/agent.ts` + `connectors/loki/src/agent.ts` — Tool names (`query_metrics`, `get_alerts`, `query_logs`) are bare strings without `<connector>.` prefix. `connectorIdFromTool()` in `tools/naming.ts` requires `<connector>.<action>`. All Prometheus and Loki tool calls permanently hard-blocked by perimeter engine for every user.
+
+**FD1** `packages/agent/src/specialist-agent.ts` — Specialist agents have no `knowledgeGraph` parameter and never call `resolveContext`. CLAUDE.md: "Knowledge Graph is the mandatory starting point for every investigation. Skipping the graph step is a hard violation." Every specialist agent (SRE, Dev, PM, BA) starts from raw input.
+
+---
+
+### HIGH
+
+**S4** `apps/gateway/src/routes/chat-stream.ts:82-104` — Dynamic `import()` with path constructed from `cc.connector_type` loaded from DB. Whitelist + regex present but not sufficient against Unicode normalization or alternate separator attacks. Must be a static import map.
+
+**S5** `apps/gateway/src/routes/auth.ts:10-55` — `/auth/token` has no rate limiting. Brute-force enumeration of emails and tenant IDs unrestricted.
+
+**S6** `apps/gateway/src/routes/settings.ts:49-63` — `POST /api/settings/provider` has no role check. Any authenticated user (dev/ba/pm) can reconfigure LLM provider and store a new API key. Admin-only per spec.
+
+**S7** `apps/gateway/src/routes/chat-stream.ts` — `/api/chat/stream` bypasses the entire `@anvay/agent` orchestrator: no perimeter check on tool calls, no audit logging, no token budget, no V1 gate on write actions, no graph context injection. Parallel unguarded path nullifies all security architecture.
+
+**D3** `packages/agent/src/specialist-agent.ts:165-169` — Multi-step loop formats tool calls/results as plaintext strings (`role: 'assistant', content: '[tool_call id=...]'`). Must use `model.formatToolCall()` / `model.formatToolResult()` as orchestrator does. Breaks multi-turn tool use on all providers.
+
+**D4** `apps/gateway/src/routes/chat-stream.ts:120-153` — On tool error, pushes `{ role: 'assistant', content: 'Error: ...' }` where `tool` role message is expected. Corrupts message history, causes provider API errors on next iteration.
+
+**D5** `apps/gateway/src/routes/services.ts:34-44` — Three unbounded queries (`SELECT ... FROM entities`, `SELECT ... FROM relationships`, `SELECT ... FROM incidents`) with no LIMIT. Full table scan per request. In-process `Array.find`/`filter` over all results is O(N²).
+
+**D6** `apps/gateway/src/routes/connectors.ts:51-75` — `POST /api/connectors/:type/bootstrap` does not validate `:type` against a known list. Arbitrary string accepted, published to Redis as `connectorType`. DoS vector + arbitrary key injection into Redis Pub/Sub.
+
+**P1** `apps/gateway/src/routes/chat.ts:317` — `adapterCache` is module-level unbounded `Map`. No TTL, no LRU, no max size. Memory leak in long-running process with many tenants/connectors.
+
+**P2** `apps/gateway/src/routes/chat.ts:160` — `sessionTokenUsage` is module-level `Map` with eviction only on read. Expired entries accumulate between reads. Unbounded memory growth.
+
+**P3** `packages/agent/src/kb/structural-graph.ts:84-99` — `resolveContext()` BFS: one SQL query per depth level. At `depth=3` = up to 6 sequential round-trips on the hot chat path. No batching, no memoization.
+
+**FD2** `apps/gateway/src/routes/chat-stream.ts:93` — Write tools filtered out but no gate, no perimeter check, no audit for read tools. V1 trust principle partially honoured but read-path governance absent.
+
+**FD3** `apps/gateway/src/routes/settings.ts:119-143` — `PUT /api/settings/connectors/:type` triggers `connector_registered` on every save including partial updates. Bootstrap runs on every credential update, causing duplicate entity churn.
+
+**FD4** `packages/agent/src/orchestrator.ts:170-213` — Graph context resolved via fuzzy `ILIKE '%name%'` match. Wrong entity resolved silently. On no-match, orchestrator proceeds without graph context instead of triggering async bootstrap as specified.
+
+**FD5** `apps/gateway/src/routes/settings.ts:49-63` — Provider POST has no `provider` enum validation before DB insert. Arbitrary string stored as provider type, passed to `ProviderFactory.create()`.
+
+---
+
+### MEDIUM (12)
+
+**M1** `apps/gateway/src/routes/settings.ts:81-91` — `isSafeBaseUrl` check on `effectiveBaseUrl` only; `manifest.modelsEndpoint` can contain protocol-relative URL bypassing check.
+
+**M2** `apps/gateway/src/routes/automations.ts:149-168` — `/api/triggers/:id/runs` and `/api/cron/:id/runs` return hardcoded mock arrays. Run history not persisted.
+
+**M3** `packages/agent/src/kb/structural-graph.ts:25-32` — `addEpisode()` and `getFacts()` throw `"not implemented"`. Episodic layer (Layer 2) non-functional.
+
+**M4** `packages/agent/src/kb/structural-graph.ts:71-73` — `search()` throws `"Semantic search requires pgvector"`. KB search broken.
+
+**M5** `apps/gateway/src/kb/freshness-daemon.ts` — Daemon decays `kb_entries` table that is never written to. Freshness scoring system non-functional.
+
+**M6** `apps/gateway/src/jobs/cron-monitors.ts` — `ServiceHealthSweep`, `SloBurnCheck`, `DeployHealthReport` are skeleton shells — count DB rows, never call live connectors or apply thresholds.
+
+**M7** `packages/agent/src/orchestrator.ts:149-153` — Intent classification `JSON.parse` silently swallows all parse errors (falls back to `'general'`). Masks real model problems.
+
+**M8** `apps/gateway/src/routes/chat-stream.ts:86` — Dynamic import path relative to compiled output directory. Silently drops all connector tools on any deployment that flattens monorepo structure.
+
+**M9** `apps/gateway/src/routes/services.ts:50-65` — O(N × M) `Array.find`/`filter` for every service × relationship. Unbounded at scale.
+
+**M10** `apps/gateway/src/routes/services.ts:79-83` — Incident matching via `title.toLowerCase().includes(name)` — no index, substring scan per service.
+
+**M11** `packages/agent/src/gate/gate.ts:43-52` — Gate poll: 500ms interval × 60 iterations × N concurrent gates = Redis flood under load.
+
+**M12** `apps/gateway/src/graph-builder/subscriber.ts:79-88` — `bootstrapRegistry` reinstantiated on every Redis event with fresh DB credential lookups. Unnecessary churn at high event volume.
+
+---
+
+### LOW (8)
+
+**L1** `apps/gateway/src/routes/audit.ts:52-53` + `alerts.ts:78` — Silently serve mock `DEMO_EVENTS`/`DEMO_SIGNALS` when DB tables empty. No flag, no warning.
+
+**L2** `apps/gateway/src/routes/graph-events.ts:9-17` — Key containing `:` at position 0 produces empty string key; `VALID_API_KEYS.has('')` would match requests with no header.
+
+**L3** `apps/gateway/src/gate/gate-decide-route.ts:24` — `gateId` not validated as UUID before Postgres cast. Invalid UUID returns 500 instead of 400.
+
+**L4** `packages/agent/src/orchestrator.ts:325` — `pollGate` does not accept abort signal. On client disconnect, gate continues polling Redis until timeout (up to 30s).
+
+**L5** `apps/gateway/src/routes/audit.ts:52-53` — `Math.min(NaN, 200)` from missing query param handled implicitly by `|| 50` default but fragile.
+
+**L6** `apps/gateway/src/routes/chat.ts:223-225` — Inline UUID regex duplicates `UUID_RE` from `validators.ts`. Inconsistency risk.
+
+**L7** `apps/gateway/src/jobs/cron-monitors.ts:32,46,63` — `SELECT DISTINCT tenant_id LIMIT 1000` runs on every cron tick. Sequential processing of 1000 tenants per sweep.
+
+**L8** `apps/gateway/src/routes/connectors.ts:51-75` — Credentials embedded in Redis `connector_registered` event payload — visible in Redis monitor/logs.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11i -->
 ## Review — 2026-06-11i | F3 (f54209f)
 

@@ -7,6 +7,29 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11ad -->
+## Review — 2026-06-11ad | FA2-B1/B2 (12f23b8)
+
+### Scope
+
+Commit `12f23b8` — buildGroundedContextBlock AgentContext type, connector types fields.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM — CLEAN
+
+Running fable final signoff.
+
+---
+
+### Verified correct
+
+**FA2-B1** — `buildGroundedContextBlock(ctx: AgentContext)` — typed param, internal access uses `ctx.primaryEntity`, `ctx.relatedEntities`, `ctx.connectorCoordinates` directly. No more unsafe cast. ✓
+
+**FA2-B2** — `"types": "dist/index.d.ts"` added to both connector package.json files. ✓
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11ad -->
+
 <!-- REVIEW SECTION START — 2026-06-11ac -->
 ## Review — 2026-06-11ac | Fable final signoff (HEAD: df58548)
 

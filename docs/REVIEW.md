@@ -7,6 +7,19 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11n -->
+## Review — 2026-06-11n | P1-B1 (8b115d4)
+
+### Scope
+
+Commit `8b115d4` — cacheSetAdapter recursion fix, rateLimitMap cap, duplicate destructure removal.
+
+### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
+
+All three issues addressed correctly. `adapterCache.set(key, val)` replaces self-call. Eviction guard added before `rateLimitMap.set`. Duplicate line removed.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11m -->
 ## Review — 2026-06-11m | HIGH batch 1 (dcf3ad4)
 

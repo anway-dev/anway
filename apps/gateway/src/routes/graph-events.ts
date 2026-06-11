@@ -91,7 +91,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
     // Enforce tenant binding — key can only write to its own tenant
     const boundTenant = CONNECTOR_KEY_TENANT_MAP.get(apiKey)
-    if (boundTenant && event.tenantId !== boundTenant) {
+    if (boundTenant !== undefined && boundTenant !== '' && event.tenantId !== boundTenant) {
       return reply.code(403).send({ error: 'forbidden — API key is not authorized for this tenantId' })
     }
 

@@ -109,7 +109,7 @@ async function* runSpecialist(
   }))
 
   const messages: Message[] = [
-    { role: 'system', content: config.systemPrompt },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: input },
   ]
 

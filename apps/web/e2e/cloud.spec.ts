@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Cloud view', () => {
-  test('P0: renders cloud resource sections', async ({ page }) => {
+  test('renders cloud resource sections', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

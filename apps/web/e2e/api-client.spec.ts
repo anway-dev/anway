@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('API Client view', () => {
-  test('P0: renders request builder', async ({ page }) => {
+  test('renders request builder', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

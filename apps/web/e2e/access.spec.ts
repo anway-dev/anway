@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Access view', () => {
-  test('P0: renders without JS errors', async ({ page }) => {
+  test('renders user provisioning section', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

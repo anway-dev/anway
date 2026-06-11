@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Settings view', () => {
-  test('P0: renders settings panel', async ({ page }) => {
+  test('renders settings panel', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
     await page.goto('/')

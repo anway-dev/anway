@@ -7,6 +7,67 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11t -->
+## Review — 2026-06-11t | MEDIUM batch 3 (d7e9c9d)
+
+### Scope
+
+Commit `d7e9c9d` — M3/M4/M5/M6. kb_episodes migration, episodic stubs, freshness daemon rewrite, health sweep.
+
+### Verdict: 2 BLOCKING, 0 HIGH, 2 MEDIUM — NEEDS FIXES
+
+---
+
+### BLOCKING
+
+**B1** `apps/gateway/src/jobs/scheduler.ts:78` — TypeScript compile error. `runFreshnessDecay(redisUrl)` passes one argument; new signature is `runFreshnessDecay()` (no params). `Expected 0 arguments, but got 1.` Fix: remove `redisUrl` from the call site.
+
+**B2** `packages/agent/src/kb/structural-graph.ts:32` — `getFacts` query has no `tenant_id` filter. `SELECT text, created_at FROM kb_episodes WHERE created_at >= $1` returns ALL tenants' episodes to any caller. Tenant data isolation breach. Fix: add `tenantId` parameter to `IKnowledgeGraph.getFacts(query, tenantId, at?)` interface and implementation. Query: `SELECT text, created_at FROM kb_episodes WHERE tenant_id = $1 AND created_at >= $2 ORDER BY created_at DESC LIMIT 50`.
+
+---
+
+### MEDIUM
+
+**M-ep1** `packages/agent/src/kb/structural-graph.ts:25-27` — `addEpisode` is a silent no-op. Comment claims "episodes written via GraphBuilderAgent in subscriber.ts" — incorrect, no code in graph-builder calls `addEpisode`. Table `kb_episodes` is never written to so `getFacts`/`search` always return empty. Fix: implement INSERT in `addEpisode`:
+```typescript
+async addEpisode(episode: Episode): Promise<void> {
+  await this.query(
+    `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at) VALUES ($1, $2, $3, now())`,
+    [episode.tenantId, episode.text, JSON.stringify(episode.metadata ?? {})],
+  ).catch(() => {})
+}
+```
+
+**M12-r** `apps/gateway/src/graph-builder/subscriber.ts:81` — `bootstrapRegistry` still rebuilt per event. Executor's justification (per-tenant KG) is valid — module-scope singleton won't work. But rebuilding on every Redis event is still wasteful. Fix: cache per tenantId:
+```typescript
+const registryCache = new Map<string, Map<string, IConnectorBootstrap>>()
+// inside event handler, before registry use:
+if (!registryCache.has(tid)) {
+  const reg = new Map<string, IConnectorBootstrap>()
+  reg.set('github', new GitHubBootstrap(kg, await connectorCredential(tid, 'github', 'GH_TOKEN')))
+  // ... other connectors
+  registryCache.set(tid, reg)
+}
+const bootstrapRegistry = registryCache.get(tid)!
+```
+
+---
+
+### Dimension Ratings
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| D1 Feature Completeness | 2/5 | addEpisode no-op → episodic layer still non-functional end-to-end |
+| D2 Code Standards | 3/5 | Scheduler call-site not updated to match new signature |
+| D3 Performance | 4/5 | M5 simplified correctly. M6 DB query is cheap. |
+| D4 Security | 2/5 | getFacts tenant isolation breach |
+| D5 Readability | 4/5 | |
+| D6 Clarity/Comments | 3/5 | addEpisode comment is factually wrong |
+
+---
+
+<!-- REVIEW SECTION END — 2026-06-11t -->
+
 <!-- REVIEW SECTION START — 2026-06-11s -->
 ## Review — 2026-06-11s | MEDIUM batch 2 (080eb5e)
 

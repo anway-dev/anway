@@ -7,6 +7,39 @@ dated review pass — newest at the top.
 
 ---
 
+<!-- EXECUTION PLAN — 2026-06-11 -->
+## Execution Plan — 2026-06-11 | Full gap closure (fable audit)
+
+8 bridge batches. Each batch: executor builds → Claude reviews → tests must pass → fable re-runs after each phase. Loop until all GREEN.
+
+### Phase 1 — Graph seeding (core value prop)
+| Batch | Tasks | Priority |
+|-------|-------|----------|
+| P1A | K8s bootstrap (real kubectl), Linear bootstrap (real API) | CRITICAL |
+| P1B | GitHub bootstrap (CODEOWNERS + relationships), `connector_removed` stale marking | HIGH |
+| P1C | Datadog bootstrap (service graph → DEPENDS_ON), ArgoCD bootstrap (relationships) | HIGH |
+
+### Phase 2 — Connector agents wired to real data
+| Batch | Tasks | Priority |
+|-------|-------|----------|
+| P2A | Datadog Agent → wire real DatadogConnector; K8s Agent → real kubectl | HIGH |
+| P2B | GitHub Agent `create_pr` → real API; ArgoCD `spawnSync` → async | MEDIUM |
+
+### Phase 3 — Intelligence layer
+| Batch | Tasks | Priority |
+|-------|-------|----------|
+| P3A | Freshness decay curve (0.0–1.0 on kb_entries + re-sync triggers) | MEDIUM |
+| P3B | Trigger engine real conditions; `surface_context` injects into active sessions; SREAgent live connector calls | MEDIUM |
+
+### Phase 4 — UI live data
+| Batch | Tasks | Priority |
+|-------|-------|----------|
+| P4A | Migrate remaining views from `lib/mock.ts` to live gateway fetch | LOW |
+
+Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ai -->
 ## Review — 2026-06-11ai | Fable 5th pass — FINAL GREEN SIGNOFF (HEAD: ccc6bba)
 

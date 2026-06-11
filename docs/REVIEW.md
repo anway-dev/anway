@@ -40,6 +40,66 @@ Fable re-runs after P1C, P2B, P3B, P4A. Cycle continues until all GREEN.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-11aj -->
+## Review — 2026-06-11aj | Commit 754a508 (P1A — K8s + Linear bootstrap)
+
+**Reviewer:** Claude
+
+### Verdict: RED — 2 HIGH (relationships never created)
+
+Both bootstraps have the same critical fault: `upsertRelationship` calls are **comments, not code**. Entities upserted, but zero graph edges created. The entire value of the bootstrap (graph traversal, targeted connector calls) requires edges.
+
+---
+
+### HIGH
+
+**P1A-H1 — `connectors/k8s/src/bootstrap.ts:46-47` — `Service→HOSTED_IN→Namespace` never created**
+
+Line 46: comment says "Upsert Service→HOSTED_IN→Namespace relationship" — but the actual call is absent. `upsertEntity` returns entity ID (string). IDs must be captured and passed to `upsertRelationship`.
+
+Fix:
+```typescript
+const nsId = await this.kg.upsertEntity({ type: 'Namespace', name: ns, metadata: {} }, tenantId)
+const svcId = await this.kg.upsertEntity({ type: 'Service', name: appLabel, metadata: { ... } }, tenantId)
+await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'HOSTED_IN', toEntityId: nsId, metadata: {} }, tenantId)
+relationshipsUpserted++
+```
+
+**P1A-H2 — `connectors/linear/src/bootstrap.ts:78-83` — `Ticket→RELATES_TO→Service` never created**
+
+Line 82: comment says "Relate ticket to matched service" — no `upsertRelationship` call. Also: `kg.search()` returns `KBEntry[]` (episode text), not entity IDs. Using `entries[0].content` as a service name is wrong — content is raw episode text, not a clean entity name.
+
+Correct approach:
+1. Capture ticket entity ID from `upsertEntity` return value
+2. Use `kg.resolveContextByName(word, tenantId, 1)` to find service entity by name extracted from ticket title
+3. If found: `upsertRelationship({ fromEntityId: ticketId, relType: 'RELATES_TO', toEntityId: serviceCtx.primaryEntity.id, metadata: { confidence: 0.6 } }, tenantId)`
+
+Fix (replace the broken search block):
+```typescript
+const ticketId = await this.kg.upsertEntity({ type: 'Ticket', name: issueName, metadata: { ... } }, tenantId)
+entitiesUpserted++
+
+// Extract first noun-like word from title as service name hint
+const words = issue.title.split(/\s+/).filter(w => w.length > 3)
+for (const word of words.slice(0, 3)) {
+  try {
+    const ctx = await this.kg.resolveContextByName(word, tenantId, 1)
+    if (ctx && ctx.primaryEntity.type === 'Service') {
+      await this.kg.upsertRelationship({
+        fromEntityId: ticketId,
+        relType: 'RELATES_TO',
+        toEntityId: ctx.primaryEntity.id,
+        metadata: { confidence: 0.6, source: 'linear-title-match' },
+      }, tenantId)
+      relationshipsUpserted++
+      break
+    }
+  } catch { /* no match — skip */ }
+}
+```
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11ai -->
 ## Review — 2026-06-11ai | Fable 5th pass — FINAL GREEN SIGNOFF (HEAD: ccc6bba)
 

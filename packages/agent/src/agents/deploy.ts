@@ -18,12 +18,12 @@ export class DeployAgent {
     const history = await this.cheapModel.chat([
       { role: 'system', content: 'Extract deploy history, recent incidents, and failure rate from context.' },
       { role: 'user', content: `Service: ${service}. ${graphContext ? 'Recent episodes: ' + graphContext.recentEpisodes.slice(0, 3).map(e => e.text).join(' | ') : 'No graph context'}` },
-    ], [], { model: 'claude-haiku-3-5-20251001', maxTokens: 100, temperature: 0 })
+    ], [], { model: this.cheapModel.cheapModelId, maxTokens: 100, temperature: 0 })
 
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Generate deploy plan in JSON matching { service, environment, strategy: "rolling"|"blue_green"|"canary", preChecks: string[], postChecks: string[], rollbackTriggers: string[], estimatedDuration, confidence: number }. Return ONLY valid JSON.' },
       { role: 'user', content: `Service: ${service}\nEnv: ${env}\nSHA: ${sha}\nHistory: ${history.content}` },
-    ], [], { model: 'claude-sonnet-4-6', maxTokens: 1000, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 1000, temperature: 0 })
 
     try { return JSON.parse(result.content) as DeployPlan } catch { return { service, environment: env, strategy: 'rolling', preChecks: [], postChecks: [], rollbackTriggers: [], estimatedDuration: '10m', confidence: 0.5 } }
   }

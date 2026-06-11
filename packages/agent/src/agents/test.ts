@@ -20,12 +20,12 @@ export class TestAgent {
     await this.cheapModel.chat([
       { role: 'system', content: 'Classify the complexity and criticality of this service.' },
       { role: 'user', content: `Spec: ${spec.title}. API changes: ${spec.apiChanges.length}. Components: ${spec.components.length}` },
-    ], [], { model: 'claude-haiku-3-5-20251001', maxTokens: 50, temperature: 0 })
+    ], [], { model: this.cheapModel.cheapModelId, maxTokens: 50, temperature: 0 })
 
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Generate test plan in JSON matching { unitTests: [{path, description, testCases: string[]}], integrationTests: [{path, description, testCases: string[]}], e2eScenarios: string[], coverageTarget: number }. Return ONLY valid JSON.' },
       { role: 'user', content: `Title: ${spec.title}\nComponents: ${spec.components.map(c => `${c.name} (${c.technology})`).join(', ')}\nAPI: ${spec.apiChanges.map(a => `${a.method} ${a.path}`).join(', ')}` },
-    ], [], { model: 'claude-sonnet-4-6', maxTokens: 2000, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
     try { return JSON.parse(result.content) as TestPlan } catch { return { unitTests: [], integrationTests: [], e2eScenarios: [], coverageTarget: 80 } }
   }
@@ -37,7 +37,7 @@ export class TestAgent {
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Generate a regression test file in JSON matching { path: string, description: string, testCases: string[] }. Return ONLY valid JSON.' },
       { role: 'user', content: `Incident: ${incident}\n${graphContext ? 'Context: ' + graphContext.primaryEntity.name : ''}` },
-    ], [], { model: 'claude-sonnet-4-6', maxTokens: 1000, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 1000, temperature: 0 })
 
     try { return JSON.parse(result.content) as TestFile } catch { return { path: 'test/regression.test.ts', description: `Regression test for: ${incident}`, testCases: [] } }
   }

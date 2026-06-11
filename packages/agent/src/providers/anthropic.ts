@@ -38,6 +38,9 @@ function mapMessages(messages: Message[]): Anthropic.MessageParam[] {
 }
 
 export class AnthropicProvider implements IModelProvider {
+  get modelId(): string { return this.config.defaultModel ?? 'claude-sonnet-4-6' }
+  get cheapModelId(): string { return this.config.cheapModel ?? 'claude-haiku-4-5-20251001' }
+
   private readonly client: Anthropic
 
   constructor(private readonly config: ProviderConfig) {
@@ -50,7 +53,7 @@ export class AnthropicProvider implements IModelProvider {
   async chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse> {
     const system = extractSystem(messages)
     const params: Anthropic.MessageCreateParamsNonStreaming = {
-      model: opts.model || (this.config.defaultModel ?? DEFAULT_MODEL),
+      model: opts.model || this.modelId,
       max_tokens: opts.maxTokens ?? 4096,
       messages: mapMessages(messages),
       ...(system ? { system } : {}),
@@ -87,7 +90,7 @@ export class AnthropicProvider implements IModelProvider {
   async *stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncGenerator<StreamChunk> {
     const system = extractSystem(messages)
     const params: Anthropic.MessageCreateParamsStreaming = {
-      model: opts.model || (this.config.defaultModel ?? DEFAULT_MODEL),
+      model: opts.model || this.modelId,
       max_tokens: opts.maxTokens ?? 4096,
       messages: mapMessages(messages),
       stream: true,

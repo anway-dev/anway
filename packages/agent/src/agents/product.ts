@@ -33,7 +33,7 @@ export class ProductAgent {
     const extraction = await this.cheapModel.chat([
       { role: 'system', content: 'Extract persona, primary goal, and constraints from this feature request. Respond with comma-separated values only.' },
       { role: 'user', content: featureRequest },
-    ], [], { model: 'claude-haiku-3-5-20251001', maxTokens: 100, temperature: 0 })
+    ], [], { model: this.cheapModel.cheapModelId, maxTokens: 100, temperature: 0 })
 
     const graphBlock = graphContext
       ? `Context: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.map(e => e.name).join(', ')}`
@@ -42,7 +42,7 @@ export class ProductAgent {
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Write a structured PRD in JSON matching interface { title, problem, goals: string[], nonGoals: string[], userStories: { persona, action, outcome, acceptance: string[] }[], successMetrics: string[], openQuestions: string[] }. Return ONLY valid JSON.' },
       { role: 'user', content: `Feature request: ${featureRequest}\nExtracted: ${extraction.content}\n${graphBlock}` },
-    ], [], { model: 'claude-sonnet-4-6', maxTokens: 2000, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
     try { return JSON.parse(result.content) as PRD } catch { return { title: featureRequest, problem: '', goals: [], nonGoals: [], userStories: [], successMetrics: [], openQuestions: [] } }
   }

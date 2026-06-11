@@ -24,9 +24,9 @@ export interface OrchestratorConfig {
   perimeter: AgentPerimeter
   auditSink: IAuditSink
   sessionMemory: ISessionMemory
-  /** Model string for main inference (e.g. 'claude-sonnet-4-6') */
+  /** Model string for main inference */
   defaultModel?: string
-  /** Model string for cheap classifier calls (e.g. 'claude-haiku-3-5-20251001') */
+  /** Model string for cheap classifier calls */
   cheapModel?: string
   /** Token budget — defaults to generous limits suitable for development */
   budget?: TokenBudget
@@ -103,8 +103,8 @@ export async function* runSession(
   const { model, tools, perimeter, auditSink, sessionMemory } = config
   const budget = config.budget ?? DEFAULT_BUDGET
   const maxSteps = config.maxSteps ?? 10
-  const mainModel = config.defaultModel ?? 'claude-sonnet-4-6'
-  const cheapModel = config.cheapModel ?? 'claude-haiku-3-5-20251001'
+  const mainModel = model.modelId
+  const cheapModel = model.cheapModelId
 
   const perimeterCtx: PerimeterCtx = {
     tenantId: ctx.tenantId,

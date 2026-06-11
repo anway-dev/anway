@@ -37,6 +37,7 @@ export async function automationsRoutes(app: FastifyInstance) {
           condition: { type: 'object' },
           actions: {
             type: 'array',
+            minItems: 1,
             items: {
               type: 'object',
               required: ['type'],
@@ -97,7 +98,7 @@ export async function automationsRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: { id: string }; Body: Partial<{ enabled: boolean; condition: Record<string, unknown>; actions: TriggerAction[] }> }>('/api/automations/triggers/:id', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
     const { enabled, condition, actions } = request.body
@@ -109,9 +110,12 @@ export async function automationsRoutes(app: FastifyInstance) {
     if (actions !== undefined) { sets.push(`actions = $${idx++}::jsonb`); params.push(JSON.stringify(actions)) }
     if (sets.length === 0) return { updated: false }
     params.push(id, tenantId)
-    await withTenant(prisma, tenantId, (tx) =>
-      tx.$executeRawUnsafe(`UPDATE trigger_rules SET ${sets.join(', ')} WHERE id = $${idx}::uuid AND tenant_id = $${idx + 1}::uuid`, ...params)
+    const sql = `UPDATE trigger_rules SET ${sets.join(', ')} WHERE id = $${idx}::uuid AND tenant_id = $${idx + 1}::uuid`
+    const result = await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRawUnsafe(sql, ...params)
     )
+    // $executeRawUnsafe returns number of rows affected
+    if (result === 0) { reply.code(404); return { error: 'Trigger not found' } }
     return { updated: true }
   })
 

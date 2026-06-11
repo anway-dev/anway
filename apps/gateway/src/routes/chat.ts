@@ -111,8 +111,8 @@ async function providerConfigForTenant(
   client: PrismaClient,
 ): Promise<ProviderConfig | null> {
   const row = await withTenant(client, tenantId, (tx) =>
-    tx.$queryRaw<{ provider: string; api_key: string | null; base_url: string | null; default_model: string | null }[]>`
-      SELECT provider, api_key, base_url, default_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+    tx.$queryRaw<{ provider: string; api_key: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }[]>`
+      SELECT provider, api_key, base_url, default_model, cheap_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
     `
   ).catch(() => [])
   if (row.length > 0 && row[0]!.api_key) {
@@ -122,6 +122,7 @@ async function providerConfigForTenant(
       apiKey: r.api_key!,
       ...(r.base_url ? { baseURL: r.base_url } : {}),
       ...(r.default_model ? { defaultModel: r.default_model } : {}),
+      ...(r.cheap_model ? { cheapModel: r.cheap_model } : {}),
     }
   }
   return null  // fallback to env-based config
@@ -129,6 +130,10 @@ async function providerConfigForTenant(
 
 function withDefaultModel(config: ProviderConfig, defaultModel?: string): ProviderConfig {
   return defaultModel ? { ...config, defaultModel } : config
+}
+
+function withCheapModel(config: ProviderConfig, cheapModel?: string): ProviderConfig {
+  return cheapModel ? { ...config, cheapModel } : config
 }
 
 export function resolveProviderConfig(override?: ClientModelConfig): ProviderConfig | null {

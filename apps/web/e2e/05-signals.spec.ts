@@ -11,12 +11,12 @@ test.describe('Signals — API', () => {
   test('P0: POST /api/events/alert (Alertmanager format) → GET /api/alerts → alert visible with correct severity', async ({ request }) => {
     const alertName = uniqueId('E2EAlert')
 
-    // Post alert in Alertmanager format
+    // Post alert in Alertmanager format (status defaults to 'firing' if omitted)
     const postResp = await request.post(`${GATEWAY}/api/events/alert`, {
       headers, data: {
-        tenantId: DEMO_TENANT,
         alerts: [
           {
+            status: 'firing',
             labels: {
               alertname: alertName,
               severity: 'critical',
@@ -26,10 +26,9 @@ test.describe('Signals — API', () => {
         ],
       },
     })
-    // Alert endpoint returns 200/202/204 — any success is fine
-    expect(postResp.status(), 'POST alert event must succeed').toBeOneOf([200, 201, 202, 204])
+    expect([200, 201, 202, 204], 'POST alert event must succeed').toContain(postResp.status())
 
-    // Poll until the alert appears
+    // Poll until the alert appears in the alerts/incidents list
     const found = await pollUntil(
       async () => {
         const resp = await request.get(`${GATEWAY}/api/alerts`, { headers })
@@ -41,18 +40,16 @@ test.describe('Signals — API', () => {
         a.name === alertName ||
         a.labels?.alertname === alertName
       ),
-      { intervalMs: 400, timeoutMs: 4000 }
-    ).catch(() => null)
+      { intervalMs: 400, timeoutMs: 8000 }
+    )
 
-    if (found !== null) {
-      const alert = found.find(a =>
-        a.title === alertName ||
-        a.name === alertName ||
-        a.labels?.alertname === alertName
-      )
-      expect(alert, 'posted alert must appear in GET /api/alerts').toBeDefined()
-    }
-    // If not found, it means the alert pipeline processed it differently — not a hard failure
+    const alert = found.find(a =>
+      a.title === alertName ||
+      a.name === alertName ||
+      a.labels?.alertname === alertName
+    )
+    expect(alert, 'posted alert must appear in GET /api/alerts').toBeDefined()
+    expect(alert!.severity ?? alert!.labels?.severity ?? '', 'alert must have severity').toBeTruthy()
   })
 })
 

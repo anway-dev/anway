@@ -25,8 +25,8 @@ export class SREAgent {
     private readonly cheapModel: IModelProvider,
     private readonly mainModel: IModelProvider,
     private readonly knowledgeGraph: IKnowledgeGraph,
-    private readonly cheapModelId = 'claude-haiku-3-5-20251001',
-    private readonly mainModelId = 'claude-sonnet-4-6',
+    private readonly cheapModelId = this.cheapModel.cheapModelId,
+    private readonly mainModelId = this.mainModel.modelId,
   ) {}
 
   async assembleContext(alertTitle: string, alertDescription: string, tenantId: TenantId): Promise<IncidentContext> {

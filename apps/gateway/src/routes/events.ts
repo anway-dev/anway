@@ -3,7 +3,7 @@ import { createClient } from 'redis'
 import pino from 'pino'
 import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
-import { withTenant } from '../db/prisma.js'
+import { IncidentService } from '../services/incident.js'
 
 const log = pino({ name: 'event-routes' })
 
@@ -55,37 +55,35 @@ export async function eventRoutes(app: FastifyInstance) {
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
     const pub = await getEventPub()
+    const service = new IncidentService(prisma)
 
     for (const alert of body.alerts) {
-      if (alert.status !== 'firing') continue
+      // Only skip explicitly resolved alerts (status='resolved') — default to firing
+      if (alert.status === 'resolved') continue
       const title = alert.labels?.alertname ?? 'Alert Fired'
-      const severity = alert.labels?.severity ?? 'high'
-      const service = alert.labels?.service ?? alert.labels?.job ?? null
+      const severity = SEVERITY_MAP[alert.labels?.severity ?? ''] ?? 'medium'
+      const svc = alert.labels?.service ?? alert.labels?.job ?? null
       const description = alert.annotations?.summary ?? alert.annotations?.description ?? null
+      const desc = [svc, description].filter(Boolean).join(' — ') || undefined
 
-      // Write incident to DB — this is what the War Room reads
-      const mappedSeverity = SEVERITY_MAP[severity] ?? 'medium'
-      const rows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ id: string }>>`
-          INSERT INTO incidents (id, tenant_id, title, severity, status, description, suggested_root_cause, created_at)
-          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${title}, ${mappedSeverity}::incident_severity,
-                  'active', ${description}, ${service ? `Possible root cause: ${service} service` : null},
-                  NOW())
-          ON CONFLICT DO NOTHING
-          RETURNING id
-        `
-      ).catch(() => [])
-
-      const incidentId = (rows as Array<{ id: string }>)[0]?.id
-      if (incidentId && pub) {
-        await tryPublish(pub, 'incident_created', {
-          type: 'incident_created',
-          tenantId,
-          incidentId,
+      try {
+        const incident = await service.create(tenantId, {
           title,
-          severity,
-          serviceHint: service,
+          severity: severity as 'critical' | 'high' | 'medium' | 'low',
+          description: desc,
         })
+        if (pub) {
+          await tryPublish(pub, 'incident_created', {
+            type: 'incident_created',
+            tenantId,
+            incidentId: incident.id,
+            title,
+            severity,
+            serviceHint: svc,
+          })
+        }
+      } catch (err) {
+        request.log.error({ err, tenantId, title }, 'alert-subscriber: failed to create incident')
       }
     }
     return { ok: true }

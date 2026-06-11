@@ -103,6 +103,9 @@ function mapTools(tools: ToolDefinition[]): OpenAICompatTool[] {
 }
 
 export class OllamaProvider implements IModelProvider {
+  get modelId(): string { return this.config.defaultModel ?? 'llama3.2' }
+  get cheapModelId(): string { return this.config.cheapModel ?? 'llama3.2' }
+
   private readonly baseURL: string
 
   constructor(private readonly config: ProviderConfig) {
@@ -111,7 +114,7 @@ export class OllamaProvider implements IModelProvider {
 
   async chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse> {
     const body: Record<string, unknown> = {
-      model: opts.model || (this.config.defaultModel ?? DEFAULT_MODEL),
+      model: opts.model || this.modelId,
       messages: mapMessages(messages),
       stream: false,
       ...(tools.length > 0 ? { tools: mapTools(tools) } : {}),
@@ -163,7 +166,7 @@ export class OllamaProvider implements IModelProvider {
 
   async *stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncGenerator<StreamChunk> {
     const body: Record<string, unknown> = {
-      model: opts.model || (this.config.defaultModel ?? DEFAULT_MODEL),
+      model: opts.model || this.modelId,
       messages: mapMessages(messages),
       stream: true,
       stream_options: { include_usage: true },

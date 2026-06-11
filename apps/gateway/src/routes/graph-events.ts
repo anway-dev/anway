@@ -67,7 +67,8 @@ export async function graphEventRoutes(app: FastifyInstance) {
   app.post<{ Body: GraphEvent }>('/api/graph/events', {
     preHandler: async (request, reply) => {
       if (VALID_API_KEYS.size === 0) {
-        return reply.code(503).send({ error: 'connector API keys not configured' })
+        // Return 401 (not 503) — don't reveal whether the endpoint is configured
+        return reply.code(401).send({ error: 'unauthorized — connector API keys not configured' })
       }
       const key = request.headers['x-connector-key'] as string | undefined
       if (!key || !VALID_API_KEYS.has(key)) {

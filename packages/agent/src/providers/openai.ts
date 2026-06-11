@@ -47,6 +47,9 @@ function mapMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
 }
 
 export class OpenAIProvider implements IModelProvider {
+  get modelId(): string { return this.config.defaultModel ?? 'gpt-4o' }
+  get cheapModelId(): string { return this.config.cheapModel ?? 'gpt-4o-mini' }
+
   private readonly client: OpenAI
 
   constructor(private readonly config: ProviderConfig) {
@@ -58,7 +61,7 @@ export class OpenAIProvider implements IModelProvider {
 
   async chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse> {
     const params: OpenAI.ChatCompletionCreateParamsNonStreaming = {
-      model: opts.model || (this.config.defaultModel ?? DEFAULT_MODEL),
+      model: opts.model || this.modelId,
       messages: mapMessages(messages),
       ...(tools.length > 0 ? { tools: mapTools(tools), tool_choice: 'auto' } : {}),
       ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}),
@@ -94,7 +97,7 @@ export class OpenAIProvider implements IModelProvider {
 
   async *stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncGenerator<StreamChunk> {
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
-      model: opts.model || (this.config.defaultModel ?? DEFAULT_MODEL),
+      model: opts.model || this.modelId,
       messages: mapMessages(messages),
       stream: true,
       stream_options: { include_usage: true },

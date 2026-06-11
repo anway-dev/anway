@@ -1,6 +1,11 @@
 import { PrismaClient, IncidentSeverity, IncidentStatus } from '@prisma/client'
 import { withTenant } from '../db/prisma.js'
 
+/** Strip HTML tags and trim — prevents XSS in stored text fields. */
+function sanitizeText(s: string): string {
+  return s.replace(/<[^>]*>/g, '').trim()
+}
+
 export class IncidentService {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -9,10 +14,10 @@ export class IncidentService {
       tx.incident.create({
         data: {
           tenant_id: tenantId,
-          title: data.title,
+          title: sanitizeText(data.title),
           severity: data.severity,
           status: 'active' as IncidentStatus,
-          description: data.description ?? null,
+          description: data.description ? sanitizeText(data.description) : null,
         },
       })
     )

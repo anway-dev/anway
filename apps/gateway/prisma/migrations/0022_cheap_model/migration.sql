@@ -1,0 +1,1 @@
+ALTER TABLE provider_config ADD COLUMN IF NOT EXISTS cheap_model VARCHAR(100);

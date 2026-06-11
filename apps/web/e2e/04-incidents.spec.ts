@@ -28,7 +28,7 @@ test.describe('Incidents — full lifecycle', () => {
       headers,
       data: { title, severity: 'high' },
     })
-    expect(createResp.status(), `POST /api/incidents should be 200 or 201`).toBeOneOf([200, 201])
+    expect([200, 201], `POST /api/incidents should be 200 or 201`).toContain(createResp.status())
     const created = await createResp.json() as { id: string; title: string; status: string }
     expect(created.id, 'created incident must have an id').toBeDefined()
     expect(created.title, 'created incident title must match').toBe(title)
@@ -100,7 +100,7 @@ test.describe('Incidents — full lifecycle', () => {
       headers,
       data: { title, severity: 'medium' },
     })
-    expect(createResp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
     createdIds.push(created.id)
 
@@ -122,7 +122,7 @@ test.describe('Incidents — full lifecycle', () => {
       headers,
       data: { title, severity: 'low' },
     })
-    expect(createResp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
     createdIds.push(created.id)
 

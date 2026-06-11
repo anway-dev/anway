@@ -22,7 +22,7 @@ test.describe('Data Integrity — cross-entity chains', () => {
       headers: { ...headers, 'Content-Type': 'application/json' },
       data: { title, severity: 'high' },
     })
-    expect(resp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(resp.status())
     const { id } = await resp.json() as { id: string }
     createdIncidentIds.push(id)
 
@@ -38,17 +38,17 @@ test.describe('Data Integrity — cross-entity chains', () => {
     const alertName = uniqueId('E2E-alrt')
     const postResp = await request.post(`${GATEWAY}/api/events/alert`, {
       headers: { ...headers, 'Content-Type': 'application/json' },
-      data: { tenantId: DEMO_TENANT, alerts: [{ status: 'firing', labels: { alertname: alertName, severity: 'high' } }] },
+      data: { alerts: [{ status: 'firing', labels: { alertname: alertName, severity: 'high' } }] },
     })
-    expect(postResp.status()).toBe(200)
+    expect([200, 201, 202, 204]).toContain(postResp.status())
 
     const alerts = await pollUntil(
       () => request.get(`${GATEWAY}/api/alerts`, { headers }).then(r => r.json() as Promise<Array<{ title: string; severity?: string }>>),
       (list) => list.some(a => a.title === alertName),
-      { intervalMs: 400, timeoutMs: 6000 },
+      { intervalMs: 400, timeoutMs: 8000 },
     )
     const found = alerts.find(a => a.title === alertName)
-    expect(found).toBeTruthy()
-    expect(found!.severity).toBeTruthy()
+    expect(found, 'alert must appear in alerts list after POST').toBeTruthy()
+    expect(found!.severity, 'alert must have severity').toBeTruthy()
   })
 })

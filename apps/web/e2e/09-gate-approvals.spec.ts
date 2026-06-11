@@ -14,7 +14,7 @@ test.describe('Gate approvals — full lifecycle', () => {
       headers,
       data: { action: 'deploy', target: uniqueId('payments-api'), requestedBy: 'e2e-test' },
     })
-    expect(createResp.status(), 'POST /api/gate must succeed').toBeOneOf([200, 201])
+    expect([200, 201], 'POST /api/gate must succeed').toContain(createResp.status())
     const created = await createResp.json() as { ok: boolean; id: string }
     expect(created.id, 'gate must return an id').toBeDefined()
 
@@ -34,7 +34,7 @@ test.describe('Gate approvals — full lifecycle', () => {
       headers,
       data: { action: 'restart_pod', target: uniqueId('auth-service'), requestedBy: 'e2e-test' },
     })
-    expect(createResp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
     expect(created.id).toBeDefined()
 
@@ -53,7 +53,7 @@ test.describe('Gate approvals — full lifecycle', () => {
       headers,
       data: { action: 'deploy', target: uniqueId('svc'), requestedBy: 'e2e-test' },
     })
-    expect(createResp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
 
     // First decision
@@ -93,7 +93,7 @@ test.describe('Gate approvals — full lifecycle', () => {
       headers,
       data: { action: 'deploy', target, requestedBy: 'e2e-test' },
     })
-    expect(createResp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
 
     // Navigate to Approvals

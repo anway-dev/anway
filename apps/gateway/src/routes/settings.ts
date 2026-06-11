@@ -42,34 +42,34 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
   app.get('/api/settings/provider', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const config = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<{ provider: string; default_model: string | null }[]>`
-        SELECT provider, default_model AS default_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+      tx.$queryRaw<{ provider: string; default_model: string | null; cheap_model: string | null }[]>`
+        SELECT provider, default_model AS default_model, cheap_model AS cheap_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
       `
     ).catch(() => [])
     if (config.length === 0) return { configured: false }
-    return { configured: true, provider: config[0]!.provider, defaultModel: config[0]!.default_model }
+    return { configured: true, provider: config[0]!.provider, defaultModel: config[0]!.default_model, cheapModel: config[0]!.cheap_model }
   })
 
   const VALID_PROVIDERS = new Set(['anthropic', 'openai', 'groq', 'deepseek', 'mistral', 'ollama', 'lmstudio'])
 
-  app.post<{ Body: { provider: string; apiKey?: string; baseUrl?: string; defaultModel?: string } }>(
+  app.post<{ Body: { provider: string; apiKey?: string; baseUrl?: string; defaultModel?: string; cheapModel?: string } }>(
     '/api/settings/provider', { preHandler: [app.authenticate] }, async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
       if (user.role !== 'admin') {
         return reply.code(403).send({ error: 'admin role required' })
       }
-      const { provider, apiKey, baseUrl, defaultModel } = request.body
+      const { provider, apiKey, baseUrl, defaultModel, cheapModel } = request.body
       if (!VALID_PROVIDERS.has(provider)) {
         return reply.code(400).send({ error: `invalid provider: ${provider}. Valid: ${[...VALID_PROVIDERS].join(', ')}` })
       }
       const { tenantId } = user
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model)
-          VALUES (${tenantId}::uuid, ${provider}, ${apiKey ?? null}, ${baseUrl ?? null}, ${defaultModel ?? null})
+          INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model, cheap_model)
+          VALUES (${tenantId}::uuid, ${provider}, ${apiKey ?? null}, ${baseUrl ?? null}, ${defaultModel ?? null}, ${cheapModel ?? null})
           ON CONFLICT (tenant_id)
           DO UPDATE SET provider = ${provider}, api_key = ${apiKey ?? null}, base_url = ${baseUrl ?? null},
-            default_model = ${defaultModel ?? null}, updated_at = NOW()
+            default_model = ${defaultModel ?? null}, cheap_model = ${cheapModel ?? null}, updated_at = NOW()
         `
       )
       return { ok: true }

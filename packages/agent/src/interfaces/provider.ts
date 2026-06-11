@@ -20,7 +20,7 @@ export interface ToolCall {
 
 // Per-call inference overrides
 export interface InferenceOptions {
-  model: string
+  model?: string           // optional — omit to use provider default
   temperature?: number
   maxTokens?: number
   stopSequences?: string[]
@@ -42,6 +42,8 @@ export type StreamChunk = StreamEvent
 
 // The ONLY interface agents and the orchestrator ever call — never a provider SDK directly
 export interface IModelProvider {
+  readonly modelId: string       // configured default model or fallback
+  readonly cheapModelId: string  // configured cheap model or fallback to modelId
   chat(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): Promise<ChatResponse>
   stream(messages: Message[], tools: ToolDefinition[], opts: InferenceOptions): AsyncGenerator<StreamChunk>
   formatToolResult(toolCallId: string, result: unknown): Message
@@ -81,8 +83,9 @@ export type ProviderType = 'anthropic' | 'openai' | 'ollama' | 'groq' | 'mistral
 
 // Configuration passed to ProviderFactory.create()
 export interface ProviderConfig {
-  type: string  // open string for extensibility — was union type
+  type: string
   apiKey?: string
   baseURL?: string
   defaultModel?: string
+  cheapModel?: string
 }

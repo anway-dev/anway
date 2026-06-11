@@ -19,12 +19,12 @@ export class OncallAgent {
     const extraction = await this.cheapModel.chat([
       { role: 'system', content: 'Summarise recent activity for this team — incidents, deploys, PRs.' },
       { role: 'user', content: `Team: ${teamName}. ${graphContext ? 'Episodes: ' + graphContext.recentEpisodes.slice(0, 5).map(e => e.text).join(' | ') : ''}` },
-    ], [], { model: 'claude-haiku-3-5-20251001', maxTokens: 200, temperature: 0 })
+    ], [], { model: this.cheapModel.cheapModelId, maxTokens: 200, temperature: 0 })
 
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Generate shift brief in JSON matching { summary, openIncidents: [{title, severity, startedAt, status}], recentDeploys: string[], watchItems: string[], handoffNotes: string }. Return ONLY valid JSON.' },
       { role: 'user', content: `Team: ${teamName}\nActivity: ${extraction.content}` },
-    ], [], { model: 'claude-sonnet-4-6', maxTokens: 1500, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 
     try { return JSON.parse(result.content) as ShiftBrief } catch { return { summary: '', openIncidents: [], recentDeploys: [], watchItems: [], handoffNotes: '' } }
   }
@@ -36,7 +36,7 @@ export class OncallAgent {
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Investigate this alert. What changed before it fired? Analyse timeline and suggest next steps.' },
       { role: 'user', content: `Alert: ${alertTitle}\n${graphContext ? `Entity: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.slice(0, 5).map(e => e.name).join(', ')}. Recent: ${graphContext.recentEpisodes.slice(0, 5).map(e => e.text).join(' | ')}` : 'No context'}` },
-    ], [], { model: 'claude-sonnet-4-6', maxTokens: 1000, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 1000, temperature: 0 })
 
     return result.content
   }

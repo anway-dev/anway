@@ -70,7 +70,7 @@ async function* runSpecialist(
   ctx: SessionContext,
 ): AsyncGenerator<StreamEvent> {
   const { model, tools, perimeter, auditSink } = config
-  const mainModel = config.defaultModel ?? 'claude-sonnet-4-6'
+  const mainModel = model.modelId
   const maxSteps = config.maxSteps ?? 10
 
   // Inject knowledge graph context if available (CLAUDE.md: graph is mandatory first step)

@@ -34,7 +34,7 @@ test.describe('Audit — API', () => {
       headers,
       data: { title, severity: 'medium' },
     })
-    expect(createResp.status()).toBeOneOf([200, 201])
+    expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
     createdIncidentIds.push(created.id)
 

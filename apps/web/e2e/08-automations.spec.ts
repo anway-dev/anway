@@ -27,7 +27,7 @@ test.describe('Automations — trigger lifecycle', () => {
       data: {
         eventType: 'alert_fired',
         condition: { severity: 'critical' },
-        actions: [{ type: 'notify_oncall', target: 'oncall' }],
+        actions: [{ type: 'notify_oncall', params: { target: 'oncall' } }],
       },
     })
     expect(createResp.status(), 'POST trigger must succeed').toBe(200)
@@ -77,7 +77,7 @@ test.describe('Automations — trigger lifecycle', () => {
   test('P0: POST trigger without eventType returns 400', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/automations/triggers`, {
       headers,
-      data: { actions: [{ type: 'notify_oncall', target: 'oncall' }] },
+      data: { actions: [{ type: 'notify_oncall', params: { target: 'oncall' } }] },
     })
     expect(resp.status(), 'missing eventType must return 400').toBe(400)
   })

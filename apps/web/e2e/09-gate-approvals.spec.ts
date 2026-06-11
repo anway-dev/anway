@@ -133,7 +133,7 @@ test.describe('Gate approvals — full lifecycle', () => {
       await approveBtn.click()
 
       // After click, count must decrease (or item removed)
-      await page.waitForTimeout(500)
+      await expect(page.locator('text=approve').or(page.locator('text=Approve')).first()).toBeVisible({ timeout: 5000 })
       const afterCount = await page.locator('button:has-text("Approve")').count()
       expect(afterCount, 'Approve button count must decrease after approval').toBeLessThan(initialCount)
     } else {
@@ -157,7 +157,7 @@ test.describe('Gate approvals — full lifecycle', () => {
     let safety = 0
     while ((await approveBtn.isVisible({ timeout: 1000 }).catch(() => false)) && safety < 10) {
       await approveBtn.click()
-      await page.waitForTimeout(300)
+      await expect(page.locator('text=approve').or(page.locator('text=Approve')).first()).toBeVisible({ timeout: 5000 })
       safety++
     }
 

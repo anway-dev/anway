@@ -13,7 +13,7 @@ test.describe('Signals — API', () => {
 
     // Post alert in Alertmanager format
     const postResp = await request.post(`${GATEWAY}/api/events/alert`, {
-      data: {
+      headers, data: {
         tenantId: DEMO_TENANT,
         alerts: [
           {
@@ -89,7 +89,7 @@ test.describe('Signals — UI', () => {
 
     // Click Alerts tab
     await page.locator('button:has-text("Alerts")').first().click()
-    await page.waitForTimeout(300)
+    await expect(page.locator('text=critical').or(page.locator('text=high')).first()).toBeVisible({ timeout: 5000 })
 
     // Content should update — either shows alerts or empty state
     const content = page.locator('text=Alerts')
@@ -138,7 +138,7 @@ test.describe('Signals — UI', () => {
 
     if (rowVisible) {
       await signalRow.click()
-      await page.waitForTimeout(400)
+      await expect(page.locator('text=critical').or(page.locator('text=high')).first()).toBeVisible({ timeout: 5000 })
 
       // After click, triage details should expand
       const details = page.locator('text=Triage')
@@ -165,7 +165,7 @@ test.describe('Signals — UI', () => {
 
     if (filterVisible) {
       await criticalFilter.click()
-      await page.waitForTimeout(300)
+      await expect(page.locator('text=critical').or(page.locator('text=high')).first()).toBeVisible({ timeout: 5000 })
 
       // After filtering, content should update
       const content = page.locator('text=critical')

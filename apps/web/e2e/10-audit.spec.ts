@@ -120,7 +120,7 @@ test.describe('Audit — UI', () => {
     const inputVisible = await searchInput.isVisible({ timeout: 3000 }).catch(() => false)
     if (inputVisible) {
       await searchInput.fill('test')
-      await page.waitForTimeout(400) // allow debounce
+      await expect(page.locator('text=query').or(page.locator('text=Event')).first()).toBeVisible({ timeout: 5000 }) // allow debounce
       // Either matching rows are shown OR empty state — both are correct filter behavior
       const hasContent = await page.locator('table tbody tr')
         .or(page.locator('[data-testid="audit-row"]'))
@@ -144,7 +144,7 @@ test.describe('Audit — UI', () => {
 
     if (rowVisible) {
       await row.click()
-      await page.waitForTimeout(300)
+      await expect(page.locator('text=query').or(page.locator('text=Event')).first()).toBeVisible({ timeout: 5000 })
       // After clicking a row, some additional detail or expanded content should appear
       const expanded = page.locator('[data-testid="audit-detail"]')
         .or(page.locator('text=Role'))

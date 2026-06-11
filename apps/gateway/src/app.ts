@@ -7,7 +7,6 @@ import { healthRoutes } from './routes/health.js'
 import { metricsRoutes } from './routes/metrics.js'
 import { authRoutes } from './routes/auth.js'
 import { chatRoutes } from './routes/chat.js'
-import { chatStreamRoutes } from './routes/chat-stream.js'
 import { incidentRoutes } from './routes/incidents.js'
 import { automationsRoutes } from './routes/automations.js'
 import { graphEventRoutes } from './routes/graph-events.js'
@@ -56,7 +55,6 @@ export async function buildApp() {
   await app.register(graphEventRoutes)
   await app.register(connectorsRoutes)
   await app.register(serviceRoutes)
-  await app.register(chatStreamRoutes)
   await app.register(eventRoutes)
   await app.register(settingsRoutes)
   await app.register(gateDecideRoutes)

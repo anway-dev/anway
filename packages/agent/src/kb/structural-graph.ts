@@ -76,28 +76,41 @@ export class StructuralGraph implements IKnowledgeGraph {
     const entity = await this.getEntity(entityId, tenantId)
     if (!entity) throw new Error(`Entity ${entityId} not found`)
 
-    const visited = new Set<string>([entityId])
-    const relatedEntitiesMap = new Map<string, Entity>()
-    const allRelationships: Relationship[] = []
-    let currentDepth = 0
-    let toVisit = [entityId]
+    interface EntityRow { id: string; name: string; type: string; metadata: Record<string, unknown> }
+    interface RelRow { from_entity_id: string; rel_type: string; to_entity_id: string }
 
-    while (toVisit.length > 0 && currentDepth < depth) {
-      const rels = await this.getRelationshipsBatch(toVisit, tenantId)
-      const nextSet = new Set<string>()
-      for (const rel of rels) {
-        allRelationships.push(rel)
-        const otherId = visited.has(rel.fromEntityId) ? rel.toEntityId : rel.fromEntityId
-        if (!visited.has(otherId)) nextSet.add(otherId)
-      }
-      for (const eid of toVisit) visited.add(eid)
-      toVisit = [...nextSet].filter(eid => !visited.has(eid))
-      currentDepth++
-      if (toVisit.length > 0) {
-        const entities = await this.getEntitiesBatch(toVisit, tenantId)
-        for (const e of entities) relatedEntitiesMap.set(e.id, e)
+    const [entityRows, relRows] = await Promise.all([
+      this.query<EntityRow>(`
+        WITH RECURSIVE entity_graph AS (
+          SELECT e.id, e.name, e.type, e.metadata, 0 AS depth
+          FROM entities e WHERE e.id = $1 AND e.tenant_id = $2
+          UNION ALL
+          SELECT e2.id, e2.name, e2.type, e2.metadata, eg.depth + 1
+          FROM entity_graph eg
+          JOIN relationships r ON (r.from_entity_id = eg.id OR r.to_entity_id = eg.id)
+          JOIN entities e2 ON e2.id = CASE
+            WHEN r.from_entity_id = eg.id THEN r.to_entity_id ELSE r.from_entity_id END
+          WHERE eg.depth < $3 AND e2.tenant_id = $2
+        )
+        SELECT DISTINCT id, name, type, metadata FROM entity_graph
+      `, [entityId, tenantId, depth]),
+      this.query<RelRow>(`
+        SELECT from_entity_id, rel_type, to_entity_id FROM relationships
+        WHERE (from_entity_id = $1 OR to_entity_id = $1) AND tenant_id = $2 LIMIT 500
+      `, [entityId, tenantId]),
+    ])
+
+    const relatedEntitiesMap = new Map<string, Entity>()
+    for (const row of entityRows) {
+      if (row.id !== entityId) {
+        relatedEntitiesMap.set(row.id, {
+          id: row.id, tenantId, name: row.name, type: row.type, metadata: row.metadata,
+        })
       }
     }
+    const allRelationships: Relationship[] = relRows.map(r => ({
+      id: '', tenantId, fromEntityId: r.from_entity_id, relType: r.rel_type, toEntityId: r.to_entity_id, metadata: {},
+    }))
 
     // Extract connectorCoordinates from entity metadata
     const connectorCoordinates: Record<string, ConnectorCoordinates> = {}

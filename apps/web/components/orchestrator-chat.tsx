@@ -379,13 +379,14 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" });
 
     try {
-      const response = await fetch('/api/chat/stream', {
+      const sessionId = sessionIdRef.current;
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(devToken ? { Authorization: `Bearer ${devToken}` } : {}),
         },
-        body: JSON.stringify({ messages: [{ role: 'user', content: text }] }),
+        body: JSON.stringify({ query: text, sessionId }),
       });
 
       if (!response.ok) {

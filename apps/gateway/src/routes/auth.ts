@@ -11,11 +11,13 @@ interface TokenBody {
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 const RATE_LIMIT_MAX = 5
 const RATE_LIMIT_WINDOW_MS = 60_000
+const MAX_RATE_LIMIT_ENTRIES = 1000
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now()
   const entry = rateLimitMap.get(ip)
   if (!entry || now > entry.resetAt) {
+    if (rateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) { const k = rateLimitMap.keys().next().value; if (k !== undefined) rateLimitMap.delete(k) }
     rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
     return true
   }
@@ -41,7 +43,6 @@ export async function authRoutes(app: FastifyInstance) {
     if (!checkRateLimit(ip)) {
       return reply.code(429).send({ error: 'too many requests — try again in 1 minute' })
     }
-    const { email, tenantId } = request.body
     const { email, tenantId } = request.body
 
     // Verify tenant exists

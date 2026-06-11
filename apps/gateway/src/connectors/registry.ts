@@ -20,7 +20,7 @@ const adapterCache = new Map<string, McpConnector | CliConnector>()
 const MAX_ADAPTER_CACHE = 200
 function cacheSetAdapter(key: string, val: McpConnector | CliConnector): void {
   if (adapterCache.size >= MAX_ADAPTER_CACHE) { const k = adapterCache.keys().next().value; if (k !== undefined) adapterCache.delete(k) }
-  cacheSetAdapter(key, val)
+  adapterCache.set(key, val)
 }
 
 function cacheKey(tenantId: string, connectorId: string): string {

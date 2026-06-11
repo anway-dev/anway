@@ -69,6 +69,33 @@ Phase 4 complete. All P1–P4 batches done. Ready for fable final signoff.
 
 ---
 
+<!-- REVIEW SECTION START — 2026-06-12a -->
+## Review — 2026-06-12a | Fable final audit — YELLOW verdict
+
+**Reviewer:** Claude (fable agent output)
+
+79 DONE / 9 PARTIAL / 11 NOT IMPLEMENTED
+
+### HIGH gaps → bridge P5A+P5B posted
+
+1. `connector_reconnected` event missing end-to-end — not in `events.ts`, not handled in builder, not subscribed in subscriber. Re-bootstrap on reconnect never fires.
+2. `resolveContext` returns `recentEpisodes: []` + `groundingSources: []` always — `kb_episodes` table populated but never queried in `resolveContext`. Agents miss all temporal context.
+
+### Secondary gaps → bridge P5A+P5B posted
+
+3. Datadog bootstrap `/api/v1/service_dependencies` — non-existent endpoint. `Service→DEPENDS_ON→Service` edges never created.
+4. `InMemoryGateSink` fallback — when `REDIS_URL` absent, writes bypass gate entirely (log error only). Violates V1 trust principle.
+
+### Not blocking (defer)
+
+- `StructuralGraph.search` ILIKE only, no pgvector — semantic search gap, acceptable for prototype
+- User provisioning API missing — `access-view.tsx` stays mock, dev-only seed path acceptable
+- Several UI views stay on mock data (`kb-view`, `workflow-view`, `access-view`) — prototype scope
+
+<!-- REVIEW SECTION END — 2026-06-12a -->
+
+---
+
 <!-- REVIEW SECTION START — 2026-06-11av -->
 ## Review — 2026-06-11av | Commit c0d595c phase assessment — P4A scope
 

@@ -5,6 +5,7 @@ import { ProviderFactory } from '@anvay/agent'
 import type { IModelProvider, ProviderConfig } from '@anvay/agent'
 import type { TenantId } from '@anvay/types'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { decryptJson } from '../utils/crypto.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
@@ -39,16 +40,16 @@ const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
 async function tenantProviderFor(tenantId: string): Promise<IModelProvider | null> {
   try {
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ provider: string; api_key: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }>>`
-        SELECT provider, api_key, base_url, default_model, cheap_model
+      tx.$queryRaw<Array<{ provider: string; api_key: string | null; api_key_enc: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }>>`
+        SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model
         FROM provider_config WHERE tenant_id = ${tenantId}::uuid
       `
     )
-    if (rows.length > 0 && (rows[0]!.api_key || KEYLESS_PROVIDERS.has(rows[0]!.provider))) {
+    if (rows.length > 0 && (rows[0]!.api_key || rows[0]!.api_key_enc || KEYLESS_PROVIDERS.has(rows[0]!.provider))) {
       const r = rows[0]!
       return ProviderFactory.create({
         type: r.provider as ProviderConfig['type'],
-        apiKey: r.api_key || undefined,
+        apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key || undefined),
         baseURL: r.base_url || undefined,
         defaultModel: r.default_model || undefined,
         cheapModel: r.cheap_model || undefined,

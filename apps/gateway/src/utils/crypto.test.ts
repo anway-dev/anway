@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { encryptJson, decryptJson, isEncrypted, assertEncryptionKey } from './crypto.js'
 
 describe('crypto', () => {
+  beforeEach(() => {
+    process.env['ANVAY_ENCRYPTION_KEY'] = Buffer.alloc(32, 7).toString('base64')
+  })
+
   it('roundtrips an object', () => {
     const orig = { key: 'test-value', nested: { a: 1 } }
     const enc = encryptJson(orig)

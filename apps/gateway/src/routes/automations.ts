@@ -3,6 +3,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { TriggerEngine } from '../triggers/engine.js'
 import type { TriggerAction, TriggerRule } from '../triggers/engine.js'
+import { getActiveScheduler, registerUserMonitor, MONITOR_IMPLS } from '../jobs/scheduler.js'
 
 export async function automationsRoutes(app: FastifyInstance) {
   app.get('/api/automations/triggers', {
@@ -149,13 +150,17 @@ export async function automationsRoutes(app: FastifyInstance) {
         properties: {
           name: { type: 'string', minLength: 1 },
           schedule: { type: 'string', minLength: 1 },
-          jobType: { type: 'string', enum: ['service_health_sweep', 'cloud_security_scan', 'slo_burn_check', 'cost_anomaly_detection', 'deploy_health_report', 'oncall_morning_brief', 'incident_retrospective'] },
+          // Only job types with real implementations are creatable — see MONITOR_IMPLS
+          jobType: { type: 'string', enum: ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief'] },
         },
       },
     },
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { name, schedule, jobType } = request.body
+    if (!MONITOR_IMPLS[jobType]) {
+      return reply.code(400).send({ error: `unsupported jobType: ${jobType}` })
+    }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ id: string }>>`
         INSERT INTO cron_jobs (tenant_id, name, schedule, job_type, enabled)
@@ -164,6 +169,12 @@ export async function automationsRoutes(app: FastifyInstance) {
       `
     )
     const id = (rows as Array<{ id: string }>)[0]?.id
+    // Schedule immediately — no gateway restart needed
+    const scheduler = getActiveScheduler()
+    if (scheduler && id) {
+      await registerUserMonitor(scheduler, { id, tenant_id: tenantId, name, schedule, job_type: jobType })
+        .catch((err) => request.log.warn({ err, id }, 'monitor created but scheduling failed — will register on next restart'))
+    }
     return { ok: true, id, name, schedule, jobType }
   })
 

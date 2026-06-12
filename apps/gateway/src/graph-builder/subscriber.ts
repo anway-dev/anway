@@ -1,7 +1,7 @@
 import { createClient } from 'redis'
 import type { RedisClientType } from 'redis'
 import { GraphBuilderAgent } from '@anvay/agent'
-import type { GraphEvent, IConnectorBootstrap } from '@anvay/agent'
+import type { GraphEvent, IConnectorBootstrap, IKnowledgeGraph } from '@anvay/agent'
 import { ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
 import { createKnowledgeGraph } from '../kb/index.js'
@@ -17,20 +17,25 @@ import { PrometheusBootstrap } from '@anvay/connector-prometheus'
 // (avoid build-time dependency on packages that may not have dist/ built)
 import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
+import { decryptJson } from '../utils/crypto.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 interface SubscriberLogger { warn(obj: unknown, msg?: string): void; info(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void }
 
 async function connectorCredential(tenantId: string, connectorType: string, envVar: string): Promise<string> {
   const row = await withTenant(prisma, tenantId, (tx) =>
-    tx.$queryRaw<{ credentials: { token?: string; apiKey?: string } }[]>`
-      SELECT credentials FROM connector_config
+    tx.$queryRaw<{ credentials_enc: string; credentials: { token?: string; apiKey?: string } }[]>`
+      SELECT credentials_enc, credentials FROM connector_config
       WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${connectorType} AND enabled = true
     `
   ).catch(() => [])
   if (row.length > 0) {
-    const creds = row[0]!.credentials
-    return creds.token ?? creds.apiKey ?? process.env[envVar] ?? ''
+    const r = row[0]!
+    if (r.credentials_enc) {
+      const dec = decryptJson<{ token?: string; apiKey?: string }>(r.credentials_enc)
+      return dec.token ?? dec.apiKey ?? process.env[envVar] ?? ''
+    }
+    return r.credentials?.token ?? r.credentials?.apiKey ?? process.env[envVar] ?? ''
   }
   return process.env[envVar] ?? ''
 }
@@ -49,16 +54,17 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   if (tenantId) {
     try {
       const rows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ provider: string; api_key: string; base_url: string; default_model: string; cheap_model: string }>>`
-          SELECT provider, api_key, base_url, default_model, cheap_model
+        tx.$queryRaw<Array<{ provider: string; api_key: string; api_key_enc: string; base_url: string; default_model: string; cheap_model: string }>>`
+          SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model
           FROM provider_config WHERE tenant_id = ${tenantId}::uuid
         `
       )
-      if (rows.length > 0 && rows[0]!.api_key) {
+      const KEYLESS = new Set(['ollama', 'lmstudio'])
+      if (rows.length > 0 && (rows[0]!.api_key || rows[0]!.api_key_enc || KEYLESS.has(rows[0]!.provider))) {
         const r = rows[0]!
         return {
           type: r.provider as ProviderConfig['type'],
-          apiKey: r.api_key,
+          apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key || undefined),
           baseURL: r.base_url || undefined,
           defaultModel: r.default_model || undefined,
           cheapModel: r.cheap_model || undefined,
@@ -137,10 +143,25 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       const bootstrapRegistry = registryCache.get(tid)!
       const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub)
 
+      // Connector lifecycle events re-published internally (e.g. kb:stale) carry no
+      // payload — load stored credentials so bootstrap reaches the right endpoint.
+      if ((event.type === 'connector_registered' || event.type === 'connector_reconnected') && event.connectorType) {
+        const existing = (event as { payload?: Record<string, unknown> }).payload
+        if (!existing || Object.keys(existing).length === 0) {
+          const rows = await withTenant(prisma, tid, (tx) =>
+            tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
+              SELECT credentials_enc, credentials FROM connector_config
+              WHERE tenant_id = ${tid}::uuid AND connector_type = ${event.connectorType} AND enabled = true
+            `
+          ).catch(() => [])
+          if (rows[0]?.credentials) (event as { payload?: Record<string, unknown> }).payload = rows[0].credentials
+        }
+      }
+
       try {
         await agent.handle(event)
         if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
-          const connectorType = (event as Record<string, unknown>)['connectorType'] as string | undefined
+          const connectorType = event.connectorType
           if (connectorType) {
             void withTenant(prisma, tid, (tx) =>
               tx.$executeRaw`
@@ -155,7 +176,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       } catch (err) {
         log.error({ err, eventType: event.type, tenantId: tid }, 'GraphBuilderAgent event handling failed')
         if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
-          const connectorType = (event as Record<string, unknown>)['connectorType'] as string | undefined
+          const connectorType = event.connectorType
           if (connectorType) {
             void withTenant(prisma, tid, (tx) =>
               tx.$executeRaw`
@@ -176,12 +197,21 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       const { sources } = JSON.parse(message) as { count: number; sources: string[] }
       if (!Array.isArray(sources)) return
       for (const source of sources) {
-        await graphPub.publish('connector_reconnected', JSON.stringify({
-          type: 'connector_reconnected',
-          tenantId: '00000000-0000-0000-0000-000000000001', // default tenant
-          connectorType: source,
-          at: new Date().toISOString(),
-        })).catch(() => {})
+        // Re-bootstrap every tenant that has this connector enabled — not just the default tenant
+        const rows = await prisma.$queryRaw<Array<{ tenant_id: string; credentials: Record<string, unknown> }>>`
+          SELECT tenant_id, credentials FROM connector_config
+          WHERE connector_type = ${source} AND enabled = true
+        `.catch(() => [] as Array<{ tenant_id: string; credentials: Record<string, unknown> }>)
+        for (const row of rows) {
+          await graphPub.publish('connector_reconnected', JSON.stringify({
+            type: 'connector_reconnected',
+            tenantId: row.tenant_id,
+            connectorType: source,
+            connectorId: source,
+            payload: row.credentials,
+            at: new Date().toISOString(),
+          })).catch(() => {})
+        }
       }
     } catch { /* ignore parse errors */ }
   })

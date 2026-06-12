@@ -7,7 +7,7 @@ const PUBLIC_PATHS = ['/login', '/api/auth', '/_next', '/favicon.ico']
 // Dev mode: bypass auth for localhost when SKIP_AUTH=true (E2E tests)
 const SKIP_AUTH = process.env['SKIP_AUTH'] === 'true'
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Allow public paths without auth

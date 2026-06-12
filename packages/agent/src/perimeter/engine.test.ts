@@ -93,3 +93,27 @@ describe('AgentPerimeter.resolveCapabilities', () => {
     expect(p.allows(makeCall('linear.list_issues'))).toBe(false)
   })
 })
+
+describe('AgentPerimeter builtin tools (bare names, no connector prefix)', () => {
+  const withBuiltins = new AgentPerimeter(userPerimeter, manifests, ['list_connectors', 'register_connector'])
+
+  it('allows a registered builtin read tool', () => {
+    expect(withBuiltins.allows(makeCall('list_connectors'))).toBe(true)
+  })
+
+  it('allows a registered builtin write tool (gate fires downstream)', () => {
+    expect(withBuiltins.allows(makeCall('register_connector'))).toBe(true)
+  })
+
+  it('blocks an unprefixed tool that is NOT in the builtin allowlist', () => {
+    expect(withBuiltins.allows(makeCall('drop_database'))).toBe(false)
+  })
+
+  it('blocks all bare-named tools when no builtins are registered', () => {
+    expect(perimeter.allows(makeCall('list_connectors'))).toBe(false)
+  })
+
+  it('builtin allowlist does not leak into connector namespace', () => {
+    expect(withBuiltins.allows(makeCall('linear.list_issues'))).toBe(false)
+  })
+})

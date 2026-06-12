@@ -8,7 +8,7 @@ export class MemoryFactory {
     switch (config.type) {
       case 'redis': {
         const client = config.redisUrl ? new Redis(config.redisUrl) : new Redis()
-        return new RedisSessionMemory(client, config.summariseProvider, config.summariseModel)
+        return new RedisSessionMemory(client, config.summariseProvider)
       }
 
       default: {

@@ -1,6 +1,6 @@
 "use client";
 import { CONNECTORS, Connector } from "@/lib/mock";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 
 interface ConnectorStatus {
   connectorType: string;
@@ -17,30 +17,21 @@ export function ConnectorsView() {
   const [bootstrapInfo, setBootstrapInfo] = useState<Record<string, { bootstrapped: boolean; bootstrappedAt?: string }>>({});
   const [bootstrapping, setBootstrapping] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [devToken, setDevToken] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch('/api/auth/dev-token')
-      .then(r => r.json())
-      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
-      .catch(() => {});
-  }, []);
-
-  const authHeaders = useMemo(() => devToken ? { Authorization: `Bearer ${devToken}` } : {} as Record<string, string>, [devToken]);
+  // Auth: the /api proxy routes resolve the anvay_token session cookie server-side
   const [liveConnectors, setLiveConnectors] = useState<{ id: string; type: string }[]>([]);
 
   // Fetch live connector instances from API
   useEffect(() => {
-    if (!devToken) return
-    fetch("/api/connectors", { headers: authHeaders })
+    fetch("/api/connectors")
       .then(r => r.json() as Promise<{ id: string; type: string }[]>)
       .then(setLiveConnectors)
       .catch(() => {})
-  }, [devToken]);
+  }, []);
 
   useEffect(() => {
-    fetch("/api/settings/connectors", { headers: authHeaders })
+    fetch("/api/settings/connectors")
       .then(r => r.json())
       .then((list: ConnectorStatus[]) => {
         const map: Record<string, boolean> = {};
@@ -49,7 +40,7 @@ export function ConnectorsView() {
         // Fetch bootstrap status for each configured connector
         for (const c of list) {
           if (c.enabled) {
-            fetch(`/api/connectors/${c.connectorType}/bootstrap-status`, { headers: authHeaders })
+            fetch(`/api/connectors/${c.connectorType}/bootstrap-status`)
               .then(r => r.json())
               .then((data: { bootstrapped: boolean; bootstrappedAt?: string }) => {
                 if (data.bootstrapped) setBootstrapInfo(prev => ({ ...prev, [c.connectorType]: data }))
@@ -59,7 +50,7 @@ export function ConnectorsView() {
         }
       })
       .catch(() => {});
-  }, [devToken]);
+  }, []);
 
   const visible = filter === "All" ? CONNECTORS : CONNECTORS.filter((c) => c.category === filter);
   const isLive = (id: string) => liveConnectors.some(lc => lc.type === id) || !!configuredMap[id];
@@ -75,10 +66,7 @@ export function ConnectorsView() {
       }
       const resp = await fetch(`/api/settings/connectors/${modal.id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ credentials }),
       });
       if (!resp.ok) {
@@ -128,7 +116,7 @@ export function ConnectorsView() {
       {/* Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={isLive(conn.id)} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', headers: authHeaders }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={isLive(conn.id)} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
         ))}
       </div>
 

@@ -25,7 +25,7 @@ export type GateDecision = { _tag: 'approved' } | { _tag: 'rejected'; reason: st
 /** Write-action tool name patterns that require gate approval in V1. */
 const WRITE_ACTION_PATTERNS = [
   /^notify_/, /^create_/, /^delete_/, /^update_/, /^deploy/, /^restart/,
-  /^scale/, /^rollback/, /^merge/, /^comment/, /^run_runbook/,
+  /^scale/, /^rollback/, /^merge/, /^comment/, /^run_runbook/, /^register_/,
 ]
 
 export function isWriteAction(toolName: string): boolean {

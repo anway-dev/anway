@@ -7,3 +7,8 @@ receivers:
       # For Linux hosts, replace with: http://172.17.0.1:4000/api/events/alert
       - url: http://host.docker.internal:4000/api/events/alert
         send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            # Must match ANVAY_WEBHOOK_TOKEN in apps/gateway/.env
+            credentials: anvay-demo-webhook-token

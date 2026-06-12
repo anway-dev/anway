@@ -38,26 +38,31 @@ describe('startGraphBuilderSubscriber', () => {
     vi.clearAllMocks()
   })
 
-  it('skips when no LLM provider configured', async () => {
-    // Temporarily unset env vars for this test
+  it('skips events when no LLM provider configured', async () => {
+    // Provider is resolved per-event (DB first, env fallback) — warn fires on event arrival
     const prev = { ...process.env }
     delete process.env['ANTHROPIC_API_KEY']
     delete process.env['OPENAI_API_KEY']
     delete process.env['GROQ_API_KEY']
 
     await startGraphBuilderSubscriber('redis://localhost:6379', mockLog as any)
+    const callback = mockSubscribe.mock.calls[0]?.[1] as (msg: string) => Promise<void>
+    await callback('{"type":"pr_merged","tenantId":"00000000-0000-0000-0000-000000000001"}')
+
     expect(mockLog.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: '00000000-0000-0000-0000-000000000001' }),
       'GraphBuilderSubscriber: no LLM provider configured — skipping',
     )
+    expect(mockHandle).not.toHaveBeenCalled()
 
     Object.assign(process.env, prev)
   })
 
-  it('subscribes to all 7 graph event channels when provider available', async () => {
+  it('subscribes to all 7 graph event channels plus kb:stale', async () => {
     process.env['ANTHROPIC_API_KEY'] = 'test-key'
     await startGraphBuilderSubscriber('redis://localhost:6379', mockLog as any)
 
-    expect(mockSubscribe).toHaveBeenCalledTimes(7)
+    expect(mockSubscribe).toHaveBeenCalledTimes(8)
     const channels = mockSubscribe.mock.calls.map((c: unknown[]) => c[0])
     expect(channels).toContain('pr_merged')
     expect(channels).toContain('deploy_completed')
@@ -66,6 +71,7 @@ describe('startGraphBuilderSubscriber', () => {
     expect(channels).toContain('connector_registered')
     expect(channels).toContain('connector_removed')
     expect(channels).toContain('connector_reconnected')
+    expect(channels).toContain('kb:stale')
     expect(mockLog.info).toHaveBeenCalled()
   })
 

@@ -1,16 +1,16 @@
+import { resolveAuthHeader } from '@/lib/server-auth'
+
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const authHeader = request.headers.get('Authorization')
-    const cookieHeader = request.headers.get('Cookie')
+    const auth = await resolveAuthHeader(request)
     const response = await fetch(`${GATEWAY_URL}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(authHeader ? { Authorization: authHeader } : {}),
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+        ...(auth ? { Authorization: auth } : {}),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5 * 60 * 1000),

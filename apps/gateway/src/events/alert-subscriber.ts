@@ -31,12 +31,16 @@ export async function startAlertSubscriber(redisUrl: string): Promise<void> {
 
   await sub.subscribe('alert_fired', (message) => {
     void (async () => {
-      let payload: { tenantId?: string; title?: string; severity?: string; description?: string; service?: string }
+      let payload: { tenantId?: string; title?: string; severity?: string; description?: string; service?: string; incidentId?: string }
       try {
         payload = JSON.parse(message)
       } catch {
         return
       }
+
+      // Webhook route already wrote the incident and stamped its id on the
+      // event — creating again here duplicates every alert.
+      if (payload.incidentId) return
 
       const { tenantId, title, severity, description, service } = payload
 

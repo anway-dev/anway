@@ -24,7 +24,12 @@ export class GraphBuilderAgent {
     private readonly redisPublisher?: { publish(channel: string, message: string): Promise<number> },
   ) {}
 
-  /** Route event to correct handler. Never throws — failures are caught and logged. */
+  /**
+   * Route event to correct handler. Failures are caught and logged so graph
+   * builder errors never break the event pipeline — EXCEPT bootstrap failures
+   * on connector lifecycle events, which rethrow so callers can record an
+   * error status instead of a false success.
+   */
   async handle(event: GraphEvent): Promise<void> {
     try {
       switch (event.type) {
@@ -50,8 +55,8 @@ export class GraphBuilderAgent {
         processedAt: new Date().toISOString(),
       }))
     } catch (err) {
-      // Log + swallow — graph builder errors must not break the event pipeline
       this.logger?.error({ err, eventType: event.type }, 'GraphBuilderAgent event handling failed')
+      if (event.type === 'connector_registered' || event.type === 'connector_reconnected') throw err
     }
   }
 
@@ -85,6 +90,7 @@ export class GraphBuilderAgent {
         }
       } catch (err) {
         this.logger?.error({ err, connectorType: event.connectorType }, 'GraphBuilder: bootstrap failed')
+        throw err
       }
     }
   }

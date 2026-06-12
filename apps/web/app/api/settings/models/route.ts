@@ -1,3 +1,5 @@
+import { resolveAuthHeader } from '@/lib/server-auth'
+
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
 
 export async function GET(request: Request) {
@@ -8,7 +10,7 @@ export async function GET(request: Request) {
     searchParams.delete('apiKey')
     const qs = searchParams.toString()
     const headers: Record<string, string> = { 'content-type': 'application/json' }
-    const auth = request.headers.get('authorization')
+    const auth = await resolveAuthHeader(request)
     if (auth) headers['authorization'] = auth
     if (apiKey) headers['x-api-key'] = apiKey
     const resp = await fetch(`${GATEWAY_URL}/api/settings/models${qs ? `?${qs}` : ''}`, { headers })

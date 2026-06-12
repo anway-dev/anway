@@ -70,9 +70,15 @@ function intersectScope(userScope: ConnectorScope, manifest: ConnectorManifest):
 export class AgentPerimeter {
   // Map from connectorId → resolved (user ∩ manifest) scopes
   private readonly resolved: Map<string, ResolvedScope>
+  // Harness-owned tools with bare names (no `<connector>.` prefix), e.g.
+  // list_connectors, register_connector. Explicit allowlist — an unprefixed
+  // tool NOT in this set is still hard-blocked. Write built-ins remain
+  // subject to the gate (isWriteAction) downstream.
+  private readonly builtins: Set<string>
 
-  constructor(userPerimeter: UserPerimeter, manifests: ConnectorManifest[]) {
+  constructor(userPerimeter: UserPerimeter, manifests: ConnectorManifest[], builtinTools: string[] = []) {
     this.resolved = new Map()
+    this.builtins = new Set(builtinTools)
     const manifestMap = new Map(manifests.map((m) => [m.connectorId, m]))
 
     for (const scope of userPerimeter.connectors) {
@@ -84,6 +90,11 @@ export class AgentPerimeter {
 
   /** Deterministic rule evaluation — no LLM involved. */
   allows(toolCall: ToolCall): boolean {
+    // Bare-named harness tools: allowed only via the explicit builtin allowlist
+    if (!toolCall.name.includes('.')) {
+      return this.builtins.has(toolCall.name)
+    }
+
     const connectorId = connectorIdFromTool(toolCall.name)
     const scope = this.resolved.get(connectorId)
     if (!scope) return false
@@ -117,7 +128,8 @@ export class AgentPerimeter {
   static resolveCapabilities(
     userPerimeter: UserPerimeter,
     manifests: ConnectorManifest[],
+    builtinTools: string[] = [],
   ): AgentPerimeter {
-    return new AgentPerimeter(userPerimeter, manifests)
+    return new AgentPerimeter(userPerimeter, manifests, builtinTools)
   }
 }

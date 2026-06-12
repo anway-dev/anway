@@ -56,6 +56,9 @@ describe('ProviderFactory.create', () => {
 // ---------------------------------------------------------------------------
 
 class MockProvider implements IModelProvider {
+  readonly modelId = 'mock-model'
+  readonly cheapModelId = 'mock-model-cheap'
+
   async chat(_messages: Message[], _tools: ToolDefinition[], _opts: InferenceOptions): Promise<ChatResponse> {
     return {
       content: 'mock response',

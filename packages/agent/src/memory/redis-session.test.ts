@@ -54,6 +54,8 @@ function makeMockRedis() {
 // ---------------------------------------------------------------------------
 
 class MockSummariseProvider implements IModelProvider {
+  readonly modelId = 'mock-model'
+  readonly cheapModelId = 'mock-model-cheap'
   readonly lastPrompt: string[] = []
 
   async chat(messages: Message[], _tools: ToolDefinition[], _opts: InferenceOptions): Promise<ChatResponse> {

@@ -30,15 +30,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 export function ModelConfig() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selected, setSelected] = useState("anthropic");
-  const [devToken, setDevToken] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
-
-  useEffect(() => {
-    fetch('/api/auth/dev-token')
-      .then(r => r.json())
-      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     fetch("/api/settings/provider-manifests")
@@ -128,10 +120,7 @@ export function ModelConfig() {
       if (p.type === "local" && endpoints[providerId]) body['baseUrl'] = endpoints[providerId]!;
       const resp = await fetch('/api/settings/provider', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(devToken ? { Authorization: `Bearer ${devToken}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       setSaveState(s => ({ ...s, [providerId]: resp.ok ? "saved" : "error" }));

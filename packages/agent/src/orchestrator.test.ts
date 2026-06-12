@@ -110,6 +110,8 @@ async function collectEvents(gen: AsyncGenerator<StreamEvent>): Promise<StreamEv
 /** Provider that returns one text_delta + done, no tool calls */
 function makeTextOnlyProvider(): IModelProvider {
   return {
+    modelId: 'mock-model',
+    cheapModelId: 'mock-model-cheap',
     async chat(_messages, _tools, _opts): Promise<ChatResponse> {
       return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
     },
@@ -130,6 +132,8 @@ function makeTextOnlyProvider(): IModelProvider {
 function makeToolCallProvider(toolName: string): IModelProvider {
   let callCount = 0
   return {
+    modelId: 'mock-model',
+    cheapModelId: 'mock-model-cheap',
     async chat(_messages, _tools, _opts): Promise<ChatResponse> {
       // Intent classification call
       return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 5, outputTokens: 5 } }
@@ -171,6 +175,8 @@ describe('runSession', () => {
   it('caps the agentic loop at maxSteps and emits one done event', async () => {
     let callCount = 0
     const loopingProvider: IModelProvider = {
+      modelId: 'mock-model',
+      cheapModelId: 'mock-model-cheap',
       async chat(): Promise<ChatResponse> {
         return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 5, outputTokens: 5 } }
       },

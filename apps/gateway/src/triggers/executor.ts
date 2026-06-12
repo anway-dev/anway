@@ -10,7 +10,7 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
   await Promise.all([sub.connect(), pub.connect()])
 
   await sub.subscribe('trigger_matched', async (message) => {
-    let payload: { tenantId: string; channel: string; actions: TriggerAction[] }
+    let payload: { tenantId: string; channel: string; eventType?: string; actions: TriggerAction[] }
     try { payload = JSON.parse(message) } catch { return }
 
     for (const action of payload.actions) {

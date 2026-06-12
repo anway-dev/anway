@@ -5,6 +5,8 @@ import { ProviderFactory } from '@anvay/agent'
 import type { IModelProvider, ProviderConfig } from '@anvay/agent'
 import type { TenantId } from '@anvay/types'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 
 // CONNECTOR_API_KEYS format: <key>:<tenantId>,<key>:<tenantId>,...
 // Each key is bound to exactly one tenant — cross-tenant writes are rejected.
@@ -32,6 +34,30 @@ function resolveGraphBuilderProvider(): IModelProvider | null {
   return null
 }
 
+const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
+
+async function tenantProviderFor(tenantId: string): Promise<IModelProvider | null> {
+  try {
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ provider: string; api_key: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }>>`
+        SELECT provider, api_key, base_url, default_model, cheap_model
+        FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+      `
+    )
+    if (rows.length > 0 && (rows[0]!.api_key || KEYLESS_PROVIDERS.has(rows[0]!.provider))) {
+      const r = rows[0]!
+      return ProviderFactory.create({
+        type: r.provider as ProviderConfig['type'],
+        apiKey: r.api_key || undefined,
+        baseURL: r.base_url || undefined,
+        defaultModel: r.default_model || undefined,
+        cheapModel: r.cheap_model || undefined,
+      })
+    }
+  } catch { /* fall back to env provider */ }
+  return null
+}
+
 function providerConfigFromEnv(type: ProviderConfig['type']): ProviderConfig | null {
   if (type === 'anthropic' && process.env['ANTHROPIC_API_KEY']) {
     return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
@@ -54,7 +80,37 @@ function providerConfigFromEnv(type: ProviderConfig['type']): ProviderConfig | n
   return null
 }
 
+interface GraphEntityRow {
+  id: string
+  name: string
+  type: string
+  metadata: Record<string, unknown>
+  updatedAt: string
+}
+
+interface GraphRelRow {
+  fromEntityId: string
+  relType: string
+  toEntityId: string
+}
+
 export async function graphEventRoutes(app: FastifyInstance) {
+  // Knowledge graph explorer — entities + relationships for the tenant
+  app.get('/api/graph/entities', { preHandler: [app.authenticate] }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    return withTenant(prisma, tenantId, async (tx) => {
+      const entities = await tx.$queryRaw<GraphEntityRow[]>`
+        SELECT id, name, type, metadata, updated_at AS "updatedAt"
+        FROM entities ORDER BY type, name LIMIT 1000
+      `
+      const relationships = await tx.$queryRaw<GraphRelRow[]>`
+        SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
+        FROM relationships LIMIT 2000
+      `
+      return { entities, relationships }
+    })
+  })
+
   // Provider is a module-level singleton (expensive to build — auth clients cached inside)
   const provider = resolveGraphBuilderProvider()
   if (!provider) {
@@ -100,13 +156,15 @@ export async function graphEventRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'forbidden — API key is not authorized for this tenantId' })
     }
 
-    if (!provider) {
+    // Tenant-selected provider (DB) wins; env-resolved singleton is the fallback
+    const tenantProvider = await tenantProviderFor(event.tenantId) ?? provider
+    if (!tenantProvider) {
       return reply.code(503).send({ error: 'GraphBuilderAgent not configured — no LLM provider' })
     }
 
     // KG is cheap — create per request so withTenant sets correct tenant_id GUC
     const kg = createKnowledgeGraph(event.tenantId as TenantId)
-    const agent = new GraphBuilderAgent(kg, provider, app.log)
+    const agent = new GraphBuilderAgent(kg, tenantProvider, app.log)
 
     try {
       await agent.handle(event)

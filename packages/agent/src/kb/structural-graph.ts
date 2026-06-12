@@ -30,13 +30,13 @@ export class StructuralGraph implements IKnowledgeGraph {
     if (episode.tenantId) {
       await this.query(
         `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at)
-         VALUES ($1::uuid, $2, $3, $4)`,
+         VALUES ($1::uuid, $2, $3::jsonb, $4)`,
         [episode.tenantId, episode.text, JSON.stringify({ source: episode.source }), episode.timestamp],
       ).catch(() => {})
     } else {
       await this.query(
         `INSERT INTO kb_episodes (tenant_id, text, metadata, created_at)
-         VALUES (current_setting('app.tenant_id', true)::uuid, $1, $2, $3)`,
+         VALUES (current_setting('app.tenant_id', true)::uuid, $1, $2::jsonb, $3)`,
         [episode.text, JSON.stringify({ source: episode.source }), episode.timestamp],
       ).catch(() => {})
     }
@@ -45,7 +45,7 @@ export class StructuralGraph implements IKnowledgeGraph {
   async getFacts(_query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
     const since = at ?? new Date(Date.now() - 24 * 60 * 60 * 1000)
     const rows = await this.query<{ text: string; created_at: Date }>(
-      `SELECT text, created_at FROM kb_episodes WHERE tenant_id = $1 AND created_at >= $2 ORDER BY created_at DESC LIMIT 50`,
+      `SELECT text, created_at FROM kb_episodes WHERE tenant_id = $1::uuid AND created_at >= $2 ORDER BY created_at DESC LIMIT 50`,
       [tenantId ?? '', since],
     ).catch(() => [])
     return rows.map(r => ({
@@ -59,7 +59,7 @@ export class StructuralGraph implements IKnowledgeGraph {
 
   async getEntity(id: string, tenantId: TenantId): Promise<Entity | null> {
     const rows = await this.query<Entity>(
-      'SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities WHERE id = $1 AND tenant_id = $2',
+      'SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities WHERE id = $1::uuid AND tenant_id = $2::uuid',
       [id, tenantId],
     )
     return rows[0] ?? null
@@ -71,7 +71,7 @@ export class StructuralGraph implements IKnowledgeGraph {
       `SELECT id, tenant_id AS "tenantId", from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId", metadata
        FROM relationships
        WHERE (from_entity_id = ANY($1::uuid[]) OR to_entity_id = ANY($1::uuid[]))
-         AND tenant_id = $2`,
+         AND tenant_id = $2::uuid`,
       [entityIds, tenantId],
     )
   }
@@ -79,14 +79,14 @@ export class StructuralGraph implements IKnowledgeGraph {
   private async getEntitiesBatch(ids: string[], tenantId: TenantId): Promise<Entity[]> {
     if (ids.length === 0) return []
     return this.query<Entity>(
-      'SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities WHERE id = ANY($1::uuid[]) AND tenant_id = $2',
+      'SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities WHERE id = ANY($1::uuid[]) AND tenant_id = $2::uuid',
       [ids, tenantId],
     )
   }
 
   async getRelationships(entityId: string, tenantId: TenantId, relType?: string): Promise<Relationship[]> {
     let sql = `SELECT id, tenant_id AS "tenantId", from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId", metadata
-               FROM relationships WHERE (from_entity_id = $1 OR to_entity_id = $1) AND tenant_id = $2`
+               FROM relationships WHERE (from_entity_id = $1::uuid OR to_entity_id = $1::uuid) AND tenant_id = $2::uuid`
     const params: unknown[] = [entityId, tenantId]
     if (relType) {
       sql += ' AND rel_type = $3'
@@ -108,7 +108,7 @@ export class StructuralGraph implements IKnowledgeGraph {
           }>(
             `SELECT id, content, fetched_at, ttl_seconds, freshness_score, source
              FROM kb_entries
-             WHERE tenant_id = $1
+             WHERE tenant_id = $1::uuid
              ORDER BY embedding <=> $2::vector
              LIMIT $3`,
             [tenantId, vectorLiteral, topK],
@@ -128,7 +128,7 @@ export class StructuralGraph implements IKnowledgeGraph {
     // Fallback: ILIKE on kb_episodes
     const rows = await this.query<{ text: string; created_at: Date }>(
       `SELECT text, created_at FROM kb_episodes
-       WHERE tenant_id = $1 AND text ILIKE $2
+       WHERE tenant_id = $1::uuid AND text ILIKE $2
        ORDER BY created_at DESC LIMIT $3`,
       [tenantId, `%${query}%`, topK],
     ).catch(() => [])
@@ -154,20 +154,20 @@ export class StructuralGraph implements IKnowledgeGraph {
       this.query<EntityRow>(`
         WITH RECURSIVE entity_graph AS (
           SELECT e.id, e.name, e.type, e.metadata, 0 AS depth
-          FROM entities e WHERE e.id = $1 AND e.tenant_id = $2
+          FROM entities e WHERE e.id = $1::uuid AND e.tenant_id = $2::uuid
           UNION ALL
           SELECT e2.id, e2.name, e2.type, e2.metadata, eg.depth + 1
           FROM entity_graph eg
           JOIN relationships r ON (r.from_entity_id = eg.id OR r.to_entity_id = eg.id)
           JOIN entities e2 ON e2.id = CASE
             WHEN r.from_entity_id = eg.id THEN r.to_entity_id ELSE r.from_entity_id END
-          WHERE eg.depth < $3 AND e2.tenant_id = $2
+          WHERE eg.depth < $3::int AND e2.tenant_id = $2::uuid
         )
         SELECT DISTINCT id, name, type, metadata FROM entity_graph
       `, [entityId, tenantId, depth]),
       this.query<RelRow>(`
         SELECT from_entity_id, rel_type, to_entity_id FROM relationships
-        WHERE (from_entity_id = $1 OR to_entity_id = $1) AND tenant_id = $2 LIMIT 500
+        WHERE (from_entity_id = $1::uuid OR to_entity_id = $1::uuid) AND tenant_id = $2::uuid LIMIT 500
       `, [entityId, tenantId]),
     ])
 
@@ -199,7 +199,7 @@ export class StructuralGraph implements IKnowledgeGraph {
 
     // Compute real freshness from kb_entries
     const freshRows = await this.query<{ fs: number }>(
-      `SELECT freshness_score AS fs FROM kb_entries WHERE tenant_id = $1 AND content ILIKE $2 ORDER BY freshness_score ASC LIMIT 1`,
+      `SELECT freshness_score AS fs FROM kb_entries WHERE tenant_id = $1::uuid AND content ILIKE $2 ORDER BY freshness_score ASC LIMIT 1`,
       [tenantId, `%${entity.name}%`],
     ).catch(() => [])
     const freshness = freshRows.length > 0 ? freshRows[0]!.fs : 1.0
@@ -218,7 +218,7 @@ export class StructuralGraph implements IKnowledgeGraph {
   private async getRecentEpisodesForEntity(entityName: string, tenantId: TenantId): Promise<Episode[]> {
     const rows = await this.query<{ text: string; created_at: Date }>(
       `SELECT text, created_at FROM kb_episodes
-       WHERE tenant_id = $1
+       WHERE tenant_id = $1::uuid
          AND created_at >= NOW() - INTERVAL '24 hours'
          AND text ILIKE '%' || $2 || '%'
        ORDER BY created_at DESC LIMIT 20`,
@@ -243,7 +243,7 @@ export class StructuralGraph implements IKnowledgeGraph {
   async upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string> {
     const rows = await this.query<{ id: string }>(
       `INSERT INTO entities (tenant_id, type, name, metadata)
-       VALUES ($1, $2, $3, $4)
+       VALUES ($1::uuid, $2, $3, $4::jsonb)
        ON CONFLICT (tenant_id, type, name) DO UPDATE
          SET metadata = EXCLUDED.metadata, updated_at = NOW()
        RETURNING id`,
@@ -255,7 +255,7 @@ export class StructuralGraph implements IKnowledgeGraph {
   async upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<string> {
     const rows = await this.query<{ id: string }>(
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
-       VALUES ($1, $2, $3, $4, $5)
+       VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::jsonb)
        ON CONFLICT (tenant_id, from_entity_id, rel_type, to_entity_id)
 	       DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = NOW()
        RETURNING id`,
@@ -270,7 +270,7 @@ export class StructuralGraph implements IKnowledgeGraph {
     const rows = await this.query<{ id: string }>(
       `UPDATE entities
        SET metadata = metadata || $3::jsonb, updated_at = NOW()
-       WHERE tenant_id = $1
+       WHERE tenant_id = $1::uuid
          AND metadata->'connectorCoordinates' ? $2
        RETURNING id`,
       [tenantId, connectorType, JSON.stringify({ stale: true, staleAt: now, staleSince: connectorType })],
@@ -280,7 +280,7 @@ export class StructuralGraph implements IKnowledgeGraph {
 
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
     const rows = await this.query<{ id: string }>(
-      `SELECT id FROM entities WHERE tenant_id = $1 AND name ILIKE $2 ORDER BY metadata->>'confidence' DESC LIMIT 1`,
+      `SELECT id FROM entities WHERE tenant_id = $1::uuid AND name ILIKE $2 ORDER BY metadata->>'confidence' DESC LIMIT 1`,
       [tenantId, `%${name}%`],
     )
     if (rows.length === 0) return null
@@ -289,7 +289,7 @@ export class StructuralGraph implements IKnowledgeGraph {
 
   async getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null> {
     const rows = await this.query<{ id: string }>(
-      `SELECT id FROM entities WHERE tenant_id = $1 AND metadata->>'externalId' = $2 LIMIT 1`,
+      `SELECT id FROM entities WHERE tenant_id = $1::uuid AND metadata->>'externalId' = $2 LIMIT 1`,
       [tenantId, externalId],
     )
     return rows[0]?.id ?? null

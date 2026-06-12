@@ -36,7 +36,7 @@ export function makeRegistrationTools(tenantId: string, role: AgentRole): Execut
     {
       name: 'list_connectors',
       description: 'List all registered connectors with health status.',
-      parameters: {},
+      parameters: { type: 'object', properties: {} },
       async run() {
         return listConnectorsTool(tenantId)
       },

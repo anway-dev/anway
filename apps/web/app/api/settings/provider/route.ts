@@ -1,10 +1,12 @@
+import { resolveAuthHeader } from '@/lib/server-auth'
+
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
 
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization')
+    const auth = await resolveAuthHeader(request)
     const resp = await fetch(`${GATEWAY_URL}/api/settings/provider`, {
-      headers: { ...(authHeader ? { Authorization: authHeader } : {}) },
+      headers: { ...(auth ? { Authorization: auth } : {}) },
     })
     return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
   } catch (err) {
@@ -15,12 +17,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const authHeader = request.headers.get('Authorization')
+    const auth = await resolveAuthHeader(request)
     const resp = await fetch(`${GATEWAY_URL}/api/settings/provider`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(authHeader ? { Authorization: authHeader } : {}),
+        ...(auth ? { Authorization: auth } : {}),
       },
       body: JSON.stringify(body),
     })

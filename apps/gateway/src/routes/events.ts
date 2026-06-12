@@ -1,11 +1,27 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { createClient } from 'redis'
+import { timingSafeEqual } from 'node:crypto'
 import pino from 'pino'
 import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
 import { IncidentService } from '../services/incident.js'
 
 const log = pino({ name: 'event-routes' })
+
+// Webhook senders (Alertmanager, CI, Gitea) cannot sign tenant JWTs. They
+// authenticate with a static bearer token (ANVAY_WEBHOOK_TOKEN) which maps to
+// ANVAY_WEBHOOK_TENANT. JWT auth still works on the same routes.
+function webhookTenantFor(request: FastifyRequest): string | null {
+  const expected = process.env['ANVAY_WEBHOOK_TOKEN']
+  if (!expected) return null
+  const header = request.headers.authorization
+  if (!header?.startsWith('Bearer ')) return null
+  const presented = header.slice('Bearer '.length)
+  const a = Buffer.from(presented)
+  const b = Buffer.from(expected)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  return process.env['ANVAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
+}
 
 let _pub: import('redis').RedisClientType | null = null
 
@@ -38,9 +54,18 @@ const SEVERITY_MAP: Record<string, string> = {
 }
 
 export async function eventRoutes(app: FastifyInstance) {
+  // Accept either the static webhook token or a tenant JWT
+  const authenticateEvent = async (request: FastifyRequest, reply: FastifyReply) => {
+    const webhookTenant = webhookTenantFor(request)
+    if (webhookTenant) {
+      request.user = { sub: 'webhook', tenantId: webhookTenant, role: 'system' } as typeof request.user
+      return
+    }
+    return app.authenticate(request, reply)
+  }
 
   // Alertmanager webhook receiver — writes incidents to DB + emits incident_created
-  app.post('/api/events/alert', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.post('/api/events/alert', { preHandler: [authenticateEvent] }, async (request, reply) => {
     const body = request.body as {
       alerts?: Array<{
         labels?: { alertname?: string; severity?: string; service?: string; job?: string }
@@ -100,7 +125,7 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Deploy event receiver
-  app.post('/api/events/deploy', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.post('/api/events/deploy', { preHandler: [authenticateEvent] }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
@@ -112,7 +137,7 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // PR merged webhook (Gitea/GitHub)
-  app.post('/api/events/pr-merged', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.post('/api/events/pr-merged', { preHandler: [authenticateEvent] }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
@@ -124,7 +149,7 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Internal incident event
-  app.post('/api/events/incident', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.post('/api/events/incident', { preHandler: [authenticateEvent] }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) return reply.code(401).send({ error: 'invalid tenant' })
     const payload = request.body as Record<string, unknown>

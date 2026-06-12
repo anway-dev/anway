@@ -3,6 +3,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
 import { providerRegistry } from '@anvay/agent'
+import { encryptJson, isEncrypted, decryptJson } from '../utils/crypto.js'
 
 function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint?: string; defaultBaseUrl?: string }): string[] {
   if (Array.isArray(manifest.models)) return manifest.models
@@ -63,16 +64,18 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         return reply.code(400).send({ error: `invalid provider: ${provider}. Valid: ${[...VALID_PROVIDERS].join(', ')}` })
       }
       const { tenantId } = user
+      const apiKeyEnc = apiKey ? encryptJson(apiKey) : null
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model, cheap_model)
-          VALUES (${tenantId}::uuid, ${provider}, ${apiKey ?? null}, ${baseUrl ?? null}, ${defaultModel ?? null}, ${cheapModel ?? null})
+          INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model, cheap_model, api_key_enc)
+          VALUES (${tenantId}::uuid, ${provider}, NULL, ${baseUrl ?? null}, ${defaultModel ?? null}, ${cheapModel ?? null}, ${apiKeyEnc ?? null})
           ON CONFLICT (tenant_id)
           DO UPDATE SET provider = ${provider},
-            api_key = COALESCE(${apiKey ?? null}, provider_config.api_key),
             base_url = COALESCE(${baseUrl ?? null}, provider_config.base_url),
             default_model = COALESCE(${defaultModel ?? null}, provider_config.default_model),
             cheap_model = COALESCE(${cheapModel ?? null}, provider_config.cheap_model),
+            api_key = NULL,
+            api_key_enc = COALESCE(${apiKeyEnc ?? null}, provider_config.api_key_enc),
             updated_at = NOW()
         `
       )
@@ -148,12 +151,13 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       ).catch(() => [])
       const isNew = existing.length === 0
 
+      const credsEnc = encryptJson(credentials)
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO connector_config (tenant_id, connector_type, credentials, enabled)
-          VALUES (${tenantId}::uuid, ${type}, ${JSON.stringify(credentials)}::jsonb, true)
+          INSERT INTO connector_config (tenant_id, connector_type, credentials, credentials_enc, enabled)
+          VALUES (${tenantId}::uuid, ${type}, NULL, ${credsEnc}, true)
           ON CONFLICT (tenant_id, connector_type)
-          DO UPDATE SET credentials = ${JSON.stringify(credentials)}::jsonb, enabled = true, updated_at = NOW()
+          DO UPDATE SET credentials = NULL, credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
         `
       )
 

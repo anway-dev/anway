@@ -32,6 +32,7 @@ import { makeRegistrationTools } from '../connectors/registration-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
 import { getMemoryGateSink } from '../gate/memory-gate-fallback.js'
 import { isValidUUID } from '../utils/validators.js'
+import { decryptJson } from '../utils/crypto.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
 
@@ -106,20 +107,24 @@ export function providerConfigFromEnv(type: string): ProviderConfig | null {
   return null
 }
 
+// Providers that run without an API key (local endpoints)
+const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
+
 async function providerConfigForTenant(
   tenantId: string,
   client: PrismaClient,
 ): Promise<ProviderConfig | null> {
   const row = await withTenant(client, tenantId, (tx) =>
-    tx.$queryRaw<{ provider: string; api_key: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }[]>`
-      SELECT provider, api_key, base_url, default_model, cheap_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+    tx.$queryRaw<{ provider: string; api_key: string | null; api_key_enc: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }[]>`
+      SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
     `
   ).catch(() => [])
-  if (row.length > 0 && row[0]!.api_key) {
+  if (row.length > 0 && (row[0]!.api_key || KEYLESS_PROVIDERS.has(row[0]!.provider))) {
     const r = row[0]!
     return {
       type: r.provider as ProviderConfig['type'],
-      apiKey: r.api_key!,
+      apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key ?? undefined),
+      ...(r.api_key_enc ?? r.api_key ? {} : {}),
       ...(r.base_url ? { baseURL: r.base_url } : {}),
       ...(r.default_model ? { defaultModel: r.default_model } : {}),
       ...(r.cheap_model ? { cheapModel: r.cheap_model } : {}),
@@ -258,10 +263,15 @@ export async function chatRoutes(app: FastifyInstance) {
     }
     const { query, sessionId, model: modelOverride } = request.body
 
-    // Resolve provider config — try DB first, fallback to env
+    // Resolve provider config — DB (tenant-selected) first, env fallback.
+    // A model override only changes the model; it must not discard the
+    // tenant's stored credentials for that provider.
+    const dbConfig = await providerConfigForTenant(tenantId, prisma)
     const providerConfig = modelOverride
-      ? resolveProviderConfig(modelOverride)
-      : (await providerConfigForTenant(tenantId, prisma)) ?? resolveProviderConfig()
+      ? (dbConfig && dbConfig.type === modelOverride.type
+          ? withDefaultModel(dbConfig, modelOverride.defaultModel)
+          : resolveProviderConfig(modelOverride))
+      : dbConfig ?? resolveProviderConfig()
     if (!providerConfig) {
       return reply.code(503).send({ error: 'No LLM provider configured — configure in Settings > AI Provider in the web UI' })
     }
@@ -283,13 +293,18 @@ export async function chatRoutes(app: FastifyInstance) {
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
-    // Build perimeter from connector config
+    // Build perimeter from connector config.
+    // Scopes are keyed by the TOOL PREFIX — adapters name tools
+    // `<connector-name>.<action>` (row.name || row.type), so the perimeter
+    // must use the same key. Keying by DB UUID makes allows() miss every
+    // lookup and hard-block all connector tools.
+    const toolPrefix = (c: { name: string | null; type: string }) => c.name || c.type
     const connectorScopes: ConnectorScope[] = dbConnectors.map((c) => {
       const raw = c.capability_manifest as {
         capabilities?: { read?: string[]; write?: string[] }
       }
       return {
-        connectorId: c.id,
+        connectorId: toolPrefix(c),
         read: raw.capabilities?.read ?? ['*'],
         write: c.mode === 'write' || c.mode === 'read_write' ? (raw.capabilities?.write ?? ['*']) : [],
       }
@@ -305,7 +320,7 @@ export async function chatRoutes(app: FastifyInstance) {
         capabilities?: { read?: string[]; write?: string[] }
       }
       return {
-        connectorId: c.id,
+        connectorId: toolPrefix(c),
         mode: (c.mode === 'read_write' ? 'read-write' : c.mode) as 'read' | 'write' | 'read-write',
         capabilities: {
           read: raw.capabilities?.read ?? ['*'],
@@ -314,7 +329,15 @@ export async function chatRoutes(app: FastifyInstance) {
       }
     })
 
-    const perimeter = AgentPerimeter.resolveCapabilities(userPerimeter, manifests)
+    // Harness built-in tools (bare names, no connector prefix) — explicit
+    // allowlist in the perimeter. register_connector is a write action and
+    // still goes through the L2 gate; its admin-role check lives in the tool.
+    const registrationTools = makeRegistrationTools(tenantId, (role as AgentRole) ?? 'dev')
+    const perimeter = AgentPerimeter.resolveCapabilities(
+      userPerimeter,
+      manifests,
+      registrationTools.map((t) => t.name),
+    )
 
     // Initialize session identity for all memory implementations
     try {
@@ -349,7 +372,6 @@ export async function chatRoutes(app: FastifyInstance) {
         withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
-    const registrationTools = makeRegistrationTools(tenantId, (role as AgentRole) ?? 'dev')
     const allTools = [...connectorTools, ...registrationTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)

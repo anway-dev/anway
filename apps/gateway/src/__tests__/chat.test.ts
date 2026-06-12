@@ -74,6 +74,8 @@ class InMemoryTestMemory implements ISessionMemory {
 
 function makeMockProvider(chunks: StreamChunk[]): IModelProvider {
   return {
+    modelId: 'mock-model',
+    cheapModelId: 'mock-model-cheap',
     async chat(_msgs: Message[], _tools: ToolDefinition[], _opts: InferenceOptions): Promise<ChatResponse> {
       return { content: '{}', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } }
     },
@@ -103,6 +105,7 @@ function makeMockKG() {
     getEntityByExternalRef: async () => null,
     upsertEntity: async () => 'e1',
     upsertRelationship: async () => 'r1',
+    markConnectorEntitiesStale: async () => 0,
   }
 }
 

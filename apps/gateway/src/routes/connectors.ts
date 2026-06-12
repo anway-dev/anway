@@ -3,6 +3,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { createClient } from 'redis'
 import { UUID_RE } from '../utils/validators.js'
+import { decryptJson } from '../utils/crypto.js'
 
 export async function connectorsRoutes(app: FastifyInstance) {
   app.get('/api/connectors', {
@@ -60,12 +61,12 @@ export async function connectorsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: `unknown connector type: ${type}` })
     }
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
-        SELECT credentials FROM connector_config
+      tx.$queryRaw<Array<{ credentials_enc: string; credentials: Record<string, unknown> }>>`
+        SELECT credentials_enc, credentials FROM connector_config
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
-    const creds = (rows[0]?.credentials ?? {}) as Record<string, unknown>
+    const r = rows[0]; const creds = (r?.credentials_enc ? decryptJson<Record<string, unknown>>(r.credentials_enc) : r?.credentials ?? {}) as Record<string, unknown>
 
     const pub = await getBootstrapPub()
     if (pub) {
@@ -121,12 +122,12 @@ export async function connectorsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: `unknown connector type: ${type}` })
     }
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
-        SELECT credentials FROM connector_config
+      tx.$queryRaw<Array<{ credentials_enc: string; credentials: Record<string, unknown> }>>`
+        SELECT credentials_enc, credentials FROM connector_config
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
-    const creds = (rows[0]?.credentials ?? {}) as Record<string, unknown>
+    const r = rows[0]; const creds = (r?.credentials_enc ? decryptJson<Record<string, unknown>>(r.credentials_enc) : r?.credentials ?? {}) as Record<string, unknown>
     const pub = await getBootstrapPub()
     if (pub) {
       await pub.publish('connector_reconnected', JSON.stringify({

@@ -1,8 +1,15 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { OrchestratorScenario, AgentActivity } from "@/lib/mock";
+import type { AgentActivity } from "@/lib/mock";
 
-const SCENARIO_SUGGESTIONS = [
+interface ScenarioSuggestion {
+  id: string;
+  label: string;
+  color: string;
+  query: string;
+}
+
+const SCENARIO_SUGGESTIONS: ScenarioSuggestion[] = [
   { id: 'scenario-deploy', label: 'Deploy Check', color: '#10b981', query: 'Check recent deploys for issues' },
   { id: 'scenario-alert',  label: 'Alert Triage',  color: '#ef4444', query: 'What alerts are firing right now?' },
   { id: 'scenario-pr',     label: 'PR Summary',    color: '#3b82f6', query: 'Review recent PRs for potential issues' },
@@ -216,7 +223,7 @@ function MessageBlock({ message }: { message: Message }) {
   );
 }
 
-function EmptyState({ onScenario }: { onScenario: (s: OrchestratorScenario) => void }) {
+function EmptyState({ onScenario }: { onScenario: (s: ScenarioSuggestion) => void }) {
   return (
     <div style={{
       display: "flex", flexDirection: "column", alignItems: "center",
@@ -300,13 +307,13 @@ function EmptyState({ onScenario }: { onScenario: (s: OrchestratorScenario) => v
             >
               <div style={{ marginBottom: "5px" }}>
                 <span style={{
-                  fontSize: "9px", color: ROLE_COLORS[s.inferredRole] || "#888",
-                  background: `${ROLE_COLORS[s.inferredRole]}18`,
-                  border: `1px solid ${ROLE_COLORS[s.inferredRole]}33`,
+                  fontSize: "9px", color: s.color,
+                  background: `${s.color}18`,
+                  border: `1px solid ${s.color}33`,
                   borderRadius: "3px", padding: "0 5px", fontFamily: "monospace",
-                }}>{s.inferredRole}</span>
+                }}>{s.label}</span>
               </div>
-              <div style={{ fontSize: "11px", color: "#555", lineHeight: "1.4", fontFamily: "monospace" }}>{s.label}</div>
+              <div style={{ fontSize: "11px", color: "#555", lineHeight: "1.4", fontFamily: "monospace" }}>{s.query}</div>
             </button>
           ))}
         </div>
@@ -328,14 +335,6 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const [confidence, setConfidence] = useState<number | null>(null);
   const [gateRequired, setGateRequired] = useState<{ gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [devToken, setDevToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/auth/dev-token')
-      .then(r => r.json())
-      .then((d: { token?: string }) => { if (d.token) setDevToken(d.token) })
-      .catch(() => {})
-  }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -388,10 +387,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
       const sessionId = sessionIdRef.current;
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(devToken ? { Authorization: `Bearer ${devToken}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: text, sessionId }),
       });
 
@@ -513,75 +509,9 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }
 
-  function runScenario(scenario: OrchestratorScenario) {
-    timeoutsRef.current.forEach(clearTimeout);
-    timeoutsRef.current = [];
-    setFollowUps([]);
-    setLogLines([]);
-    setConfidence(null);
-    setIsThinking(true);
-    setCurrentAuthRole(scenario.authRole);
-    setCurrentInferredRole(scenario.inferredRole);
-
-    setMessages(prev => [...prev, {
-      id: `user-${Date.now()}`, role: "user", content: scenario.query,
-      authRole: scenario.authRole, inferredRole: scenario.inferredRole,
-    }]);
-    setAgentStates(scenario.agents.map(a => ({ ...a, currentStatus: "pending" })));
-
-    const intentMap: Record<string, string> = { sre: "incident_triage", pm: "status_query", ba: "analytics_query", dev: "debug_query" };
-    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" }), 80);
-    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: `intent:${intentMap[scenario.inferredRole] || "general"} role:${scenario.inferredRole}`, status: "info" }), 420);
-    addTimeout(() => pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: `resolving envelope · ${scenario.authRole}→${scenario.inferredRole}`, status: "running" }), 600);
-    addTimeout(() => pushLog({ actor: "PERIMETER", actorColor: "#10b981", text: `${scenario.agents.length} connectors scoped · write:gated`, status: "done" }), 900);
-
-    const base = 1100;
-    scenario.agents.forEach(agent => {
-      const color = AGENT_COLORS[agent.name] || "#888";
-      const label = agent.name.replace("-agent", "").toUpperCase().slice(0, 6);
-      addTimeout(() => {
-        setAgentStates(prev => prev.map(a => a.id === agent.id ? { ...a, currentStatus: "running" } : a));
-        pushLog({ actor: label, actorColor: color, text: agent.detail, status: "running" });
-      }, base + agent.startDelay);
-      addTimeout(() => {
-        setAgentStates(prev => prev.map(a => a.id === agent.id ? { ...a, currentStatus: "done" } : a));
-        pushLog({ actor: label, actorColor: color, text: "complete", status: "done", ms: agent.duration });
-      }, base + agent.startDelay + agent.duration);
-    });
-
-    const maxTime = Math.max(...scenario.agents.map(a => a.startDelay + a.duration)) + base;
-    const conf = parseFloat((0.86 + Math.random() * 0.11).toFixed(2));
-
-    addTimeout(() => pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "aggregating", status: "running" }), maxTime + 80);
-    addTimeout(() => {
-      setConfidence(conf);
-      pushLog({ actor: "CONF", actorColor: conf >= 0.9 ? "#10b981" : "#f59e0b", text: conf.toFixed(2), status: "done" });
-      pushLog({ actor: "AUDIT", actorColor: "#333", text: `evt-${Math.floor(Math.random() * 900 + 100)} · logged`, status: "info" });
-    }, maxTime + 380);
-
-    addTimeout(() => {
-      setIsThinking(false);
-      const respId = `resp-${Date.now()}`;
-      const sources = scenario.agents.map(a => a.name.replace("-agent", ""));
-      setMessages(prev => [...prev, {
-        id: respId, role: "assistant", content: "", streaming: true,
-        authRole: scenario.authRole, inferredRole: scenario.inferredRole,
-        sources, confidence: conf,
-      }]);
-      const words = scenario.response.split(" ");
-      let acc = "";
-      words.forEach((w, i) => {
-        addTimeout(() => {
-          acc += (i === 0 ? "" : " ") + w;
-          const done = i === words.length - 1;
-          setMessages(prev => prev.map(m => m.id === respId
-            ? { ...m, content: acc, streaming: !done, durationMs: done ? maxTime + 380 + i * 30 : undefined }
-            : m
-          ));
-          if (done) setFollowUps(scenario.followUps);
-        }, i * 30);
-      });
-    }, maxTime + 480);
+  function runScenario(scenario: ScenarioSuggestion) {
+    if (isThinking) return;
+    sendRealForm(scenario.query);
   }
 
   const isEmpty = messages.length === 0;

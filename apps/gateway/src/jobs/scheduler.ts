@@ -21,6 +21,53 @@ async function updateLastRun(tenantId: string, jobType: string, result: unknown)
   }
 }
 
+async function updateLastRunById(tenantId: string, jobId: string, result: unknown): Promise<void> {
+  try {
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`
+        UPDATE cron_jobs
+        SET last_run_at = NOW(), last_result = ${JSON.stringify(result)}::jsonb
+        WHERE tenant_id = ${tenantId}::uuid AND id = ${jobId}::uuid
+      `
+    )
+  } catch { /* best-effort */ }
+}
+
+// User-creatable monitor types → implementations
+export const MONITOR_IMPLS: Record<string, { new (): { run(tenantId: string): Promise<unknown> } }> = {
+  service_health_sweep: ServiceHealthSweep,
+  slo_burn_check: SloBurnCheck,
+  deploy_health_report: DeployHealthReport,
+  oncall_morning_brief: OncallMorningBrief,
+}
+
+interface UserMonitorRow { id: string; tenant_id: string; name: string; schedule: string; job_type: string }
+
+/** Schedule a user-created cron_jobs row. Worker re-checks enabled in DB before each run. */
+export async function registerUserMonitor(scheduler: IScheduler, row: UserMonitorRow): Promise<void> {
+  const Impl = MONITOR_IMPLS[row.job_type]
+  if (!Impl) return
+  await scheduler.register({
+    id: `user:${row.id}`,
+    name: `user:${row.id}`,
+    schedule: row.schedule,
+    async run() {
+      const live = await withTenant(prisma, row.tenant_id, (tx) =>
+        tx.$queryRaw<{ enabled: boolean }[]>`
+          SELECT enabled FROM cron_jobs WHERE id = ${row.id}::uuid AND tenant_id = ${row.tenant_id}::uuid
+        `
+      ).catch(() => [] as { enabled: boolean }[])
+      if (!live[0]?.enabled) return  // disabled or deleted — skip
+      const result = await new Impl().run(row.tenant_id)
+      await updateLastRunById(row.tenant_id, row.id, result)
+    },
+  })
+}
+
+// Module-level handle so routes can register monitors created at runtime
+let activeScheduler: IScheduler | null = null
+export function getActiveScheduler(): IScheduler | null { return activeScheduler }
+
 export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
   const scheduler = SchedulerFactory.create(redisUrl)
 
@@ -79,5 +126,14 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     },
   })
 
+  // User-created monitors (POST /api/automations/monitors) — schedule from DB
+  try {
+    const rows = await prisma.$queryRaw<Array<{ id: string; tenant_id: string; name: string; schedule: string; job_type: string }>>`
+      SELECT id, tenant_id, name, schedule, job_type FROM cron_jobs WHERE enabled = true
+    `
+    for (const row of rows) await registerUserMonitor(scheduler, row)
+  } catch { /* table may not exist on first boot — monitors register on create */ }
+
+  activeScheduler = scheduler
   return scheduler
 }

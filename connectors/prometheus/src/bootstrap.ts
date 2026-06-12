@@ -9,12 +9,17 @@ export class PrometheusBootstrap implements IConnectorBootstrap {
     const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'http://localhost:9090'
     let jobs: string[]
     try {
-      const res = await fetch(`${baseUrl}/api/v1/label/job/values`)
-      if (!res.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
-      const data = await res.json() as { data: string[] }
-      jobs = data.data ?? []
-    } catch {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
+      // Active targets only — label-values API includes stale jobs from TSDB history
+      const res = await fetch(`${baseUrl}/api/v1/targets?state=active`)
+      if (!res.ok) throw new Error(`prometheus returned ${res.status}`)
+      const data = await res.json() as { data?: { activeTargets?: Array<{ labels?: { job?: string } }> } }
+      jobs = [...new Set(
+        (data.data?.activeTargets ?? [])
+          .map(t => t.labels?.job)
+          .filter((j): j is string => typeof j === 'string' && j.length > 0),
+      )]
+    } catch (err) {
+      throw new Error(`prometheus unreachable at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`)
     }
 
     let entitiesUpserted = 0

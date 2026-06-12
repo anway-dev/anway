@@ -144,6 +144,7 @@ export function AutomationsView() {
   const [expandedRuns, setExpandedRuns] = useState<Record<string, 'trigger' | 'cron'>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({ eventType: 'alert_fired', condition: '{}', actions: '' });
+  const [monitorForm, setMonitorForm] = useState({ name: '', schedule: '*/5 * * * *', jobType: 'service_health_sweep' });
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -207,6 +208,35 @@ export function AutomationsView() {
     }
     setCreating(false)
   }
+
+  async function createMonitor() {
+    setCreateError('')
+    setCreating(true)
+    try {
+      if (!monitorForm.name.trim()) { setCreateError('Name required'); setCreating(false); return }
+      const resp = await fetch('/api/automations/monitors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(monitorForm),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: string }
+        setCreateError(err.error ?? `Failed to create monitor (${resp.status})`)
+        setCreating(false)
+        return
+      }
+      // Re-fetch list — server returns {ok,id} not the full row
+      const list = await fetch('/api/automations/monitors').then(r => r.json() as Promise<CronMonitorAPI[]>).catch(() => monitors)
+      setMonitors(list)
+      setShowCreateModal(false)
+      setMonitorForm({ name: '', schedule: '*/5 * * * *', jobType: 'service_health_sweep' })
+    } catch {
+      setCreateError('Network error — could not reach gateway')
+    }
+    setCreating(false)
+  }
+
+  const MONITOR_JOB_TYPES = ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief']
 
   const displayTriggers = triggers.map(toDisplayTrigger)
   const displayMonitors = monitors.map(toDisplayCron)
@@ -361,22 +391,11 @@ export function AutomationsView() {
                     </div>
                   </div>
 
-                  {/* Recent runs (T8) */}
+                  {/* Recent runs — run history recording not yet implemented; never show fake data */}
                   {expandedRuns[t.id] === 'trigger' && (
                     <div style={{ padding: "8px 20px 12px 50px", background: "#060606", borderBottom: "1px solid #111" }}>
                       <div style={{ fontSize: "10px", color: "#444", marginBottom: "6px", fontFamily: "monospace" }}>Recent Runs</div>
-                      {[
-                        { event: 'alert_fired', time: '3h ago', actions: 'create_incident, notify_oncall', result: 'success' },
-                        { event: 'deploy_failed', time: '7h ago', actions: 'surface_context', result: 'success' },
-                        { event: 'error_rate', time: '14h ago', actions: 'create_incident', result: 'error: incident exists' },
-                      ].map((r, i) => (
-                        <div key={i} style={{ display: "flex", gap: "12px", fontSize: "10px", color: "#666", fontFamily: "monospace", marginBottom: "3px" }}>
-                          <span style={{ width: "100px", color: "#888" }}>{r.event}</span>
-                          <span style={{ width: "60px", color: "#444" }}>{r.time}</span>
-                          <span style={{ flex: 1, color: "#555" }}>{r.actions}</span>
-                          <span style={{ color: r.result === 'success' ? '#10b981' : '#ef4444' }}>{r.result}</span>
-                        </div>
-                      ))}
+                      <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>No run history recorded yet.</div>
                     </div>
                   )}
                 </div>
@@ -481,33 +500,61 @@ export function AutomationsView() {
             padding: '24px',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ fontSize: '14px', fontWeight: 600, color: '#e5e5e5', marginBottom: '20px' }}>
-              New Trigger
+              {tab === 'triggers' ? 'New Trigger' : 'New Cron Monitor'}
             </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Event Type</label>
-              <select value={createForm.eventType} onChange={e => setCreateForm(f => ({ ...f, eventType: e.target.value }))}
-                style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px' }}>
-                {Object.keys(EVENT_COLOR).map(et => <option key={et} value={et}>{et}</option>)}
-              </select>
-            </div>
+            {tab === 'triggers' ? (
+              <>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Event Type</label>
+                  <select value={createForm.eventType} onChange={e => setCreateForm(f => ({ ...f, eventType: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px' }}>
+                    {Object.keys(EVENT_COLOR).map(et => <option key={et} value={et}>{et}</option>)}
+                  </select>
+                </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Condition (JSON)</label>
-              <textarea value={createForm.condition} onChange={e => setCreateForm(f => ({ ...f, condition: e.target.value }))}
-                rows={3} style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '11px', fontFamily: 'monospace', resize: 'vertical' }}
-                placeholder='{"severity": "critical"}' />
-            </div>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Condition (JSON)</label>
+                  <textarea value={createForm.condition} onChange={e => setCreateForm(f => ({ ...f, condition: e.target.value }))}
+                    rows={3} style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '11px', fontFamily: 'monospace', resize: 'vertical' }}
+                    placeholder='{"severity": "critical"}' />
+                </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Actions (comma-separated)</label>
-              <input value={createForm.actions} onChange={e => setCreateForm(f => ({ ...f, actions: e.target.value }))}
-                style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px', fontFamily: 'monospace' }}
-                placeholder="notify_oncall, create_incident" />
-              <div style={{ fontSize: '9px', color: '#444', marginTop: '4px' }}>
-                Valid: {Object.keys(ACTION_LABEL).join(', ')}
-              </div>
-            </div>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Actions (comma-separated)</label>
+                  <input value={createForm.actions} onChange={e => setCreateForm(f => ({ ...f, actions: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px', fontFamily: 'monospace' }}
+                    placeholder="notify_oncall, create_incident" />
+                  <div style={{ fontSize: '9px', color: '#444', marginTop: '4px' }}>
+                    Valid: {Object.keys(ACTION_LABEL).join(', ')}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Name</label>
+                  <input value={monitorForm.name} onChange={e => setMonitorForm(f => ({ ...f, name: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px' }}
+                    placeholder="prod health sweep" />
+                </div>
+
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Schedule (cron)</label>
+                  <input value={monitorForm.schedule} onChange={e => setMonitorForm(f => ({ ...f, schedule: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px', fontFamily: 'monospace' }}
+                    placeholder="*/5 * * * *" />
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Monitor Type</label>
+                  <select value={monitorForm.jobType} onChange={e => setMonitorForm(f => ({ ...f, jobType: e.target.value }))}
+                    style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px' }}>
+                    {MONITOR_JOB_TYPES.map(jt => <option key={jt} value={jt}>{jt.replace(/_/g, ' ')}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
 
             {createError && (
               <div style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', fontSize: '11px', color: '#ef4444', marginBottom: '14px' }}>{createError}</div>
@@ -518,9 +565,9 @@ export function AutomationsView() {
                 style={{ padding: '7px 16px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#888', fontSize: '11px', cursor: 'pointer' }}>
                 Cancel
               </button>
-              <button onClick={createTrigger} disabled={creating}
+              <button onClick={tab === 'triggers' ? createTrigger : createMonitor} disabled={creating}
                 style={{ padding: '7px 16px', background: creating ? '#0e3a28' : '#10b981', border: 'none', borderRadius: '6px', color: creating ? '#666' : '#080808', fontSize: '11px', fontWeight: 600, cursor: creating ? 'not-allowed' : 'pointer' }}>
-                {creating ? 'Creating…' : 'Create Trigger'}
+                {creating ? 'Creating…' : tab === 'triggers' ? 'Create Trigger' : 'Create Monitor'}
               </button>
             </div>
           </div>

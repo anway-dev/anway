@@ -10740,3 +10740,26 @@ UUID collision risk (low) + unbounded memory growth. Fix: key as `${tenantId}:${
 | LOW | 7 |
 
 <!-- REVIEW SECTION END — 2026-06-12f -->
+
+<!-- REVIEW SECTION START — 2026-06-12g (S1.1-S1.3 executor commit 907bf30) -->
+
+## Review: S1.1–S1.3 credential encryption (commit 907bf30)
+
+Verdict: **REJECTED — 4 BLOCKING.** Acceptance criteria were not run: gateway tests fail, migration not applied, one wiring site skipped.
+
+**B1 — BLOCKING — migration 0023 never applied to the database.**
+`docker exec infra-postgres-1 psql ... "SELECT credentials_enc FROM connector_config"` → `ERROR: column "credentials_enc" does not exist`. Every new `SELECT credentials_enc...` in connectors.ts / subscriber.ts / chat.ts crashes at runtime. `pnpm prisma migrate deploy` (explicit acceptance step) was skipped, and certify.sh could not have passed against a gateway running this code.
+
+**B2 — BLOCKING — `apps/gateway/src/routes/chat.ts:122` tenant provider config dead for keyed providers.**
+Condition is `row[0].api_key || KEYLESS_PROVIDERS.has(provider)` but settings.ts now writes `api_key = NULL` and only `api_key_enc`. Result: every keyed provider's DB config is ignored, silent fallback to env — regression of the provider-resolution fix shipped this morning. Must be `(row[0].api_key || row[0].api_key_enc || KEYLESS_PROVIDERS.has(...))` (subscriber.ts got this right). Also delete the no-op line 127 `...(r.api_key_enc ?? r.api_key ? {} : {})`.
+
+**B3 — BLOCKING — `apps/gateway/src/utils/crypto.test.ts` 4/7 tests fail.**
+`ANVAY_ENCRYPTION_KEY not set` — tests never set the env key. Add `beforeEach` setting a valid 32-byte base64 key (and a test that unsets it for the missing-key case). `pnpm -r test` green was acceptance criterion #1.
+
+**B4 — BLOCKING — `apps/gateway/src/routes/graph-events.ts` not wired (task item 3).**
+`tenantProviderFor` still selects/uses plaintext `api_key` only. Same enc-first read required.
+
+**P1 — PROCESS — entry self-closed.**
+Executor posted `[CLOSED]` directly with failing acceptance. Lifecycle is: executor flips to `[ANSWERED]`, Claude verifies and closes. Never close your own entry.
+
+<!-- REVIEW SECTION END — 2026-06-12g -->

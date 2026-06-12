@@ -1,6 +1,12 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SCENARIOS, OrchestratorScenario, AgentActivity } from "@/lib/mock";
+import type { OrchestratorScenario, AgentActivity } from "@/lib/mock";
+
+const SCENARIO_SUGGESTIONS = [
+  { id: 'scenario-deploy', label: 'Deploy Check', color: '#10b981', query: 'Check recent deploys for issues' },
+  { id: 'scenario-alert',  label: 'Alert Triage',  color: '#ef4444', query: 'What alerts are firing right now?' },
+  { id: 'scenario-pr',     label: 'PR Summary',    color: '#3b82f6', query: 'Review recent PRs for potential issues' },
+];
 import { ProviderConfig } from "@/components/provider-config";
 
 export interface OrchestratorContext {
@@ -271,11 +277,11 @@ function EmptyState({ onScenario }: { onScenario: (s: OrchestratorScenario) => v
       <div style={{ width: "100%", maxWidth: "520px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
           <div style={{ flex: 1, height: "1px", background: "#111" }} />
-          <span style={{ fontSize: "9px", color: "#333", fontFamily: "monospace", letterSpacing: "0.12em" }}>SCENARIOS</span>
+          <span style={{ fontSize: "9px", color: "#333", fontFamily: "monospace", letterSpacing: "0.12em" }}>QUICK ACTIONS</span>
           <div style={{ flex: 1, height: "1px", background: "#111" }} />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-          {SCENARIOS.map(s => (
+          {SCENARIO_SUGGESTIONS.map(s => (
             <button
               key={s.id}
               onClick={() => onScenario(s)}
@@ -704,7 +710,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
         <div style={{ padding: "12px 20px", borderTop: "1px solid #0e0e0e", flexShrink: 0, background: "#080808" }}>
           {!isEmpty && (
             <div style={{ display: "flex", gap: "5px", marginBottom: "8px", flexWrap: "wrap" }}>
-              {SCENARIOS.map(s => (
+              {SCENARIO_SUGGESTIONS.map(s => (
                 <button
                   key={s.id}
                   onClick={() => runScenario(s)}

@@ -68,8 +68,12 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
           INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model, cheap_model)
           VALUES (${tenantId}::uuid, ${provider}, ${apiKey ?? null}, ${baseUrl ?? null}, ${defaultModel ?? null}, ${cheapModel ?? null})
           ON CONFLICT (tenant_id)
-          DO UPDATE SET provider = ${provider}, api_key = ${apiKey ?? null}, base_url = ${baseUrl ?? null},
-            default_model = ${defaultModel ?? null}, cheap_model = ${cheapModel ?? null}, updated_at = NOW()
+          DO UPDATE SET provider = ${provider},
+            api_key = COALESCE(${apiKey ?? null}, provider_config.api_key),
+            base_url = COALESCE(${baseUrl ?? null}, provider_config.base_url),
+            default_model = COALESCE(${defaultModel ?? null}, provider_config.default_model),
+            cheap_model = COALESCE(${cheapModel ?? null}, provider_config.cheap_model),
+            updated_at = NOW()
         `
       )
       return { ok: true }

@@ -1,8 +1,19 @@
-import { getDemoToken, GATEWAY_URL } from '@/lib/gateway-client'
+
+const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:4000"
+
+
+async function getToken(): Promise<string | null> {
+  try {
+    const { cookies } = await import("next/headers")
+    return (await cookies()).get("anvay_token")?.value ?? null
+  } catch {
+    return null
+  }
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const token = await getDemoToken()
+  const token = await getToken()
   if (!token) return new Response(JSON.stringify({ error: 'auth failed' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
 
   try {

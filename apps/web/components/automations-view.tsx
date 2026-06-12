@@ -142,6 +142,10 @@ export function AutomationsView() {
   const [loading, setLoading] = useState(true);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, 'trigger' | 'cron'>>({});
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState({ eventType: 'alert_fired', condition: '{}', actions: '' });
+  const [createError, setCreateError] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -171,6 +175,37 @@ export function AutomationsView() {
     } catch {
       setToggleError('Network error — could not reach gateway')
     }
+  }
+
+  async function createTrigger() {
+    setCreateError('')
+    setCreating(true)
+    try {
+      let condition: Record<string, unknown> = {}
+      try { condition = JSON.parse(createForm.condition) } catch { setCreateError('Invalid JSON in condition field'); setCreating(false); return }
+      const actions = createForm.actions.split(',').map(a => a.trim()).filter(Boolean).map(type => ({ type, params: {} }))
+      if (actions.length === 0) { setCreateError('At least one action required'); setCreating(false); return }
+
+      const resp = await fetch('/api/automations/triggers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType: createForm.eventType, condition, actions }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: string }
+        setCreateError(err.error ?? `Failed to create trigger (${resp.status})`)
+        setCreating(false)
+        return
+      }
+      const created = await resp.json() as TriggerRuleAPI | TriggerRuleAPI[]
+      const trigger = Array.isArray(created) ? created[0] : created
+      if (trigger) setTriggers(prev => [...prev, trigger])
+      setShowCreateModal(false)
+      setCreateForm({ eventType: 'alert_fired', condition: '{}', actions: '' })
+    } catch {
+      setCreateError('Network error — could not reach gateway')
+    }
+    setCreating(false)
   }
 
   const displayTriggers = triggers.map(toDisplayTrigger)
@@ -221,7 +256,10 @@ export function AutomationsView() {
           </button>
         ))}
         <div style={{ marginLeft: "auto", padding: "8px 16px", display: "flex", alignItems: "center" }}>
-          <button style={{ background: "#111", border: "1px solid #2a2a2a", color: "#555", padding: "5px 12px", borderRadius: "6px", cursor: "not-allowed", fontSize: "11px" }}>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            style={{ background: "#10b981", border: "none", color: "#080808", padding: "5px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "11px", fontWeight: 600 }}
+          >
             + New {tab === "triggers" ? "Trigger" : "Monitor"}
           </button>
         </div>
@@ -431,6 +469,63 @@ export function AutomationsView() {
           </div>
         )}
       </div>
+
+      {/* Create Trigger Modal */}
+      {showCreateModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setShowCreateModal(false)}>
+          <div style={{
+            width: '480px', background: '#0e0e0e', border: '1px solid #2a2a2a', borderRadius: '12px',
+            padding: '24px',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#e5e5e5', marginBottom: '20px' }}>
+              New Trigger
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Event Type</label>
+              <select value={createForm.eventType} onChange={e => setCreateForm(f => ({ ...f, eventType: e.target.value }))}
+                style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px' }}>
+                {Object.keys(EVENT_COLOR).map(et => <option key={et} value={et}>{et}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Condition (JSON)</label>
+              <textarea value={createForm.condition} onChange={e => setCreateForm(f => ({ ...f, condition: e.target.value }))}
+                rows={3} style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '11px', fontFamily: 'monospace', resize: 'vertical' }}
+                placeholder='{"severity": "critical"}' />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>Actions (comma-separated)</label>
+              <input value={createForm.actions} onChange={e => setCreateForm(f => ({ ...f, actions: e.target.value }))}
+                style={{ width: '100%', padding: '7px 10px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#e5e5e5', fontSize: '12px', fontFamily: 'monospace' }}
+                placeholder="notify_oncall, create_incident" />
+              <div style={{ fontSize: '9px', color: '#444', marginTop: '4px' }}>
+                Valid: {Object.keys(ACTION_LABEL).join(', ')}
+              </div>
+            </div>
+
+            {createError && (
+              <div style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', fontSize: '11px', color: '#ef4444', marginBottom: '14px' }}>{createError}</div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowCreateModal(false)}
+                style={{ padding: '7px 16px', background: '#111', border: '1px solid #2a2a2a', borderRadius: '6px', color: '#888', fontSize: '11px', cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={createTrigger} disabled={creating}
+                style={{ padding: '7px 16px', background: creating ? '#0e3a28' : '#10b981', border: 'none', borderRadius: '6px', color: creating ? '#666' : '#080808', fontSize: '11px', fontWeight: 600, cursor: creating ? 'not-allowed' : 'pointer' }}>
+                {creating ? 'Creating…' : 'Create Trigger'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

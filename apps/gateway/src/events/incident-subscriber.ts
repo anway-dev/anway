@@ -4,6 +4,7 @@ import { SREAgent, ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
 import { IncidentService } from '../services/incident.js'
 import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 import { createKnowledgeGraph } from '../kb/index.js'
 import { UUID_RE } from '../utils/validators.js'
 import type { TenantId } from '@anvay/types'
@@ -11,7 +12,27 @@ import pino from 'pino'
 
 const log = pino({ name: 'incident-subscriber' })
 
-function resolveProviderConfig(): ProviderConfig | null {
+/** Resolve provider config: DB first (per-tenant, user-selected model), env vars as fallback. */
+async function resolveProviderConfig(tenantId: string): Promise<ProviderConfig | null> {
+  try {
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ provider: string; api_key: string; base_url: string; default_model: string; cheap_model: string }>>`
+        SELECT provider, api_key, base_url, default_model, cheap_model
+        FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+      `
+    )
+    if (rows.length > 0 && rows[0]!.api_key) {
+      const r = rows[0]!
+      return {
+        type: r.provider as ProviderConfig['type'],
+        apiKey: r.api_key,
+        baseURL: r.base_url || undefined,
+        defaultModel: r.default_model || undefined,
+        cheapModel: r.cheap_model || undefined,
+      }
+    }
+  } catch { /* fall through to env vars */ }
+  // Env var fallback
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
   if (process.env['OPENAI_API_KEY']) return { type: 'openai', apiKey: process.env['OPENAI_API_KEY'] }
   if (process.env['GROQ_API_KEY']) return { type: 'groq', apiKey: process.env['GROQ_API_KEY'] }
@@ -20,13 +41,6 @@ function resolveProviderConfig(): ProviderConfig | null {
 }
 
 export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
-  const providerConfig = resolveProviderConfig()
-  if (!providerConfig) {
-    log.warn('IncidentSubscriber: no LLM provider configured — SRE root cause analysis disabled')
-    return
-  }
-
-  const provider = ProviderFactory.create(providerConfig)
   const incidentService = new IncidentService(prisma)
 
   const sub: RedisClientType = createClient({
@@ -59,6 +73,14 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
         log.warn({ payload }, 'incident-subscriber: invalid payload — skipping')
         return
       }
+
+      // Resolve provider per-tenant from DB (with env fallback)
+      const providerConfig = await resolveProviderConfig(tenantId)
+      if (!providerConfig) {
+        log.warn({ tenantId }, 'IncidentSubscriber: no LLM provider configured for tenant — skipping SRE analysis')
+        return
+      }
+      const provider = ProviderFactory.create(providerConfig)
 
       try {
         const kg = createKnowledgeGraph(tenantId as TenantId)

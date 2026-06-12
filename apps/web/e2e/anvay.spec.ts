@@ -92,13 +92,8 @@ test.describe('B: Auth', () => {
 // ---------------------------------------------------------------------------
 test.describe('C: Connectors', () => {
   test('C.1 GET /api/connectors returns list with valid JWT', async ({ request }) => {
-    const authResp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT },
-    })
-    const { token } = await authResp.json()
-    const resp = await request.get(`${GATEWAY}/api/connectors`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const h = await authHeaders(request)
+    const resp = await request.get(`${GATEWAY}/api/connectors`, { headers: h })
     expect(resp.status()).toBe(200)
     const body = await resp.json()
     expect(Array.isArray(body)).toBe(true)
@@ -115,13 +110,8 @@ test.describe('C: Connectors', () => {
 // ---------------------------------------------------------------------------
 test.describe('D: Incidents', () => {
   test('D.1 GET /api/incidents returns list', async ({ request }) => {
-    const authResp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT },
-    })
-    const { token } = await authResp.json()
-    const resp = await request.get(`${GATEWAY}/api/incidents`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const h = await authHeaders(request)
+    const resp = await request.get(`${GATEWAY}/api/incidents`, { headers: h })
     // May return 200 (list) or 404 (no incidents)
     expect([200, 404]).toContain(resp.status())
   })
@@ -132,12 +122,9 @@ test.describe('D: Incidents', () => {
 // ---------------------------------------------------------------------------
 test.describe('E: Gate', () => {
   test('E.1 gate decide on non-existent gate returns 404', async ({ request }) => {
-    const authResp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT },
-    })
-    const { token } = await authResp.json()
+    const h = await authHeaders(request)
     const resp = await request.post(`${GATEWAY}/api/gate/00000000-0000-0000-0000-000000000099/decide`, {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { ...h, 'Content-Type': 'application/json' },
       data: { decision: 'approved' },
     })
     expect(resp.status()).toBe(404)

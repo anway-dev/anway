@@ -81,6 +81,16 @@ export async function eventRoutes(app: FastifyInstance) {
             severity,
             serviceHint: svc,
           })
+          // Also publish to alert_fired — activates alert-subscriber + trigger engine
+          await tryPublish(pub, 'alert_fired', {
+            type: 'alert_fired',
+            tenantId,
+            incidentId: incident.id,
+            title,
+            severity,
+            service: svc,
+            description: desc,
+          })
         }
       } catch (err) {
         request.log.error({ err, tenantId, title }, 'alert-subscriber: failed to create incident')

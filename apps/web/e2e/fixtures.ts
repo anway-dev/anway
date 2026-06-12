@@ -1,4 +1,4 @@
-import type { APIRequestContext } from '@playwright/test'
+import type { APIRequestContext, BrowserContext } from '@playwright/test'
 
 export const GATEWAY = 'http://127.0.0.1:4000'
 export const WEB = 'http://localhost:3000'
@@ -14,6 +14,22 @@ export async function getToken(request: APIRequestContext): Promise<string> {
 export async function authHeaders(request: APIRequestContext): Promise<Record<string, string>> {
   const token = await getToken(request)
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+/** Set auth cookie on browser context — bypasses login redirect for UI tests. */
+export async function setAuthCookie(context: BrowserContext): Promise<void> {
+  const token = await getToken(context.request)
+  if (token) {
+    await context.addCookies([{
+      name: 'anvay_token',
+      value: token,
+      domain: 'localhost',
+      path: '/',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'Lax' as const,
+    }])
+  }
 }
 
 export async function pollUntil<T>(

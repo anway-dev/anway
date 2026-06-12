@@ -140,6 +140,33 @@ export async function automationsRoutes(app: FastifyInstance) {
     )
   })
 
+  app.post<{ Body: { name: string; schedule: string; jobType: string } }>('/api/automations/monitors', {
+    preHandler: [app.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'schedule', 'jobType'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          schedule: { type: 'string', minLength: 1 },
+          jobType: { type: 'string', enum: ['service_health_sweep', 'cloud_security_scan', 'slo_burn_check', 'cost_anomaly_detection', 'deploy_health_report', 'oncall_morning_brief', 'incident_retrospective'] },
+        },
+      },
+    },
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { name, schedule, jobType } = request.body
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ id: string }>>`
+        INSERT INTO cron_jobs (tenant_id, name, schedule, job_type, enabled)
+        VALUES (${tenantId}::uuid, ${name}, ${schedule}, ${jobType}, true)
+        RETURNING id
+      `
+    )
+    const id = (rows as Array<{ id: string }>)[0]?.id
+    return { ok: true, id, name, schedule, jobType }
+  })
+
   app.patch<{ Params: { id: string }; Body: { enabled: boolean } }>('/api/automations/monitors/:id', {
     preHandler: [app.authenticate],
   }, async (request) => {
@@ -154,21 +181,12 @@ export async function automationsRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/triggers/:id/runs', {
     preHandler: [app.authenticate],
   }, async () => ({
-    runs: [
-      { event: 'alert_fired', timestamp: new Date(Date.now() - 3_600_000).toISOString(), actions: ['create_incident', 'notify_oncall'], result: 'success' },
-      { event: 'deploy_failed', timestamp: new Date(Date.now() - 7_200_000).toISOString(), actions: ['surface_context'], result: 'success' },
-      { event: 'error_rate_threshold', timestamp: new Date(Date.now() - 14_400_000).toISOString(), actions: ['create_incident'], result: 'error: incident already exists' },
-    ],
+    runs: [],
   }))
 
-  // T8: Cron run history — mock data for now
   app.get<{ Params: { id: string } }>('/api/cron/:id/runs', {
     preHandler: [app.authenticate],
   }, async () => ({
-    runs: [
-      { started_at: new Date(Date.now() - 300_000).toISOString(), duration_ms: 1200, anomaly_found: false, summary: 'All services healthy' },
-      { started_at: new Date(Date.now() - 600_000).toISOString(), duration_ms: 980, anomaly_found: false, summary: 'All services healthy' },
-      { started_at: new Date(Date.now() - 900_000).toISOString(), duration_ms: 1500, anomaly_found: true, summary: 'payments-api p99 elevated' },
-    ],
+    runs: [],
   }))
 }

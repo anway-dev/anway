@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { setAuthCookie } from './fixtures'
 import { GATEWAY, DEMO_TENANT, authHeaders } from './fixtures'
 
 test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () => {
   let token: string
 
   test.beforeAll(async ({ request }) => {
-    await setAuthCookie(context)
     const r = await request.get(`${GATEWAY}/api/auth/dev-token`)
     const body = await r.json() as { token?: string }
     token = body.token ?? ''

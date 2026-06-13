@@ -14,6 +14,8 @@ import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
 import { startTriggerExecutor } from './triggers/executor.js'
 import { startIncidentSubscriber } from './events/incident-subscriber.js'
 import { startAlertSubscriber } from './events/alert-subscriber.js'
+import { beginDraining, isDraining } from './lifecycle.js'
+import type { IScheduler } from '@anvay/agent'
 
 const DEFAULT_REDIS_URL = 'redis://localhost:6379'
 const bootstrapLog = pino({ level: 'info' })
@@ -27,13 +29,29 @@ async function main() {
   const host = env.HOST
 
   let app: Awaited<ReturnType<typeof buildApp>> | undefined
+  // Scheduler handle hoisted so the shutdown handler can stop it.
+  let cronScheduler: IScheduler | undefined
+
+  // Grace period (ms) between marking not-ready and closing the server,
+  // giving load balancers time to stop routing and in-flight requests to drain.
+  const DRAIN_GRACE_MS = Number(process.env['SHUTDOWN_GRACE_MS'] ?? 3000)
 
   try {
     initMetrics()
     app = await buildApp()
     const shutdown = async (signal: string) => {
-      app!.log.info({ signal }, 'shutdown signal received')
+      // Guard against double-invocation (e.g. SIGINT after SIGTERM)
+      if (isDraining()) return
+      beginDraining()
+      app!.log.info({ signal }, 'shutdown signal received — draining')
       try {
+        // /health/ready now returns 503; wait for LBs to stop routing
+        await new Promise((r) => setTimeout(r, DRAIN_GRACE_MS))
+        try {
+          await cronScheduler?.stop()
+        } catch (err) {
+          app!.log.warn({ err }, 'error stopping cron scheduler during shutdown')
+        }
         await app!.close()
         await shutdownTelemetry()
         app!.log.info('server shut down cleanly')
@@ -56,7 +74,7 @@ async function main() {
       app.log.warn({ err }, 'Trigger subscriber not started — Redis may be unavailable')
     }
     try {
-      const cronScheduler = await createCronJobs(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
+      cronScheduler = await createCronJobs(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
       await cronScheduler.start()
       app.log.info('Cron scheduler started')
     } catch (err) {

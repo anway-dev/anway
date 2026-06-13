@@ -538,3 +538,27 @@ test.describe('CERT P: additional monitor types (P2)', () => {
     expect(create.status(), 'cloud_security_scan monitor must be creatable').toBeLessThan(300)
   })
 })
+
+// ---------------------------------------------------------------------------
+test.describe('CERT Q: audit export', () => {
+  test('Q.1 admin can export audit log as NDJSON', async ({ request }) => {
+    // Dev-token user is admin. Prior cert actions (connector register, triggers,
+    // webhook → incident) have written audit_events rows.
+    const r = await request.get(`${GATEWAY}/api/audit/export`, { headers })
+    expect(r.status(), 'admin audit export must return 200').toBe(200)
+    expect(
+      r.headers()['content-type'],
+      'export must be served as NDJSON',
+    ).toContain('ndjson')
+
+    const text = await r.text()
+    const lines = text.split('\n').filter(l => l.trim().length > 0)
+    expect(lines.length, 'export must contain at least one audit row').toBeGreaterThan(0)
+
+    const parsed = lines.map(l => JSON.parse(l) as Record<string, unknown>)
+    expect(
+      parsed.some(row => row['event_type'] !== undefined || row['eventType'] !== undefined),
+      'each exported row must be a JSON audit event with an event_type field',
+    ).toBe(true)
+  })
+})

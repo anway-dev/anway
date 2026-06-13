@@ -54,6 +54,65 @@ export async function auditRoutes(app: FastifyInstance) {
       } as AuditEvent
     })
   })
+
+  // X1: Audit log export — admin only, NDJSON download
+  app.get('/api/audit/export', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const user = request.user as { tenantId: string; role?: string }
+    const { tenantId } = user
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+
+    const q = request.query as Record<string, string>
+    let from: Date | undefined
+    let to: Date | undefined
+    if (q['from']) {
+      const d = new Date(q['from'])
+      if (!isNaN(d.getTime())) from = d
+    }
+    if (q['to']) {
+      const d = new Date(q['to'])
+      if (!isNaN(d.getTime())) to = d
+    }
+
+    const rows = await withTenant(prisma, tenantId, (tx) => {
+      if (from && to) {
+        return tx.$queryRaw<AuditRow[]>`
+          SELECT id, event_type, payload, created_at, user_id
+          FROM audit_events
+          WHERE created_at >= ${from} AND created_at <= ${to}
+          ORDER BY created_at ASC LIMIT 10000
+        `
+      }
+      if (from) {
+        return tx.$queryRaw<AuditRow[]>`
+          SELECT id, event_type, payload, created_at, user_id
+          FROM audit_events
+          WHERE created_at >= ${from}
+          ORDER BY created_at ASC LIMIT 10000
+        `
+      }
+      if (to) {
+        return tx.$queryRaw<AuditRow[]>`
+          SELECT id, event_type, payload, created_at, user_id
+          FROM audit_events
+          WHERE created_at <= ${to}
+          ORDER BY created_at ASC LIMIT 10000
+        `
+      }
+      return tx.$queryRaw<AuditRow[]>`
+        SELECT id, event_type, payload, created_at, user_id
+        FROM audit_events
+        ORDER BY created_at ASC LIMIT 10000
+      `
+    }).catch(() => [] as AuditRow[])
+
+    const body = rows.map(r => JSON.stringify(r)).join('\n')
+    return reply
+      .header('Content-Type', 'application/x-ndjson')
+      .header('Content-Disposition', 'attachment; filename="audit-export.ndjson"')
+      .send(body)
+  })
 }
 
 function mapOutcome(eventType: string, payload: Record<string, unknown>): AuditEvent['outcome'] {

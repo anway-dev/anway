@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
+import { isDraining } from '../lifecycle.js'
 
 const startTime = Date.now()
 
@@ -16,8 +17,12 @@ export async function healthRoutes(app: FastifyInstance) {
     return reply.send({ status: 'ok' })
   })
 
-  // Readiness: verifies DB is reachable
+  // Readiness: drains on shutdown, then verifies DB is reachable
   app.get('/health/ready', async (_request, reply) => {
+    // During graceful shutdown, signal not-ready so LBs stop routing traffic
+    if (isDraining()) {
+      return reply.status(503).send({ status: 'draining' })
+    }
     try {
       await prisma.$queryRaw`SELECT 1`
       return reply.send({ status: 'ok', db: 'connected' })

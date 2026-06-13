@@ -180,14 +180,30 @@ export class GraphBuilderAgent {
       tenantId,
     )
 
-    // If service hint present, create AFFECTS relationship
-    if (event.serviceHint) {
+    let serviceName = event.serviceHint ?? null
+
+    // If no explicit serviceHint, try LLM extraction from title
+    if (!serviceName) {
+      try {
+        serviceName = await this.extractServiceName(event.title, tenantId)
+      } catch {
+        // Best-effort — proceed without service resolution
+      }
+    }
+
+    if (serviceName) {
       const serviceId = await this.kg.upsertEntity(
-        { type: 'Service', name: event.serviceHint },
+        { type: 'Service', name: serviceName },
         tenantId,
       )
+      const confidence = event.serviceHint ? 1.0 : this.scoreServiceMatch(serviceName, event.title)
       await this.kg.upsertRelationship(
-        { fromEntityId: incidentId, relType: 'AFFECTS', toEntityId: serviceId },
+        {
+          fromEntityId: incidentId,
+          relType: 'AFFECTS',
+          toEntityId: serviceId,
+          metadata: { confidence, unconfirmed: confidence < 0.7 },
+        },
         tenantId,
       )
     }

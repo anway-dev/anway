@@ -74,7 +74,7 @@ export async function incidentRoutes(app: FastifyInstance) {
         await pub.publish('incident_created', JSON.stringify({
           type: 'incident_created',
           tenantId: user.tenantId,
-          id: incident.id,
+          incidentId: incident.id,
           title: incident.title,
           severity: incident.severity,
           description: incident.description ?? undefined,

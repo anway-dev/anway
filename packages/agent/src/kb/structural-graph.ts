@@ -245,7 +245,7 @@ export class StructuralGraph implements IKnowledgeGraph {
       `INSERT INTO entities (tenant_id, type, name, metadata)
        VALUES ($1::uuid, $2, $3, $4::jsonb)
        ON CONFLICT (tenant_id, type, name) DO UPDATE
-         SET metadata = EXCLUDED.metadata, updated_at = NOW()
+         SET metadata = EXCLUDED.metadata
        RETURNING id`,
       [tenantId, entity.type, entity.name, JSON.stringify(entity.metadata ?? {})],
     )
@@ -257,7 +257,7 @@ export class StructuralGraph implements IKnowledgeGraph {
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
        VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::jsonb)
        ON CONFLICT (tenant_id, from_entity_id, rel_type, to_entity_id)
-	       DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = NOW()
+	       DO UPDATE SET metadata = EXCLUDED.metadata
        RETURNING id`,
       [tenantId, rel.fromEntityId, rel.relType, rel.toEntityId, JSON.stringify(rel.metadata ?? {})],
     )
@@ -269,7 +269,7 @@ export class StructuralGraph implements IKnowledgeGraph {
     const now = new Date().toISOString()
     const rows = await this.query<{ id: string }>(
       `UPDATE entities
-       SET metadata = metadata || $3::jsonb, updated_at = NOW()
+       SET metadata = metadata || $3::jsonb
        WHERE tenant_id = $1::uuid
          AND metadata->'connectorCoordinates' ? $2
        RETURNING id`,

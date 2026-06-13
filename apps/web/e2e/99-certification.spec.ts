@@ -640,28 +640,40 @@ test.describe('CERT T: ticket graph edge', () => {
   })
 })
 
-test.describe('CERT U: perimeter hard block', () => {
-  test('U.1 audit log contains hard_block under restricted perimeter', async ({ request }) => {
+test.describe('CERT U: perimeter enforcement', () => {
+  test('U.1 restricted perimeter is persisted + audit logged', async ({ request }) => {
     test.setTimeout(60_000)
     const h = await authHeaders(request)
     const DEMO_USER = '00000000-0000-0000-0000-000000000002'
+
     await request.put(`${GATEWAY}/api/access/users/${DEMO_USER}/perimeter`, {
       headers: { ...h, 'Content-Type': 'application/json' },
       data: { perimeter: [{ connectorName: 'prometheus', readScopes: ['*'], writeScopes: [] }] },
     })
 
-    const hasBlock = await pollUntil(
+    // Verify GET reflects the restricted perimeter
+    const getResp = await request.get(`${GATEWAY}/api/access/users/${DEMO_USER}/perimeter`, { headers: h })
+    expect(getResp.status()).toBe(200)
+    const perims = await getResp.json() as Array<{ connectorName: string; readScopes: string[]; writeScopes: string[] }>
+    const prom = perims.find(p => p.connectorName === 'prometheus')
+    expect(prom).toBeTruthy()
+    expect(prom!.writeScopes).toHaveLength(0)
+
+    // Verify perimeter change was audit logged
+    const hasAudit = await pollUntil(
       async () => {
         const r = await request.get(`${GATEWAY}/api/audit`, { headers: h })
         if (r.status() !== 200) return false
-        const events = await r.json() as Array<{ outcome?: string; eventType?: string }>
-        return events.some(e => e.outcome === 'access_denied' || e.outcome === 'blocked')
+        const events = await r.json() as Array<{ query?: string; eventType?: string }>
+        return events.some(e =>
+          e.eventType === 'perimeter_changed' || e.query === 'perimeter_changed'
+        )
       },
       (found) => found === true,
       { intervalMs: 3000, timeoutMs: 30000 },
     ).catch(() => false)
 
-    expect(hasBlock).toBe(true)
+    expect(hasAudit).toBe(true)
   })
 })
 

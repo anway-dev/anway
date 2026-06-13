@@ -43,7 +43,7 @@ Execute it. When done:
 2. git add docs/BRIDGE.md && git commit -m 'bridge: Codex reply — <one line>' && git push
 3. Stop."
 
-      if "$OPENCODE" run "$PROMPT"; then
+      if "$OPENCODE" run --model deepseek/deepseek-v4-pro "$PROMPT"; then
         echo "[bridge-watch] opencode run complete"
       else
         echo "[bridge-watch] opencode exited non-zero — will retry on next commit"

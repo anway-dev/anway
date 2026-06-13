@@ -316,11 +316,15 @@ export async function chatRoutes(app: FastifyInstance) {
         WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
       `
     ).catch(() => [])
-    for (const row of userPerimeterRows) {
-      const scope = connectorScopes.find(s => s.connectorId === row.connector_name)
-      if (scope) {
-        if (row.read_scopes.length > 0) scope.read = row.read_scopes
-        if (row.write_scopes.length > 0) scope.write = row.write_scopes
+    for (let i = 0; i < connectorScopes.length; i++) {
+      const scope = connectorScopes[i]!
+      const row = userPerimeterRows.find(r => r.connector_name === scope.connectorId)
+      if (!row) continue
+      // ConnectorScope.read/write are readonly — replace the element, don't mutate
+      connectorScopes[i] = {
+        connectorId: scope.connectorId,
+        read: row.read_scopes.length > 0 ? row.read_scopes : scope.read,
+        write: row.write_scopes.length > 0 ? row.write_scopes : scope.write,
       }
     }
 

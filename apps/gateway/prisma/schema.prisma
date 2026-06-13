@@ -49,11 +49,13 @@ model Tenant {
   connector_limit      Int      @default(3)
   created_at           DateTime @default(now()) @db.Timestamptz
 
-  users        User[]
-  sessions     Session[]
-  connectors   Connector[]
-  incidents    Incident[]
-  audit_events AuditEvent[]
+  users            User[]
+  sessions         Session[]
+  connectors       Connector[]
+  incidents        Incident[]
+  audit_events     AuditEvent[]
+  providerConfig   ProviderConfig?
+  connectorConfigs ConnectorConfig[]
 
   @@map("tenants")
 }
@@ -96,6 +98,7 @@ model Connector {
   type                String
   mode                ConnectorMode @default(read)
   config_encrypted    Json          @default("{}")
+  config_enc          String?
   capability_manifest Json          @default("{}")
   created_at          DateTime      @default(now()) @db.Timestamptz
 
@@ -144,8 +147,7 @@ model ProviderConfig {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id     String   @db.Uuid
   provider      String   @db.VarChar(50)
-  api_key       String?  @text
-  base_url      String?  @text
+  base_url      String?  @db.Text
   default_model String?  @db.VarChar(100)
   updated_at    DateTime @default(now()) @db.Timestamptz
 
@@ -156,14 +158,14 @@ model ProviderConfig {
 }
 
 model ConnectorConfig {
-  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id             String    @db.Uuid
-  connector_type        String    @db.VarChar(50)
-  credentials           Json      @default("{}")
-  enabled               Boolean   @default(false)
-  bootstrapped_at       DateTime? @db.Timestamptz
-  last_bootstrap_summary Json?    @default("{}")
-  updated_at            DateTime  @default(now()) @db.Timestamptz
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id              String    @db.Uuid
+  connector_type         String    @db.VarChar(50)
+  credentials            Json      @default("{}")
+  enabled                Boolean   @default(false)
+  bootstrapped_at        DateTime? @db.Timestamptz
+  last_bootstrap_summary Json?     @default("{}")
+  updated_at             DateTime  @default(now()) @db.Timestamptz
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 

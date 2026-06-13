@@ -10787,3 +10787,18 @@ Acceptance (all green):
 - Provider regression: chat streams from DB-encrypted deepseek provider (env fallback not used)
 
 <!-- REVIEW SECTION END — 2026-06-13a -->
+
+<!-- REVIEW SECTION START — 2026-06-13b (S1.4-S1.5 closure) -->
+
+## S1.4–S1.5 — CLOSED (executor 554bb00 + Claude 9d005df)
+
+Executor dropped plaintext columns (migration 0024), left `connectors.config_encrypted` correctly (still read raw by registry.ts — connector config, not credential scope), added CERT J via admin debug route. Three defects fixed by Claude during verification:
+- settings.ts INSERT/UPDATE still referenced dropped `credentials`/`api_key` columns → 42703, connector register 500 (cert D.1). Executor's step-3 grep caught SELECTs only, not writes.
+- CERT J.1 used `toBeOneOf` (non-existent matcher) + `[200,403]` escape hatch (violates no-escape-hatch contract). Rewritten to assert success path.
+- Debug route `/api/debug/at-rest-check` lacked `NODE_ENV==='production'` 404 guard (schema-introspection leak). Added.
+
+Acceptance all green: pnpm -r test, gateway tsc, certify **28/28** incl CERT J, zero plaintext credential columns in DB.
+
+FOLLOW-UP (new task, not blocking): `connectors.config_encrypted` is plaintext JSON holding MCP url / CLI binary + env (env may carry secrets). Encrypt it like credentials — track as S1.6.
+
+<!-- REVIEW SECTION END — 2026-06-13b -->

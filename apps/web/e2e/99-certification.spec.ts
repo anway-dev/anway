@@ -400,3 +400,50 @@ test.describe('CERT K: per-user perimeter enforcement', () => {
     expect(prom!.writeScopes).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+test.describe('CERT M: preview banners', () => {
+  test('M.1 mock view (Cloud) shows DESIGN PREVIEW banner', async ({ page, context }) => {
+    await setAuthCookie(context)
+    await page.goto(WEB)
+    await page.locator('text=Cloud').first().click()
+    await expect(
+      page.locator('text=DESIGN PREVIEW').first(),
+      'Cloud is a design-only mock view and must carry the preview banner'
+    ).toBeVisible({ timeout: 10000 })
+  })
+
+  test('M.2 real view (Services) shows NO DESIGN PREVIEW banner', async ({ page, context }) => {
+    await setAuthCookie(context)
+    await page.goto(WEB)
+    await page.locator('text=Services').first().click()
+    await page.waitForLoadState('networkidle')
+    await expect(
+      page.locator('text=DESIGN PREVIEW'),
+      'Services is backed by real data and must NOT carry the preview banner'
+    ).toHaveCount(0)
+  })
+})
+
+test.describe('CERT L: graph triage', () => {
+  test('L.1 GET /api/graph/triage resolves a real indexed service', async ({ request }) => {
+    // CERT D/E already bootstrapped prometheus and indexed services into the
+    // graph. Pick a real indexed service name and triage it — proves the graph
+    // triage endpoint resolves a primary entity + its one-hop neighbourhood.
+    const svcResp = await request.get(`${GATEWAY}/api/services`, { headers })
+    expect(svcResp.status(), 'services must be queryable for triage precondition').toBe(200)
+    const services = await svcResp.json() as Array<{ name: string }>
+    expect(
+      services.length,
+      'CERT FAIL: no services indexed — triage has no entity to resolve'
+    ).toBeGreaterThan(0)
+
+    const target = services.find(s => s.name === 'payments-api')?.name ?? services[0]!.name
+
+    const r = await request.get(`${GATEWAY}/api/graph/triage/${encodeURIComponent(target)}`, { headers })
+    expect(r.status(), 'graph triage must resolve an indexed entity').toBe(200)
+    const body = await r.json() as { entity: { name: string }; related: Record<string, unknown[]>; recentDeploys: unknown[] }
+    expect(body.entity.name, 'triage must return the requested entity').toBe(target)
+    expect(body.related, 'triage must return a related map').toBeTruthy()
+  })
+})

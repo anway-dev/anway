@@ -5,6 +5,7 @@ import {
   CloudProvider, CloudResource, CloudSecurityFinding, CloudConfigIssue,
   CloudFindingSeverity,
 } from "@/lib/mock";
+import { PreviewBanner } from "@/components/preview-banner";
 
 type Tab = "overview" | "security" | "config" | "capacity";
 
@@ -233,7 +234,9 @@ export function CloudView({ onTriggerOrchestrator }: {
   const highCfg = config.filter(c => c.severity === "high").length;
 
   return (
-    <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#080808" }}>
+      <PreviewBanner />
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
       {/* Left: provider selector */}
       <div style={{ width: "220px", flexShrink: 0, background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a" }}>
@@ -456,6 +459,7 @@ export function CloudView({ onTriggerOrchestrator }: {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

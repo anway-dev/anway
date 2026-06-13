@@ -1,4 +1,5 @@
 "use client";
+import { PreviewBanner } from "@/components/preview-banner";
 
 const MOCK_CLUSTER = {
   nodes: 6,
@@ -57,7 +58,9 @@ function Bar({ used, total, color }: { used: number; total: number; color: strin
 
 export function K8sView() {
   return (
-    <div style={{ padding: "24px", height: "100%", overflowY: "auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <PreviewBanner />
+      <div style={{ padding: "24px", flex: 1, minHeight: 0, overflowY: "auto" }}>
       {/* Header */}
       <div style={{ marginBottom: "20px" }}>
         <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Kubernetes</div>
@@ -131,6 +134,7 @@ export function K8sView() {
             <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>{e.time}</div>
           </div>
         ))}
+      </div>
       </div>
     </div>
   );

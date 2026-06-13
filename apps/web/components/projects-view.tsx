@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { PROJECTS, TEAMS, CONNECTORS, Project } from "@/lib/mock";
+import { PreviewBanner } from "@/components/preview-banner";
 
 const KB_DOMAINS = ["code", "infra", "metrics", "issues", "docs", "deploys"] as const;
 type KBDomain = typeof KB_DOMAINS[number];
@@ -76,7 +77,9 @@ export function ProjectsView({
   }
 
   return (
-    <div style={{ padding: "24px", height: "100%", overflowY: "auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <PreviewBanner />
+      <div style={{ padding: "24px", flex: 1, minHeight: 0, overflowY: "auto" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "20px" }}>
         <div>
@@ -247,6 +250,7 @@ export function ProjectsView({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

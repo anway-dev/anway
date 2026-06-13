@@ -95,6 +95,21 @@ interface GraphRelRow {
   toEntityId: string
 }
 
+interface TriageEntityRow {
+  id: string
+  type: string
+  name: string
+  metadata: Record<string, unknown>
+}
+
+interface TriageRelatedRow {
+  relType: string
+  id: string
+  type: string
+  name: string
+  metadata: Record<string, unknown>
+}
+
 export async function graphEventRoutes(app: FastifyInstance) {
   // Knowledge graph explorer — entities + relationships for the tenant
   app.get('/api/graph/entities', { preHandler: [app.authenticate] }, async (request) => {
@@ -111,6 +126,66 @@ export async function graphEventRoutes(app: FastifyInstance) {
       return { entities, relationships }
     })
   })
+
+  // Graph triage — resolve a primary entity by name and return its one-hop
+  // neighbourhood (both outbound and inbound edges) grouped by relationship type.
+  app.get<{ Params: { entityName: string } }>(
+    '/api/graph/triage/:entityName',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const entityName = decodeURIComponent(request.params.entityName ?? '').trim()
+      if (!entityName) {
+        return reply.code(400).send({ error: 'entityName is required' })
+      }
+
+      return withTenant(prisma, tenantId, async (tx) => {
+        const primaryRows = await tx.$queryRaw<TriageEntityRow[]>`
+          SELECT id, type, name, metadata
+          FROM entities
+          WHERE tenant_id = ${tenantId}::uuid AND name = ${entityName}
+          LIMIT 1
+        `
+        const primary = primaryRows[0]
+        if (!primary) {
+          return reply.code(404).send({ error: 'entity not found' })
+        }
+
+        // One-hop outbound: primary -[rel]-> neighbour
+        const outbound = await tx.$queryRaw<TriageRelatedRow[]>`
+          SELECT r.rel_type AS "relType", e.id, e.type, e.name, e.metadata
+          FROM relationships r
+          JOIN entities e ON e.id = r.to_entity_id
+          WHERE r.from_entity_id = ${primary.id}::uuid
+        `
+
+        // One-hop inbound: neighbour -[rel]-> primary (e.g. Ticket OWNED_BY this)
+        const inbound = await tx.$queryRaw<TriageRelatedRow[]>`
+          SELECT r.rel_type AS "relType", e.id, e.type, e.name, e.metadata
+          FROM relationships r
+          JOIN entities e ON e.id = r.from_entity_id
+          WHERE r.to_entity_id = ${primary.id}::uuid
+        `
+
+        const related: Record<string, Array<{ id: string; type: string; name: string }>> = {}
+        const recentDeploys: Array<{ name: string; metadata: Record<string, unknown> }> = []
+
+        for (const row of [...outbound, ...inbound]) {
+          if (!related[row.relType]) related[row.relType] = []
+          related[row.relType]!.push({ id: row.id, type: row.type, name: row.name })
+          if (row.type === 'Deploy') {
+            recentDeploys.push({ name: row.name, metadata: row.metadata ?? {} })
+          }
+        }
+
+        return {
+          entity: { id: primary.id, type: primary.type, name: primary.name, metadata: primary.metadata ?? {} },
+          related,
+          recentDeploys,
+        }
+      })
+    },
+  )
 
   // Provider is a module-level singleton (expensive to build — auth clients cached inside)
   const provider = resolveGraphBuilderProvider()

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { INTAKE_SOURCES, INTAKE_LOG, IntakeSource, IntakeMode } from "@/lib/mock";
+import { PreviewBanner } from "@/components/preview-banner";
 
 const MODE_LABEL: Record<IntakeMode, string> = {
   bypass: "Bypass",
@@ -248,7 +249,9 @@ export function IntakeView() {
   const ticketingSources = INTAKE_SOURCES.filter(s => s.category === "ticketing");
 
   return (
-    <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#080808" }}>
+      <PreviewBanner />
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
       {/* Left: source list */}
       <div style={{ width: "260px", flexShrink: 0, background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a" }}>
@@ -344,6 +347,7 @@ export function IntakeView() {
       ) : (
         <ConfigPanel source={selected} />
       )}
+      </div>
     </div>
   );
 }

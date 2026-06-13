@@ -1,0 +1,1 @@
+ALTER TABLE connectors ADD COLUMN IF NOT EXISTS config_enc TEXT;

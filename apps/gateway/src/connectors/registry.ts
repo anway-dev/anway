@@ -3,6 +3,7 @@ import type { ExecutableTool } from '@anvay/agent'
 import { McpConnector } from '@anvay/mcp-adapter'
 import type { CliExecEntry } from '@anvay/cli-adapter'
 import { CliConnector } from '@anvay/cli-adapter'
+import { encryptJson, decryptJson } from '../utils/crypto.js'
 import type { PrismaClient } from '@prisma/client'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
@@ -13,6 +14,7 @@ type ConnectorRow = {
   name: string
   mode: string
   config_encrypted: Prisma.JsonValue
+  config_enc?: string | null
 }
 
 // Singleton cache per (tenantId, connectorId) — bounded to prevent memory leak
@@ -28,6 +30,7 @@ function cacheKey(tenantId: string, connectorId: string): string {
 }
 
 function getCfg(row: ConnectorRow): Record<string, unknown> {
+  if (row.config_enc) return decryptJson<Record<string, unknown>>(row.config_enc)
   if (typeof row.config_encrypted === 'object' && row.config_encrypted !== null && !Array.isArray(row.config_encrypted)) {
     return row.config_encrypted as Record<string, unknown>
   }
@@ -108,13 +111,14 @@ export async function registerConnectorTool(
         name,
         type,
         mode: 'read',
-        config_encrypted: config as Prisma.JsonObject,
+        config_encrypted: {} as Prisma.JsonObject,
+        config_enc: encryptJson(config),
         capability_manifest: { capabilities: { read: ['*'], write: [] } } as Prisma.JsonObject,
       },
     })
   )
 
-  const adapter = instantiateAdapter({ id: row.id, type, name, mode: 'read', config_encrypted: config as Prisma.JsonObject }, tenantId)
+  const adapter = instantiateAdapter({ id: row.id, type, name, mode: 'read', config_encrypted: {} as Prisma.JsonObject, config_enc: encryptJson(config) }, tenantId)
   const key = cacheKey(tenantId, row.id)
   cacheSetAdapter(key, adapter)
 

@@ -17,6 +17,27 @@ vi.mock('../kb/index.js', () => ({
   createKnowledgeGraph: (...args: unknown[]) => mockCreateKG(...args),
 }))
 
+// Mock db/client — prisma may auto-connect if DATABASE_URL is set from .env
+vi.mock('../db/client.js', () => {
+  const mockTx = {
+    $queryRaw: vi.fn(() => Promise.resolve([])),
+    $executeRaw: vi.fn(() => Promise.resolve(0)),
+  }
+  return {
+    prisma: {
+      $queryRaw: mockTx.$queryRaw,
+      $executeRaw: mockTx.$executeRaw,
+    },
+  }
+})
+
+// Mock db/prisma — withTenant calls the callback with a mock tx
+vi.mock('../db/prisma.js', () => ({
+  withTenant: vi.fn((_prisma: unknown, _tenantId: string, fn: (tx: unknown) => Promise<unknown>) => {
+    return fn({ $queryRaw: vi.fn(() => Promise.resolve([])), $executeRaw: vi.fn(() => Promise.resolve(0)) })
+  }),
+}))
+
 // Mock @anvay/agent
 const mockHandle = vi.fn()
 vi.mock('@anvay/agent', () => ({
@@ -39,11 +60,11 @@ describe('startGraphBuilderSubscriber', () => {
   })
 
   it('skips events when no LLM provider configured', async () => {
-    // Provider is resolved per-event (DB first, env fallback) — warn fires on event arrival
-    const prev = { ...process.env }
-    delete process.env['ANTHROPIC_API_KEY']
-    delete process.env['OPENAI_API_KEY']
-    delete process.env['GROQ_API_KEY']
+    // Provider is resolved per-event (DB first, env fallback) — warn fires on event arrival.
+    // Must clear ALL LLM env vars — vitest loads .env which may set OLLAMA_ENDPOINT.
+    const cleared = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GROQ_API_KEY', 'MISTRAL_API_KEY', 'OLLAMA_ENDPOINT', 'LMSTUDIO_ENDPOINT']
+    const prev: Record<string, string | undefined> = {}
+    for (const k of cleared) { prev[k] = process.env[k]; delete process.env[k] }
 
     await startGraphBuilderSubscriber('redis://localhost:6379', mockLog as any)
     const callback = mockSubscribe.mock.calls[0]?.[1] as (msg: string) => Promise<void>
@@ -55,7 +76,7 @@ describe('startGraphBuilderSubscriber', () => {
     )
     expect(mockHandle).not.toHaveBeenCalled()
 
-    Object.assign(process.env, prev)
+    for (const k of cleared) { if (prev[k] !== undefined) process.env[k] = prev[k] }
   })
 
   it('subscribes to all 7 graph event channels plus kb:stale', async () => {

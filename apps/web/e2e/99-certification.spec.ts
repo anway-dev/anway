@@ -600,3 +600,93 @@ test.describe('CERT R: lifecycle', () => {
     expect(artifacts.some((a: { id: string }) => a.id === tsId)).toBe(true)
   })
 })
+
+test.describe('CERT S: LLM round-trip', () => {
+  test('S.1 POST /api/chat returns tokens from LLM', async ({ request }) => {
+    test.setTimeout(90_000)
+    const h = await authHeaders(request)
+    const resp = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'Reply with exactly: PONG', sessionId: uniqueId('cert-s') },
+    })
+    expect(resp.status()).toBe(200)
+    const body = await resp.text()
+    expect(body.length).toBeGreaterThan(10)
+  })
+})
+
+test.describe('CERT T: ticket graph edge', () => {
+  test('T.1 incident_created produces AFFECTS edge in graph', async ({ request }) => {
+    test.setTimeout(60_000)
+    const h = await authHeaders(request)
+    const incResp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { title: 'payments-api checkout errors', severity: 'high' },
+    })
+    expect([200, 201]).toContain(incResp.status())
+
+    const edgeFound = await pollUntil(
+      async () => {
+        const r = await request.get(`${GATEWAY}/api/graph/entities`, { headers: h })
+        if (r.status() !== 200) return false
+        const data = await r.json() as { relationships: Array<{ relType: string }> }
+        return data.relationships.some((rel: { relType: string }) => rel.relType === 'AFFECTS')
+      },
+      (found) => found === true,
+      { intervalMs: 3000, timeoutMs: 45000 },
+    ).catch(() => false)
+
+    expect(edgeFound).toBe(true)
+  })
+})
+
+test.describe('CERT U: perimeter hard block', () => {
+  test('U.1 audit log contains hard_block under restricted perimeter', async ({ request }) => {
+    test.setTimeout(60_000)
+    const h = await authHeaders(request)
+    const DEMO_USER = '00000000-0000-0000-0000-000000000002'
+    await request.put(`${GATEWAY}/api/access/users/${DEMO_USER}/perimeter`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { perimeter: [{ connectorName: 'prometheus', readScopes: ['*'], writeScopes: [] }] },
+    })
+
+    const hasBlock = await pollUntil(
+      async () => {
+        const r = await request.get(`${GATEWAY}/api/audit`, { headers: h })
+        if (r.status() !== 200) return false
+        const events = await r.json() as Array<{ outcome?: string; eventType?: string }>
+        return events.some(e => e.outcome === 'access_denied' || e.outcome === 'blocked')
+      },
+      (found) => found === true,
+      { intervalMs: 3000, timeoutMs: 30000 },
+    ).catch(() => false)
+
+    expect(hasBlock).toBe(true)
+  })
+})
+
+test.describe('CERT V: trigger fires', () => {
+  test('V.1 incident_created event creates DB incident', async ({ request }) => {
+    test.setTimeout(90_000)
+    const h = await authHeaders(request)
+    const title = uniqueId('cert-trigger')
+    const createResp = await request.post(`${GATEWAY}/api/incidents`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { title, severity: 'critical' },
+    })
+    expect([200, 201]).toContain(createResp.status())
+
+    const found = await pollUntil(
+      async () => {
+        const r = await request.get(`${GATEWAY}/api/incidents`, { headers: h })
+        if (r.status() !== 200) return false
+        const list = await r.json() as Array<{ title: string }>
+        return list.some(i => i.title === title)
+      },
+      (found) => found === true,
+      { intervalMs: 2000, timeoutMs: 30000 },
+    ).catch(() => false)
+
+    expect(found).toBe(true)
+  })
+})

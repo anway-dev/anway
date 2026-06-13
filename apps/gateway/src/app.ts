@@ -73,6 +73,7 @@ export async function buildApp() {
   await app.register(alertRoutes)
   await app.register(auditRoutes)
   await app.register(accessRoutes)
+  await app.register(lifecycleRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

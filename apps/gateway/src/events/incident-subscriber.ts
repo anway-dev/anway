@@ -6,6 +6,7 @@ import { IncidentService } from '../services/incident.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { effectiveApiKey } from '../utils/credentials.js'
 import { UUID_RE } from '../utils/validators.js'
 import type { TenantId } from '@anvay/types'
 import pino from 'pino'
@@ -16,16 +17,17 @@ const log = pino({ name: 'incident-subscriber' })
 async function resolveProviderConfig(tenantId: string): Promise<ProviderConfig | null> {
   try {
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ provider: string; api_key: string; base_url: string; default_model: string; cheap_model: string }>>`
-        SELECT provider, api_key, base_url, default_model, cheap_model
+      tx.$queryRaw<Array<{ provider: string; api_key: string | null; api_key_enc: string | null; base_url: string; default_model: string; cheap_model: string }>>`
+        SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model
         FROM provider_config WHERE tenant_id = ${tenantId}::uuid
       `
     )
-    if (rows.length > 0 && rows[0]!.api_key) {
+    const KEYLESS = new Set(['ollama', 'lmstudio'])
+    if (rows.length > 0 && (rows[0]!.api_key || rows[0]!.api_key_enc || KEYLESS.has(rows[0]!.provider))) {
       const r = rows[0]!
       return {
         type: r.provider as ProviderConfig['type'],
-        apiKey: r.api_key,
+        apiKey: effectiveApiKey(r),
         baseURL: r.base_url || undefined,
         defaultModel: r.default_model || undefined,
         cheapModel: r.cheap_model || undefined,

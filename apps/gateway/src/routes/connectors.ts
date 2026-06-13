@@ -3,7 +3,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { createClient } from 'redis'
 import { UUID_RE } from '../utils/validators.js'
-import { decryptJson } from '../utils/crypto.js'
+import { effectiveCredentials } from '../utils/credentials.js'
 
 export async function connectorsRoutes(app: FastifyInstance) {
   app.get('/api/connectors', {
@@ -66,7 +66,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
-    const r = rows[0]; const creds = (r?.credentials_enc ? decryptJson<Record<string, unknown>>(r.credentials_enc) : r?.credentials ?? {}) as Record<string, unknown>
+    const creds = effectiveCredentials(rows[0])
 
     const pub = await getBootstrapPub()
     if (pub) {
@@ -127,7 +127,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
-    const r = rows[0]; const creds = (r?.credentials_enc ? decryptJson<Record<string, unknown>>(r.credentials_enc) : r?.credentials ?? {}) as Record<string, unknown>
+    const creds = effectiveCredentials(rows[0])
     const pub = await getBootstrapPub()
     if (pub) {
       await pub.publish('connector_reconnected', JSON.stringify({

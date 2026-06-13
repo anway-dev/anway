@@ -3,7 +3,8 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
 import { providerRegistry } from '@anvay/agent'
-import { encryptJson, isEncrypted, decryptJson } from '../utils/crypto.js'
+import { encryptJson } from '../utils/crypto.js'
+import { effectiveCredentials } from '../utils/credentials.js'
 
 function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint?: string; defaultBaseUrl?: string }): string[] {
   if (Array.isArray(manifest.models)) return manifest.models
@@ -166,12 +167,12 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       // Emit connector_registered only on first registration (not credential update)
       if (isNew && opts?.pub) {
         const creds = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ credentials: Record<string, unknown> }>>`
-            SELECT credentials FROM connector_config
+          tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
+            SELECT credentials_enc, credentials FROM connector_config
             WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid LIMIT 1
           `
         ).catch(() => [])
-        const credPayload = (creds[0]?.credentials ?? {}) as Record<string, unknown>
+        const credPayload = effectiveCredentials(creds[0])
         await opts.pub.publish('connector_registered', JSON.stringify({
           type: 'connector_registered',
           tenantId,

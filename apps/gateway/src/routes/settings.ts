@@ -68,14 +68,13 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       const apiKeyEnc = apiKey ? encryptJson(apiKey) : null
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO provider_config (tenant_id, provider, api_key, base_url, default_model, cheap_model, api_key_enc)
-          VALUES (${tenantId}::uuid, ${provider}, NULL, ${baseUrl ?? null}, ${defaultModel ?? null}, ${cheapModel ?? null}, ${apiKeyEnc ?? null})
+          INSERT INTO provider_config (tenant_id, provider, base_url, default_model, cheap_model, api_key_enc)
+          VALUES (${tenantId}::uuid, ${provider}, ${baseUrl ?? null}, ${defaultModel ?? null}, ${cheapModel ?? null}, ${apiKeyEnc ?? null})
           ON CONFLICT (tenant_id)
           DO UPDATE SET provider = ${provider},
             base_url = COALESCE(${baseUrl ?? null}, provider_config.base_url),
             default_model = COALESCE(${defaultModel ?? null}, provider_config.default_model),
             cheap_model = COALESCE(${cheapModel ?? null}, provider_config.cheap_model),
-            api_key = NULL,
             api_key_enc = COALESCE(${apiKeyEnc ?? null}, provider_config.api_key_enc),
             updated_at = NOW()
         `
@@ -152,15 +151,14 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       ).catch(() => [])
       const isNew = existing.length === 0
 
-      // Plaintext column is NOT NULL until migration S1.4 drops it — write an
-      // empty object (no secret) while the real value lives in credentials_enc.
+      // Credentials live only in credentials_enc — plaintext column dropped (S1.4).
       const credsEnc = encryptJson(credentials)
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO connector_config (tenant_id, connector_type, credentials, credentials_enc, enabled)
-          VALUES (${tenantId}::uuid, ${type}, '{}'::jsonb, ${credsEnc}, true)
+          INSERT INTO connector_config (tenant_id, connector_type, credentials_enc, enabled)
+          VALUES (${tenantId}::uuid, ${type}, ${credsEnc}, true)
           ON CONFLICT (tenant_id, connector_type)
-          DO UPDATE SET credentials = '{}'::jsonb, credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
+          DO UPDATE SET credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
         `
       )
 

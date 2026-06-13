@@ -367,14 +367,15 @@ test.describe('CERT I: UI — real data, no mock fallbacks', () => {
 
 test.describe('CERT J: secrets at rest', () => {
   test('J.1 no plaintext credential columns remain', async ({ request }) => {
+    // Dev-token user is admin; route is admin-only + dev-only. Success path required.
     const h = await authHeaders(request)
     const resp = await request.get(`${GATEWAY}/api/debug/at-rest-check`, { headers: h })
-    // 403 if not admin, 200 if admin with check result
-    expect(resp.status()).toBeOneOf([200, 403])
-    if (resp.status() === 200) {
-      const body = await resp.json() as { plaintextColumns: string[]; sampleEncPrefix: boolean }
-      expect(body.plaintextColumns, 'plaintext credential columns must be dropped').toHaveLength(0)
-      expect(body.sampleEncPrefix, 'credentials_enc must have v1: prefix').toBe(true)
-    }
+    expect(resp.status(), 'admin at-rest-check must return 200').toBe(200)
+    const body = await resp.json() as { plaintextColumns: string[]; sampleEncPrefix: boolean }
+    expect(
+      body.plaintextColumns,
+      `CERT FAIL: plaintext credential columns still present: ${body.plaintextColumns.join(', ')}`,
+    ).toHaveLength(0)
+    expect(body.sampleEncPrefix, 'credentials_enc must be encrypted (v1: prefix)').toBe(true)
   })
 })

@@ -37,6 +37,8 @@ export async function healthRoutes(app: FastifyInstance) {
   // Admin-only debug: at-rest secrets check
   app.get('/api/debug/at-rest-check', { preHandler: [app.authenticate] }, async (_request, reply) => {
   try {
+    // Debug routes must not exist in production — schema introspection leak.
+    if (process.env['NODE_ENV'] === 'production') return reply.code(404).send({ error: 'not found' })
     const user = _request.user as { role?: string }
     if (user.role !== 'admin') return reply.code(403).send({ error: 'admin required' })
     const { prisma } = await import('../db/client.js')

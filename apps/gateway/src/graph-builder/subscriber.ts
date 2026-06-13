@@ -13,6 +13,7 @@ import { LinearBootstrap } from '@anvay/connector-linear'
 import { KubernetesBootstrap } from '@anvay/connector-k8s'
 import { LokiBootstrap } from '@anvay/connector-loki'
 import { PrometheusBootstrap } from '@anvay/connector-prometheus'
+import { JiraBootstrap } from '@anvay/connector-jira'
 // Tier 2+3 — remaining 20 connector bootstraps registered as lazy imports below
 // (avoid build-time dependency on packages that may not have dist/ built)
 import type { TenantId } from '@anvay/types'
@@ -96,11 +97,12 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
   reg.set('prometheus', new PrometheusBootstrap(kg))
   reg.set('loki', new LokiBootstrap(kg))
   reg.set('k8s', new KubernetesBootstrap(kg))
+  reg.set('jira', new JiraBootstrap(kg))
   // Tier 2+3 — registered as no-op stubs (packages pending build)
   // As each connector package is built, replace NoopBootstrap with real import
   const pendingConnectors = [
     'pagerduty','grafana','circleci','confluence','coralogix','dynatrace',
-    'elastic','jenkins','jira','launchdarkly','newrelic','notion','opsgenie',
+    'elastic','jenkins','launchdarkly','newrelic','notion','opsgenie',
     'sentry','slack','snyk','sonarqube','terraform','vault','vercel',
   ]
   for (const name of pendingConnectors) {

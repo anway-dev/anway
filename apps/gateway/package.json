@@ -19,6 +19,7 @@
     "@anvay/connector-argocd": "workspace:*",
     "@anvay/connector-datadog": "workspace:*",
     "@anvay/connector-github": "workspace:*",
+    "@anvay/connector-jira": "workspace:*",
     "@anvay/connector-k8s": "workspace:*",
     "@anvay/connector-linear": "workspace:*",
     "@anvay/connector-loki": "workspace:*",

@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing/connector-conformance.js",
+      "types": "./dist/testing/connector-conformance.d.ts"
     }
   },
   "scripts": {

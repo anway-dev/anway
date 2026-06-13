@@ -70,6 +70,11 @@ export { GraphBuilderAgent } from './graph-builder/builder.js'
 export type { IConnectorBootstrap, ConnectorBootstrapResult } from './graph-builder/bootstrap.js'
 export type { IConnectorAgent, ConnectorTool } from './interfaces/connector-agent.js'
 
+// NOTE: the connector conformance harness (C0) is intentionally NOT exported here.
+// It imports `vitest` at module top-level; pulling it into the main barrel drags
+// vitest into every production import of @anvay/agent and crashes the gateway at
+// startup. Import it via the dedicated subpath instead: `@anvay/agent/testing`.
+
 // Agents
 export { SREAgent } from './agents/sre.js'
 export type { IncidentContext, TimelineEvent } from './agents/sre.js'

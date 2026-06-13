@@ -512,3 +512,29 @@ test.describe('CERT O: gate policy + auto-approve enforcement (P3)', () => {
     expect((await high.json() as { autoApproved: boolean }).autoApproved, 'high confidence must auto-approve under policy').toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+test.describe('CERT P: additional monitor types (P2)', () => {
+  test('P.1 incident_retrospective monitor is creatable + listed', async ({ request }) => {
+    const name = uniqueId('cert-retro')
+    const create = await request.post(`${GATEWAY}/api/automations/monitors`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { name, schedule: '0 0 * * 0', jobType: 'incident_retrospective' },
+    })
+    expect(create.status(), 'incident_retrospective monitor must be creatable').toBeLessThan(300)
+
+    const list = await request.get(`${GATEWAY}/api/automations/monitors`, { headers })
+    expect(list.status()).toBe(200)
+    const monitors = await list.json() as Array<{ name?: string; jobType?: string }>
+    expect(monitors.some(m => m.name === name && m.jobType === 'incident_retrospective'),
+      'created monitor must be listed with its jobType').toBe(true)
+  })
+
+  test('P.2 cloud_security_scan creatable (returns unconfigured without cloud connector)', async ({ request }) => {
+    const create = await request.post(`${GATEWAY}/api/automations/monitors`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { name: uniqueId('cert-cloudsec'), schedule: '0 * * * *', jobType: 'cloud_security_scan' },
+    })
+    expect(create.status(), 'cloud_security_scan monitor must be creatable').toBeLessThan(300)
+  })
+})

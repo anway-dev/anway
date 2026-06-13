@@ -207,9 +207,10 @@ export class GraphBuilderAgent {
     )
 
     // Extract service name from title + description (cheap model)
+    const sourceText = `${event.title} ${event.description}`
     let serviceName: string | null = null
     try {
-      serviceName = await this.extractServiceName(`${event.title} ${event.description}`, tenantId)
+      serviceName = await this.extractServiceName(sourceText, tenantId)
     } catch {
       // Best-effort — proceed without service resolution
     }
@@ -219,12 +220,13 @@ export class GraphBuilderAgent {
         { type: 'Service', name: serviceName },
         tenantId,
       )
+      const confidence = this.scoreServiceMatch(serviceName, sourceText)
       await this.kg.upsertRelationship(
         {
           fromEntityId: ticketId,
           relType: 'RELATES_TO',
           toEntityId: serviceId,
-          metadata: { confidence: 0.7 },
+          metadata: { confidence, unconfirmed: confidence < 0.7 },
         },
         tenantId,
       )
@@ -261,6 +263,16 @@ export class GraphBuilderAgent {
   }
 
   // -- helpers ---------------------------------------------------------------
+
+  /**
+   * Scores how confidently an extracted service name relates to its source text.
+   * Verbatim mention (name appears as a substring, case-insensitive) → 0.9.
+   * Model-inferred only (name not present in text) → 0.6.
+   * Callers store confidence < 0.7 with `unconfirmed: true` (per KB confidence policy).
+   */
+  private scoreServiceMatch(name: string, sourceText: string): number {
+    return sourceText.toLowerCase().includes(name.toLowerCase()) ? 0.9 : 0.6
+  }
 
   /**
    * Extracts a service/component name from free text using the cheap model.

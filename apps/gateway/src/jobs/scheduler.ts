@@ -2,7 +2,7 @@
 // node-cron removed per CLAUDE.md §11: no in-process cron in production.
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
-import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief } from './cron-monitors.js'
+import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief, CloudSecurityScan, CostAnomalyDetection, IncidentRetrospective } from './cron-monitors.js'
 import { SchedulerFactory } from '../scheduler/factory.js'
 import { runFreshnessDecay } from '../kb/freshness-daemon.js'
 import type { IScheduler } from '@anvay/agent'
@@ -48,6 +48,9 @@ export const MONITOR_IMPLS: Record<string, { new (): { run(tenantId: string): Pr
   slo_burn_check: SloBurnCheck,
   deploy_health_report: DeployHealthReport,
   oncall_morning_brief: OncallMorningBrief,
+  cloud_security_scan: CloudSecurityScan,
+  cost_anomaly_detection: CostAnomalyDetection,
+  incident_retrospective: IncidentRetrospective,
 }
 
 interface UserMonitorRow { id: string; tenant_id: string; name: string; schedule: string; job_type: string }

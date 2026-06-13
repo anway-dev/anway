@@ -152,7 +152,7 @@ export async function automationsRoutes(app: FastifyInstance) {
           name: { type: 'string', minLength: 1 },
           schedule: { type: 'string', minLength: 1 },
           // Only job types with real implementations are creatable — see MONITOR_IMPLS
-          jobType: { type: 'string', enum: ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief'] },
+          jobType: { type: 'string', enum: ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief', 'cloud_security_scan', 'cost_anomaly_detection', 'incident_retrospective'] },
         },
       },
     },

@@ -166,7 +166,7 @@ describe('GraphBuilderAgent', () => {
   })
 
   describe('handle(ticket_created)', () => {
-    it('upserts Ticket + RELATES_TO→Service with confidence 0.7', async () => {
+    it('upserts Ticket + RELATES_TO→Service relationship', async () => {
       await agent.handle(TICKET_EVENT)
 
       expect(kg.upsertEntity).toHaveBeenCalledWith(
@@ -174,12 +174,49 @@ describe('GraphBuilderAgent', () => {
         't-1' as TenantId,
       )
       expect(kg.upsertRelationship).toHaveBeenCalledWith(
-        expect.objectContaining({
-          relType: 'RELATES_TO',
-          metadata: expect.objectContaining({ confidence: 0.7 }),
-        }),
+        expect.objectContaining({ relType: 'RELATES_TO' }),
         't-1' as TenantId,
       )
+    })
+
+    it('scores confidence 0.9 / unconfirmed false when service name is mentioned verbatim', async () => {
+      // Model extracts "payments-api"; title contains it verbatim → high confidence
+      const verbatimEvent: TicketCreated = {
+        type: 'ticket_created',
+        tenantId: 't-1',
+        ticketId: 'LIN-2000',
+        title: 'payments-api checkout failing',
+        description: 'Users reporting 500 errors at checkout',
+        labels: ['bug'],
+      }
+      await agent.handle(verbatimEvent)
+
+      const relCall = (kg.upsertRelationship as unknown as ReturnType<typeof vi.fn>).mock.calls
+        .map((c) => c[0] as RelationshipSpec)
+        .find((r) => r.relType === 'RELATES_TO')
+      expect(relCall).toBeDefined()
+      expect(relCall?.metadata).toMatchObject({ confidence: 0.9, unconfirmed: false })
+    })
+
+    it('scores confidence 0.6 / unconfirmed true when extracted name is not in the text', async () => {
+      // Model infers "billing-svc" but it never appears in the ticket text → low confidence
+      const inferredModel = makeMockModel('billing-svc')
+      const inferringAgent = new GraphBuilderAgent(kg, inferredModel)
+      const inferredEvent: TicketCreated = {
+        type: 'ticket_created',
+        tenantId: 't-1',
+        ticketId: 'LIN-3000',
+        title: 'Checkout failing since deploy',
+        description: 'Users reporting 500 errors at checkout',
+        labels: ['bug'],
+      }
+      await inferringAgent.handle(inferredEvent)
+
+      const relCall = (kg.upsertRelationship as unknown as ReturnType<typeof vi.fn>).mock.calls
+        .map((c) => c[0] as RelationshipSpec)
+        .find((r) => r.relType === 'RELATES_TO')
+      expect(relCall).toBeDefined()
+      expect(relCall?.metadata).toMatchObject({ confidence: 0.6, unconfirmed: true })
     })
   })
 

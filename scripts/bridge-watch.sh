@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Watches BRIDGE.md for new CLAUDE [OPEN] entries and invokes opencode to reply.
 # Run once in a persistent terminal: bash scripts/bridge-watch.sh
-set -euo pipefail
+set -uo pipefail
 
 OPENCODE="/Users/raj/.opencode/bin/opencode"
 BRANCH="claude/claude-md-docs-k210H"
@@ -43,8 +43,13 @@ Execute it. When done:
 2. git add docs/BRIDGE.md && git commit -m 'bridge: Codex reply — <one line>' && git push
 3. Stop."
 
-      "$OPENCODE" run "$PROMPT"
-      echo "[bridge-watch] opencode run complete"
+      if "$OPENCODE" run "$PROMPT"; then
+        echo "[bridge-watch] opencode run complete"
+      else
+        echo "[bridge-watch] opencode exited non-zero — will retry on next commit"
+        # Reset cursor so next poll retries the same [OPEN] entry
+        rm -f "$CURSOR_FILE"
+      fi
     else
       echo "[bridge-watch] new commit $LATEST but no [OPEN] entries — cursor updated"
       echo "$LATEST" > "$CURSOR_FILE"

@@ -11,6 +11,17 @@ export function createLogger(context: { service: string; version?: string; env?:
       version: context.version ?? process.env.APP_VERSION ?? '0.0.1',
       env,
     },
+    // Strip secret-shaped fields from any logged object before it leaves the process
+    redact: {
+      paths: [
+        'req.headers.authorization',
+        'headers.authorization',
+        '*.apiKey', '*.api_key', '*.token', '*.secret', '*.password', '*.credentials',
+        'apiKey', 'api_key', 'token', 'secret', 'password', 'credentials',
+        'credentials_enc', 'api_key_enc',
+      ],
+      censor: '[REDACTED]',
+    },
     formatters: {
       level: (label) => ({ level: label }),
     },

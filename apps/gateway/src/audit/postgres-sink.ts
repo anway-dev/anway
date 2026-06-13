@@ -2,6 +2,7 @@ import type { AuditEvent, IAuditSink } from '@anvay/agent'
 import type { PrismaClient } from '@prisma/client'
 import { withTenant } from '../db/prisma.js'
 import { isValidUUID } from '../utils/validators.js'
+import { redactSecrets } from '../utils/redact.js'
 
 const isUUID = isValidUUID
 
@@ -29,7 +30,8 @@ export class PostgresAuditSink implements IAuditSink {
             })(),
             session_id: isUUID(event.sessionId) ? event.sessionId : null,
             event_type: event.eventType,
-            payload: event.payload as object,
+            // Redact secret-shaped keys before persisting — audit must never store raw creds
+            payload: redactSecrets(event.payload) as object,
             created_at: event.createdAt,
           },
         })

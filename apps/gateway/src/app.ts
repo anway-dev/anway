@@ -46,9 +46,10 @@ export async function buildApp() {
   await app.register(jwtPlugin)
   await app.register(requestLoggerPlugin)
 
-  // Global rate limit: 100 req/min per IP
+  // Global rate limit: 100 req/min per IP. Webhook ingestion (/api/events/*)
+  // bursts higher — Alertmanager/CI fan out — so allow 600/min there.
   await app.register(import('@fastify/rate-limit'), {
-    max: 100,
+    max: (req: { url: string }) => (req.url.startsWith('/api/events/') ? 600 : 100),
     timeWindow: '1 minute',
   })
 

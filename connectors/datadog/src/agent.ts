@@ -6,7 +6,7 @@ const DD_API = 'https://api.datadoghq.com'
 async function ddApi(path: string, creds: Record<string, unknown>, body?: Record<string, unknown>): Promise<unknown | null> {
   const apiKey = (creds as ConnectorCreds).apiKey
   const appKey = (creds as ConnectorCreds).app_key
-  if (!apiKey || !appKey) return null
+  if (typeof apiKey !== 'string' || typeof appKey !== 'string') return null
   try {
     const resp = await fetch(`${DD_API}${path}`, {
       method: body ? 'POST' : 'GET',

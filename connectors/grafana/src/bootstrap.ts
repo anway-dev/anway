@@ -28,24 +28,28 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
       // Upsert discovered services from datasources
       for (const ds of datasources) {
         await this.kg.upsertEntity({
-          id: `grafana-ds-${ds.uid}`, type: 'Service', name: ds.name, tenantId: _tenantId,
+          id: `grafana-ds-${ds.uid}`, type: 'Service', name: ds.name,
           metadata: { source: 'grafana', type: ds.type, externalId: ds.uid },
-        })
+        }, _tenantId)
       }
 
       // Record dashboards as knowledge entries
       for (const dash of dashboards) {
         await this.kg.addEpisode({
-          type: 'grafana_dashboard', tenantId: _tenantId, title: dash.title,
-          payload: { uid: dash.uid }, at: new Date(),
+          text: `Grafana dashboard: ${dash.title} (uid: ${dash.uid})`,
+          source: 'grafana',
+          timestamp: new Date(),
+          tenantId: _tenantId,
         })
       }
 
       // Record alert rules
       for (const rule of alertRules) {
         await this.kg.addEpisode({
-          type: 'grafana_alert_rule', tenantId: _tenantId, title: rule.title,
-          payload: { uid: rule.uid, labels: rule.labels }, at: new Date(),
+          text: `Grafana alert rule: ${rule.title} (uid: ${rule.uid}, labels: ${JSON.stringify(rule.labels)})`,
+          source: 'grafana',
+          timestamp: new Date(),
+          tenantId: _tenantId,
         })
       }
 

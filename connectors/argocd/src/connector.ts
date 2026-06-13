@@ -54,7 +54,7 @@ export class ArgoCDConnector implements IConnector {
   }
 
   async write(action: ConnectorAction): Promise<ConnectorResult> {
-    const appName = action.params?.['app'] as string
+    const appName = ((action as Record<string, unknown>)['params'] as Record<string, string> | undefined)?.['app']
     if (!appName) { return { source: 'argocd', fetched_at: new Date(), ttl: 60, freshness_score: 1.0, data: { error: 'app name required' } } }
     if (action.type === 'syncApp') {
       await this.runCli('argocd', ['app', 'sync', appName])

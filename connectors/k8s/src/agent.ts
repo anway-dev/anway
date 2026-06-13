@@ -3,7 +3,7 @@ import type { ConnectorCreds } from '@anvay/types'
 import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
 
 function kubectl(args: string[], creds: Record<string, unknown>): { stdout: string; status: number | null } {
-  const kubeconfig = (creds as ConnectorCreds).kubeconfig
+  const kubeconfig = typeof (creds as ConnectorCreds).kubeconfig === 'string' ? (creds as ConnectorCreds).kubeconfig as string : undefined
   const fullArgs = kubeconfig ? ['--kubeconfig', kubeconfig, ...args] : args
   const result = spawnSync('kubectl', fullArgs, { encoding: 'utf-8', timeout: 15_000 })
   return { stdout: result.stdout ?? '', status: result.status }

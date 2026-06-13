@@ -5,7 +5,7 @@ import type { PRD } from '@anvay/agent'
 import { TenantId } from '@anvay/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
-import { providerConfigFromEnv } from './chat.js'
+import { providerConfigFromEnv, resolveProviderConfig } from './chat.js'
 import { decryptJson } from '../utils/crypto.js'
 
 const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
@@ -29,8 +29,8 @@ export async function lifecycleRoutes(app: FastifyInstance) {
         cheapModel: r.cheap_model || undefined,
       })
     }
-    // Env fallback for dev
-    const envConfig = providerConfigFromEnv('deepseek') ?? providerConfigFromEnv('anthropic')
+    // Env fallback for dev — same provider ordering as chat.ts
+    const envConfig = resolveProviderConfig()
     if (envConfig) return ProviderFactory.create(envConfig)
     return null
   }
@@ -43,18 +43,20 @@ export async function lifecycleRoutes(app: FastifyInstance) {
       const { featureRequest } = request.body
       if (!featureRequest) return reply.code(400).send({ error: 'featureRequest required' })
 
-      let provider = await getProvider(tenantId)
-      if (!provider) {
-        const fallback = providerConfigFromEnv('deepseek') ?? providerConfigFromEnv('anthropic')
-        if (fallback) provider = ProviderFactory.create(fallback)
-      }
+      const provider = await getProvider(tenantId)
       if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
 
       const kg: IKnowledgeGraph = new StructuralGraph(
         (sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
       )
       const agent = new ProductAgent(provider, provider, kg)
-      const prd = await agent.writePRD(featureRequest, TenantId(tenantId))
+      let prd: PRD
+      try {
+        prd = await agent.writePRD(featureRequest, TenantId(tenantId))
+      } catch (err) {
+        request.log.error({ err }, 'writePRD failed')
+        return reply.code(502).send({ error: 'LLM provider returned an error' })
+      }
       const title = prd.title || featureRequest
 
       const rows = await withTenant(prisma, tenantId, (tx) =>
@@ -98,11 +100,7 @@ export async function lifecycleRoutes(app: FastifyInstance) {
       ).catch(() => [])
       if (prdRows.length === 0) return reply.code(404).send({ error: 'Approved PRD not found' })
 
-      let provider = await getProvider(tenantId)
-      if (!provider) {
-        const fallback = providerConfigFromEnv('deepseek') ?? providerConfigFromEnv('anthropic')
-        if (fallback) provider = ProviderFactory.create(fallback)
-      }
+      const provider = await getProvider(tenantId)
       if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
 
       const prd = prdRows[0]!.content as unknown as PRD
@@ -110,7 +108,13 @@ export async function lifecycleRoutes(app: FastifyInstance) {
         (sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
       )
       const agent = new TechSpecAgent(provider, provider, kg)
-      const techspec = await agent.writeTechSpec(prd, TenantId(tenantId))
+      let techspec: { title: string }
+      try {
+        techspec = await agent.writeTechSpec(prd, TenantId(tenantId))
+      } catch (err) {
+        request.log.error({ err }, 'writeTechSpec failed')
+        return reply.code(502).send({ error: 'LLM provider returned an error' })
+      }
 
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`

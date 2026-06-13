@@ -103,8 +103,8 @@ function mapTools(tools: ToolDefinition[]): OpenAICompatTool[] {
 }
 
 export class OllamaProvider implements IModelProvider {
-  get modelId(): string { return this.config.defaultModel ?? 'llama3.2' }
-  get cheapModelId(): string { return this.config.cheapModel ?? 'llama3.2' }
+  get modelId(): string { return this.config.defaultModel ?? DEFAULT_MODEL }
+  get cheapModelId(): string { return this.config.cheapModel ?? this.modelId }
 
   private readonly baseURL: string
 

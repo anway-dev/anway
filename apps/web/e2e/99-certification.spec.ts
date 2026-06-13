@@ -565,7 +565,7 @@ test.describe('CERT Q: audit export', () => {
 
 test.describe('CERT R: lifecycle', () => {
   test('P4 lifecycle: PRD → approve → TechSpec', async ({ request }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(180_000)
     const h = await authHeaders(request)
     const featureRequest = 'add CSV export to the audit log'
 

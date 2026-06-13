@@ -113,7 +113,7 @@ export class GitHubBootstrap implements IConnectorBootstrap {
         entitiesUpserted++
         // Find the first team and create Engineer→MEMBER_OF→Team
         if (teamSet.size > 0) {
-          const firstTeam = teamSet.values().next().value
+          const firstTeam = teamSet.values().next().value!
           // Lookup team entity id — reuse team upsert from above
           const teamId = await this.kg.upsertEntity({
             type: 'Team',

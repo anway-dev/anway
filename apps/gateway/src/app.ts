@@ -19,6 +19,7 @@ import { eventRoutes } from './routes/events.js'
 import { alertRoutes } from './routes/alerts.js'
 import { auditRoutes } from './routes/audit.js'
 import { accessRoutes } from './routes/access.js'
+import { lifecycleRoutes } from './routes/lifecycle.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'

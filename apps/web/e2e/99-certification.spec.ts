@@ -562,3 +562,45 @@ test.describe('CERT Q: audit export', () => {
     ).toBe(true)
   })
 })
+
+test.describe('CERT R: lifecycle', () => {
+  test('P4 lifecycle: PRD → approve → TechSpec', async ({ request }) => {
+    test.setTimeout(60_000)
+    const h = await authHeaders(request)
+    const featureRequest = 'add CSV export to the audit log'
+
+    // Create PRD
+    const prdResp = await request.post(`${GATEWAY}/api/lifecycle/prd`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { featureRequest },
+    })
+    expect([200, 503]).toContain(prdResp.status())
+    if (prdResp.status() === 503) {
+      console.log('CERT R: lifecycle skipped — no LLM provider configured')
+      return
+    }
+    const { id, prd } = await prdResp.json() as { id: string; prd: { title: string } }
+    expect(id).toBeTruthy()
+    expect(prd).toBeTruthy()
+
+    // Approve
+    const approveResp = await request.post(`${GATEWAY}/api/lifecycle/prd/${id}/approve`, { headers: h })
+    expect(approveResp.status()).toBe(200)
+
+    // Create TechSpec
+    const tsResp = await request.post(`${GATEWAY}/api/lifecycle/techspec`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { prdId: id },
+    })
+    expect(tsResp.status()).toBe(200)
+    const { id: tsId, techspec } = await tsResp.json() as { id: string; techspec: { title: string } }
+    expect(tsId).toBeTruthy()
+    expect(techspec).toBeTruthy()
+
+    // List artifacts
+    const listResp = await request.get(`${GATEWAY}/api/lifecycle/artifacts`, { headers: h })
+    const artifacts = await listResp.json() as Array<{ id: string; kind: string }>
+    expect(artifacts.some((a: { id: string }) => a.id === id)).toBe(true)
+    expect(artifacts.some((a: { id: string }) => a.id === tsId)).toBe(true)
+  })
+})

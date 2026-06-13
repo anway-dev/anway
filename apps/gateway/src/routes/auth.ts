@@ -81,7 +81,7 @@ export async function authRoutes(app: FastifyInstance) {
   // Dev-only: returns a signed JWT + upserts dev tenant/user — no auth required
   // Only available when NODE_ENV=development
   app.get('/api/auth/dev-token', async (request, reply) => {
-    if (process.env.NODE_ENV !== 'development') {
+    if (process.env.NODE_ENV !== 'development' || process.env['ALLOW_DEV_TOKEN'] !== 'true') {
       return reply.code(404).send({ error: 'not found' })
     }
 

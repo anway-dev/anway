@@ -5,7 +5,7 @@ startTelemetry()
 
 import { buildApp } from './app.js'
 import { initMetrics } from './metrics.js'
-import { validateEnv } from './config/env.js'
+import { validateEnv, assertSecureJwtSecret } from './config/env.js'
 import { assertEncryptionKey } from './utils/crypto.js'
 import pino from 'pino'
 import { startTriggerSubscriber } from './triggers/subscriber.js'
@@ -21,6 +21,7 @@ const bootstrapLog = pino({ level: 'info' })
 async function main() {
   // Validate environment before any other setup
   const env = validateEnv()
+  assertSecureJwtSecret()
   assertEncryptionKey()
   const port = env.PORT
   const host = env.HOST

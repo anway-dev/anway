@@ -33,3 +33,11 @@ export function validateEnv(): Env {
   }
   return result.data
 }
+
+export function assertSecureJwtSecret(): void {
+  if (process.env['NODE_ENV'] !== 'production') return
+  const secret = process.env['JWT_SECRET']
+  if (!secret || secret === 'dev-secret-change-in-production' || secret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters in production (not the dev default)')
+  }
+}

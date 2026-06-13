@@ -46,6 +46,12 @@ export async function buildApp() {
   await app.register(jwtPlugin)
   await app.register(requestLoggerPlugin)
 
+  // Global rate limit: 100 req/min per IP
+  await app.register(import('@fastify/rate-limit'), {
+    max: 100,
+    timeWindow: '1 minute',
+  })
+
   await app.register(healthRoutes)
   await app.register(metricsRoutes)
   await app.register(authRoutes)

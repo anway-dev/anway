@@ -309,6 +309,21 @@ export async function chatRoutes(app: FastifyInstance) {
       }
     })
 
+    // Load user-specific perimeter overrides from DB
+    const userPerimeterRows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ connector_name: string; read_scopes: string[]; write_scopes: string[] }[]>`
+        SELECT connector_name, read_scopes, write_scopes FROM user_perimeters
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
+      `
+    ).catch(() => [])
+    for (const row of userPerimeterRows) {
+      const scope = connectorScopes.find(s => s.connectorId === row.connector_name)
+      if (scope) {
+        if (row.read_scopes.length > 0) scope.read = row.read_scopes
+        if (row.write_scopes.length > 0) scope.write = row.write_scopes
+      }
+    }
+
     const userPerimeter: UserPerimeter = {
       userId: UserId(userId),
       connectors: connectorScopes,

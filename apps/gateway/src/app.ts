@@ -17,6 +17,7 @@ import { settingsRoutes } from './routes/settings.js'
 import { eventRoutes } from './routes/events.js'
 import { alertRoutes } from './routes/alerts.js'
 import { auditRoutes } from './routes/audit.js'
+import { accessRoutes } from './routes/access.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -67,6 +68,7 @@ export async function buildApp() {
   await app.register(gateDecideRoutes)
   await app.register(alertRoutes)
   await app.register(auditRoutes)
+  await app.register(accessRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

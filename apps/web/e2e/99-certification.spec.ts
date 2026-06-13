@@ -379,3 +379,24 @@ test.describe('CERT J: secrets at rest', () => {
     expect(body.sampleEncPrefix, 'credentials_enc must be encrypted (v1: prefix)').toBe(true)
   })
 })
+
+test.describe('CERT K: per-user perimeter enforcement', () => {
+  test('K.1 PUT user perimeter restricts write scope', async ({ request }) => {
+    const h = await authHeaders(request)
+    const DEMO_USER = '00000000-0000-0000-0000-000000000002'
+    // Restrict prometheus write to empty
+    const putResp = await request.put(`${GATEWAY}/api/access/users/${DEMO_USER}/perimeter`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { perimeter: [{ connectorName: 'prometheus', readScopes: ['*'], writeScopes: [] }] },
+    })
+    expect(putResp.status()).toBe(200)
+
+    // Verify GET reflects the change
+    const getResp = await request.get(`${GATEWAY}/api/access/users/${DEMO_USER}/perimeter`, { headers: h })
+    expect(getResp.status()).toBe(200)
+    const perims = await getResp.json() as Array<{ connectorName: string; readScopes: string[]; writeScopes: string[] }>
+    const prom = perims.find(p => p.connectorName === 'prometheus')
+    expect(prom).toBeTruthy()
+    expect(prom!.writeScopes).toHaveLength(0)
+  })
+})

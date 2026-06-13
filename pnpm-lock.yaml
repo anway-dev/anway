@@ -32,6 +32,9 @@ importers:
       '@anvay/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
+      '@anvay/connector-jenkins':
+        specifier: workspace:*
+        version: link:../../connectors/jenkins
       '@anvay/connector-jira':
         specifier: workspace:*
         version: link:../../connectors/jira
@@ -44,9 +47,18 @@ importers:
       '@anvay/connector-loki':
         specifier: workspace:*
         version: link:../../connectors/loki
+      '@anvay/connector-pagerduty':
+        specifier: workspace:*
+        version: link:../../connectors/pagerduty
       '@anvay/connector-prometheus':
         specifier: workspace:*
         version: link:../../connectors/prometheus
+      '@anvay/connector-sentry':
+        specifier: workspace:*
+        version: link:../../connectors/sentry
+      '@anvay/connector-slack':
+        specifier: workspace:*
+        version: link:../../connectors/slack
       '@anvay/mcp-adapter':
         specifier: workspace:*
         version: link:../../packages/mcp-adapter

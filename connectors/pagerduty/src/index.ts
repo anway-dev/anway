@@ -1,1 +1,1 @@
-export { PagerDutyBootstrap } from './bootstrap.js'
+export { PagerdutyBootstrap } from './bootstrap.js'

@@ -574,11 +574,7 @@ test.describe('CERT R: lifecycle', () => {
       headers: { ...h, 'Content-Type': 'application/json' },
       data: { featureRequest },
     })
-    expect([200, 503]).toContain(prdResp.status())
-    if (prdResp.status() === 503) {
-      console.log('CERT R: lifecycle skipped — no LLM provider configured')
-      return
-    }
+    expect(prdResp.status()).toBe(200)
     const { id, prd } = await prdResp.json() as { id: string; prd: { title: string } }
     expect(id).toBeTruthy()
     expect(prd).toBeTruthy()

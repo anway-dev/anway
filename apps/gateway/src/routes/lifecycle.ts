@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { ProviderFactory, ProductAgent, TechSpecAgent, StructuralGraph } from '@anvay/agent'
 import type { ProviderConfig, IKnowledgeGraph } from '@anvay/agent'
+import type { PRD } from '@anvay/agent'
+import { TenantId } from '@anvay/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
@@ -44,7 +46,7 @@ export async function lifecycleRoutes(app: FastifyInstance) {
         (sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
       )
       const agent = new ProductAgent(provider, provider, kg)
-      const prd = await agent.writePRD(featureRequest, tenantId as unknown as 'TenantId')
+      const prd = await agent.writePRD(featureRequest, TenantId(tenantId))
       const title = prd.title || featureRequest
 
       const rows = await withTenant(prisma, tenantId, (tx) =>
@@ -91,12 +93,12 @@ export async function lifecycleRoutes(app: FastifyInstance) {
       const provider = await getProvider(tenantId)
       if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
 
-      const prd = prdRows[0]!.content as unknown as { title: string; problem: string; goals: string[]; nonGoals: string[]; userStories: unknown[]; successMetrics: string[]; openQuestions: string[] }
+      const prd = prdRows[0]!.content as unknown as PRD
       const kg: IKnowledgeGraph = new StructuralGraph(
         (sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
       )
       const agent = new TechSpecAgent(provider, provider, kg)
-      const techspec = await agent.writeTechSpec(prd, tenantId as unknown as 'TenantId')
+      const techspec = await agent.writeTechSpec(prd, TenantId(tenantId))
 
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`

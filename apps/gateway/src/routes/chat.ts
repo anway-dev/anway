@@ -96,10 +96,10 @@ export function providerConfigFromEnv(type: string): ProviderConfig | null {
     return { type: 'mistral', apiKey: process.env['MISTRAL_API_KEY'] }
   }
   if (type === 'ollama' && process.env['OLLAMA_ENDPOINT']) {
-    return { type: 'ollama', baseURL: process.env['OLLAMA_ENDPOINT'] }
+    return { type: 'ollama', baseURL: process.env['OLLAMA_ENDPOINT'], defaultModel: process.env['OLLAMA_DEFAULT_MODEL'] }
   }
   if (type === 'lmstudio' && process.env['LMSTUDIO_ENDPOINT']) {
-    return { type: 'lmstudio', baseURL: process.env['LMSTUDIO_ENDPOINT'] }
+    return { type: 'lmstudio', baseURL: process.env['LMSTUDIO_ENDPOINT'], defaultModel: process.env['LMSTUDIO_DEFAULT_MODEL'] }
   }
   if (type === 'deepseek' && process.env['DEEPSEEK_API_KEY']) {
     return { type: 'deepseek', apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com' }

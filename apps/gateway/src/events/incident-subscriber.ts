@@ -34,11 +34,13 @@ async function resolveProviderConfig(tenantId: string): Promise<ProviderConfig |
       }
     }
   } catch { /* fall through to env vars */ }
-  // Env var fallback
+  // Env var fallback (keyed providers first, then keyless local)
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
   if (process.env['OPENAI_API_KEY']) return { type: 'openai', apiKey: process.env['OPENAI_API_KEY'] }
   if (process.env['GROQ_API_KEY']) return { type: 'groq', apiKey: process.env['GROQ_API_KEY'] }
   if (process.env['MISTRAL_API_KEY']) return { type: 'mistral', apiKey: process.env['MISTRAL_API_KEY'] }
+  if (process.env['OLLAMA_ENDPOINT']) return { type: 'ollama', baseURL: process.env['OLLAMA_ENDPOINT'] }
+  if (process.env['LMSTUDIO_ENDPOINT']) return { type: 'lmstudio', baseURL: process.env['LMSTUDIO_ENDPOINT'] }
   return null
 }
 

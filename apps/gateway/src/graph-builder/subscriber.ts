@@ -80,6 +80,9 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic' as const, apiKey: process.env['ANTHROPIC_API_KEY']! }
   if (process.env['OPENAI_API_KEY']) return { type: 'openai' as const, apiKey: process.env['OPENAI_API_KEY']! }
   if (process.env['GROQ_API_KEY']) return { type: 'groq' as const, apiKey: process.env['GROQ_API_KEY']! }
+  if (process.env['MISTRAL_API_KEY']) return { type: 'mistral' as const, apiKey: process.env['MISTRAL_API_KEY']! }
+  if (process.env['OLLAMA_ENDPOINT']) return { type: 'ollama' as const, baseURL: process.env['OLLAMA_ENDPOINT']! }
+  if (process.env['LMSTUDIO_ENDPOINT']) return { type: 'lmstudio' as const, baseURL: process.env['LMSTUDIO_ENDPOINT']! }
   return null
 }
 

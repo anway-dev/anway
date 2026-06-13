@@ -100,8 +100,35 @@ services:
     ports: ["2375:2375"]
     networks: [demo]
 
+  # Local LLM — no API key needed for demo/dev
+  # Model: llama3.2:3b (tool calling, ~2 GB). Override with OLLAMA_MODEL env var.
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes:
+      - ollama-data:/root/.ollama
+    networks: [demo]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # Pull model on first start (idempotent — skips if already cached in volume)
+  ollama-init:
+    image: curlimages/curl:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks: [demo]
+    entrypoint: >
+      sh -c "curl -sf http://ollama:11434/api/pull
+             -d '{\"name\":\"${OLLAMA_MODEL:-llama3.2:3b}\",\"stream\":false}'"
+    restart: "no"
+
 volumes:
   gitea-data:
+  ollama-data:
 
 networks:
   demo:

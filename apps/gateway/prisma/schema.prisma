@@ -97,7 +97,6 @@ model Connector {
   name                String
   type                String
   mode                ConnectorMode @default(read)
-  config_encrypted    Json          @default("{}")
   config_enc          String?
   capability_manifest Json          @default("{}")
   created_at          DateTime      @default(now()) @db.Timestamptz

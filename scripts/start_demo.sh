@@ -140,6 +140,21 @@ until curl -sf http://localhost:9090/-/ready > /dev/null 2>&1; do
   sleep 1
 done
 
+# Wait for Ollama (then pull model in background — large download)
+log "Waiting for Ollama..."
+TRIES=0
+until curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; do
+  TRIES=$((TRIES + 1))
+  [ $TRIES -ge 60 ] && { warn "Ollama not ready after 60s — LLM features may be unavailable"; break; }
+  sleep 2
+done
+if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
+  OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}"
+  log "Ollama ready — ensuring model ${OLLAMA_MODEL} is available (pulls if not cached)..."
+  curl -sf http://localhost:11434/api/pull -d "{\"name\":\"${OLLAMA_MODEL}\",\"stream\":false}" > /dev/null 2>&1 &
+  log "  Model pull running in background — chat may be slow until complete"
+fi
+
 # ── Env file ──
 cp -n apps/gateway/.env.example apps/gateway/.env 2>/dev/null || true
 log "apps/gateway/.env initialized from example (existing file preserved)"
@@ -242,6 +257,7 @@ check_service "Web      :3000"  "curl -sf http://localhost:3000"
 check_service "Postgres"       "docker exec infra-postgres-1 pg_isready -U anvay"
 check_service "Prometheus"     "curl -sf http://localhost:9090/-/ready"
 check_service "Loki"           "curl -sf http://localhost:3100/ready"
+check_service "Ollama   :11434" "curl -sf http://localhost:11434/api/tags"
 echo ""
 echo "  Logs:  tail -f /tmp/anvay-gateway.log"
 echo "         tail -f /tmp/anvay-web.log"

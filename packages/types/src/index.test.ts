@@ -93,7 +93,7 @@ describe('AppError', () => {
 })
 
 describe('ErrorCode', () => {
-  it('contains all 8 required codes', () => {
+  it('contains all 9 required codes', () => {
     const codes = Object.values(ErrorCode)
     expect(codes).toContain('UNAUTHORIZED')
     expect(codes).toContain('FORBIDDEN')
@@ -103,7 +103,8 @@ describe('ErrorCode', () => {
     expect(codes).toContain('RATE_LIMITED')
     expect(codes).toContain('TOKEN_LIMIT_EXCEEDED')
     expect(codes).toContain('INTENT_CLASSIFICATION_FAILED')
-    expect(codes).toHaveLength(8)
+    expect(codes).toContain('GRAPH_CONTEXT_FAILED')
+    expect(codes).toHaveLength(9)
   })
 })
 

@@ -151,13 +151,15 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       ).catch(() => [])
       const isNew = existing.length === 0
 
+      // Plaintext column is NOT NULL until migration S1.4 drops it — write an
+      // empty object (no secret) while the real value lives in credentials_enc.
       const credsEnc = encryptJson(credentials)
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
           INSERT INTO connector_config (tenant_id, connector_type, credentials, credentials_enc, enabled)
-          VALUES (${tenantId}::uuid, ${type}, NULL, ${credsEnc}, true)
+          VALUES (${tenantId}::uuid, ${type}, '{}'::jsonb, ${credsEnc}, true)
           ON CONFLICT (tenant_id, connector_type)
-          DO UPDATE SET credentials = NULL, credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
+          DO UPDATE SET credentials = '{}'::jsonb, credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
         `
       )
 

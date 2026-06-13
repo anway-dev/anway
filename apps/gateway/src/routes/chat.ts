@@ -115,15 +115,15 @@ async function providerConfigForTenant(
   client: PrismaClient,
 ): Promise<ProviderConfig | null> {
   const row = await withTenant(client, tenantId, (tx) =>
-    tx.$queryRaw<{ provider: string; api_key: string | null; api_key_enc: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }[]>`
-      SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
+    tx.$queryRaw<{ provider: string; api_key_enc: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }[]>`
+      SELECT provider, api_key_enc, base_url, default_model, cheap_model FROM provider_config WHERE tenant_id = ${tenantId}::uuid
     `
   ).catch(() => [])
-  if (row.length > 0 && (row[0]!.api_key || row[0]!.api_key_enc || KEYLESS_PROVIDERS.has(row[0]!.provider))) {
+  if (row.length > 0 && (row[0]!.api_key_enc || KEYLESS_PROVIDERS.has(row[0]!.provider))) {
     const r = row[0]!
     return {
       type: r.provider as ProviderConfig['type'],
-      apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key ?? undefined),
+      apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : undefined,
       ...(r.base_url ? { baseURL: r.base_url } : {}),
       ...(r.default_model ? { defaultModel: r.default_model } : {}),
       ...(r.cheap_model ? { cheapModel: r.cheap_model } : {}),

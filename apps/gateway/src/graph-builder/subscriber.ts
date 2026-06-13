@@ -59,17 +59,17 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   if (tenantId) {
     try {
       const rows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ provider: string; api_key: string; api_key_enc: string; base_url: string; default_model: string; cheap_model: string }>>`
-          SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model
+        tx.$queryRaw<Array<{ provider: string; api_key_enc: string; base_url: string; default_model: string; cheap_model: string }>>`
+          SELECT provider, api_key_enc, base_url, default_model, cheap_model
           FROM provider_config WHERE tenant_id = ${tenantId}::uuid
         `
       )
       const KEYLESS = new Set(['ollama', 'lmstudio'])
-      if (rows.length > 0 && (rows[0]!.api_key || rows[0]!.api_key_enc || KEYLESS.has(rows[0]!.provider))) {
+      if (rows.length > 0 && (rows[0]!.api_key_enc || KEYLESS.has(rows[0]!.provider))) {
         const r = rows[0]!
         return {
           type: r.provider as ProviderConfig['type'],
-          apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key || undefined),
+          apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : undefined,
           baseURL: r.base_url || undefined,
           defaultModel: r.default_model || undefined,
           cheapModel: r.cheap_model || undefined,

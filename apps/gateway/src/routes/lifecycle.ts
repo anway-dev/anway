@@ -11,24 +11,19 @@ import { decryptJson } from '../utils/crypto.js'
 const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
 
 export async function lifecycleRoutes(app: FastifyInstance) {
-  app.get('/api/lifecycle/debug', async (_req) => {
-    const envKeys = ['DEEPSEEK_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY'].filter(k => !!process.env[k])
-    return { envKeys, deepseek_exists: !!process.env['DEEPSEEK_API_KEY'], fn_exists: typeof providerConfigFromEnv === 'function' }
-  })
-
   async function getProvider(tenantId: string) {
-    // DB-first, env fallback — same pattern as chat.ts
+    // DB-first (api_key_enc only — plaintext api_key dropped in S1.4), env fallback.
     const row = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ provider: string; api_key_enc: string | null; api_key: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }>>`
-        SELECT provider, api_key_enc, api_key, base_url, default_model, cheap_model
+      tx.$queryRaw<Array<{ provider: string; api_key_enc: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }>>`
+        SELECT provider, api_key_enc, base_url, default_model, cheap_model
         FROM provider_config WHERE tenant_id = ${tenantId}::uuid
       `
     ).catch(() => [])
-    if (row.length > 0 && (row[0]!.api_key_enc || row[0]!.api_key || KEYLESS_PROVIDERS.has(row[0]!.provider))) {
+    if (row.length > 0 && (row[0]!.api_key_enc || KEYLESS_PROVIDERS.has(row[0]!.provider))) {
       const r = row[0]!
       return ProviderFactory.create({
         type: r.provider as ProviderConfig['type'],
-        apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key ?? undefined),
+        apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : undefined,
         baseURL: r.base_url || undefined,
         defaultModel: r.default_model || undefined,
         cheapModel: r.cheap_model || undefined,

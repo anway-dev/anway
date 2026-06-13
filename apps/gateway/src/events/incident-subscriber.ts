@@ -17,13 +17,13 @@ const log = pino({ name: 'incident-subscriber' })
 async function resolveProviderConfig(tenantId: string): Promise<ProviderConfig | null> {
   try {
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ provider: string; api_key: string | null; api_key_enc: string | null; base_url: string; default_model: string; cheap_model: string }>>`
-        SELECT provider, api_key, api_key_enc, base_url, default_model, cheap_model
+      tx.$queryRaw<Array<{ provider: string; api_key_enc: string | null; base_url: string; default_model: string; cheap_model: string }>>`
+        SELECT provider, api_key_enc, base_url, default_model, cheap_model
         FROM provider_config WHERE tenant_id = ${tenantId}::uuid
       `
     )
     const KEYLESS = new Set(['ollama', 'lmstudio'])
-    if (rows.length > 0 && (rows[0]!.api_key || rows[0]!.api_key_enc || KEYLESS.has(rows[0]!.provider))) {
+    if (rows.length > 0 && (rows[0]!.api_key_enc || KEYLESS.has(rows[0]!.provider))) {
       const r = rows[0]!
       return {
         type: r.provider as ProviderConfig['type'],

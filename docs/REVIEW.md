@@ -10763,3 +10763,27 @@ Condition is `row[0].api_key || KEYLESS_PROVIDERS.has(provider)` but settings.ts
 Executor posted `[CLOSED]` directly with failing acceptance. Lifecycle is: executor flips to `[ANSWERED]`, Claude verifies and closes. Never close your own entry.
 
 <!-- REVIEW SECTION END — 2026-06-12g -->
+
+<!-- REVIEW SECTION START — 2026-06-13a (S1.1-S1.3 closure, direct-fix mandate) -->
+
+## S1.1–S1.3 — CLOSED (commits 907bf30 + d5bc52b)
+
+All 4 BLOCKING from 2026-06-12g resolved (executor fixed B2/B3/B4 + applied migration; Claude completed under direct-fix mandate):
+- B1 migration applied (`credentials_enc`/`config_enc`/`api_key_enc` exist).
+- B2 chat.ts guard includes `api_key_enc`; dead line removed.
+- B3 crypto.test.ts 7/7 (beforeEach sets key).
+- B4 graph-events.ts `tenantProviderFor` enc-first.
+
+Additional defects found + fixed during verification:
+- connector_config.credentials is NOT NULL — settings.ts wrote NULL → 500 on every connector register (cert D.1 failed). Now writes `'{}'::jsonb`.
+- Backfill script: wrong import paths (`../db` → `../apps/gateway/src/db`); left plaintext after encrypting. Now nulls plaintext + cleanup pass for already-encrypted rows.
+- packages/types ErrorCode test stale (asserted 8, source has 9) — blocked `pnpm -r test`.
+
+Acceptance (all green):
+- `pnpm -r test` ✓ (33 suites, incl crypto 7/7, perimeter builtin tests)
+- gateway `tsc --noEmit` ✓
+- `./scripts/certify.sh` → CERTIFIED 27/27
+- Plaintext at rest: 0 rows with plaintext secret (provider api_key NULL, connector credentials `{}`, enc = `v1:` blobs, no `9090` substring)
+- Provider regression: chat streams from DB-encrypted deepseek provider (env fallback not used)
+
+<!-- REVIEW SECTION END — 2026-06-13a -->

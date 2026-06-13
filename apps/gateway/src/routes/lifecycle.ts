@@ -5,21 +5,27 @@ import type { PRD } from '@anvay/agent'
 import { TenantId } from '@anvay/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { providerConfigFromEnv } from './chat.js'
 import { decryptJson } from '../utils/crypto.js'
 
 const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
 
 export async function lifecycleRoutes(app: FastifyInstance) {
+  app.get('/api/lifecycle/debug', async (_req) => {
+    const envKeys = ['DEEPSEEK_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY'].filter(k => !!process.env[k])
+    return { envKeys, deepseek_exists: !!process.env['DEEPSEEK_API_KEY'], fn_exists: typeof providerConfigFromEnv === 'function' }
+  })
+
   async function getProvider(tenantId: string) {
-    const rows = await withTenant(prisma, tenantId, (tx) =>
+    // DB-first, env fallback — same pattern as chat.ts
+    const row = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ provider: string; api_key_enc: string | null; api_key: string | null; base_url: string | null; default_model: string | null; cheap_model: string | null }>>`
         SELECT provider, api_key_enc, api_key, base_url, default_model, cheap_model
         FROM provider_config WHERE tenant_id = ${tenantId}::uuid
       `
     ).catch(() => [])
-
-    if (rows.length > 0 && (rows[0]!.api_key_enc || rows[0]!.api_key || KEYLESS_PROVIDERS.has(rows[0]!.provider))) {
-      const r = rows[0]!
+    if (row.length > 0 && (row[0]!.api_key_enc || row[0]!.api_key || KEYLESS_PROVIDERS.has(row[0]!.provider))) {
+      const r = row[0]!
       return ProviderFactory.create({
         type: r.provider as ProviderConfig['type'],
         apiKey: r.api_key_enc ? decryptJson<string>(r.api_key_enc) : (r.api_key ?? undefined),
@@ -28,6 +34,9 @@ export async function lifecycleRoutes(app: FastifyInstance) {
         cheapModel: r.cheap_model || undefined,
       })
     }
+    // Env fallback for dev
+    const envConfig = providerConfigFromEnv('deepseek') ?? providerConfigFromEnv('anthropic')
+    if (envConfig) return ProviderFactory.create(envConfig)
     return null
   }
 
@@ -39,7 +48,11 @@ export async function lifecycleRoutes(app: FastifyInstance) {
       const { featureRequest } = request.body
       if (!featureRequest) return reply.code(400).send({ error: 'featureRequest required' })
 
-      const provider = await getProvider(tenantId)
+      let provider = await getProvider(tenantId)
+      if (!provider) {
+        const fallback = providerConfigFromEnv('deepseek') ?? providerConfigFromEnv('anthropic')
+        if (fallback) provider = ProviderFactory.create(fallback)
+      }
       if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
 
       const kg: IKnowledgeGraph = new StructuralGraph(
@@ -90,7 +103,11 @@ export async function lifecycleRoutes(app: FastifyInstance) {
       ).catch(() => [])
       if (prdRows.length === 0) return reply.code(404).send({ error: 'Approved PRD not found' })
 
-      const provider = await getProvider(tenantId)
+      let provider = await getProvider(tenantId)
+      if (!provider) {
+        const fallback = providerConfigFromEnv('deepseek') ?? providerConfigFromEnv('anthropic')
+        if (fallback) provider = ProviderFactory.create(fallback)
+      }
       if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
 
       const prd = prdRows[0]!.content as unknown as PRD

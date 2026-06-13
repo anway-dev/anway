@@ -168,7 +168,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       if (isNew && opts?.pub) {
         const creds = await withTenant(prisma, tenantId, (tx) =>
           tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-            SELECT credentials_enc, credentials FROM connector_config
+            SELECT credentials_enc FROM connector_config
             WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid LIMIT 1
           `
         ).catch(() => [])

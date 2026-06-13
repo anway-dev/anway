@@ -25,8 +25,8 @@ interface SubscriberLogger { warn(obj: unknown, msg?: string): void; info(obj: u
 
 async function connectorCredential(tenantId: string, connectorType: string, envVar: string): Promise<string> {
   const row = await withTenant(prisma, tenantId, (tx) =>
-    tx.$queryRaw<{ credentials_enc: string; credentials: { token?: string; apiKey?: string } }[]>`
-      SELECT credentials_enc, credentials FROM connector_config
+    tx.$queryRaw<{ credentials_enc: string }[]>`
+      SELECT credentials_enc FROM connector_config
       WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${connectorType} AND enabled = true
     `
   ).catch(() => [])
@@ -36,7 +36,6 @@ async function connectorCredential(tenantId: string, connectorType: string, envV
       const dec = decryptJson<{ token?: string; apiKey?: string }>(r.credentials_enc)
       return dec.token ?? dec.apiKey ?? process.env[envVar] ?? ''
     }
-    return r.credentials?.token ?? r.credentials?.apiKey ?? process.env[envVar] ?? ''
   }
   return process.env[envVar] ?? ''
 }
@@ -151,7 +150,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         if (!existing || Object.keys(existing).length === 0) {
           const rows = await withTenant(prisma, tid, (tx) =>
             tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-              SELECT credentials_enc, credentials FROM connector_config
+              SELECT credentials_enc FROM connector_config
               WHERE tenant_id = ${tid}::uuid AND connector_type = ${event.connectorType} AND enabled = true
             `
           ).catch(() => [])
@@ -201,7 +200,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       for (const source of sources) {
         // Re-bootstrap every tenant that has this connector enabled — not just the default tenant
         const rows = await prisma.$queryRaw<Array<{ tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-          SELECT tenant_id, credentials_enc, credentials FROM connector_config
+          SELECT tenant_id, credentials_enc FROM connector_config
           WHERE connector_type = ${source} AND enabled = true
         `.catch(() => [] as Array<{ tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>)
         for (const row of rows) {

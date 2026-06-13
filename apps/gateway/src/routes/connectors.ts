@@ -61,8 +61,8 @@ export async function connectorsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: `unknown connector type: ${type}` })
     }
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ credentials_enc: string; credentials: Record<string, unknown> }>>`
-        SELECT credentials_enc, credentials FROM connector_config
+      tx.$queryRaw<Array<{ credentials_enc: string }>>`
+        SELECT credentials_enc FROM connector_config
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
@@ -122,8 +122,8 @@ export async function connectorsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: `unknown connector type: ${type}` })
     }
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ credentials_enc: string; credentials: Record<string, unknown> }>>`
-        SELECT credentials_enc, credentials FROM connector_config
+      tx.$queryRaw<Array<{ credentials_enc: string }>>`
+        SELECT credentials_enc FROM connector_config
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])

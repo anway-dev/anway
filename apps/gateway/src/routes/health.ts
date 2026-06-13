@@ -33,4 +33,29 @@ export async function healthRoutes(app: FastifyInstance) {
   app.get('/health/startup', async (_request, reply) => {
     return reply.send({ status: 'ok' })
   })
+
+  // Admin-only debug: at-rest secrets check
+  app.get('/api/debug/at-rest-check', { preHandler: [app.authenticate] }, async (_request, reply) => {
+  try {
+    const user = _request.user as { role?: string }
+    if (user.role !== 'admin') return reply.code(403).send({ error: 'admin required' })
+    const { prisma } = await import('../db/client.js')
+    // Check plaintext columns have been dropped
+    const cols = await prisma.$queryRaw<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema='public'
+      AND ((table_name='connector_config' AND column_name IN ('credentials'))
+        OR (table_name='provider_config' AND column_name IN ('api_key')))
+    `
+    const plaintextColumns = cols.map(c => c.column_name)
+    // Check an enc column has v1: prefix
+    const samples = await prisma.$queryRaw<{ credentials_enc: string | null }[]>`
+      SELECT credentials_enc FROM connector_config LIMIT 1
+    `
+    const sampleEncPrefix = samples[0]?.credentials_enc?.startsWith('v1:') ?? false
+    return { plaintextColumns, sampleEncPrefix }
+  } catch (err) {
+    return reply.code(500).send({ error: err instanceof Error ? err.message : 'unknown' })
+  }
+})
 }

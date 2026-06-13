@@ -133,6 +133,14 @@ const ACTION_COLOR: Record<string, string> = {
   block_deploy_gate: "#ef4444",
 };
 
+interface AutomationRun {
+  id: string
+  status: string
+  summary: Record<string, unknown> | null
+  startedAt: string
+  finishedAt: string
+}
+
 type Tab = "triggers" | "crons";
 
 export function AutomationsView() {
@@ -142,6 +150,7 @@ export function AutomationsView() {
   const [loading, setLoading] = useState(true);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, 'trigger' | 'cron'>>({});
+  const [cronRuns, setCronRuns] = useState<Record<string, AutomationRun[] | 'loading'>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({ eventType: 'alert_fired', condition: '{}', actions: '' });
   const [monitorForm, setMonitorForm] = useState({ name: '', schedule: '*/5 * * * *', jobType: 'service_health_sweep' });
@@ -234,6 +243,20 @@ export function AutomationsView() {
       setCreateError('Network error — could not reach gateway')
     }
     setCreating(false)
+  }
+
+  function toggleCronExpand(id: string) {
+    setExpandedRuns(prev => {
+      if (prev[id] === 'cron') return {}
+      return { ...prev, [id]: 'cron' }
+    })
+    if (cronRuns[id] === undefined) {
+      setCronRuns(prev => ({ ...prev, [id]: 'loading' }))
+      fetch(`/api/cron/${id}/runs`)
+        .then(r => r.json() as Promise<{ runs?: AutomationRun[] }>)
+        .then(d => setCronRuns(prev => ({ ...prev, [id]: d.runs ?? [] })))
+        .catch(() => setCronRuns(prev => ({ ...prev, [id]: [] })))
+    }
   }
 
   const MONITOR_JOB_TYPES = ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief']
@@ -421,9 +444,11 @@ export function AutomationsView() {
             {displayMonitors.map(c => {
               const statusColor = STATUS_COLOR[c.status] ?? "#555"
               const resultColor = RESULT_COLOR[c.lastResult] ?? "#555"
+              const runs = cronRuns[c.id]
               return (
+                <div key={c.id}>
                 <div
-                  key={c.id}
+                  onClick={() => toggleCronExpand(c.id)}
                   style={{
                     display: "grid",
                     gridTemplateColumns: "22px 200px 130px 120px 120px 1fr 60px",
@@ -431,6 +456,7 @@ export function AutomationsView() {
                     padding: "12px 20px",
                     borderBottom: "1px solid #111",
                     alignItems: "start",
+                    cursor: "pointer",
                   }}
                 >
                   <div style={{ padding: "0 6px 0 0", display: "flex", alignItems: "center", paddingTop: "2px" }}>
@@ -482,6 +508,36 @@ export function AutomationsView() {
                       <div style={{ fontSize: "10px", color: "#ef4444", marginTop: "2px" }}>{c.errorCount} err</div>
                     )}
                   </div>
+                </div>
+
+                {expandedRuns[c.id] === 'cron' && (
+                  <div style={{ padding: "8px 20px 12px 50px", background: "#060606", borderBottom: "1px solid #111" }}>
+                    <div style={{ fontSize: "10px", color: "#444", marginBottom: "6px", fontFamily: "monospace" }}>Recent Runs</div>
+                    {runs === 'loading' && (
+                      <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>Loading…</div>
+                    )}
+                    {Array.isArray(runs) && runs.length === 0 && (
+                      <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>No run history recorded yet.</div>
+                    )}
+                    {Array.isArray(runs) && runs.map(run => {
+                      const rColor = RESULT_COLOR[run.status] ?? "#555"
+                      return (
+                        <div key={run.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "3px 0" }}>
+                          <span style={{
+                            fontSize: "9px", fontWeight: 700, textTransform: "uppercase",
+                            color: rColor, background: `${rColor}12`,
+                            border: `1px solid ${rColor}30`, padding: "1px 6px", borderRadius: "3px",
+                          }}>
+                            {run.status}
+                          </span>
+                          <span style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>
+                            {new Date(run.startedAt).toLocaleString()}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
                 </div>
               )
             })}

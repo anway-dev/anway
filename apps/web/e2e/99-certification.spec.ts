@@ -447,3 +447,68 @@ test.describe('CERT L: graph triage', () => {
     expect(body.related, 'triage must return a related map').toBeTruthy()
   })
 })
+
+// ---------------------------------------------------------------------------
+test.describe('CERT N: automation run history (P1)', () => {
+  test('N.1 a cron monitor that has run persists run rows via /api/cron/:id/runs', async ({ request }) => {
+    // CERT G.4/G.5 already created an every-minute monitor and proved it ran
+    // (lastRunAt written). By the time CERT N executes, that monitor has
+    // completed runs — so automation_runs rows must exist for it.
+    const monitorId = await pollUntil(
+      async () => {
+        const r = await request.get(`${GATEWAY}/api/automations/monitors`, { headers })
+        if (r.status() !== 200) return undefined
+        const list = await r.json() as Array<{ id: string; lastRunAt: string | null }>
+        return (Array.isArray(list) ? list : []).find(m => m.lastRunAt)?.id
+      },
+      (id) => id !== undefined,
+      { intervalMs: 3000, timeoutMs: 25000 },
+    ).catch(() => undefined)
+
+    expect(monitorId, 'a monitor with a completed run must exist (see CERT G.5)').toBeTruthy()
+
+    const r = await request.get(`${GATEWAY}/api/cron/${monitorId}/runs`, { headers })
+    expect(r.status()).toBe(200)
+    const body = await r.json() as { runs: Array<{ status: string; startedAt: string }> }
+    expect(
+      body.runs.length,
+      'CERT FAIL: monitor ran (lastRunAt set) but no automation_runs persisted — run history pipeline broken',
+    ).toBeGreaterThan(0)
+    expect(body.runs[0]!.status, 'run row must carry a status').toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT O: gate policy + auto-approve enforcement (P3)', () => {
+  test('O.1 PUT then GET round-trips a gate policy', async ({ request }) => {
+    const put = await request.put(`${GATEWAY}/api/gate/policies`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { scope: '*', approversRequired: 1, autoApproveThreshold: 0.95 },
+    })
+    expect(put.status(), 'admin PUT gate policy must succeed').toBeLessThan(300)
+
+    const get = await request.get(`${GATEWAY}/api/gate/policies`, { headers })
+    expect(get.status()).toBe(200)
+    const policies = await get.json() as Array<{ scope: string; autoApproveThreshold: number }>
+    const wildcard = policies.find(p => p.scope === '*')
+    expect(wildcard, 'wildcard policy must be listed').toBeTruthy()
+    expect(wildcard!.autoApproveThreshold).toBeCloseTo(0.95)
+  })
+
+  test('O.2 confidence below threshold still gates (pending); above auto-approves', async ({ request }) => {
+    // policy threshold = 0.95 from O.1
+    const low = await request.post(`${GATEWAY}/api/gate`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { action: 'deploy', target: 'payments-api', confidence: 0.5 },
+    })
+    expect(low.status()).toBe(201)
+    expect((await low.json() as { autoApproved: boolean }).autoApproved, 'low confidence must NOT auto-approve').toBe(false)
+
+    const high = await request.post(`${GATEWAY}/api/gate`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { action: 'deploy', target: 'payments-api', confidence: 0.99 },
+    })
+    expect(high.status()).toBe(201)
+    expect((await high.json() as { autoApproved: boolean }).autoApproved, 'high confidence must auto-approve under policy').toBe(true)
+  })
+})

@@ -31,6 +31,15 @@ async function updateLastRunById(tenantId: string, jobId: string, result: unknow
       `
     )
   } catch { /* best-effort */ }
+  try {
+    const status = (result as { status?: string } | null | undefined)?.status ?? 'ok'
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`
+        INSERT INTO automation_runs (tenant_id, kind, ref_id, status, summary)
+        VALUES (${tenantId}::uuid, 'cron', ${jobId}::uuid, ${status}, ${JSON.stringify(result)}::jsonb)
+      `
+    )
+  } catch { /* best-effort — run history is non-critical */ }
 }
 
 // User-creatable monitor types → implementations

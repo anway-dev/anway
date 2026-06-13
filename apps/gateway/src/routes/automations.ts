@@ -4,6 +4,7 @@ import { withTenant } from '../db/prisma.js'
 import { TriggerEngine } from '../triggers/engine.js'
 import type { TriggerAction, TriggerRule } from '../triggers/engine.js'
 import { getActiveScheduler, registerUserMonitor, MONITOR_IMPLS } from '../jobs/scheduler.js'
+import { UUID_RE } from '../utils/validators.js'
 
 export async function automationsRoutes(app: FastifyInstance) {
   app.get('/api/automations/triggers', {
@@ -197,7 +198,19 @@ export async function automationsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/cron/:id/runs', {
     preHandler: [app.authenticate],
-  }, async () => ({
-    runs: [],
-  }))
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    if (!UUID_RE.test(id)) { reply.code(400); return { error: 'invalid id' } }
+    const runs = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`
+        SELECT id, status, summary, started_at AS "startedAt", finished_at AS "finishedAt"
+        FROM automation_runs
+        WHERE tenant_id = ${tenantId}::uuid AND kind = 'cron' AND ref_id = ${id}::uuid
+        ORDER BY started_at DESC
+        LIMIT 20
+      `
+    )
+    return { runs }
+  })
 }

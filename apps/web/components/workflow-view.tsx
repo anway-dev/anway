@@ -140,6 +140,139 @@ function GateEditor({ stage, onChange }: {
   );
 }
 
+interface GatePolicy {
+  id: string;
+  scope: string;
+  approversRequired: number;
+  autoApproveThreshold: number;
+}
+
+function GatePolicySection() {
+  const [policy, setPolicy] = useState<GatePolicy | null>(null);
+  const [approversRequired, setApproversRequired] = useState(1);
+  const [autoApproveThreshold, setAutoApproveThreshold] = useState(0);
+  const [status, setStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/gate/policies")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: GatePolicy[]) => {
+        if (cancelled) return;
+        const wildcard = Array.isArray(rows) ? rows.find((p) => p.scope === "*") : undefined;
+        if (wildcard) {
+          setPolicy(wildcard);
+          setApproversRequired(wildcard.approversRequired);
+          setAutoApproveThreshold(wildcard.autoApproveThreshold);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setStatus(null);
+    try {
+      const resp = await fetch("/api/gate/policies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "*", approversRequired, autoApproveThreshold }),
+      });
+      if (resp.status === 403) {
+        setStatus("Admin role required");
+      } else if (resp.ok) {
+        const saved: GatePolicy = await resp.json();
+        setPolicy(saved);
+        setStatus("Saved");
+      } else {
+        const err = await resp.json().catch(() => ({}));
+        setStatus(err?.error ?? `Error ${resp.status}`);
+      }
+    } catch {
+      setStatus("Network error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ padding: "16px", background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "8px", marginBottom: "20px", maxWidth: "640px" }}>
+      <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+        Gate Policy
+      </div>
+      <div style={{ fontSize: "11px", color: "#555", marginBottom: "14px" }}>
+        Tenant-wide policy for scope <span style={{ fontFamily: "monospace", color: "#888" }}>*</span>. Admin only.
+      </div>
+
+      <div style={{ marginBottom: "12px" }}>
+        <div style={{ fontSize: "11px", color: "#888", marginBottom: "6px" }}>Approvers required</div>
+        <div style={{ display: "flex", gap: "6px" }}>
+          {[1, 2, 3].map((n) => (
+            <button
+              key={n}
+              onClick={() => setApproversRequired(n)}
+              style={{
+                width: "32px", height: "28px", borderRadius: "4px", fontSize: "12px", cursor: "pointer",
+                background: approversRequired === n ? "rgba(16,185,129,0.15)" : "transparent",
+                border: `1px solid ${approversRequired === n ? "rgba(16,185,129,0.4)" : "#2a2a2a"}`,
+                color: approversRequired === n ? "#10b981" : "#555",
+                fontWeight: approversRequired === n ? 700 : 400,
+              }}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "11px", color: "#888", marginBottom: "6px" }}>Auto-approve if confidence ≥ (0 = disabled)</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <input
+            type="number"
+            min={0}
+            max={1.0}
+            step={0.01}
+            value={autoApproveThreshold}
+            onChange={(e) => setAutoApproveThreshold(parseFloat(e.target.value) || 0)}
+            style={{
+              width: "70px", background: "#111", border: "1px solid #2a2a2a", color: "#e5e5e5",
+              padding: "4px 8px", borderRadius: "4px", fontSize: "12px", outline: "none", fontFamily: "monospace",
+            }}
+          />
+          <div style={{ height: "4px", flex: 1, background: "#1a1a1a", borderRadius: "2px", position: "relative" }}>
+            <div style={{ height: "100%", background: "#10b981", width: `${Math.min(Math.max(autoApproveThreshold, 0), 1) * 100}%`, borderRadius: "2px", transition: "width 0.2s" }} />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <button
+          onClick={save}
+          disabled={saving}
+          style={{
+            padding: "6px 16px", borderRadius: "6px", fontSize: "12px", cursor: saving ? "default" : "pointer",
+            background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.4)", color: "#10b981",
+            fontWeight: 600, opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? "Saving…" : "Save policy"}
+        </button>
+        {status && (
+          <span style={{ fontSize: "11px", color: status === "Saved" ? "#10b981" : "#ef4444" }}>{status}</span>
+        )}
+        {policy && (
+          <span style={{ fontSize: "10px", color: "#444", fontFamily: "monospace" }}>
+            current: {policy.approversRequired} approver(s), threshold {policy.autoApproveThreshold}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AutonomyDial({ service, onChange }: {
   service: ServicePolicy;
   onChange: (level: AutonomyLevel) => void;
@@ -292,6 +425,7 @@ export function WorkflowView() {
 
       {/* Main area: Pipeline */}
       <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        <GatePolicySection />
         <div style={{ marginBottom: "20px" }}>
           <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Workflow Pipeline</div>
           <div style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5" }}>

@@ -55,7 +55,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
   )
 
   // Create a gate (for seeding approvals in tests)
-  app.post<{ Body: { action: string; target: string; requestedBy?: string } }>(
+  app.post<{ Body: { action: string; target: string; requestedBy?: string; scope?: string; confidence?: number } }>(
     '/api/gate',
     {
       preHandler: [app.authenticate],
@@ -67,23 +67,49 @@ export async function gateDecideRoutes(app: FastifyInstance) {
             action: { type: 'string' },
             target: { type: 'string' },
             requestedBy: { type: 'string' },
+            scope: { type: 'string' },
+            confidence: { type: 'number' },
           },
         },
       },
     },
     async (request, reply) => {
-      const { action, target, requestedBy } = request.body
+      const { action, target, requestedBy, scope, confidence } = request.body
       const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
       const toolArgs = JSON.stringify({ target, requestedBy: requestedBy ?? 'system' })
+
+      // P3 policy enforcement: auto-approve when a gate policy for the action's
+      // scope (or '*') sets auto_approve_threshold > 0 and the supplied
+      // confidence meets it. Otherwise seed 'pending' as before.
+      let status: 'pending' | 'approved' = 'pending'
+      let autoApproved = false
+      if (typeof confidence === 'number') {
+        const lookupScope = typeof scope === 'string' && scope.length > 0 ? scope : '*'
+        const policies = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ scope: string; auto_approve_threshold: number }>>`
+            SELECT scope, auto_approve_threshold
+            FROM gate_policies
+            WHERE tenant_id = ${tenantId}::uuid AND scope IN (${lookupScope}, '*')
+          `
+        ).catch(() => [])
+        // Prefer an exact scope match over the wildcard.
+        const policy =
+          policies.find((p) => p.scope === lookupScope) ?? policies.find((p) => p.scope === '*')
+        if (policy && policy.auto_approve_threshold > 0 && confidence >= policy.auto_approve_threshold) {
+          status = 'approved'
+          autoApproved = true
+        }
+      }
+
       const row = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
           INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
           VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
-                  ${action}, ${toolArgs}::jsonb, 'test', 'pending', NOW())
+                  ${action}, ${toolArgs}::jsonb, 'test', ${status}::text, NOW())
           RETURNING id
         `
       )
-      return reply.code(201).send({ ok: true, id: (row as Array<{ id: string }>)[0]?.id })
+      return reply.code(201).send({ ok: true, id: (row as Array<{ id: string }>)[0]?.id, autoApproved })
     },
   )
 }

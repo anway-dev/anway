@@ -13,6 +13,7 @@ import { graphEventRoutes } from './routes/graph-events.js'
 import { connectorsRoutes } from './routes/connectors.js'
 import { serviceRoutes } from './routes/services.js'
 import { gateDecideRoutes } from './gate/gate-decide-route.js'
+import { gatePolicyRoutes } from './routes/gate-policies.js'
 import { settingsRoutes } from './routes/settings.js'
 import { eventRoutes } from './routes/events.js'
 import { alertRoutes } from './routes/alerts.js'
@@ -47,10 +48,11 @@ export async function buildApp() {
   await app.register(jwtPlugin)
   await app.register(requestLoggerPlugin)
 
-  // Global rate limit: 100 req/min per IP. Webhook ingestion (/api/events/*)
-  // bursts higher — Alertmanager/CI fan out — so allow 600/min there.
+  // Global rate limit per IP. 300/min for normal API — a single dashboard load
+  // legitimately fires dozens of requests, so 100 was too tight. Webhook
+  // ingestion (/api/events/*) bursts higher (Alertmanager/CI fan out) → 600/min.
   await app.register(import('@fastify/rate-limit'), {
-    max: (req: { url: string }) => (req.url.startsWith('/api/events/') ? 600 : 100),
+    max: (req: { url: string }) => (req.url.startsWith('/api/events/') ? 600 : 300),
     timeWindow: '1 minute',
   })
 
@@ -66,6 +68,7 @@ export async function buildApp() {
   await app.register(eventRoutes)
   await app.register(settingsRoutes)
   await app.register(gateDecideRoutes)
+  await app.register(gatePolicyRoutes)
   await app.register(alertRoutes)
   await app.register(auditRoutes)
   await app.register(accessRoutes)

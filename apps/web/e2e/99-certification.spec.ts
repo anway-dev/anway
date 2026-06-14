@@ -723,3 +723,12 @@ test.describe('CERT V: trigger fires', () => {
     expect(triggered, 'CERT FAIL: no trigger_fired audit event within 60s — trigger engine not firing').toBe(true)
   })
 })
+
+test.describe('CERT W: OIDC status endpoint', () => {
+  test('W.1 GET /auth/oidc/status returns configured shape', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/auth/oidc/status`)
+    expect(r.status()).toBe(200)
+    const body = await r.json() as { configured: boolean }
+    expect(typeof body.configured, 'CERT FAIL: OIDC status must return {configured: boolean}').toBe('boolean')
+  })
+})

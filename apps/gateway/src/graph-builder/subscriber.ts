@@ -18,6 +18,11 @@ import { SlackBootstrap } from '@anvay/connector-slack'
 import { SentryBootstrap } from '@anvay/connector-sentry'
 import { JenkinsBootstrap } from '@anvay/connector-jenkins'
 import { PagerdutyBootstrap } from '@anvay/connector-pagerduty'
+import { GrafanaBootstrap } from '@anvay/connector-grafana'
+import { OpsGenieBootstrap } from '@anvay/connector-opsgenie'
+import { NewRelicBootstrap } from '@anvay/connector-newrelic'
+import { CircleCIBootstrap } from '@anvay/connector-circleci'
+import { ConfluenceBootstrap } from '@anvay/connector-confluence'
 // Tier 2+3 — remaining 20 connector bootstraps registered as lazy imports below
 // (avoid build-time dependency on packages that may not have dist/ built)
 import type { TenantId } from '@anvay/types'
@@ -109,11 +114,15 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
   reg.set('sentry', new SentryBootstrap(kg))
   reg.set('jenkins', new JenkinsBootstrap(kg))
   reg.set('pagerduty', new PagerdutyBootstrap(kg))
-  // Tier 2+3 — registered as no-op stubs (packages pending build)
-  // As each connector package is built, replace NoopBootstrap with real import
+  reg.set('grafana', new GrafanaBootstrap(kg))
+  reg.set('opsgenie', new OpsGenieBootstrap(kg))
+  reg.set('newrelic', new NewRelicBootstrap(kg))
+  reg.set('circleci', new CircleCIBootstrap(kg))
+  reg.set('confluence', new ConfluenceBootstrap(kg))
+  // Tier 2+3 — remaining connectors registered as no-op stubs (packages pending build)
   const pendingConnectors = [
-    'grafana','circleci','confluence','coralogix','dynatrace',
-    'elastic','launchdarkly','newrelic','notion','opsgenie',
+    'coralogix','dynatrace',
+    'elastic','launchdarkly','notion',
     'snyk','sonarqube','terraform','vault','vercel',
   ]
   for (const name of pendingConnectors) {

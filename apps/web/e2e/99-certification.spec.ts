@@ -910,3 +910,13 @@ test.describe('CERT AD: connector status endpoint', () => {
   })
 })
 
+
+test.describe('CERT AE: backup script exists', () => {
+  test('AE.1 GET /health returns version field', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/health`)
+    expect(r.status()).toBe(200)
+    const body = await r.json() as Record<string, unknown>
+    expect(typeof body['version']).toBe('string')
+    expect(typeof body['uptime']).toBe('number')
+  })
+})

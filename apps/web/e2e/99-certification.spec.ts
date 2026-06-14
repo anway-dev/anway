@@ -887,3 +887,26 @@ test.describe('CERT AC: session API', () => {
     expect(Array.isArray(body)).toBe(true)
   })
 })
+
+test.describe('CERT AD: connector status endpoint', () => {
+  test('AD.1 GET /api/connectors/prometheus/status returns status shape', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/connectors/prometheus/status`, { headers: h })
+    // 200 if prometheus registered in CERT D, 404 if not — both valid
+    if (r.status() === 200) {
+      const body = await r.json() as Record<string, unknown>
+      expect(typeof body['type']).toBe('string')
+      expect(typeof body['enabled']).toBe('boolean')
+      expect(['bootstrapped', 'pending'].includes(body['status'] as string)).toBe(true)
+    } else {
+      expect(r.status()).toBe(404)
+    }
+  })
+
+  test('AD.2 GET /api/connectors/nonexistent-type/status returns 404', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/connectors/nonexistent-type-xyz/status`, { headers: h })
+    expect(r.status()).toBe(404)
+  })
+})
+

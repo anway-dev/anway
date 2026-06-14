@@ -1,0 +1,6 @@
+apiVersion: v2
+name: anvay
+description: Anvay — central nervous system of a software organisation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

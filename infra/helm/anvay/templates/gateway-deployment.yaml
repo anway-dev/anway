@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    app: {{ .Release.Name }}-gateway
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-gateway
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.gateway.repository }}:{{ .Values.image.gateway.tag }}"
+          imagePullPolicy: {{ .Values.image.gateway.pullPolicy }}
+          ports:
+            - containerPort: 4000
+          env:
+            - name: JWT_SECRET
+              value: {{ .Values.env.jwtSecret | quote }}
+            - name: ANVAY_ENCRYPTION_KEY
+              value: {{ .Values.env.encryptionKey | quote }}
+            - name: DATABASE_URL
+              value: {{ .Values.env.databaseUrl | quote }}
+            - name: REDIS_URL
+              value: {{ .Values.env.redisUrl | quote }}
+            - name: OLLAMA_ENDPOINT
+              value: {{ .Values.env.ollamaEndpoint | quote }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 30

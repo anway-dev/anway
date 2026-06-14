@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  gateway:
+    repository: anvay/gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+  web:
+    repository: anvay/web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+service:
+  gateway:
+    type: ClusterIP
+    port: 4000
+  web:
+    type: ClusterIP
+    port: 3000
+
+ingress:
+  enabled: false
+  className: nginx
+  host: anvay.example.com
+  tls: []
+
+env:
+  jwtSecret: ""
+  encryptionKey: ""
+  databaseUrl: ""
+  redisUrl: ""
+  ollamaEndpoint: ""
+
+postgres:
+  enabled: true
+  storageSize: 10Gi
+
+redis:
+  enabled: true
+  storageSize: 1Gi

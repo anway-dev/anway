@@ -5,6 +5,22 @@ import { UUID_RE } from '../utils/validators.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 
 export async function accessRoutes(app: FastifyInstance) {
+  // GET /api/access/users — list all users in tenant (admin only)
+  app.get(
+    '/api/access/users',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const user = request.user as { tenantId: string; role?: string }
+      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      const rows = await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$queryRaw<{ id: string; email: string; role: string; created_at: Date }[]>`
+          SELECT id, email, role, created_at FROM users ORDER BY email
+        `
+      ).catch(() => [])
+      return rows.map(r => ({ id: r.id, email: r.email, role: r.role, createdAt: r.created_at }))
+    },
+  )
+
   // GET /api/access/users/:userId/perimeter — read user's connector permissions
   app.get<{ Params: { userId: string } }>(
     '/api/access/users/:userId/perimeter',

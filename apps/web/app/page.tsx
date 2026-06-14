@@ -20,8 +20,7 @@ import { AutomationsView } from "@/components/automations-view";
 import { K8sView } from "@/components/k8s-view";
 import { SettingsView } from "@/components/settings-view";
 import { ApprovalsView } from "@/components/approvals-view";
-import { StageNode } from "@/lib/mock";
-// Remove mock imports once all views are wired — only StageNode still needed for lifecycle
+import type { StageNode } from "@/components/lifecycle";
 
 
 type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings";

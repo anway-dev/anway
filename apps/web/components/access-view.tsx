@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { USERS, CONNECTOR_MANIFESTS, UserAccess, ConnectorAccess } from "@/lib/mock";
+import { useState, useEffect } from "react";
+import { CONNECTOR_MANIFESTS } from "@/lib/mock";
 
 const ROLE_COLORS: Record<string, string> = {
   dev: "#3b82f6",
@@ -14,6 +14,21 @@ const MODE_CONFIG: Record<string, { label: string; color: string }> = {
   "read-write": { label: "R/W", color: "#10b981" },
   "read":       { label: "R",   color: "#3b82f6" },
   "none":       { label: "—",   color: "#444" },
+};
+
+const CONNECTOR_ICON: Record<string, { icon: string; color: string }> = {
+  github: { icon: "GH", color: "#6e7681" },
+  datadog: { icon: "DD", color: "#7c3aed" },
+  loki: { icon: "LK", color: "#f9a825" },
+  k8s: { icon: "K8", color: "#326ce5" },
+  argocd: { icon: "AC", color: "#ef7b4d" },
+  linear: { icon: "LN", color: "#5e6ad2" },
+  prometheus: { icon: "PM", color: "#e6522c" },
+  pagerduty: { icon: "PD", color: "#06ac38" },
+  slack: { icon: "SL", color: "#4a154b" },
+  jira: { icon: "JR", color: "#0052cc" },
+  sentry: { icon: "SN", color: "#fb4226" },
+  grafana: { icon: "GF", color: "#f46800" },
 };
 
 const YAML_TEMPLATE = `# Anvay access provisioning template
@@ -53,6 +68,19 @@ connectors:
     mode: none
     # no access — requires sre or admin role`;
 
+interface ApiUser {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+}
+
+interface PerimeterEntry {
+  connectorName: string;
+  readScopes: string[];
+  writeScopes: string[];
+}
+
 function ScopeChips({ scopes, color }: { scopes: string[]; color: string }) {
   if (scopes.length === 0) return <span style={{ fontSize: "10px", color: "#333" }}>—</span>;
   return (
@@ -69,23 +97,25 @@ function ScopeChips({ scopes, color }: { scopes: string[]; color: string }) {
   );
 }
 
-function ConnectorRow({ conn, onEdit }: { conn: ConnectorAccess; onEdit: () => void }) {
-  const mc = MODE_CONFIG[conn.mode];
-  const isDisabled = conn.status === "disabled";
+function ConnectorPerimeterRow({ entry }: { entry: PerimeterEntry }) {
+  const iconInfo = CONNECTOR_ICON[entry.connectorName.toLowerCase()] ?? { icon: entry.connectorName.slice(0, 2).toUpperCase(), color: "#888" };
+  const hasWrite = entry.writeScopes.length > 0;
+  const mode = hasWrite ? "read-write" : "read";
+  const mc = MODE_CONFIG[mode];
 
   return (
-    <tr style={{ borderBottom: "1px solid #111", opacity: isDisabled ? 0.5 : 1 }}>
+    <tr style={{ borderBottom: "1px solid #111" }}>
       <td style={{ padding: "10px 14px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <div style={{
             width: "26px", height: "26px", borderRadius: "6px",
-            background: `${conn.color}18`, border: `1px solid ${conn.color}33`,
+            background: `${iconInfo.color}18`, border: `1px solid ${iconInfo.color}33`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "10px", color: conn.color, fontWeight: 700, flexShrink: 0,
+            fontSize: "10px", color: iconInfo.color, fontWeight: 700, flexShrink: 0,
           }}>
-            {conn.icon}
+            {iconInfo.icon}
           </div>
-          <span style={{ fontSize: "12px", color: "#d1d5db" }}>{conn.connectorName}</span>
+          <span style={{ fontSize: "12px", color: "#d1d5db" }}>{entry.connectorName}</span>
         </div>
       </td>
       <td style={{ padding: "10px 14px" }}>
@@ -98,29 +128,24 @@ function ConnectorRow({ conn, onEdit }: { conn: ConnectorAccess; onEdit: () => v
         </span>
       </td>
       <td style={{ padding: "10px 14px" }}>
-        <ScopeChips scopes={conn.readScope} color="#3b82f6" />
+        <ScopeChips scopes={entry.readScopes} color="#3b82f6" />
       </td>
       <td style={{ padding: "10px 14px" }}>
-        <ScopeChips scopes={conn.writeScope} color="#10b981" />
+        <ScopeChips scopes={entry.writeScopes} color="#10b981" />
       </td>
       <td style={{ padding: "10px 14px" }}>
         <span style={{
           fontSize: "10px", padding: "1px 6px", borderRadius: "3px",
-          background: conn.status === "active" ? "rgba(16,185,129,0.1)" : conn.status === "limited" ? "rgba(245,158,11,0.1)" : "rgba(85,85,85,0.1)",
-          border: `1px solid ${conn.status === "active" ? "rgba(16,185,129,0.3)" : conn.status === "limited" ? "rgba(245,158,11,0.3)" : "rgba(85,85,85,0.3)"}`,
-          color: conn.status === "active" ? "#10b981" : conn.status === "limited" ? "#f59e0b" : "#555",
+          background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#10b981",
         }}>
-          {conn.status}
+          active
         </span>
       </td>
       <td style={{ padding: "10px 14px" }}>
-        <button
-          onClick={onEdit}
-          style={{
-            background: "transparent", border: "1px solid #2a2a2a", color: "#555",
-            padding: "3px 8px", borderRadius: "4px", fontSize: "10px", cursor: "pointer",
-          }}
-        >
+        <button style={{
+          background: "transparent", border: "1px solid #2a2a2a", color: "#555",
+          padding: "3px 8px", borderRadius: "4px", fontSize: "10px", cursor: "pointer",
+        }}>
           Edit
         </button>
       </td>
@@ -207,9 +232,35 @@ function ProvisioningTemplate({ expanded, onToggle }: { expanded: boolean; onTog
 }
 
 export function AccessView() {
-  const [selectedUser, setSelectedUser] = useState<UserAccess>(USERS[0]);
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [selectedUser, setSelectedUser] = useState<ApiUser | null>(null);
+  const [perimeter, setPerimeter] = useState<PerimeterEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [perimeterLoading, setPerimeterLoading] = useState(false);
   const [manifestExpanded, setManifestExpanded] = useState(false);
   const [templateExpanded, setTemplateExpanded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/access/users")
+      .then((r) => r.json() as Promise<ApiUser[]>)
+      .then((data) => {
+        const rows = Array.isArray(data) ? data : [];
+        setUsers(rows);
+        if (rows.length > 0) setSelectedUser(rows[0]);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedUser) return;
+    setPerimeterLoading(true);
+    fetch(`/api/access/users/${selectedUser.id}/perimeter`)
+      .then((r) => r.ok ? r.json() as Promise<PerimeterEntry[]> : [])
+      .then((data) => setPerimeter(Array.isArray(data) ? data : []))
+      .catch(() => setPerimeter([]))
+      .finally(() => setPerimeterLoading(false));
+  }, [selectedUser?.id]);
 
   return (
     <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>
@@ -225,9 +276,15 @@ export function AccessView() {
           </button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
-          {USERS.map((user) => {
-            const isSelected = selectedUser.id === user.id;
-            const roleColor = ROLE_COLORS[user.authRole] || "#888";
+          {loading && (
+            <div style={{ fontSize: "11px", color: "#555", padding: "12px 8px" }}>Loading…</div>
+          )}
+          {!loading && users.length === 0 && (
+            <div style={{ fontSize: "11px", color: "#444", padding: "12px 8px" }}>No users provisioned</div>
+          )}
+          {users.map((user) => {
+            const isSelected = selectedUser?.id === user.id;
+            const roleColor = ROLE_COLORS[user.role] || "#888";
             return (
               <button
                 key={user.id}
@@ -246,16 +303,16 @@ export function AccessView() {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: "10px", color: roleColor, fontWeight: 700, flexShrink: 0,
                   }}>
-                    {user.name.split(" ").map((n) => n[0]).join("")}
+                    {user.email.slice(0, 2).toUpperCase()}
                   </div>
                   <div>
-                    <div style={{ fontSize: "12px", color: isSelected ? "#e5e5e5" : "#d1d5db", fontWeight: isSelected ? 600 : 400 }}>{user.name}</div>
+                    <div style={{ fontSize: "12px", color: isSelected ? "#e5e5e5" : "#d1d5db", fontWeight: isSelected ? 600 : 400 }}>{user.email.split("@")[0]}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
                       <span style={{
                         fontSize: "9px", padding: "1px 5px", borderRadius: "3px",
                         background: `${roleColor}18`, border: `1px solid ${roleColor}33`, color: roleColor,
                       }}>
-                        {user.authRole}
+                        {user.role}
                       </span>
                     </div>
                   </div>
@@ -268,86 +325,92 @@ export function AccessView() {
 
       {/* Right: Access matrix */}
       <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "4px" }}>
-            <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", margin: 0 }}>
-              {selectedUser.name}
-            </h2>
-            <span style={{
-              fontSize: "11px", padding: "2px 8px", borderRadius: "4px",
-              background: `${ROLE_COLORS[selectedUser.authRole] || "#888"}18`,
-              border: `1px solid ${ROLE_COLORS[selectedUser.authRole] || "#888"}33`,
-              color: ROLE_COLORS[selectedUser.authRole] || "#888",
-            }}>
-              {selectedUser.authRole}
-            </span>
-          </div>
-          <div style={{ fontSize: "12px", color: "#555" }}>{selectedUser.email}</div>
-        </div>
-
-        {/* Access matrix table */}
-        <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px", overflow: "hidden", marginBottom: "0" }}>
-          <div style={{ padding: "10px 14px", borderBottom: "1px solid #1a1a1a" }}>
-            <span style={{ fontSize: "11px", fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Connector Access Matrix
-            </span>
-          </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #1a1a1a" }}>
-                {["Connector", "Mode", "Read Scope", "Write Scope", "Status", ""].map((h) => (
-                  <th key={h} style={{
-                    padding: "8px 14px", textAlign: "left", fontSize: "10px", fontWeight: 600,
-                    color: "#555", textTransform: "uppercase", letterSpacing: "0.08em",
-                  }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {selectedUser.connectors.map((conn) => (
-                <ConnectorRow key={conn.connectorId} conn={conn} onEdit={() => {}} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Permission summary */}
-        <div style={{ marginTop: "16px", background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "14px 16px" }}>
-          <div style={{ fontSize: "11px", fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>
-            Permission Envelope
-          </div>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {selectedUser.connectors
-              .filter((c) => c.mode !== "none")
-              .flatMap((c) => [
-                ...c.readScope.map((s) => ({ connector: c.connectorName, scope: s, type: "read", color: "#3b82f6" })),
-                ...c.writeScope.map((s) => ({ connector: c.connectorName, scope: s, type: "write", color: "#10b981" })),
-              ])
-              .map((item, idx) => (
-                <span key={idx} style={{
-                  fontSize: "10px", fontFamily: "monospace",
-                  background: `${item.color}11`, border: `1px solid ${item.color}22`,
-                  color: item.color, padding: "2px 7px", borderRadius: "4px",
+        {selectedUser ? (
+          <>
+            <div style={{ marginBottom: "20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "4px" }}>
+                <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", margin: 0 }}>
+                  {selectedUser.email}
+                </h2>
+                <span style={{
+                  fontSize: "11px", padding: "2px 8px", borderRadius: "4px",
+                  background: `${ROLE_COLORS[selectedUser.role] || "#888"}18`,
+                  border: `1px solid ${ROLE_COLORS[selectedUser.role] || "#888"}33`,
+                  color: ROLE_COLORS[selectedUser.role] || "#888",
                 }}>
-                  {item.type === "write" ? "W" : "R"}:{item.connector.toLowerCase().replace(" ", "-")}:{item.scope}
+                  {selectedUser.role}
                 </span>
-              ))}
-            {selectedUser.connectors.filter((c) => c.mode === "none").map((c) => (
-              <span key={c.connectorId} style={{
-                fontSize: "10px", fontFamily: "monospace",
-                background: "rgba(85,85,85,0.1)", border: "1px solid rgba(85,85,85,0.2)",
-                color: "#444", padding: "2px 7px", borderRadius: "4px",
-              }}>
-                BLOCKED:{c.connectorName.toLowerCase().replace(" ", "-")}
-              </span>
-            ))}
-          </div>
-        </div>
+              </div>
+            </div>
 
-        <ManifestSection expanded={manifestExpanded} onToggle={() => setManifestExpanded(!manifestExpanded)} />
-        <ProvisioningTemplate expanded={templateExpanded} onToggle={() => setTemplateExpanded(!templateExpanded)} />
+            {/* Access matrix table */}
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px", overflow: "hidden", marginBottom: "0" }}>
+              <div style={{ padding: "10px 14px", borderBottom: "1px solid #1a1a1a" }}>
+                <span style={{ fontSize: "11px", fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  Connector Access Matrix
+                </span>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #1a1a1a" }}>
+                    {["Connector", "Mode", "Read Scope", "Write Scope", "Status", ""].map((h) => (
+                      <th key={h} style={{
+                        padding: "8px 14px", textAlign: "left", fontSize: "10px", fontWeight: 600,
+                        color: "#555", textTransform: "uppercase", letterSpacing: "0.08em",
+                      }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {perimeterLoading && (
+                    <tr><td colSpan={6} style={{ padding: "16px 14px", fontSize: "11px", color: "#555" }}>Loading perimeter…</td></tr>
+                  )}
+                  {!perimeterLoading && perimeter.length === 0 && (
+                    <tr><td colSpan={6} style={{ padding: "16px 14px", fontSize: "11px", color: "#444" }}>No connector permissions provisioned</td></tr>
+                  )}
+                  {perimeter.map((entry) => (
+                    <ConnectorPerimeterRow key={entry.connectorName} entry={entry} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Permission envelope */}
+            <div style={{ marginTop: "16px", background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "14px 16px" }}>
+              <div style={{ fontSize: "11px", fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>
+                Permission Envelope
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {perimeter.flatMap((e) => [
+                  ...e.readScopes.map((s) => ({ connector: e.connectorName, scope: s, type: "read", color: "#3b82f6" })),
+                  ...e.writeScopes.map((s) => ({ connector: e.connectorName, scope: s, type: "write", color: "#10b981" })),
+                ]).map((item, idx) => (
+                  <span key={idx} style={{
+                    fontSize: "10px", fontFamily: "monospace",
+                    background: `${item.color}11`, border: `1px solid ${item.color}22`,
+                    color: item.color, padding: "2px 7px", borderRadius: "4px",
+                  }}>
+                    {item.type === "write" ? "W" : "R"}:{item.connector.toLowerCase()}:{item.scope}
+                  </span>
+                ))}
+                {perimeter.length === 0 && !perimeterLoading && (
+                  <span style={{ fontSize: "11px", color: "#444" }}>No permissions assigned</span>
+                )}
+              </div>
+            </div>
+
+            <ManifestSection expanded={manifestExpanded} onToggle={() => setManifestExpanded(!manifestExpanded)} />
+            <ProvisioningTemplate expanded={templateExpanded} onToggle={() => setTemplateExpanded(!templateExpanded)} />
+          </>
+        ) : (
+          !loading && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "200px" }}>
+              <span style={{ fontSize: "13px", color: "#444" }}>Select a user to view their access</span>
+            </div>
+          )
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,47 @@
 "use client";
 import { useState, useEffect } from "react";
-import { WORKFLOW_STAGES, SERVICE_POLICIES, WorkflowStage, ServicePolicy, GateType, AutonomyLevel } from "@/lib/mock";
+
+type GateType = "manual" | "auto" | "disabled";
+type AutonomyLevel = "L1" | "L2" | "L3" | "L4";
+
+interface GateConfig {
+  type: GateType;
+  requiredApprovals: number;
+  autoApproveConfidence: number;
+  requiredApprovers: string[];
+}
+
+interface WorkflowStage {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  gate: GateConfig;
+  agents: string[];
+}
+
+interface ServicePolicy {
+  id: string;
+  name: string;
+  autonomyLevel: AutonomyLevel;
+  description: string;
+}
+
+const WORKFLOW_STAGES: WorkflowStage[] = [
+  { id: "prd", name: "PRD", icon: "📄", description: "Product requirement document approved by PM", gate: { type: "manual", requiredApprovals: 1, autoApproveConfidence: 0.95, requiredApprovers: ["pm"] }, agents: ["linear-agent"] },
+  { id: "spec", name: "Tech Spec", icon: "📐", description: "Technical specification reviewed by tech lead", gate: { type: "manual", requiredApprovals: 2, autoApproveConfidence: 0.92, requiredApprovers: ["tech-lead", "pm"] }, agents: ["github-agent", "repo-agent"] },
+  { id: "bootstrap", name: "Bootstrap", icon: "⚡", description: "Project scaffolding and initial setup", gate: { type: "auto", requiredApprovals: 1, autoApproveConfidence: 0.90, requiredApprovers: ["tech-lead"] }, agents: ["repo-agent"] },
+  { id: "tests", name: "Tests", icon: "🧪", description: "All test cases must pass before proceeding", gate: { type: "auto", requiredApprovals: 1, autoApproveConfidence: 0.90, requiredApprovers: ["tech-lead"] }, agents: ["test-agent", "github-agent"] },
+  { id: "pr", name: "PR Review", icon: "🔍", description: "Code review by at least one peer", gate: { type: "manual", requiredApprovals: 2, autoApproveConfidence: 0.95, requiredApprovers: ["tech-lead", "peer"] }, agents: ["github-agent", "repo-agent"] },
+  { id: "deploy", name: "Deploy", icon: "🚀", description: "Deploy to staging then production", gate: { type: "manual", requiredApprovals: 2, autoApproveConfidence: 0.95, requiredApprovers: ["tech-lead", "sre"] }, agents: ["argocd-agent", "k8s-agent"] },
+  { id: "monitor", name: "Monitor", icon: "📊", description: "Continuous observability post-deploy", gate: { type: "disabled", requiredApprovals: 0, autoApproveConfidence: 0.90, requiredApprovers: [] }, agents: ["datadog-agent", "loki-agent", "k8s-agent"] },
+];
+
+const FALLBACK_SERVICES: ServicePolicy[] = [
+  { id: "payments-api", name: "payments-api", autonomyLevel: "L2", description: "High-value service. Agent can analyze and recommend; all actions require approval." },
+  { id: "catalog-service", name: "catalog-service", autonomyLevel: "L3", description: "Medium-risk. Agent can execute non-destructive actions; destructive actions supervised." },
+  { id: "auth-service", name: "auth-service", autonomyLevel: "L2", description: "Security-critical. Agent can analyze only; all changes require human approval." },
+];
 
 const GATE_COLORS: Record<GateType, string> = {
   manual: "#f59e0b",
@@ -373,9 +414,26 @@ function AgentLoop({ activeStageIdx }: { activeStageIdx: number }) {
 }
 
 export function WorkflowView() {
-  const [selectedService, setSelectedService] = useState<ServicePolicy>(SERVICE_POLICIES[0]);
-  const [services, setServices] = useState<ServicePolicy[]>(SERVICE_POLICIES);
+  const [selectedService, setSelectedService] = useState<ServicePolicy>(FALLBACK_SERVICES[0]);
+  const [services, setServices] = useState<ServicePolicy[]>(FALLBACK_SERVICES);
   const [stages, setStages] = useState<WorkflowStage[]>(WORKFLOW_STAGES);
+
+  useEffect(() => {
+    fetch("/api/services")
+      .then((r) => r.ok ? r.json() as Promise<{ id: string; name: string }[]> : [])
+      .then((data) => {
+        if (!Array.isArray(data) || data.length === 0) return;
+        const mapped: ServicePolicy[] = data.map((s) => ({
+          id: s.id,
+          name: s.name,
+          autonomyLevel: "L2" as AutonomyLevel,
+          description: `${s.name} — gate policy managed via Workflows`,
+        }));
+        setServices(mapped);
+        setSelectedService(mapped[0]);
+      })
+      .catch(() => {});
+  }, []);
   const [expandedStage, setExpandedStage] = useState<string | null>("tests");
   const [activeStageIdx, setActiveStageIdx] = useState(3);
 

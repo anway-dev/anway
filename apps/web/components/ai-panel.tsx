@@ -1,5 +1,6 @@
 "use client";
-import { StageNode, AI_RESPONSES } from "@/lib/mock";
+import type { StageNode } from "@/components/lifecycle";
+import { AI_RESPONSES } from "@/lib/mock";
 import { useState, useEffect, useRef } from "react";
 
 interface Props {

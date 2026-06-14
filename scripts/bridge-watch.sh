@@ -20,12 +20,13 @@ while true; do
   LAST=$(cat "$CURSOR_FILE" 2>/dev/null || echo "")
 
   if [ "$LATEST" != "$LAST" ] && [ -n "$LATEST" ]; then
-    if grep -q "\[OPEN\]" docs/BRIDGE.md 2>/dev/null; then
-      echo "[bridge-watch] new CLAUDE [OPEN] detected at $LATEST — invoking opencode"
+    # Only trigger on TASKS [OPEN] — NOTE/CORRECTION [OPEN] are informational
+    if grep -q "TASKS \[OPEN\]" docs/BRIDGE.md 2>/dev/null; then
+      echo "[bridge-watch] new CLAUDE TASKS [OPEN] detected at $LATEST — invoking opencode"
       echo "$LATEST" > "$CURSOR_FILE"
 
-      # Compose prompt from live authoritative sources — no static copy
-      OPEN_ENTRY=$(awk '/\[OPEN\]/{found=1} found{print} /^---$/ && found{exit}' docs/BRIDGE.md)
+      # Extract the MOST RECENT TASKS [OPEN] entry (tac = reverse, stop at first match)
+      OPEN_ENTRY=$(tac docs/BRIDGE.md | awk '/TASKS \[OPEN\]/{found=1} found{print}' | tac)
       PROMPT="You are Codex, executor agent for this project.
 
 Read CLAUDE.md for architecture, non-negotiables, and design decisions.
@@ -51,7 +52,7 @@ Execute it. When done:
         rm -f "$CURSOR_FILE"
       fi
     else
-      echo "[bridge-watch] new commit $LATEST but no [OPEN] entries — cursor updated"
+      echo "[bridge-watch] new commit $LATEST but no TASKS [OPEN] entries — cursor updated"
       echo "$LATEST" > "$CURSOR_FILE"
     fi
   fi

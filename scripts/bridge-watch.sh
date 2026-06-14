@@ -25,8 +25,14 @@ while true; do
       echo "[bridge-watch] new CLAUDE TASKS [OPEN] detected at $LATEST — invoking opencode"
       echo "$LATEST" > "$CURSOR_FILE"
 
-      # Extract the MOST RECENT TASKS [OPEN] entry (tac = reverse, stop at first match)
-      OPEN_ENTRY=$(tac docs/BRIDGE.md | awk '/TASKS \[OPEN\]/{found=1} found{print}' | tac)
+      # Extract only the MOST RECENT TASKS [OPEN] block (header → next ## section header)
+      # Terminates on next ## line so --- dividers within the task body are preserved.
+      OPEN_ENTRY=$(awk '
+        /^## CLAUDE.*TASKS \[OPEN\]/ { block=$0"\n"; in_block=1; next }
+        in_block && /^## /           { last=block; in_block=0; block="" }
+        in_block                     { block=block $0"\n" }
+        END                          { if(in_block) last=block; print last }
+      ' docs/BRIDGE.md)
       PROMPT="You are Codex, executor agent for this project.
 
 Read CLAUDE.md for architecture, non-negotiables, and design decisions.

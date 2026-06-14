@@ -7,6 +7,8 @@ interface SessionRow {
   user_id: string | null
   created_at: Date
   expires_at: Date
+  updated_at: Date
+  turn_count: number
 }
 
 export async function sessionRoutes(app: FastifyInstance) {
@@ -17,10 +19,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<SessionRow[]>`
-        SELECT id, user_id, created_at, expires_at
+        SELECT id, user_id, created_at, expires_at, updated_at, turn_count
         FROM sessions
         WHERE tenant_id = ${tenantId}::uuid
-        ORDER BY created_at DESC LIMIT 50
+        ORDER BY updated_at DESC LIMIT 50
       `
     ).catch(() => [] as SessionRow[])
     return rows.map(r => ({
@@ -28,6 +30,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       userId: r.user_id,
       createdAt: r.created_at.toISOString(),
       expiresAt: r.expires_at.toISOString(),
+      updatedAt: r.updated_at.toISOString(),
+      turnCount: r.turn_count,
     }))
   })
 
@@ -39,7 +43,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     const { id } = request.params
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<SessionRow[]>`
-        SELECT id, user_id, created_at, expires_at
+        SELECT id, user_id, created_at, expires_at, updated_at, turn_count
         FROM sessions
         WHERE tenant_id = ${tenantId}::uuid AND id = ${id}::uuid
         LIMIT 1
@@ -52,6 +56,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       userId: r.user_id,
       createdAt: r.created_at.toISOString(),
       expiresAt: r.expires_at.toISOString(),
+      updatedAt: r.updated_at.toISOString(),
+      turnCount: r.turn_count,
     }
   })
 }

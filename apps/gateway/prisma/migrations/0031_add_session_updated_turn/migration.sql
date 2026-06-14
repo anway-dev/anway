@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "sessions" ADD COLUMN "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE "sessions" ADD COLUMN "turn_count" INTEGER NOT NULL DEFAULT 0;

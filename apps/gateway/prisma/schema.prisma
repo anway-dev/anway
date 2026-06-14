@@ -82,6 +82,8 @@ model Session {
   tenant_id  String   @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz
   expires_at DateTime @db.Timestamptz
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+  turn_count Int      @default(0) @map("turn_count")
 
   user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)

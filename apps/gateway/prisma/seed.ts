@@ -33,6 +33,12 @@ async function main() {
   })
   log(`User: ${user.email} (role=${user.role})`)
 
+  await prisma.$executeRaw`
+    INSERT INTO sessions (id, user_id, tenant_id, created_at, expires_at)
+    VALUES (gen_random_uuid(), ${user.id}::uuid, ${tenant.id}::uuid, now(), now() + interval '24 hours')
+  `
+  log('Session seeded.')
+
   // Seed connectors with correct nested capability_manifest format
   await prisma.connector.createMany({
     skipDuplicates: true,

@@ -55,8 +55,9 @@ export async function buildApp() {
   // Global rate limit per IP. 300/min for normal API — a single dashboard load
   // legitimately fires dozens of requests, so 100 was too tight. Webhook
   // ingestion (/api/events/*) bursts higher (Alertmanager/CI fan out) → 600/min.
+  const rlMax = Number(process.env['RATE_LIMIT_MAX'] ?? 300)
   await app.register(import('@fastify/rate-limit'), {
-    max: (req: { url: string }) => (req.url.startsWith('/api/events/') ? 600 : 300),
+    max: (req: { url: string }) => (req.url.startsWith('/api/events/') ? rlMax * 2 : rlMax),
     timeWindow: '1 minute',
   })
 

@@ -732,3 +732,31 @@ test.describe('CERT W: OIDC status endpoint', () => {
     expect(typeof body.configured, 'CERT FAIL: OIDC status must return {configured: boolean}').toBe('boolean')
   })
 })
+
+test.describe('CERT X: liveness and startup probes', () => {
+  test('X.1 GET /health/live returns 200', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/health/live`)
+    expect(r.status()).toBe(200)
+    const body = await r.json() as Record<string, unknown>
+    expect(body['status']).toBe('ok')
+  })
+
+  test('X.2 GET /health/startup returns 200', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/health/startup`)
+    expect(r.status()).toBe(200)
+    const body = await r.json() as Record<string, unknown>
+    expect(body['status']).toBe('ok')
+  })
+})
+
+test.describe('CERT Y: Prometheus metrics', () => {
+  test('Y.1 GET /metrics returns Prometheus-format data', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/metrics`)
+    expect(r.status()).toBe(200)
+    const ct = r.headers()['content-type'] ?? ''
+    expect(ct).toContain('text/plain')
+    const body = await r.text()
+    expect(body.length).toBeGreaterThan(10)
+    expect(body).toContain('process_cpu_seconds_total')
+  })
+})

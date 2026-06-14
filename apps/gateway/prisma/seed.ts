@@ -37,9 +37,9 @@ async function main() {
   await prisma.connector.createMany({
     skipDuplicates: true,
     data: [
-      { tenant_id: tenant.id, name: 'GitHub (Demo)', type: 'cli', mode: 'read', config_encrypted: { binary: 'gh', allowedSubcommands: ['pr list', 'issue list', 'run list'] }, capability_manifest: { capabilities: { read: ['org/*'], write: [] } } },
-      { tenant_id: tenant.id, name: 'PagerDuty (Demo)', type: 'cli', mode: 'read', config_encrypted: { binary: 'pd', allowedSubcommands: ['incident list', 'incident view'] }, capability_manifest: { capabilities: { read: ['*'], write: [] } } },
-      { tenant_id: tenant.id, name: 'ArgoCD (Demo)', type: 'cli', mode: 'read', config_encrypted: { binary: 'argocd', allowedSubcommands: ['app list', 'app get'] }, capability_manifest: { capabilities: { read: ['*'], write: [] } } },
+      { tenant_id: tenant.id, name: 'GitHub (Demo)', type: 'cli', mode: 'read', config_enc: JSON.stringify({ binary: 'gh', allowedSubcommands: ['pr list', 'issue list', 'run list'] }), capability_manifest: { capabilities: { read: ['org/*'], write: [] } } },
+      { tenant_id: tenant.id, name: 'PagerDuty (Demo)', type: 'cli', mode: 'read', config_enc: JSON.stringify({ binary: 'pd', allowedSubcommands: ['incident list', 'incident view'] }), capability_manifest: { capabilities: { read: ['*'], write: [] } } },
+      { tenant_id: tenant.id, name: 'ArgoCD (Demo)', type: 'cli', mode: 'read', config_enc: JSON.stringify({ binary: 'argocd', allowedSubcommands: ['app list', 'app get'] }), capability_manifest: { capabilities: { read: ['*'], write: [] } } },
     ],
   })
   log('Connectors seeded.')

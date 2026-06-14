@@ -760,3 +760,87 @@ test.describe('CERT Y: Prometheus metrics', () => {
     expect(body).toContain('process_cpu_seconds_total')
   })
 })
+
+// ---------------------------------------------------------------------------
+test.describe('CERT Z: auth boundaries and tenant isolation', () => {
+  test('Z.1 unauthenticated GET /api/alerts returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/alerts`)
+    expect(r.status()).toBe(401)
+  })
+
+  test('Z.2 POST /auth/token with non-existent tenantId returns 400', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/auth/token`, {
+      data: { email: 'nobody@nowhere.com', tenantId: '00000000-0000-0000-0000-000000000099' },
+    })
+    expect(r.status()).toBe(400)
+    const body = await r.json() as Record<string, unknown>
+    expect(typeof body['error']).toBe('string')
+  })
+
+  test('Z.3 malformed Authorization header returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/alerts`, {
+      headers: { Authorization: 'Bearer not-a-valid-jwt' },
+    })
+    expect(r.status()).toBe(401)
+  })
+
+  test('Z.4 tenant A data not visible to tenant B token', async ({ request }) => {
+    const h = await authHeaders(request)
+    const marker = uniqueId('z4-isolation')
+    const createR = await request.post(`${GATEWAY}/api/events/incident`, {
+      headers: {
+        ...h,
+        Authorization: `Bearer ${process.env['ANVAY_WEBHOOK_TOKEN'] ?? 'anvay-demo-webhook-token'}`,
+      },
+      data: { title: marker, severity: 'low' },
+    })
+    expect([200, 201, 204].includes(createR.status())).toBe(true)
+
+    const fakeToken = Buffer.from(
+      JSON.stringify({ alg: 'HS256', typ: 'JWT' })
+    ).toString('base64url') + '.' +
+    Buffer.from(
+      JSON.stringify({ tenantId: '00000000-0000-0000-0000-000000000099', role: 'admin', sub: 'fake' })
+    ).toString('base64url') + '.fakesig'
+
+    const r = await request.get(`${GATEWAY}/api/alerts`, {
+      headers: { Authorization: `Bearer ${fakeToken}` },
+    })
+    if (r.status() === 200) {
+      const body = await r.json() as unknown[]
+      const leaked = Array.isArray(body) && body.some((a: unknown) => {
+        const alert = a as Record<string, unknown>
+        return JSON.stringify(alert).includes(marker)
+      })
+      expect(leaked, 'CERT FAIL: tenant A incident visible in tenant B response').toBe(false)
+    } else {
+      expect(r.status()).toBe(401)
+    }
+  })
+})
+
+test.describe('CERT AA: connector re-register idempotency', () => {
+  test('AA.1 registering the same connector type twice does not duplicate it', async ({ request }) => {
+    const h = await authHeaders(request)
+    // Use 'vault' — known connector type not yet registered in any prior cert suite
+    const connType = 'vault'
+
+    const r1 = await request.put(`${GATEWAY}/api/settings/connectors/${connType}`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { credentials: { url: 'http://localhost:8200' } },
+    })
+    expect(r1.status()).toBeLessThan(300)
+
+    const r2 = await request.put(`${GATEWAY}/api/settings/connectors/${connType}`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { credentials: { url: 'http://localhost:8200' } },
+    })
+    expect(r2.status()).toBeLessThan(300)
+
+    const listR = await request.get(`${GATEWAY}/api/settings/connectors`, { headers: h })
+    expect(listR.status()).toBe(200)
+    const connectors = await listR.json() as Array<Record<string, unknown>>
+    const matches = connectors.filter(c => c['connectorType'] === connType)
+    expect(matches.length, `CERT FAIL: connector type ${connType} appears ${matches.length} times, expected 1`).toBe(1)
+  })
+})

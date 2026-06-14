@@ -75,7 +75,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
     })
   })
 
-  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','pagerduty','k8s'])
+  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','pagerduty','k8s','aws-cloudwatch'])
 
   // T9: Trigger bootstrap
   app.post<{ Params: { type: string } }>('/api/connectors/:type/bootstrap', {

@@ -1,5 +1,4 @@
 "use client";
-import { PreviewBanner } from "@/components/preview-banner";
 
 const MOCK_CLUSTER = {
   nodes: 6,
@@ -59,7 +58,6 @@ function Bar({ used, total, color }: { used: number; total: number; color: strin
 export function K8sView() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <PreviewBanner />
       <div style={{ padding: "24px", flex: 1, minHeight: 0, overflowY: "auto" }}>
       {/* Header */}
       <div style={{ marginBottom: "20px" }}>

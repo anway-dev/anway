@@ -17,6 +17,7 @@
     "@anvay/agent": "workspace:*",
     "@anvay/cli-adapter": "workspace:*",
     "@anvay/connector-argocd": "workspace:*",
+    "@anvay/connector-aws-cloudwatch": "workspace:*",
     "@anvay/connector-circleci": "workspace:*",
     "@anvay/connector-confluence": "workspace:*",
     "@anvay/connector-coralogix": "workspace:*",

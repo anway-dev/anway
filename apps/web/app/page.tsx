@@ -20,16 +20,18 @@ import { AutomationsView } from "@/components/automations-view";
 import { K8sView } from "@/components/k8s-view";
 import { SettingsView } from "@/components/settings-view";
 import { ApprovalsView } from "@/components/approvals-view";
+import { ProjectsView } from "@/components/projects-view";
 import type { StageNode } from "@/components/lifecycle";
 
 
-type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings";
+type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings" | "projects";
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "chat",        label: "Anvay",        icon: "✦" },
   { id: "alerts",      label: "Signals",      icon: "◎" },
   { id: "incident",    label: "War Room",     icon: "⚠" },
   { id: "catalog",     label: "Services",     icon: "⬢" },
+  { id: "projects",    label: "Projects",     icon: "◫" },
   { id: "routing",     label: "Routing",      icon: "⇉" },
   { id: "lifecycle",   label: "Lifecycle",    icon: "◈" },
   { id: "editor",      label: "Editor",       icon: "⌗" },
@@ -224,6 +226,7 @@ export default function App() {
           {view === "cloud" && <CloudView onTriggerOrchestrator={handleTriggerOrchestrator} />}
           {view === "incident" && <IncidentView onTriggerOrchestrator={handleTriggerOrchestrator} />}
           {view === "catalog" && <ServiceCatalog onTriggerOrchestrator={handleTriggerOrchestrator} />}
+          {view === "projects" && <ProjectsView activeProject="" setActiveProject={() => {}} />}
           {view === "automations" && <AutomationsView />}
           {view === "settings" && <SettingsView />}
           {view === "k8s" && <K8sView />}

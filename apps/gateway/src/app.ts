@@ -21,6 +21,7 @@ import { alertRoutes } from './routes/alerts.js'
 import { auditRoutes } from './routes/audit.js'
 import { accessRoutes } from './routes/access.js'
 import { lifecycleRoutes } from './routes/lifecycle.js'
+import { cloudRoutes } from './routes/cloud.js'
 import { oidcRoutes } from './routes/oidc.js'
 import { sessionRoutes } from './routes/sessions.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
@@ -79,6 +80,7 @@ export async function buildApp() {
   await app.register(auditRoutes)
   await app.register(accessRoutes)
   await app.register(lifecycleRoutes)
+  await app.register(cloudRoutes)
   await app.register(oidcRoutes)
   await app.register(sessionRoutes)
 

@@ -34,6 +34,7 @@ import { SonarQubeBootstrap } from '@anvay/connector-sonarqube'
 import { TerraformBootstrap } from '@anvay/connector-terraform'
 import { VaultBootstrap } from '@anvay/connector-vault'
 import { VercelBootstrap } from '@anvay/connector-vercel'
+import { AwsCloudwatchBootstrap } from '@anvay/connector-aws-cloudwatch'
 // (avoid build-time dependency on packages that may not have dist/ built)
 import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
@@ -132,6 +133,7 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
   reg.set('terraform', new TerraformBootstrap(kg))
   reg.set('vault', new VaultBootstrap(kg))
   reg.set('vercel', new VercelBootstrap(kg))
+  reg.set('aws-cloudwatch', new AwsCloudwatchBootstrap(kg))
   return reg
 }
 

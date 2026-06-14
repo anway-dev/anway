@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import { PreviewBanner } from "@/components/preview-banner";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const METHOD_COLORS: Record<string, string> = {
@@ -53,7 +52,6 @@ export function ApiClientView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <PreviewBanner />
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       {/* Left: Collections */}
       <div style={{ width: "220px", background: "#0e0e0e", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>

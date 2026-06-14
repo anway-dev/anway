@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect } from "react";
-import { PreviewBanner } from "@/components/preview-banner";
 
 type EditorState = "writing" | "analyzing" | "gate" | "running" | "done";
 type BottomTab = "problems" | "tests" | "terminal";
@@ -136,7 +135,6 @@ export function EditorView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#1e1e1e", fontFamily: "monospace" }}>
-      <PreviewBanner />
       <style>{`
         @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }

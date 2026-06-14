@@ -23,7 +23,17 @@ import { OpsGenieBootstrap } from '@anvay/connector-opsgenie'
 import { NewRelicBootstrap } from '@anvay/connector-newrelic'
 import { CircleCIBootstrap } from '@anvay/connector-circleci'
 import { ConfluenceBootstrap } from '@anvay/connector-confluence'
-// Tier 2+3 — remaining 20 connector bootstraps registered as lazy imports below
+// Tier 2+3 — fully wired
+import { CoralogixBootstrap } from '@anvay/connector-coralogix'
+import { DynatraceBootstrap } from '@anvay/connector-dynatrace'
+import { ElasticsearchBootstrap } from '@anvay/connector-elastic'
+import { LaunchDarklyBootstrap } from '@anvay/connector-launchdarkly'
+import { NotionBootstrap } from '@anvay/connector-notion'
+import { SnykBootstrap } from '@anvay/connector-snyk'
+import { SonarQubeBootstrap } from '@anvay/connector-sonarqube'
+import { TerraformBootstrap } from '@anvay/connector-terraform'
+import { VaultBootstrap } from '@anvay/connector-vault'
+import { VercelBootstrap } from '@anvay/connector-vercel'
 // (avoid build-time dependency on packages that may not have dist/ built)
 import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
@@ -91,14 +101,6 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   return null
 }
 
-/** No-op bootstrap for connectors that don't have their package built yet. */
-class NoopBootstrap implements IConnectorBootstrap {
-  constructor(private readonly kg: IKnowledgeGraph, private readonly name: string) {}
-  async bootstrap(): Promise<{ entitiesUpserted: number; relationshipsUpserted: number; episodeHints: string[] }> {
-    return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [`${this.name}: bootstrap package not yet imported (pending build)`] }
-  }
-}
-
 function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string): Map<string, IConnectorBootstrap> {
   const reg = new Map<string, IConnectorBootstrap>()
   // Tier 1 — fully operational
@@ -119,15 +121,17 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
   reg.set('newrelic', new NewRelicBootstrap(kg))
   reg.set('circleci', new CircleCIBootstrap(kg))
   reg.set('confluence', new ConfluenceBootstrap(kg))
-  // Tier 2+3 — remaining connectors registered as no-op stubs (packages pending build)
-  const pendingConnectors = [
-    'coralogix','dynatrace',
-    'elastic','launchdarkly','notion',
-    'snyk','sonarqube','terraform','vault','vercel',
-  ]
-  for (const name of pendingConnectors) {
-    reg.set(name, new NoopBootstrap(kg, name))
-  }
+  // Tier 2+3 — fully wired
+  reg.set('coralogix', new CoralogixBootstrap(kg))
+  reg.set('dynatrace', new DynatraceBootstrap(kg))
+  reg.set('elastic', new ElasticsearchBootstrap(kg))
+  reg.set('launchdarkly', new LaunchDarklyBootstrap(kg))
+  reg.set('notion', new NotionBootstrap(kg))
+  reg.set('snyk', new SnykBootstrap(kg))
+  reg.set('sonarqube', new SonarQubeBootstrap(kg))
+  reg.set('terraform', new TerraformBootstrap(kg))
+  reg.set('vault', new VaultBootstrap(kg))
+  reg.set('vercel', new VercelBootstrap(kg))
   return reg
 }
 

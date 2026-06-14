@@ -32,9 +32,18 @@ importers:
       '@anvay/connector-confluence':
         specifier: workspace:*
         version: link:../../connectors/confluence
+      '@anvay/connector-coralogix':
+        specifier: workspace:*
+        version: link:../../connectors/coralogix
       '@anvay/connector-datadog':
         specifier: workspace:*
         version: link:../../connectors/datadog
+      '@anvay/connector-dynatrace':
+        specifier: workspace:*
+        version: link:../../connectors/dynatrace
+      '@anvay/connector-elastic':
+        specifier: workspace:*
+        version: link:../../connectors/elastic
       '@anvay/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
@@ -50,6 +59,9 @@ importers:
       '@anvay/connector-k8s':
         specifier: workspace:*
         version: link:../../connectors/k8s
+      '@anvay/connector-launchdarkly':
+        specifier: workspace:*
+        version: link:../../connectors/launchdarkly
       '@anvay/connector-linear':
         specifier: workspace:*
         version: link:../../connectors/linear
@@ -59,6 +71,9 @@ importers:
       '@anvay/connector-newrelic':
         specifier: workspace:*
         version: link:../../connectors/newrelic
+      '@anvay/connector-notion':
+        specifier: workspace:*
+        version: link:../../connectors/notion
       '@anvay/connector-opsgenie':
         specifier: workspace:*
         version: link:../../connectors/opsgenie
@@ -74,6 +89,21 @@ importers:
       '@anvay/connector-slack':
         specifier: workspace:*
         version: link:../../connectors/slack
+      '@anvay/connector-snyk':
+        specifier: workspace:*
+        version: link:../../connectors/snyk
+      '@anvay/connector-sonarqube':
+        specifier: workspace:*
+        version: link:../../connectors/sonarqube
+      '@anvay/connector-terraform':
+        specifier: workspace:*
+        version: link:../../connectors/terraform
+      '@anvay/connector-vault':
+        specifier: workspace:*
+        version: link:../../connectors/vault
+      '@anvay/connector-vercel':
+        specifier: workspace:*
+        version: link:../../connectors/vercel
       '@anvay/mcp-adapter':
         specifier: workspace:*
         version: link:../../packages/mcp-adapter
@@ -8293,7 +8323,7 @@ snapshots:
       eslint: 9.39.4(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-react: 7.37.5(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.7.0))
@@ -8326,7 +8356,7 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -8340,7 +8370,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0)):
+  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9

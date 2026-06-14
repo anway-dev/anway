@@ -27,7 +27,6 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
       } catch {
         return
       }
-      // Validate tenantId before passing to DB
       if (typeof payload.tenantId !== 'string' || !UUID_RE.test(payload.tenantId)) {
         log.warn({ channel, tenantId: payload.tenantId }, 'subscriber: invalid tenantId — skipping')
         return
@@ -47,6 +46,17 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
 
       if (actions.length > 0) {
         await pub.publish('trigger_matched', JSON.stringify({ tenantId, channel, actions }))
+        // Write audit event so CERT V can verify trigger actually fired
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, NULL, NULL,
+                    'trigger_fired',
+                    ${JSON.stringify({ channel, actionCount: actions.length, actionTypes: actions.map(a => a.type) })}::jsonb,
+                    NOW())
+          `
+        ).catch((err: Error) => log.warn({ err, channel, tenantId }, 'trigger_fired audit write failed'))
+        log.info({ channel, tenantId, actionCount: actions.length }, 'trigger fired — actions queued for gate')
       }
     })
   }

@@ -16,6 +16,7 @@ export type AuditEventType =
   | 'intent_parse_failed'
   | 'graph_miss'
   | 'perimeter_changed'
+  | 'trigger_fired'
 
 export interface AuditEvent {
   readonly id: string

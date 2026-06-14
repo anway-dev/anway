@@ -678,27 +678,48 @@ test.describe('CERT U: perimeter enforcement', () => {
 })
 
 test.describe('CERT V: trigger fires', () => {
-  test('V.1 incident_created event creates DB incident', async ({ request }) => {
+  test('V.1 trigger rule fires on matching Redis event — audit log confirms', async ({ request }) => {
     test.setTimeout(90_000)
     const h = await authHeaders(request)
-    const title = uniqueId('cert-trigger')
-    const createResp = await request.post(`${GATEWAY}/api/incidents`, {
-      headers: { ...h, 'Content-Type': 'application/json' },
-      data: { title, severity: 'critical' },
-    })
-    expect([200, 201]).toContain(createResp.status())
 
-    const found = await pollUntil(
+    // Create a trigger rule that listens for incident_created
+    const ruleResp = await request.post(`${GATEWAY}/api/automations/triggers`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: {
+        name: uniqueId('cert-v-trigger'),
+        eventType: 'incident_created',
+        condition: {},
+        actions: [{ type: 'surface_context', params: {} }],
+        enabled: true,
+      },
+    })
+    expect(ruleResp.status(), 'trigger rule creation must succeed').toBeLessThan(300)
+
+    // Fire incident_created via the webhook endpoint
+    const evResp = await request.post(`${GATEWAY}/api/events/incident`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env['ANVAY_WEBHOOK_TOKEN'] ?? 'anvay-demo-webhook-token'}`,
+      },
+      data: { title: uniqueId('cert-v-incident'), severity: 'critical' },
+    })
+    expect([200, 201, 204].includes(evResp.status()), `CERT FAIL: event rejected with ${evResp.status()}`).toBe(true)
+
+    // Poll audit export for trigger_fired event (written by trigger subscriber on match)
+    const triggered = await pollUntil(
       async () => {
-        const r = await request.get(`${GATEWAY}/api/incidents`, { headers: h })
+        const r = await request.get(`${GATEWAY}/api/audit/export`, { headers: h })
         if (r.status() !== 200) return false
-        const list = await r.json() as Array<{ title: string }>
-        return list.some(i => i.title === title)
+        const lines = (await r.text()).split('\n').filter(l => l.trim())
+        return lines.some(l => {
+          try { return (JSON.parse(l) as { event_type?: string }).event_type === 'trigger_fired' }
+          catch { return false }
+        })
       },
       (found) => found === true,
-      { intervalMs: 2000, timeoutMs: 30000 },
+      { intervalMs: 3000, timeoutMs: 60000 },
     ).catch(() => false)
 
-    expect(found).toBe(true)
+    expect(triggered, 'CERT FAIL: no trigger_fired audit event within 60s — trigger engine not firing').toBe(true)
   })
 })

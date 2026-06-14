@@ -20,8 +20,9 @@ while true; do
   LAST=$(cat "$CURSOR_FILE" 2>/dev/null || echo "")
 
   if [ "$LATEST" != "$LAST" ] && [ -n "$LATEST" ]; then
-    # Only trigger on TASKS [OPEN] — NOTE/CORRECTION [OPEN] are informational
-    if grep -q "TASKS \[OPEN\]" docs/BRIDGE.md 2>/dev/null; then
+    # Only trigger on header lines: ## CLAUDE — ... | TASKS [OPEN]
+    # Body text may mention "TASKS [OPEN]" in descriptions — must not trigger.
+    if grep -q "^## CLAUDE.*TASKS \[OPEN\]" docs/BRIDGE.md 2>/dev/null; then
       echo "[bridge-watch] new CLAUDE TASKS [OPEN] detected at $LATEST — invoking opencode"
       echo "$LATEST" > "$CURSOR_FILE"
 

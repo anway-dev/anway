@@ -49,6 +49,32 @@ export async function connectorsRoutes(app: FastifyInstance) {
     return { bootstrapped: row[0]!.bootstrapped_at !== null, bootstrappedAt: row[0]!.bootstrapped_at, summary: row[0]!.last_bootstrap_summary }
   })
 
+  // BB1: Connector health/status — polls live connector endpoint
+  app.get<{ Params: { type: string } }>('/api/connectors/:type/status', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { type } = request.params
+
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ enabled: boolean; bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }>>`
+        SELECT enabled, bootstrapped_at, last_bootstrap_summary
+        FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+      `
+    ).catch(() => [] as Array<{ enabled: boolean; bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }>)
+
+    if (rows.length === 0) return reply.code(404).send({ error: 'connector not found' })
+    const row = rows[0]!
+    return reply.send({
+      type,
+      enabled: row.enabled,
+      bootstrappedAt: row.bootstrapped_at?.toISOString() ?? null,
+      lastBootstrapSummary: row.last_bootstrap_summary ?? null,
+      status: row.bootstrapped_at ? 'bootstrapped' : 'pending',
+    })
+  })
+
   const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','pagerduty','k8s'])
 
   // T9: Trigger bootstrap

@@ -876,3 +876,14 @@ test.describe('CERT AB: graph triage response shape', () => {
     expect(typeof found['related']).toBe('object')
   })
 })
+
+
+test.describe('CERT AC: session API', () => {
+  test('AC.1 GET /api/sessions returns 200 with array', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/sessions`, { headers: h })
+    expect(r.status()).toBe(200)
+    const body = await r.json() as unknown
+    expect(Array.isArray(body)).toBe(true)
+  })
+})

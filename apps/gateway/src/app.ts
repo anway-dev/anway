@@ -22,6 +22,7 @@ import { auditRoutes } from './routes/audit.js'
 import { accessRoutes } from './routes/access.js'
 import { lifecycleRoutes } from './routes/lifecycle.js'
 import { oidcRoutes } from './routes/oidc.js'
+import { sessionRoutes } from './routes/sessions.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -79,6 +80,7 @@ export async function buildApp() {
   await app.register(accessRoutes)
   await app.register(lifecycleRoutes)
   await app.register(oidcRoutes)
+  await app.register(sessionRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

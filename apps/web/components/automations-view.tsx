@@ -259,7 +259,7 @@ export function AutomationsView() {
     }
   }
 
-  const MONITOR_JOB_TYPES = ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief']
+  const MONITOR_JOB_TYPES = ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief', 'cloud_security_scan', 'cost_anomaly_detection', 'incident_retrospective', 'data_retention']
 
   const displayTriggers = triggers.map(toDisplayTrigger)
   const displayMonitors = monitors.map(toDisplayCron)

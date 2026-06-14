@@ -104,3 +104,33 @@ export class IncidentRetrospective {
     return { status: 'ok', resolved: Number(rows[0]?.count ?? 0) }
   }
 }
+
+export class DataRetentionJob {
+  async run(tenantId: string): Promise<{ status: string; auditPurged: number; automationPurged: number }> {
+    // Purge audit_events > 90 days
+    let auditPurged = 0
+    try {
+      const r = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          DELETE FROM audit_events
+          WHERE tenant_id = ${tenantId}::uuid AND created_at < NOW() - INTERVAL '90 days'
+        `
+      )
+      auditPurged = Number(r)
+    } catch { /* best-effort */ }
+
+    // Purge automation_runs > 30 days
+    let automationPurged = 0
+    try {
+      const r = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          DELETE FROM automation_runs
+          WHERE tenant_id = ${tenantId}::uuid AND created_at < NOW() - INTERVAL '30 days'
+        `
+      )
+      automationPurged = Number(r)
+    } catch { /* best-effort */ }
+
+    return { status: 'ok', auditPurged, automationPurged }
+  }
+}

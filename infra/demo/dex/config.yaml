@@ -1,0 +1,26 @@
+issuer: http://localhost:5556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /tmp/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+staticClients:
+  - id: anvay-demo
+    redirectURIs:
+      - http://localhost:4000/auth/oidc/callback
+    name: Anvay Demo
+    secret: anvay-demo-secret
+    public: false
+
+enablePasswordDB: true
+
+staticPasswords:
+  - email: "demo@anvay.local"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZdwille2LW"
+    # password: "anvay2026"
+    userID: "00000000-0000-0000-0000-000000000002"
+    username: "demo"

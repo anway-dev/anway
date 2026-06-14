@@ -1,5 +1,6 @@
 import Fastify from 'fastify'
 import sensible from '@fastify/sensible'
+import cookie from '@fastify/cookie'
 import corsPlugin from './plugins/cors.js'
 import jwtPlugin from './plugins/jwt.js'
 import requestLoggerPlugin from './plugins/request-logger.js'
@@ -20,6 +21,7 @@ import { alertRoutes } from './routes/alerts.js'
 import { auditRoutes } from './routes/audit.js'
 import { accessRoutes } from './routes/access.js'
 import { lifecycleRoutes } from './routes/lifecycle.js'
+import { oidcRoutes } from './routes/oidc.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -48,6 +50,7 @@ export async function buildApp() {
   await app.register(corsPlugin)
   await app.register(jwtPlugin)
   await app.register(requestLoggerPlugin)
+  await app.register(cookie)
 
   // Global rate limit per IP. 300/min for normal API — a single dashboard load
   // legitimately fires dozens of requests, so 100 was too tight. Webhook
@@ -74,6 +77,7 @@ export async function buildApp() {
   await app.register(auditRoutes)
   await app.register(accessRoutes)
   await app.register(lifecycleRoutes)
+  await app.register(oidcRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

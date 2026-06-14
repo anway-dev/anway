@@ -100,6 +100,15 @@ services:
     ports: ["2375:2375"]
     networks: [demo]
 
+  # OIDC IdP — demo SSO without a corporate IdP
+  dex:
+    image: dexidp/dex:v2.38.0
+    ports: ["5556:5556"]
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+    networks: [demo]
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+
   # Local LLM — no API key needed for demo/dev
   # Model: llama3.2:3b (tool calling, ~2 GB). Override with OLLAMA_MODEL env var.
   ollama:

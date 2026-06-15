@@ -641,6 +641,26 @@ export async function pipelineRoutes(app: FastifyInstance) {
               monitorOk = rolloutResult.code === 0
               monitorDetails.push(rolloutResult.output.trim() || (monitorOk ? '✓ Rollout complete' : '✗ Rollout failed'))
               sse({ type: 'log', line: monitorDetails[0]! })
+            } else if (healthUrl) {
+              sse({ type: 'log', line: `-> Polling ${healthUrl}` })
+              let pollOk = false
+              for (let attempt = 1; attempt <= 12; attempt++) {
+                try {
+                  const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) })
+                  if (resp.ok) {
+                    sse({ type: 'log', line: `OK ${healthUrl} -- ${resp.status} (attempt ${attempt}/12)` })
+                    pollOk = true
+                    break
+                  }
+                  sse({ type: 'log', line: `FAIL ${healthUrl} -- ${resp.status} (attempt ${attempt}/12)` })
+                } catch (err) {
+                  sse({ type: 'log', line: `FAIL ${healthUrl} -- ${err instanceof Error ? err.message : String(err)} (attempt ${attempt}/12)` })
+                }
+                await new Promise(r => setTimeout(r, 5000))
+              }
+              monitorOk = pollOk
+              monitorDetails = [pollOk ? `OK ${healthUrl} healthy` : `FAIL ${healthUrl} failed after 12 attempts`]
+              sse({ type: 'log', line: monitorDetails[0]! })
             } else {
               // DEMO: query real metrics from DB instead
               sse({ type: 'log', line: '[DEMO] Polling metrics (set KUBECONFIG for real K8s checks)' })
@@ -660,7 +680,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
               : `${envLabel ?? stageId} health check failed`
 
             // Check if monitor stage reports failure (external systems may signal via input)
-            const monitorFailed = input === 'fail' || input === 'failed'
+            const monitorFailed = !monitorOk || input === 'fail' || input === 'failed'
             if (monitorFailed) {
               const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
               const prevState = pipelineMeta?.['previousTfState']

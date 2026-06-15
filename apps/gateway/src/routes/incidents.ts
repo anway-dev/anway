@@ -6,7 +6,9 @@ import { TenantId, UserId, SessionId } from '@anvay/types'
 import { IncidentService } from '../services/incident.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
+import { appendAuditEvent } from './audit.js'
 
 let _pub: RedisClientType | null = null
 
@@ -147,4 +149,27 @@ export async function incidentRoutes(app: FastifyInstance) {
 
     return { ok: true }
   })
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/incidents/:id',
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { id } = request.params
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          DELETE FROM incidents WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid RETURNING id
+        `
+      ).catch(() => [] as Array<{ id: string }>)
+      if (rows.length === 0) return reply.code(404).send({ error: 'not found' })
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'incident.delete',
+        resource: `incident:${id}`,
+        outcome: 'action_executed',
+        metadata: { id },
+      }).catch(() => {})
+      return reply.send({ deleted: true, id })
+    },
+  )
 }

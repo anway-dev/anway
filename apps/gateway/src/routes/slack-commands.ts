@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { appendAuditEvent } from './audit.js'
 
 async function formatIncidentList(tenantId: string, userId: string): Promise<string> {
   const incidents = await withTenant(prisma, tenantId, (tx) =>
@@ -130,6 +131,15 @@ export async function slackCommandRoutes(app: FastifyInstance) {
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
           `
         ).catch(() => null)
+        const slashUserId = (request.body as Record<string, string> | undefined)?.['user_id'] ?? 'slack-unknown'
+        await appendAuditEvent({
+          tenantId,
+          userId: slashUserId,
+          action: 'gate.approve',
+          resource: `gate_event:${gateId}`,
+          outcome: 'action_executed',
+          metadata: { source: 'slack_slash_command', command: '/anvay approve', gateId },
+        }).catch(() => { /* non-blocking */ })
         return reply.send({ response_type: 'ephemeral', text: `Gate *${gateId}* approved.` })
       }
 

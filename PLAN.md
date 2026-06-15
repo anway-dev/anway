@@ -150,7 +150,7 @@ Each wave is complete when:
 
 | Wave | Status | Started | Completed |
 |------|--------|---------|-----------|
-| Wave 1 — Sale Blockers | 🔄 In Progress | 2026-06-15 | — |
-| Wave 2 — Enterprise Close | ⏳ Pending | — | — |
-| Wave 3 — Flipkart Scale | ⏳ Pending | — | — |
-| Wave 4 — Complete | ⏳ Pending | — | — |
+| Wave 1 — Sale Blockers | ✅ Done | 2026-06-15 | 2026-06-15 |
+| Wave 2 — Enterprise Close | ✅ Done | 2026-06-15 | 2026-06-15 |
+| Wave 3 — Flipkart Scale | ✅ Done | 2026-06-15 | 2026-06-15 |
+| Wave 4 — Complete | ✅ Done | 2026-06-15 | 2026-06-15 |

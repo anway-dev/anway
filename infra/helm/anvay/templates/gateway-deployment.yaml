@@ -43,3 +43,28 @@ spec:
               port: 4000
             initialDelaySeconds: 10
             periodSeconds: 30
+          {{- if .Values.loki.enabled }}
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+          {{- end }}
+        {{- if .Values.loki.enabled }}
+        - name: promtail
+          image: grafana/promtail:2.9.0
+          args:
+            - "-config.file=/etc/promtail/promtail.yaml"
+          volumeMounts:
+            - name: promtail-config
+              mountPath: /etc/promtail
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+        {{- end }}
+      {{- if .Values.loki.enabled }}
+      volumes:
+        - name: promtail-config
+          configMap:
+            name: {{ include "anvay.fullname" . }}-promtail
+        - name: varlog
+          emptyDir: {}
+      {{- end }}

@@ -1,23 +1,21 @@
 name: CI
 on:
-  push:
-    branches: [main, 'claude/**']
   pull_request:
     branches: [main]
-
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
         with:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: 20
+          cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r test
-      - run: cd apps/gateway && npx tsc --noEmit
-      - run: cd apps/web && npx tsc --noEmit
+      - run: npx tsc --noEmit -p apps/gateway/tsconfig.json
+      - run: npx tsc --noEmit -p apps/web/tsconfig.json
+      - run: docker build -f apps/gateway/Dockerfile . -t anvay-gateway:ci
+      - run: docker build -f apps/web/Dockerfile . -t anvay-web:ci

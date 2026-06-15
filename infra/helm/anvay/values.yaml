@@ -38,3 +38,7 @@ postgres:
 redis:
   enabled: true
   storageSize: 1Gi
+
+loki:
+  enabled: false
+  endpoint: http://loki:3100

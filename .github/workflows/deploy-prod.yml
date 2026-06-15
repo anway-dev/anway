@@ -1,0 +1,61 @@
+name: Deploy Production
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Git SHA to deploy (defaults to latest main)
+        required: false
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve SHA
+        id: sha
+        run: echo "sha=${{ inputs.sha || github.sha }}" >> $GITHUB_OUTPUT
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > /tmp/kubeconfig
+      - name: Helm upgrade production
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          helm upgrade --install anvay infra/helm/anvay \
+            --namespace anvay --create-namespace \
+            --set gateway.image.repository=${{ env.REGISTRY }}/anvay-gateway \
+            --set gateway.image.tag=${{ steps.sha.outputs.sha }} \
+            --set web.image.repository=${{ env.REGISTRY }}/anvay-web \
+            --set web.image.tag=${{ steps.sha.outputs.sha }} \
+            --wait --timeout 10m
+      - name: Run migrations
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          kubectl run migrate-${{ github.run_id }} \
+            --image=${{ env.REGISTRY }}/anvay-gateway:${{ steps.sha.outputs.sha }} \
+            --namespace anvay \
+            --restart=Never --rm --attach \
+            --env DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}" \
+            -- npx prisma migrate deploy
+      - name: Health check
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          for i in $(seq 1 24); do
+            STATUS=$(kubectl exec -n anvay deploy/anvay-gateway -- \
+              wget -qO- http://localhost:4000/health/ready 2>/dev/null || echo "fail")
+            echo "$STATUS" | grep -q '"status":"ok"' && echo "Healthy" && exit 0
+            echo "Attempt $i/24 — waiting 5s..."
+            sleep 5
+          done
+          echo "Health check timed out" && exit 1

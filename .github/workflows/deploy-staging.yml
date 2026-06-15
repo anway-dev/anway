@@ -1,0 +1,57 @@
+name: Deploy Staging
+on:
+  push:
+    branches: [main]
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/gateway/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/anvay-gateway:${{ github.sha }},${{ env.REGISTRY }}/anvay-gateway:staging-latest
+      - name: Build and push web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/anvay-web:${{ github.sha }},${{ env.REGISTRY }}/anvay-web:staging-latest
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > /tmp/kubeconfig
+      - name: Helm upgrade staging
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          helm upgrade --install anvay infra/helm/anvay \
+            --namespace anvay-staging --create-namespace \
+            --set gateway.image.repository=${{ env.REGISTRY }}/anvay-gateway \
+            --set gateway.image.tag=${{ github.sha }} \
+            --set web.image.repository=${{ env.REGISTRY }}/anvay-web \
+            --set web.image.tag=${{ github.sha }} \
+            --wait --timeout 5m
+      - name: Run migrations
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          kubectl run migrate-${{ github.run_id }} \
+            --image=${{ env.REGISTRY }}/anvay-gateway:${{ github.sha }} \
+            --namespace anvay-staging \
+            --restart=Never --rm --attach \
+            --env DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}" \
+            -- npx prisma migrate deploy

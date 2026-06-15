@@ -51,5 +51,16 @@ groups:
           team: platform
         annotations:
           summary: "Anvay Redis memory high ({{ $value | humanizePercentage }})"
-          description: "Redis memory usage exceeds 85%. Consider scaling or eviction policy review."
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory. Risk of eviction."
           runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#redis-memory-high"
+
+      - alert: AnvaySloBurnRateCritical
+        expr: anvay_slo_burn_rate_1h > 2
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "SLO burn rate critical ({{ $value }}x)"
+          description: "Error budget burning at {{ $value }}x the safe rate. At this pace budget exhausts in {{ $value | humanizeDuration }}."
+          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#high-error-rate"

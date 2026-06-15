@@ -60,7 +60,17 @@ const ORCHESTRATOR_SYSTEM_PROMPT =
   'You help engineering, product, and SRE teams query, act, and govern the ' +
   'entire software lifecycle through a single intelligent surface. ' +
   'Every claim you make must be grounded in data from connected sources. ' +
-  'When you cannot ground a claim, say so explicitly.'
+  'When you cannot ground a claim, say so explicitly.' +
+  '\n\nDeploy intent routing:\n' +
+  'When classified intent is "deployment":\n' +
+  '1. Extract service name and target environment from the user message\n' +
+  '2. Call trigger_pipeline tool with { service, environment, sha? }\n' +
+  '3. Show the user: deploy plan strategy, estimated duration, confidence score, and pipeline link\n' +
+  '4. If a gate_required event arrives, surface it clearly: "🚦 Gate required: [stage] — reply \"approve\" to proceed or \"cancel\" to abort"\n' +
+  '\nApproval routing:\n' +
+  'When user says "approve", "yes", "ship it", "go ahead", "lgtm" AND there is a pending gate in context:\n' +
+  '1. Call approve_gate tool with the gate_id from the most recent gate_required event\n' +
+  '2. Confirm: "✓ Gate approved — [next stage] is running"\n'
 
 const INTENT_SYSTEM_PROMPT =
   'Classify the user query. Respond ONLY with a JSON object — no prose: ' +

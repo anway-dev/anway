@@ -51,6 +51,8 @@ interface Message {
   inputTokens?: number;
   outputTokens?: number;
   staleWarning?: string;
+  gateId?: string;
+  gateStatus?: "pending" | "approved" | "rejected";
 }
 
 interface LogLine {
@@ -137,7 +139,7 @@ function LogEntry({ line, idx }: { line: LogLine; idx: number }) {
   );
 }
 
-function MessageBlock({ message }: { message: Message }) {
+function MessageBlock({ message, onApproveGate }: { message: Message; onApproveGate?: (gateId: string) => void }) {
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -227,6 +229,25 @@ function MessageBlock({ message }: { message: Message }) {
           }} />
         )}
       </div>
+      {message.gateId && message.gateStatus === 'pending' && onApproveGate && (
+        <div style={{ marginTop: 8, paddingLeft: 2 }}>
+          <button
+            onClick={() => onApproveGate(message.gateId!)}
+            style={{
+              padding: '6px 16px',
+              background: '#10b981',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontFamily: 'monospace',
+            }}
+          >
+            ✓ Approve
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -490,6 +511,13 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
           } else if (event.type === 'gate_required') {
             setGateRequired({ gateId: event.gateId, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
             pushLog({ actor: "GATE", actorColor: "#f59e0b", text: `${event.toolName} — awaiting approval`, status: 'running' });
+            setMessages(prev => [...prev, {
+              id: `gate-${event.gateId}`,
+              role: "assistant",
+              content: `🚦 Gate required: **${event.toolName}** — reply "approve" to proceed or "cancel" to abort\n\`\`\`json\n${JSON.stringify(event.args, null, 2)}\n\`\`\``,
+              gateId: event.gateId,
+              gateStatus: "pending",
+            }]);
           } else if (event.type === 'error') {
             pushLog({ actor: "ERROR", actorColor: "#ef4444", text: `${event.code}: ${event.message}`, status: 'error' });
             setMessages(prev => prev.map(m =>
@@ -542,6 +570,15 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
   function handleSend() {
     if (!input.trim() || isThinking) return;
     const t = input.trim(); setInput(""); sendRealForm(t);
+  }
+
+  function handleApproveGate(gateId: string) {
+    if (isThinking) return;
+    setMessages(prev => prev.map(m =>
+      m.gateId === gateId ? { ...m, gateStatus: 'approved' as const } : m
+    ));
+    setGateRequired(null);
+    sendRealForm(`approve gate ${gateId}`);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -650,7 +687,7 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
             <EmptyState onScenario={runScenario} />
           ) : (
             <>
-              {messages.map(msg => <MessageBlock key={msg.id} message={msg} />)}
+              {messages.map(msg => <MessageBlock key={msg.id} message={msg} onApproveGate={handleApproveGate} />)}
               {noProvider && (
                 <div style={{
                   margin: "16px 0", padding: "14px 16px",

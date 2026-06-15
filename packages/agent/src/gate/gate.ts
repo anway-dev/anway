@@ -26,6 +26,7 @@ export type GateDecision = { _tag: 'approved' } | { _tag: 'rejected'; reason: st
 const WRITE_ACTION_PATTERNS = [
   /^notify_/, /^create_/, /^delete_/, /^update_/, /^deploy/, /^restart/,
   /^scale/, /^rollback/, /^merge/, /^comment/, /^run_runbook/, /^register_/,
+  /^trigger_/,  // trigger_pipeline etc.
 ]
 
 export function isWriteAction(toolName: string): boolean {

@@ -31,6 +31,7 @@ import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
 import { makeRegistrationTools } from '../connectors/registration-tools.js'
+import { makeDeployTools } from '../tools/deploy-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
 import { getMemoryGateSink } from '../gate/memory-gate-fallback.js'
 import { isValidUUID } from '../utils/validators.js'
@@ -432,7 +433,8 @@ export async function chatRoutes(app: FastifyInstance) {
         withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
-    const allTools = [...connectorTools, ...registrationTools]
+    const deployTools = makeDeployTools(tenantId, userId, provider, knowledgeGraph)
+    const allTools = [...connectorTools, ...registrationTools, ...deployTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
     const gateSink = redisUrl ? new RedisGateSink(redisUrl) : getMemoryGateSink()

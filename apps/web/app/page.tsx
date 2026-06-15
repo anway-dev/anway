@@ -76,13 +76,13 @@ export default function App() {
     // Fetch critical alerts count
     fetch("/api/alerts")
       .then(r => r.json() as Promise<{ data: { severity: string }[] }>)
-      .then(list => setCriticalCount(list.filter(a => a.severity === "critical").length))
+      .then(list => setCriticalCount((list.data ?? []).filter(a => a.severity === "critical").length))
       .catch(() => setCriticalCount(0))
 
     // Fetch active incidents count
     fetch("/api/incidents")
       .then(r => r.json() as Promise<{ data: { status: string }[] }>)
-      .then(list => setActiveIncidents(list.filter(i => i.status === "active" || i.status === "investigating").length))
+      .then(list => setActiveIncidents((list.data ?? []).filter(i => i.status === "active" || i.status === "investigating").length))
       .catch(() => setActiveIncidents(0))
 
     // Fetch recent audit events for sidebar

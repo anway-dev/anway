@@ -4,7 +4,9 @@ import { GraphBuilderAgent } from '@anvay/agent'
 import type { GraphEvent, IConnectorBootstrap, IKnowledgeGraph } from '@anvay/agent'
 import { ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
+import type { TenantId } from '@anvay/types'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { startGraphWorker } from './queue.js'
 // Tier 1 — fully operational
 import { GitHubBootstrap } from '@anvay/connector-github'
 import { ArgocdBootstrap } from '@anvay/connector-argocd'
@@ -36,7 +38,6 @@ import { VaultBootstrap } from '@anvay/connector-vault'
 import { VercelBootstrap } from '@anvay/connector-vercel'
 import { AwsCloudwatchBootstrap } from '@anvay/connector-aws-cloudwatch'
 // (avoid build-time dependency on packages that may not have dist/ built)
-import type { TenantId } from '@anvay/types'
 import { UUID_RE } from '../utils/validators.js'
 import { decryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
@@ -246,4 +247,60 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
   })
 
   log.info({ channels: [...GRAPH_EVENT_CHANNELS, 'kb:stale'] }, 'GraphBuilderSubscriber started')
+}
+
+export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberLogger): Promise<void> {
+  const worker = startGraphWorker(async (job) => {
+    const event = job.data.event as GraphEvent & { tenantId: string }
+    if (typeof event.tenantId !== 'string' || !UUID_RE.test(event.tenantId)) {
+      log.warn({ tenantId: event.tenantId }, 'graph-worker: invalid tenantId — skipping')
+      return
+    }
+    const tid = event.tenantId
+
+    const providerConfig = await resolveProviderConfig(tid)
+    if (!providerConfig) {
+      log.warn({ tenantId: tid }, 'GraphWorker: no LLM provider configured — skipping')
+      return
+    }
+    const provider = ProviderFactory.create(providerConfig)
+    const kg = createKnowledgeGraph(tid as TenantId)
+
+    if (!registryCache.has(tid)) {
+      if (registryCache.size >= MAX_REGISTRY_CACHE) {
+        const k = registryCache.keys().next().value
+        if (k !== undefined) registryCache.delete(k)
+      }
+      registryCache.set(tid, buildBootstrapRegistry(kg, tid))
+    }
+    const bootstrapRegistry = registryCache.get(tid)!
+    const pub = createClient({ url: redisUrl })
+    await pub.connect()
+    const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, pub)
+
+    try {
+      await agent.handle(event)
+      if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
+        const connectorType = event.connectorType
+        if (connectorType) {
+          void withTenant(prisma, tid, (tx) =>
+            tx.$executeRaw`
+              UPDATE connector_config
+              SET bootstrapped_at = NOW(),
+                  last_bootstrap_summary = ${JSON.stringify({ status: 'success', at: new Date().toISOString() })}::jsonb
+              WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
+            `
+          ).catch(() => {})
+        }
+      }
+    } catch (err) {
+      log.error({ err, eventType: event.type, tenantId: tid }, 'GraphWorker event handling failed')
+    } finally {
+      await pub.quit()
+    }
+  })
+
+  if (worker) {
+    log.info({}, 'GraphBuilderWorker started (BullMQ)')
+  }
 }

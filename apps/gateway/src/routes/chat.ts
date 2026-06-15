@@ -1,5 +1,7 @@
 import { Readable } from 'node:stream'
 import type { FastifyInstance } from 'fastify'
+import { createClient } from 'redis'
+import type { RedisClientType } from 'redis'
 import {
   createOrchestrator,
   runSession,
@@ -70,7 +72,23 @@ export class InMemorySessionMemory implements ISessionMemory {
     this.turns.set(sessionId, [...existing, turn])
   }
 
-  async summarise(_sessionId: SessionId): Promise<void> {}
+  async summarise(sessionId: SessionId): Promise<void> {
+    const ctx = await this.get(sessionId)
+    if (!ctx || ctx.turns.length <= 10) return
+    const toSummarise = ctx.turns.slice(0, ctx.turns.length - 10)
+    const summaryLines = toSummarise
+      .filter(t => t.role === 'user' || t.role === 'assistant')
+      .slice(-20)
+      .map(t => `${t.role}: ${typeof t.content === 'string' ? t.content.slice(0, 200) : JSON.stringify(t.content).slice(0, 200)}`)
+    const summary = summaryLines.length > 0
+      ? `Earlier conversation summary (${summaryLines.length} turns): ${summaryLines.join(' | ')}`
+      : 'No prior conversation to summarize.'
+    const summaryTurn: ConversationTurn = { role: 'system' as const, content: `[Summary of earlier conversation]: ${summary}`, timestamp: Date.now() }
+    const kept = [summaryTurn, ...ctx.turns.slice(ctx.turns.length - 10)]
+    // InMemorySessionMemory stores turns directly
+    const existing = this.turns.get(sessionId) ?? []
+    this.turns.set(sessionId, [...summaryLines.length > 0 ? [summaryTurn] : [], ...existing.slice(-9)])
+  }
 
   async clear(sessionId: SessionId): Promise<void> {
     this.turns.delete(sessionId)
@@ -292,6 +310,22 @@ export async function chatRoutes(app: FastifyInstance) {
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
+    // Token budget enforcement — check Redis counter before processing
+    if (redisUrl) {
+      try {
+        const redisBudget = createClient({ url: redisUrl }) as RedisClientType
+        await redisBudget.connect()
+        const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
+        const used = parseInt(await redisBudget.get(monthKey) ?? '0', 10)
+        const budget = (dbTenant as { token_budget_monthly?: number } | null)?.token_budget_monthly ?? 1_000_000
+        if (used >= budget) {
+          await redisBudget.quit()
+          return reply.code(429).send({ error: 'token budget exceeded', code: 'BUDGET_EXCEEDED', used, budget })
+        }
+        await redisBudget.quit()
+      } catch { /* Redis may be unavailable — skip budget check */ }
+    }
+
     // Build perimeter from connector config.
     // Scopes are keyed by the TOOL PREFIX — adapters name tools
     // `<connector-name>.<action>` (row.name || row.type), so the perimeter
@@ -409,8 +443,7 @@ export async function chatRoutes(app: FastifyInstance) {
       gateSink,
     })
 
-    // SSE response setup
-    const stream = new Readable({ read() {} })
+    // SSE response setup — Redis fan-out for multi-pod, direct stream for single-pod
     reply.header('Content-Type', 'text/event-stream')
     reply.header('Cache-Control', 'no-cache')
     reply.header('Connection', 'keep-alive')
@@ -420,7 +453,29 @@ export async function chatRoutes(app: FastifyInstance) {
     const abortController = new AbortController()
     request.raw.on('close', () => abortController.abort())
 
+    // Redis SSE fan-out — enables multi-pod gateway deployments
+    const chatRedisUrl = process.env['REDIS_URL']
+    let chatPub: RedisClientType | null = null
+    let chatSub: RedisClientType | null = null
+
+    if (chatRedisUrl) {
+      chatPub = createClient({ url: chatRedisUrl }) as RedisClientType
+      chatSub = chatPub.duplicate()
+      await chatPub.connect()
+      await chatSub.connect()
+      const channel = `sse:chat:${sessionId}`
+      await chatSub.subscribe(channel, (_channel, message) => {
+        reply.raw.write(`data: ${message}\n\n`)
+      })
+      request.raw.on('close', async () => {
+        try { await chatSub!.unsubscribe(channel) } catch { /* */ }
+        try { await chatSub!.quit() } catch { /* */ }
+        try { await chatPub!.quit() } catch { /* */ }
+      })
+    }
+
     // Agent loop runs in background; aborted on client disconnect
+    const stream = new Readable({ read() {} })
     void (async () => {
       let totalTokens = 0
       try {
@@ -442,6 +497,18 @@ export async function chatRoutes(app: FastifyInstance) {
             })
             // Persist token usage to DB
             if (totalTokens > 0) {
+              // Redis token counter (real-time budget tracking)
+              if (redisUrl) {
+                try {
+                  const redisBudget = createClient({ url: redisUrl }) as RedisClientType
+                  await redisBudget.connect()
+                  const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
+                  await redisBudget.incrBy(monthKey, totalTokens)
+                  const nextMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)
+                  await redisBudget.expireAt(monthKey, Math.floor(nextMonth.getTime() / 1000))
+                  await redisBudget.quit()
+                } catch { /* Redis may be unavailable */ }
+              }
               try {
                 const today = new Date().toISOString().slice(0, 10)
                 await withTenant(prisma, tenantId, (tx) =>
@@ -455,9 +522,19 @@ export async function chatRoutes(app: FastifyInstance) {
               } catch { /* token tracking is best-effort */ }
             }
           }
-          stream.push(`data: ${JSON.stringify(event)}\n\n`)
+          const msg = JSON.stringify(event)
+          if (chatPub) {
+            void chatPub.publish(`sse:chat:${sessionId}`, msg)
+          } else {
+            stream.push(`data: ${msg}\n\n`)
+          }
         }
-        stream.push('data: [DONE]\n\n')
+        const doneMsg = JSON.stringify('[DONE]')
+        if (chatPub) {
+          void chatPub.publish(`sse:chat:${sessionId}`, doneMsg)
+        } else {
+          stream.push('data: [DONE]\n\n')
+        }
       } catch (err) {
         request.log.error({ err, sessionId }, 'chat session error')
         const errPayload = {
@@ -465,10 +542,23 @@ export async function chatRoutes(app: FastifyInstance) {
           code: 'UPSTREAM_ERROR',
           message: err instanceof Error ? err.message : 'internal error',
         }
-        stream.push(`data: ${JSON.stringify(errPayload)}\n\n`)
+        if (chatPub) {
+          void chatPub.publish(`sse:chat:${sessionId}`, JSON.stringify(errPayload))
+        } else {
+          stream.push(`data: ${JSON.stringify(errPayload)}\n\n`)
+        }
       } finally {
         if (totalTokens > 0) recordSessionUsed(sessionId, totalTokens)
         stream.push(null)
+        // Trigger session summarisation if turns exceed threshold
+        void (async () => {
+          try {
+            const ctx = await sessionMemory.get(SessionId(sessionId))
+            if (ctx && ctx.turns.length > 50) {
+              await sessionMemory.summarise(SessionId(sessionId))
+            }
+          } catch { /* summarisation is best-effort */ }
+        })()
       }
     })()
 

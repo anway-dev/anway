@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
@@ -40,15 +41,24 @@ export async function alertRoutes(app: FastifyInstance) {
     preHandler: [app.authenticate],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
+    const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
+    const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<IncidentRow[]>`
         SELECT id, title, severity, status, description, suggested_root_cause, created_at
-        FROM incidents ORDER BY created_at DESC LIMIT 20
+        FROM incidents
+        ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
+        ORDER BY id DESC
+        LIMIT ${limit + 1}
       `
     ).catch(() => [] as IncidentRow[])
 
-    return rows.map(r => ({
+    const hasMore = rows.length > limit
+    const data = hasMore ? rows.slice(0, limit) : rows
+
+    return {
+      data: data.map(r => ({
       id: r.id,
       kind: 'alert' as const,
       severity: (r.severity === 'critical' || r.severity === 'high' || r.severity === 'medium' || r.severity === 'low') ? r.severity : 'medium' as 'critical' | 'high' | 'medium' | 'low',
@@ -61,7 +71,9 @@ export async function alertRoutes(app: FastifyInstance) {
       triageStatus: (r.status === 'active' || r.status === 'investigating') ? 'triaging' : 'pending' as 'auto_triaged' | 'triaging' | 'pending' | 'escalated',
       triageSummary: r.suggested_root_cause ?? undefined,
       orchestratorQuery: `Explain: ${r.title}`,
-    }))
+    })),
+      nextCursor: hasMore ? data[data.length - 1]!.id : null,
+    }
   })
 }
 

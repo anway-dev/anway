@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '@prisma/client'
 import type { GraphEvent } from '@anvay/agent'
 import { GraphBuilderAgent } from '@anvay/agent'
 import { ProviderFactory } from '@anvay/agent'
@@ -114,16 +115,23 @@ export async function graphEventRoutes(app: FastifyInstance) {
   // Knowledge graph explorer — entities + relationships for the tenant
   app.get('/api/graph/entities', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
+    const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
+    const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
     return withTenant(prisma, tenantId, async (tx) => {
       const entities = await tx.$queryRaw<GraphEntityRow[]>`
         SELECT id, name, type, metadata, updated_at AS "updatedAt"
-        FROM entities ORDER BY type, name LIMIT 1000
+        FROM entities
+        ${cursor ? Prisma.sql`WHERE id > ${cursor}::uuid` : Prisma.sql``}
+        ORDER BY id ASC
+        LIMIT ${limit + 1}
       `
+      const hasMore = entities.length > limit
+      const entityData = hasMore ? entities.slice(0, limit) : entities
       const relationships = await tx.$queryRaw<GraphRelRow[]>`
         SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
         FROM relationships LIMIT 2000
       `
-      return { entities, relationships }
+      return { data: entityData, relationships, nextCursor: hasMore ? entityData[entityData.length - 1]!.id : null }
     })
   })
 

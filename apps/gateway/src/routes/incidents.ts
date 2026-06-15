@@ -31,13 +31,16 @@ export async function incidentRoutes(app: FastifyInstance) {
         properties: {
           status: { type: 'string' },
           severity: { type: 'string' },
+          cursor: { type: 'string' },
+          limit: { type: 'string' },
         },
       },
     },
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
-    const { status, severity } = request.query as { status?: IncidentStatus; severity?: IncidentSeverity }
-    return service.list(tenantId, { status, severity })
+    const { status, severity, cursor, limit: limitStr } = request.query as { status?: IncidentStatus; severity?: IncidentSeverity; cursor?: string; limit?: string }
+    const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
+    return service.list(tenantId, { status, severity, cursor, limit })
   })
 
   app.get<{ Params: { id: string } }>('/api/incidents/:id', {

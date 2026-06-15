@@ -41,10 +41,18 @@ export class IncidentService {
     )
   }
 
-  async list(tenantId: string, filters?: { status?: IncidentStatus; severity?: IncidentSeverity }) {
-    return withTenant(this.prisma, tenantId, (tx) =>
-      tx.incident.findMany({ where: { tenant_id: tenantId, ...filters }, orderBy: { created_at: 'desc' }, take: 50 })
-    )
+  async list(tenantId: string, filters?: { status?: IncidentStatus; severity?: IncidentSeverity; cursor?: string; limit?: number }) {
+    const { status, severity, cursor, limit = 50 } = filters ?? {}
+    return withTenant(this.prisma, tenantId, async (tx) => {
+      const rows = await tx.incident.findMany({
+        where: { tenant_id: tenantId, ...(status ? { status } : {}), ...(severity ? { severity } : {}), ...(cursor ? { id: { gt: cursor } } : {}) },
+        orderBy: { id: 'asc' },
+        take: limit + 1,
+      })
+      const hasMore = rows.length > limit
+      const data = hasMore ? rows.slice(0, limit) : rows
+      return { data, nextCursor: hasMore ? data[data.length - 1]!.id : null }
+    })
   }
 
   async resolve(id: string, tenantId: string) {

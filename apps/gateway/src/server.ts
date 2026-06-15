@@ -10,7 +10,7 @@ import { assertEncryptionKey } from './utils/crypto.js'
 import pino from 'pino'
 import { startTriggerSubscriber } from './triggers/subscriber.js'
 import { createCronJobs } from './jobs/scheduler.js'
-import { startGraphBuilderSubscriber } from './graph-builder/subscriber.js'
+import { startGraphBuilderSubscriber, startGraphBuilderWorker } from './graph-builder/subscriber.js'
 import { startTriggerExecutor } from './triggers/executor.js'
 import { startIncidentSubscriber } from './events/incident-subscriber.js'
 import { startAlertSubscriber } from './events/alert-subscriber.js'
@@ -88,6 +88,14 @@ async function main() {
       )
     } catch (err) {
       app.log.warn({ err }, 'Graph builder subscriber not started — Redis may be unavailable')
+    }
+    try {
+      await startGraphBuilderWorker(
+        process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL,
+        app.log,
+      )
+    } catch (err) {
+      app.log.warn({ err }, 'Graph builder worker not started — Redis may be unavailable')
     }
     try {
       await startTriggerExecutor(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)

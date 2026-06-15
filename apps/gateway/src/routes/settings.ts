@@ -192,5 +192,51 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       return { ok: true }
     },
   )
+
+  // GET /api/settings/token-usage — per-tenant monthly token budget
+  app.get('/api/settings/token-usage', {
+    preHandler: [app.authenticate],
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const month = new Date().toISOString().slice(0, 7)
+    let used = 0
+    const redisUrl = process.env['REDIS_URL']
+    if (redisUrl) {
+      try {
+        const { createClient } = await import('redis')
+        const r = createClient({ url: redisUrl })
+        await r.connect()
+        const monthKey = `tokens:${tenantId}:${month}`
+        used = parseInt(await r.get(monthKey) ?? '0', 10)
+        await r.quit()
+      } catch { /* fall through */ }
+    }
+    // Fallback to DB if no Redis
+    if (used === 0) {
+      try {
+        const rows = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ monthly: bigint }>>`
+            SELECT COALESCE(SUM(tokens_used), 0) AS monthly
+            FROM token_usage_daily WHERE tenant_id = ${tenantId}::uuid
+            AND date >= ${`${month}-01`}::date
+          `
+        ).catch(() => [])
+        used = rows.length > 0 ? Number(rows[0]!.monthly) : 0
+      } catch { /* table may not exist */ }
+    }
+    // Get budget from tenant
+    let budget = 1_000_000
+    try {
+      const tenantRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ token_budget_monthly: number | null }>>`
+          SELECT token_budget_monthly FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1
+        `
+      ).catch(() => [] as Array<{ token_budget_monthly: number | null }>)
+      if (tenantRows.length > 0 && tenantRows[0]!.token_budget_monthly != null) {
+        budget = tenantRows[0]!.token_budget_monthly
+      }
+    } catch { /* use default */ }
+    return { used, budget, month }
+  })
 }
 

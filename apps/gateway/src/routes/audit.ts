@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
@@ -28,17 +29,24 @@ export async function auditRoutes(app: FastifyInstance) {
     preHandler: [app.authenticate],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
+    const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
+    const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
-    const limitClause = Math.min(Number((request.query as Record<string, string>)['limit']) || 50, 200)
-    const offsetClause = Math.max(Number((request.query as Record<string, string>)['offset']) || 0, 0)
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
-        FROM audit_events ORDER BY created_at DESC LIMIT ${limitClause} OFFSET ${offsetClause}
+        FROM audit_events
+        ${cursor ? Prisma.sql`WHERE id > ${cursor}::uuid` : Prisma.sql``}
+        ORDER BY id DESC
+        LIMIT ${limit + 1}
       `
     ).catch(() => [] as AuditRow[])
 
-    return rows.map(r => {
+    const hasMore = rows.length > limit
+    const data = hasMore ? rows.slice(0, limit) : rows
+
+    return {
+      data: data.map(r => {
       const p = (r.payload ?? {}) as Record<string, unknown>
       return {
         id: r.id,
@@ -52,7 +60,9 @@ export async function auditRoutes(app: FastifyInstance) {
         detail: (p['detail'] as string) ?? (p['message'] as string) ?? '',
         durationMs: (p['durationMs'] as number) ?? 0,
       } as AuditEvent
-    })
+    }),
+      nextCursor: hasMore ? data[data.length - 1]!.id : null,
+    }
   })
 
   // X1: Audit log export — admin only, NDJSON download

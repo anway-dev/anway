@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ProviderConfig } from "@/components/provider-config";
 import { ConnectorsView } from "@/components/connectors";
 import { AccessView } from "@/components/access-view";
@@ -14,8 +14,18 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "audit", label: "Audit" },
 ];
 
+interface TokenUsage { used: number; budget: number; month: string }
+
 export function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>("provider");
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+
+  useEffect(() => {
+    fetch('/api/settings/token-usage')
+      .then(r => r.json() as Promise<TokenUsage>)
+      .then(setTokenUsage)
+      .catch(() => {})
+  }, [])
 
   return (
     <div style={{ padding: "24px", height: "100%", overflowY: "auto" }}>
@@ -49,6 +59,22 @@ export function SettingsView() {
             Configure which AI model provider Anvay uses for query answering and analysis.
           </p>
           <ProviderConfig inline />
+          {tokenUsage && (
+            <div style={{ marginTop: "24px", padding: "16px", background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px" }}>
+              <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>Token Usage — {tokenUsage.month}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ flex: 1, height: "8px", background: "#1a1a1a", borderRadius: "4px", overflow: "hidden" }}>
+                  <div style={{ width: `${Math.min(100, tokenUsage.budget > 0 ? (tokenUsage.used / tokenUsage.budget) * 100 : 0)}%`, height: "100%", background: tokenUsage.used >= tokenUsage.budget ? "#ef4444" : "#10b981", borderRadius: "4px", transition: "width 0.3s" }} />
+                </div>
+                <span style={{ fontSize: "11px", color: "#888", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                  {tokenUsage.used.toLocaleString()} / {tokenUsage.budget.toLocaleString()}
+                </span>
+              </div>
+              {tokenUsage.used >= tokenUsage.budget && (
+                <div style={{ marginTop: "8px", fontSize: "11px", color: "#ef4444", fontFamily: "monospace" }}>Budget exceeded — further queries blocked until next billing period.</div>
+              )}
+            </div>
+          )}
         </div>
       )}
       {tab === "connectors" && <ConnectorsView />}

@@ -6,6 +6,7 @@ import { CliConnector } from '@anvay/cli-adapter'
 import { encryptJson, decryptJson } from '../utils/crypto.js'
 import type { PrismaClient } from '@prisma/client'
 import { prisma } from '../db/client.js'
+import { checkRateLimit } from './rate-limiter.js'
 
 type ConnectorRow = {
   id: string
@@ -81,6 +82,16 @@ export async function getToolsForTenant(
     tx.connector.findMany({ where: { tenant_id: tenantId } })
   ) as unknown as ConnectorRow[]
 
+  // Load rate_limit_rps for each connector
+  const rateLimits = await withTenant(prismaClient, tenantId, (tx) =>
+    tx.$queryRaw<Array<{ connector_type: string; rate_limit_rps: number }>>`
+      SELECT connector_type, COALESCE(rate_limit_rps, 10) AS rate_limit_rps
+      FROM connector_config WHERE tenant_id = ${tenantId}::uuid
+    `
+  ).catch(() => [] as Array<{ connector_type: string; rate_limit_rps: number }>)
+  const rpsByType = new Map(rateLimits.map(r => [r.connector_type, r.rate_limit_rps]))
+  const DEFAULT_RPS = 10
+
   const adapterEntries = rows.map(async (row) => {
     const key = cacheKey(tenantId, row.id)
     let adapter = adapterCache.get(key)
@@ -88,7 +99,23 @@ export async function getToolsForTenant(
       adapter = instantiateAdapter(row, tenantId)
       cacheSetAdapter(key, adapter)
     }
-    return adapter.getTools()
+    const tools = await adapter.getTools()
+    const connectorType = row.type
+    const rps = rpsByType.get(connectorType) ?? DEFAULT_RPS
+    // Wrap each tool with rate limiting
+    return tools.map(t => ({
+      ...t,
+      run: async (args: Record<string, unknown>) => {
+        const allowed = await checkRateLimit(tenantId, connectorType, rps)
+        if (!allowed) {
+          // Wait 1s and retry once
+          await new Promise(r => setTimeout(r, 1000))
+          const retry = await checkRateLimit(tenantId, connectorType, rps)
+          if (!retry) return { error: 'rate limit exceeded' }
+        }
+        return t.run(args)
+      },
+    }))
   })
   const toolArrays = await Promise.all(adapterEntries)
   return toolArrays.flat()

@@ -1,0 +1,1 @@
+ALTER TABLE connector_config ADD COLUMN IF NOT EXISTS rate_limit_rps INT NOT NULL DEFAULT 10;

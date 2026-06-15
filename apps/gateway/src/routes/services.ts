@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
@@ -47,13 +48,21 @@ export async function serviceRoutes(app: FastifyInstance) {
 
   app.get('/api/services', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
+    const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
+    const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
     return withTenant(prisma, tenantId, async (tx) => {
-      // RLS filters by tenant — no need to repeat tenant_id in WHERE
       const entities = await tx.$queryRaw<EntityRow[]>`
-        SELECT id, name, type, metadata FROM entities WHERE type = 'Service' ORDER BY name LIMIT 500
+        SELECT id, name, type, metadata FROM entities
+        WHERE type = 'Service'
+        ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
+        ORDER BY id ASC
+        LIMIT ${limit + 1}
       `
-      if (entities.length === 0) return []
+      if (entities.length === 0) return { data: [], nextCursor: null }
+
+      const hasMore = entities.length > limit
+      const data = hasMore ? entities.slice(0, limit) : entities
 
       const allEntities = await tx.$queryRaw<EntityRow[]>`
         SELECT id, name, type, metadata FROM entities LIMIT 1000
@@ -78,7 +87,7 @@ export async function serviceRoutes(app: FastifyInstance) {
         relsByTo.get(r.toEntityId)!.push(r)
       }
 
-      return entities.map(entity => {
+      const result = data.map(entity => {
         const meta = (entity.metadata ?? {}) as Record<string, unknown>
         const fromRels = relsByFrom.get(entity.id) ?? []
         const toRels = relsByTo.get(entity.id) ?? []
@@ -124,6 +133,7 @@ export async function serviceRoutes(app: FastifyInstance) {
           },
         }
       })
+      return { data: result, nextCursor: hasMore ? data[data.length - 1]!.id : null }
     })
   })
 }

@@ -1,8 +1,16 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '@prisma/client'
+import { createClient } from 'redis'
+import type { RedisClientType } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
 import { requireRole } from '../plugins/rbac.js'
+
+// Module-level EventEmitter for single-pod SSE fan-out (no Redis)
+import { EventEmitter } from 'node:events'
+const stageRunEvents = new EventEmitter()
+stageRunEvents.setMaxListeners(200)
 
 interface PipelineRow {
   id: string
@@ -88,26 +96,35 @@ export async function pipelineRoutes(app: FastifyInstance) {
   // GET /api/pipelines
   app.get('/api/pipelines', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
+    const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
+    const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<PipelineRow[]>`
         SELECT id, name, description, stages, status, created_at, updated_at
         FROM pipelines
         WHERE tenant_id = ${tenantId}::uuid
-        ORDER BY updated_at DESC
-        LIMIT 50
+        ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
+        ORDER BY id ASC
+        LIMIT ${limit + 1}
       `,
     ).catch(() => [] as PipelineRow[])
 
-    return reply.send(rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      stages: r.stages ?? FALLBACK_STAGES,
-      status: r.status,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    })))
+    const hasMore = rows.length > limit
+    const data = hasMore ? rows.slice(0, limit) : rows
+
+    return reply.send({
+      data: data.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        stages: r.stages ?? FALLBACK_STAGES,
+        status: r.status,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      })),
+      nextCursor: hasMore ? data[data.length - 1]!.id : null,
+    })
   })
 
   // POST /api/pipelines
@@ -230,8 +247,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
         'X-Accel-Buffering': 'no',
       })
 
-      const sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
-
+      // Create run record first so we have a runId for the Redis channel name
       const runRows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
           INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at)
@@ -241,6 +257,27 @@ export async function pipelineRoutes(app: FastifyInstance) {
       ).catch(() => [] as Array<{ id: string }>)
 
       const runId = runRows[0]?.id ?? null
+
+      let sse: (data: object) => void
+      const redisUrl = process.env['REDIS_URL']
+
+      if (redisUrl && runId) {
+        const channel = `sse:run:${runId}`
+        const pub = createClient({ url: redisUrl }) as RedisClientType
+        await pub.connect()
+        const sub = pub.duplicate()
+        await sub.subscribe(channel, (_channel, message) => {
+          reply.raw.write(`data: ${message}\n\n`)
+        })
+        request.raw.on('close', async () => {
+          await sub.unsubscribe(channel)
+          await sub.quit()
+          await pub.quit()
+        })
+        sse = (data: object) => { void pub.publish(channel, JSON.stringify(data)) }
+      } else {
+        sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
+      }
 
       const finishRun = async (status: string, output: object) => {
         if (!runId) return

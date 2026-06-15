@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { requireRole } from '../plugins/rbac.js'
 
 interface EnvRow {
   id: string
@@ -71,7 +72,7 @@ export async function environmentRoutes(app: FastifyInstance) {
   // POST /api/environments — create env
   app.post<{ Body: { name: string; label: string; color?: string } }>(
     '/api/environments',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { name, label, color } = request.body
@@ -108,7 +109,7 @@ export async function environmentRoutes(app: FastifyInstance) {
   // PATCH /api/environments/:id — update label, color, sort_order
   app.patch<{ Params: { id: string }; Body: { label?: string; color?: string; sortOrder?: number } }>(
     '/api/environments/:id',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id } = request.params
@@ -146,7 +147,7 @@ export async function environmentRoutes(app: FastifyInstance) {
   // DELETE /api/environments/:id
   app.delete<{ Params: { id: string } }>(
     '/api/environments/:id',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id } = request.params

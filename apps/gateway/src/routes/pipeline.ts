@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { decryptJson } from '../utils/crypto.js'
+import { requireRole } from '../plugins/rbac.js'
 
 interface PipelineRow {
   id: string
@@ -111,7 +113,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
   // POST /api/pipelines
   app.post<{ Body: { name: string; description?: string; stages?: unknown[]; context?: string; serviceName?: string } }>(
     '/api/pipelines',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { name, description, stages, context, serviceName } = request.body
@@ -202,15 +204,15 @@ export async function pipelineRoutes(app: FastifyInstance) {
   // POST /api/pipelines/:id/stages/:stageId/run — SSE stream
   app.post<{ Params: { id: string; stageId: string }; Body: { input?: string } }>(
     '/api/pipelines/:id/stages/:stageId/run',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id, stageId } = request.params
       const { input } = request.body ?? {}
 
       const pipelines = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ stages: unknown; status: string }>>`
-          SELECT stages, status FROM pipelines
+        tx.$queryRaw<Array<{ stages: unknown; status: string; name: string }>>`
+          SELECT stages, status, name FROM pipelines
           WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid LIMIT 1
         `,
       ).catch(() => [])
@@ -355,6 +357,33 @@ export async function pipelineRoutes(app: FastifyInstance) {
                 VALUES (gen_random_uuid(), ${tenantId}::uuid, ${'pipeline_promote'}, ${JSON.stringify({ pipelineId: id, stageId, runId })}::jsonb, 'pending', now())
               `,
             ).catch(() => null)
+
+            const pipelineName = (pipelines[0] as Record<string, unknown>)['name'] as string ?? 'unknown'
+            const slackConfig = await withTenant(prisma, tenantId, (tx) =>
+              tx.$queryRaw<{ credentials_enc: string }[]>`
+                SELECT credentials_enc FROM connector_config WHERE tenant_id = ${tenantId}::uuid AND connector_type = 'slack' AND enabled = true LIMIT 1
+              `
+            ).catch(() => [])
+
+            if (slackConfig.length > 0) {
+              try {
+                const creds = decryptJson(slackConfig[0]!.credentials_enc) as { webhookUrl?: string; botToken?: string; channel?: string }
+                if (creds.webhookUrl) {
+                  await fetch(creds.webhookUrl, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                      text: `🚦 Gate pending approval`,
+                      blocks: [
+                        { type: 'section', text: { type: 'mrkdwn', text: `*Gate requires approval*\nPipeline: ${pipelineName}\nStage: ${stageName}\nTriggered by: ${(request.user as { email?: string }).email ?? 'unknown'}` } },
+                        { type: 'section', text: { type: 'mrkdwn', text: `Approve in Anvay → Pipeline view → Gate: ${stageId}` } }
+                      ]
+                    })
+                  }).catch(() => { /* non-blocking */ })
+                }
+              } catch { /* non-blocking — no Slack never breaks gate */ }
+            }
+
             sse({ type: 'gate_required', message: `${stageName} — approval required to promote` })
             await finishRun('waiting', { message: 'Waiting for promotion approval' })
             break
@@ -380,7 +409,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
   // POST /api/pipelines/:id/stages/:stageId/approve
   app.post<{ Params: { id: string; stageId: string } }>(
     '/api/pipelines/:id/stages/:stageId/approve',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id, stageId } = request.params
@@ -410,7 +439,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
   // DELETE /api/pipelines/:id
   app.delete<{ Params: { id: string } }>(
     '/api/pipelines/:id',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id } = request.params

@@ -330,7 +330,7 @@ function EmptyState({ onScenario }: { onScenario: (s: ScenarioSuggestion) => voi
   );
 }
 
-export function OrchestratorChat({ initialContext, onNavigate }: { initialContext?: OrchestratorContext; onNavigate?: (view: string) => void }) {
+export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }: { initialContext?: OrchestratorContext; onNavigate?: (view: string) => void; onFirstMessage?: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [logLines, setLogLines] = useState<LogLine[]>([]);
   const [agentStates, setAgentStates] = useState<AgentState[]>([]);
@@ -375,6 +375,7 @@ export function OrchestratorChat({ initialContext, onNavigate }: { initialContex
   }
 
   async function sendRealForm(text: string) {
+    onFirstMessage?.();
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
     setFollowUps([]);

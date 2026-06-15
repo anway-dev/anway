@@ -5,6 +5,7 @@ import { ConnectorsView } from "@/components/connectors";
 import { ApiClientView } from "@/components/apiclient";
 import { AiPanel } from "@/components/ai-panel";
 import { OrchestratorChat, OrchestratorContext } from "@/components/orchestrator-chat";
+import { OnboardingModal } from "@/components/onboarding-modal";
 import { WorkflowView } from "@/components/workflow-view";
 import { AuditView } from "@/components/audit-view";
 import { AccessView } from "@/components/access-view";
@@ -61,6 +62,7 @@ export default function App() {
   const [activeNode, setActiveNode] = useState<StageNode | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [orchestratorContext, setOrchestratorContext] = useState<OrchestratorContext | undefined>(undefined);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Sidebar data — fetched from gateway APIs
   const [recentQueries, setRecentQueries] = useState<{ id: string; query: string }[]>([]);
@@ -98,7 +100,13 @@ export default function App() {
     // Fetch connector count
     fetch("/api/connectors/catalog")
       .then(r => r.json() as Promise<{ connected: boolean }[]>)
-      .then(list => setConnectorCount(list.filter(c => c.connected).length))
+      .then(list => {
+        const count = list.filter(c => c.connected).length
+        setConnectorCount(count)
+        if (count === 0 && typeof window !== 'undefined' && !localStorage.getItem('anvay-onboarding-dismissed')) {
+          setShowOnboarding(true)
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -113,6 +121,7 @@ export default function App() {
   };
 
   return (
+    <>
     <EnvProvider>
     <div style={{ display: "flex", height: "100vh", background: "#080808" }}>
       {/* Sidebar */}
@@ -240,7 +249,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
         {/* View area */}
         <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
-          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat key={orchestratorContext?.query} initialContext={orchestratorContext} onNavigate={(v: string) => setView(v as View)} /></ErrorBoundary>}
+          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat key={orchestratorContext?.query} initialContext={orchestratorContext} onNavigate={(v: string) => setView(v as View)} onFirstMessage={() => { localStorage.setItem('anvay-onboarding-dismissed', '1'); setShowOnboarding(false); }} /></ErrorBoundary>}
           {view === "alerts" && <ErrorBoundary viewName="Signals"><AlertsView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
           {view === "routing" && <ErrorBoundary viewName="Routing"><IntakeView /></ErrorBoundary>}
           {view === "kb" && <ErrorBoundary viewName="Knowledge"><KbView /></ErrorBoundary>}
@@ -275,6 +284,14 @@ export default function App() {
       </div>
     </div>
     </EnvProvider>
+    {showOnboarding && (
+      <OnboardingModal
+        onDismiss={() => { localStorage.setItem('anvay-onboarding-dismissed', '1'); setShowOnboarding(false); }}
+        onGoToConnectors={() => { setView('connectors'); setShowOnboarding(false); }}
+        onGoToChat={() => { setView('chat'); setShowOnboarding(false); }}
+      />
+    )}
+    </>
   );
 }
 

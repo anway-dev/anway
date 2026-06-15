@@ -1,5 +1,6 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
+import { FreshnessBadge } from "@/components/freshness-badge"
 import { useState, useEffect } from "react";
 
 // Shape returned by /api/incidents
@@ -261,6 +262,7 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [runbookOpen, setRunbookOpen] = useState(true);
+  const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -279,6 +281,23 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<Array<{ id: string; bootstrappedAt: string | null }>>)
+      .then(list => {
+        const pd = list.find(c => c.id === 'pagerduty')
+        setFreshnessTimestamp(pd?.bootstrappedAt ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleRefresh = async () => {
+    try {
+      await fetch('/api/connectors/pagerduty/bootstrap', { method: 'POST' })
+      setFreshnessTimestamp(new Date().toISOString())
+    } catch { /* non-blocking */ }
+  }
 
   const filtered = incidents.filter(i => filter === "all" || i.status === filter);
   const selected = selectedId ? incidents.find(i => i.id === selectedId) ?? incidents[0] : incidents[0];
@@ -305,6 +324,7 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
           <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "2px" }}>Incident</div>
           <div style={{ fontSize: "16px", fontWeight: 700, color: "#e5e5e5" }}>War Room</div>
           <div style={{ fontSize: "11px", color: "#888", marginTop: "2px" }}>Live triage</div>
+          <FreshnessBadge bootstrappedAt={freshnessTimestamp} onRefresh={handleRefresh} />
         </div>
 
         {/* Filter */}

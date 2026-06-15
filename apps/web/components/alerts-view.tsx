@@ -1,5 +1,6 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
+import { FreshnessBadge } from "@/components/freshness-badge"
 import { useState, useEffect } from "react";
 
 // Types matching gateway /api/alerts response
@@ -265,6 +266,7 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">("all");
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/alerts")
@@ -273,6 +275,23 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
       .catch(() => setAlerts([]))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<Array<{ id: string; bootstrappedAt: string | null }>>)
+      .then(list => {
+        const dd = list.find(c => c.id === 'datadog')
+        setFreshnessTimestamp(dd?.bootstrappedAt ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleRefresh = async () => {
+    try {
+      await fetch('/api/connectors/datadog/bootstrap', { method: 'POST' })
+      setFreshnessTimestamp(new Date().toISOString())
+    } catch { /* non-blocking */ }
+  }
 
   const criticalCount = alerts.filter(a => a.severity === "critical").length;
 
@@ -314,6 +333,7 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
           <div>
             <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "2px" }}>Signals</div>
             <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#e5e5e5", margin: 0 }}>All Project Failures</h2>
+            <FreshnessBadge bootstrappedAt={freshnessTimestamp} onRefresh={handleRefresh} />
           </div>
           {criticalCount > 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: "5px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "4px", padding: "3px 8px" }}>

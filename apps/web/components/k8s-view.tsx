@@ -1,5 +1,6 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
+import { FreshnessBadge } from "@/components/freshness-badge"
 import { useState, useEffect } from "react";
 
 interface Namespace {
@@ -50,6 +51,7 @@ function Bar({ used, total, color }: { used: number; total: number; color: strin
 
 export function K8sView({ onGoToConnectors }: { onGoToConnectors?: () => void } = {}) {
   const [data, setData] = useState<K8sOverview | null>(null);
+  const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/k8s/overview")
@@ -57,6 +59,23 @@ export function K8sView({ onGoToConnectors }: { onGoToConnectors?: () => void } 
       .then(setData)
       .catch(() => setData({ connected: false, summary: null, namespaces: [], workloads: [], events: [] }));
   }, []);
+
+  useEffect(() => {
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<Array<{ id: string; bootstrappedAt: string | null }>>)
+      .then(list => {
+        const k = list.find(c => c.id === 'k8s')
+        setFreshnessTimestamp(k?.bootstrappedAt ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleRefresh = async () => {
+    try {
+      await fetch('/api/connectors/k8s/bootstrap', { method: 'POST' })
+      setFreshnessTimestamp(new Date().toISOString())
+    } catch { /* non-blocking */ }
+  }
 
   if (!data) {
     return (
@@ -88,6 +107,7 @@ export function K8sView({ onGoToConnectors }: { onGoToConnectors?: () => void } 
         <div style={{ marginBottom: "20px" }}>
           <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Kubernetes</div>
           <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", margin: 0 }}>Cluster Overview</h2>
+          <FreshnessBadge bootstrappedAt={freshnessTimestamp} onRefresh={handleRefresh} />
         </div>
 
         <div style={{ display: "flex", gap: "10px", marginBottom: "24px", flexWrap: "wrap" }}>

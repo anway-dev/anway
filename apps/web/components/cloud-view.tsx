@@ -1,6 +1,7 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
 import { PreviewBanner } from "@/components/preview-banner"
+import { FreshnessBadge } from "@/components/freshness-badge"
 import { useState, useEffect } from "react";
 
 type Tab = "overview" | "security" | "config" | "capacity";
@@ -215,6 +216,7 @@ export function CloudView({ onTriggerOrchestrator, onGoToConnectors }: {
   const [tab, setTab] = useState<Tab>("overview");
   const [cloudData, setCloudData] = useState<CloudData>({ providers: DEFAULT_PROVIDERS, resources: [], security: [], config: [] });
   const [loading, setLoading] = useState(true);
+  const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/cloud/resources")
@@ -229,6 +231,23 @@ export function CloudView({ onTriggerOrchestrator, onGoToConnectors }: {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<Array<{ id: string; bootstrappedAt: string | null }>>)
+      .then(list => {
+        const cw = list.find(c => c.id === 'aws-cloudwatch')
+        setFreshnessTimestamp(cw?.bootstrappedAt ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleRefresh = async () => {
+    try {
+      await fetch('/api/connectors/aws-cloudwatch/bootstrap', { method: 'POST' })
+      setFreshnessTimestamp(new Date().toISOString())
+    } catch { /* non-blocking */ }
+  }
 
   const pSummary = cloudData.providers.find(p => p.provider === provider) ?? DEFAULT_PROVIDERS[0]!;
   const resources = cloudData.resources.filter(r => r.provider === provider);
@@ -256,6 +275,7 @@ export function CloudView({ onTriggerOrchestrator, onGoToConnectors }: {
           <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a" }}>
             <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Cloud Health</div>
             <div style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5" }}>Infrastructure</div>
+            <FreshnessBadge bootstrappedAt={freshnessTimestamp} onRefresh={handleRefresh} />
           </div>
           <div style={{ padding: "12px", flex: 1 }}>
             <div style={{ fontSize: "10px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>Providers</div>

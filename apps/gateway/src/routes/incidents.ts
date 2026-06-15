@@ -6,6 +6,7 @@ import { TenantId, UserId, SessionId } from '@anvay/types'
 import { IncidentService } from '../services/incident.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { prisma } from '../db/client.js'
+import { requireRole } from '../plugins/rbac.js'
 
 let _pub: RedisClientType | null = null
 
@@ -50,7 +51,7 @@ export async function incidentRoutes(app: FastifyInstance) {
   })
 
   app.post<{ Body: { title: string; severity: IncidentSeverity; description?: string } }>('/api/incidents', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
     schema: {
       body: {
         type: 'object',

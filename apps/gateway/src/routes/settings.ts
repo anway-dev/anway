@@ -5,6 +5,7 @@ import type { PrismaClient } from '@prisma/client'
 import { providerRegistry } from '@anvay/agent'
 import { encryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
+import { requireRole } from '../plugins/rbac.js'
 
 function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint?: string; defaultBaseUrl?: string }): string[] {
   if (Array.isArray(manifest.models)) return manifest.models
@@ -145,7 +146,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
   ]
 
   app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(
-    '/api/settings/connectors/:type', { preHandler: [app.authenticate] }, async (request, reply) => {
+    '/api/settings/connectors/:type', { preHandler: [app.authenticate, requireRole('admin')] }, async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { type } = request.params
       if (!KNOWN_CONNECTORS.includes(type)) {

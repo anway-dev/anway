@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { createClient } from 'redis'
-import { timingSafeEqual } from 'node:crypto'
+import { timingSafeEqual, createHmac } from 'node:crypto'
 import pino from 'pino'
 import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
@@ -21,6 +21,35 @@ function webhookTenantFor(request: FastifyRequest): string | null {
   const b = Buffer.from(expected)
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null
   return process.env['ANVAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
+}
+
+function verifyGitHubSignature(body: string, signature: string, secret: string): boolean {
+  try {
+    const expected = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex')
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  } catch { return false }
+}
+
+function verifyDatadogSignature(body: string, signature: string, secret: string): boolean {
+  try {
+    const expected = createHmac('sha256', secret).update(body).digest('hex')
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  } catch { return false }
+}
+
+function verifyWebhookSignatures(request: FastifyRequest): boolean {
+  const body = JSON.stringify(request.body)
+  const ghSecret = process.env['GITHUB_WEBHOOK_SECRET']
+  const hubSig = request.headers['x-hub-signature-256'] as string | undefined
+  if (ghSecret && hubSig) {
+    if (!verifyGitHubSignature(body, hubSig, ghSecret)) return false
+  }
+  const ddSecret = process.env['DD_WEBHOOK_SECRET']
+  const ddSig = request.headers['dd-request-signature'] as string | undefined
+  if (ddSecret && ddSig) {
+    if (!verifyDatadogSignature(body, ddSig, ddSecret)) return false
+  }
+  return true
 }
 
 let _pub: import('redis').RedisClientType | null = null
@@ -56,6 +85,9 @@ const SEVERITY_MAP: Record<string, string> = {
 export async function eventRoutes(app: FastifyInstance) {
   // Accept either the static webhook token or a tenant JWT
   const authenticateEvent = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyWebhookSignatures(request)) {
+      return reply.code(401).send({ error: 'invalid signature' })
+    }
     const webhookTenant = webhookTenantFor(request)
     if (webhookTenant) {
       request.user = { sub: 'webhook', tenantId: webhookTenant, role: 'system' } as typeof request.user

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { createClient } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
@@ -117,6 +118,28 @@ export async function terraformRoutes(app: FastifyInstance) {
         }
       }
 
+      // Acquire distributed lock to prevent concurrent terraform apply on same env
+      const redisUrl = process.env['REDIS_URL']
+      let lockKey: string | null = null
+      let redis: ReturnType<typeof createClient> | null = null
+      if (redisUrl) {
+        lockKey = `terraform:lock:${env}:${tenantId}`
+        redis = createClient({ url: redisUrl })
+        try {
+          await redis.connect()
+          const acquired = await redis.set(lockKey, (request.user as { sub: string }).sub, { NX: true, EX: 600 })
+          if (!acquired) {
+            await redis.disconnect()
+            return reply.code(409).send({ error: 'deploy in progress', code: 'LOCK_HELD' })
+          }
+        } catch {
+          // Redis unavailable — skip lock (non-blocking, single-instance deploys)
+          if (redis) { try { await redis.disconnect() } catch { /* ignore */ } }
+          redis = null
+          lockKey = null
+        }
+      }
+
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -140,6 +163,10 @@ export async function terraformRoutes(app: FastifyInstance) {
       } catch (err) {
         reply.raw.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`)
       } finally {
+        if (redis && lockKey) {
+          try { await redis.del(lockKey) } catch { /* ignore */ }
+          try { await redis.disconnect() } catch { /* ignore */ }
+        }
         reply.raw.end()
       }
     },

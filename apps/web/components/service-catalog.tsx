@@ -1,5 +1,6 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
+import { FreshnessBadge } from "@/components/freshness-badge"
 import { useState, useEffect } from "react";
 
 interface ServiceMetrics { errorRate: number; p99ms: number; rps: number; uptime: number }
@@ -170,6 +171,7 @@ export function ServiceCatalog({ onTriggerOrchestrator, onGoToConnectors }: Prop
   const [incidents, setIncidents] = useState<IncidentAPI[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -183,6 +185,23 @@ export function ServiceCatalog({ onTriggerOrchestrator, onGoToConnectors }: Prop
       setLoading(false)
     })
   }, [])
+
+  useEffect(() => {
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<Array<{ id: string; bootstrappedAt: string | null }>>)
+      .then(list => {
+        const dd = list.find(c => c.id === 'datadog')
+        setFreshnessTimestamp(dd?.bootstrappedAt ?? null)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleRefresh = async () => {
+    try {
+      await fetch('/api/connectors/datadog/bootstrap', { method: 'POST' })
+      setFreshnessTimestamp(new Date().toISOString())
+    } catch { /* non-blocking */ }
+  }
 
   const metricStatus = (v: number, warn: number, crit: number): string =>
     v >= crit ? "critical" : v >= warn ? "warning" : "ok";
@@ -232,6 +251,7 @@ export function ServiceCatalog({ onTriggerOrchestrator, onGoToConnectors }: Prop
           <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "2px" }}>Platform</div>
           <div style={{ fontSize: "16px", fontWeight: 700, color: "#e5e5e5" }}>Service Catalog</div>
           <div style={{ fontSize: "11px", color: "#888", marginTop: "2px" }}>Entities · deps · health</div>
+          <FreshnessBadge bootstrappedAt={freshnessTimestamp} onRefresh={handleRefresh} />
         </div>
 
         <div style={{ padding: "10px 12px", borderBottom: "1px solid #1a1a1a", display: "flex", gap: "4px", flexWrap: "wrap" }}>

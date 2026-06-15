@@ -7,6 +7,7 @@ import { createClient } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
+import { appendAuditEvent } from '../routes/audit.js'
 
 const TERRAFORM_ROOT = path.resolve(process.env['TERRAFORM_ROOT'] ?? '../../../infra/terraform')
 
@@ -171,18 +172,24 @@ export async function terraformRoutes(app: FastifyInstance) {
           ['apply', '-auto-approve', '-no-color'],
           send,
         )
-        // Audit: every terraform apply is a write action
-        void withTenant(prisma, tenantId, (tx) =>
-          tx.$executeRaw`
-            INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
-            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${(request.user as { sub: string }).sub}::uuid, NULL,
-                    'terraform.apply',
-                    ${JSON.stringify({ env, gateId, exitCode: code })}::jsonb,
-                    NOW())
-          `
-        ).catch(() => { /* non-blocking */ })
+        await appendAuditEvent({
+          tenantId,
+          userId: (request.user as { sub: string }).sub,
+          action: 'terraform.apply',
+          resource: `env:${env}`,
+          outcome: code === 0 ? 'action_executed' : 'action_failed',
+          metadata: { env, gateId, exitCode: code },
+        }).catch(() => { /* non-blocking */ })
         reply.raw.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`)
       } catch (err) {
+        await appendAuditEvent({
+          tenantId,
+          userId: (request.user as { sub: string }).sub,
+          action: 'terraform.apply',
+          resource: `env:${env}`,
+          outcome: 'action_failed',
+          metadata: { env, gateId, error: String(err) },
+        }).catch(() => { /* non-blocking */ })
         reply.raw.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`)
       } finally {
         if (redis && lockKey) {

@@ -48,7 +48,8 @@ export async function alertRoutes(app: FastifyInstance) {
       tx.$queryRaw<IncidentRow[]>`
         SELECT id, title, severity, status, description, suggested_root_cause, created_at
         FROM incidents
-        ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
+        WHERE tenant_id = ${tenantId}::uuid
+        ${cursor ? Prisma.sql`AND id < ${cursor}::uuid` : Prisma.sql``}
         ORDER BY id DESC
         LIMIT ${limit + 1}
       `

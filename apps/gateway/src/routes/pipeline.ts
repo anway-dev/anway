@@ -104,18 +104,29 @@ async function runRollback(pipelineId: string, tenantId: string, prevState: unkn
     )
 
     // Execute terraform apply with previous state via subprocess
-    const { execFile } = await import('node:child_process')
-    const { promisify } = await import('node:util')
-    const execFileAsync = promisify(execFile)
-
     const stateJson = JSON.stringify(prevState)
     const tfDir = process.env['TF_DIR'] ?? 'infra/terraform'
 
     try {
-      await execFileAsync('terraform', ['apply', '-auto-approve', '-state', '-'], {
-        cwd: tfDir,
-        // input via stdin
-        timeout: 120_000,
+      const { spawn } = await import('node:child_process')
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('terraform', ['apply', '-auto-approve', '-state', '-'], {
+          cwd: tfDir,
+          env: process.env,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        child.stdin.write(stateJson)
+        child.stdin.end()
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+        child.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+        child.on('close', (code) => {
+          if (code === 0) resolve()
+          else reject(new Error(`terraform apply exited ${code}: ${stderr || stdout}`))
+        })
+        child.on('error', reject)
+        setTimeout(() => { child.kill(); reject(new Error('terraform apply timed out after 120s')) }, 120_000)
       })
 
       await withTenant(prisma, tenantId, (tx) =>
@@ -589,6 +600,20 @@ export async function pipelineRoutes(app: FastifyInstance) {
             AND tool_args->>'stageId' = ${stageId}
         `,
       ).catch(() => null)
+
+      // Audit log — gate approval event
+      const { PostgresAuditSink } = await import('../audit/postgres-sink.js')
+      const { TenantId, UserId, SessionId } = await import('@anvay/types')
+      const auditSink = new PostgresAuditSink(prisma, () => {})
+      auditSink.append({
+        id: crypto.randomUUID(),
+        tenantId: TenantId(tenantId),
+        userId: UserId((request.user as { sub: string }).sub),
+        sessionId: SessionId(''),
+        eventType: 'gate_approved',
+        payload: { pipelineId: id, stageId, decidedBy: (request.user as { email?: string }).email ?? 'unknown' },
+        createdAt: new Date(),
+      }).catch(() => {})
 
       return reply.send({ approved: true })
     },

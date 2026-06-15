@@ -64,6 +64,10 @@ export default function App() {
   const [orchestratorContext, setOrchestratorContext] = useState<OrchestratorContext | undefined>(undefined);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
+  // User identity — fetched from /api/auth/me
+  const [userEmail, setUserEmail] = useState("—");
+  const [userRole, setUserRole] = useState("—");
+
   // Sidebar data — fetched from gateway APIs
   const [recentQueries, setRecentQueries] = useState<{ id: string; query: string }[]>([]);
   const [criticalCount, setCriticalCount] = useState(0);
@@ -105,6 +109,17 @@ export default function App() {
         setConnectorCount(count)
         if (count === 0 && typeof window !== 'undefined' && !localStorage.getItem('anvay-onboarding-dismissed')) {
           setShowOnboarding(true)
+        }
+      })
+      .catch(() => {})
+
+    // Fetch user identity
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() as Promise<{ email: string; role: string }> : null)
+      .then(d => {
+        if (d) {
+          if (d.email) setUserEmail(d.email)
+          if (d.role) setUserRole(d.role)
         }
       })
       .catch(() => {})
@@ -226,8 +241,8 @@ export default function App() {
               AJ
             </div>
             <div>
-              <div style={{ fontSize: "11px", color: "#d1d5db" }}>alex@acme.dev</div>
-              <div style={{ fontSize: "10px", color: "#555" }}>Admin</div>
+              <div style={{ fontSize: "11px", color: "#d1d5db" }}>{userEmail}</div>
+              <div style={{ fontSize: "10px", color: "#555" }}>{userRole}</div>
             </div>
           </div>
           <button

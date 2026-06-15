@@ -270,8 +270,8 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
 
   useEffect(() => {
     fetch("/api/alerts")
-      .then(r => r.json() as Promise<LiveAlert[]>)
-      .then(setAlerts)
+      .then(r => r.json() as Promise<{ data: LiveAlert[]; nextCursor: string | null }>)
+      .then(res => setAlerts(res.data ?? []))
       .catch(() => setAlerts([]))
       .finally(() => setLoading(false))
   }, [])

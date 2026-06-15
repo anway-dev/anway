@@ -127,4 +127,10 @@ export async function authRoutes(app: FastifyInstance) {
 
     return reply.send({ token, tenantId: DEV_TENANT })
   })
+
+  // GET /api/auth/me — return authenticated user info from JWT
+  app.get('/api/auth/me', { preHandler: [app.authenticate] }, async (request) => {
+    const user = request.user as { sub: string; email: string; tenantId: string; role: string }
+    return { email: user.email, role: user.role, tenantId: user.tenantId, sub: user.sub }
+  })
 }

@@ -91,7 +91,18 @@ export async function terraformRoutes(app: FastifyInstance) {
   // Requires gate approval — caller must have approved the plan first (checked via gate_events)
   app.post<{ Params: { env: string }; Body: { gateId?: string } }>(
     '/api/terraform/:env/apply',
-    { preHandler: [app.authenticate] },
+    {
+      preHandler: [app.authenticate, requireRole('admin', 'sre')],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['gateId'],
+          properties: {
+            gateId: { type: 'string' },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const { env } = request.params
       const { tenantId } = request.user as { tenantId: string }
@@ -101,8 +112,7 @@ export async function terraformRoutes(app: FastifyInstance) {
       }
 
       // Verify gate approval exists for this environment
-      const { gateId } = request.body ?? {}
-      if (!gateId) return reply.code(400).send({ error: 'gateId is required' })
+      const { gateId } = request.body
       if (gateId) {
         const { prisma } = await import('../db/client.js')
         const { withTenant } = await import('../db/prisma.js')
@@ -161,6 +171,16 @@ export async function terraformRoutes(app: FastifyInstance) {
           ['apply', '-auto-approve', '-no-color'],
           send,
         )
+        // Audit: every terraform apply is a write action
+        void withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${(request.user as { sub: string }).sub}::uuid, NULL,
+                    'terraform.apply',
+                    ${JSON.stringify({ env, gateId, exitCode: code })}::jsonb,
+                    NOW())
+          `
+        ).catch(() => { /* non-blocking */ })
         reply.raw.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`)
       } catch (err) {
         reply.raw.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`)

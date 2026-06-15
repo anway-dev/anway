@@ -267,10 +267,11 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   useEffect(() => {
     let mounted = true;
     fetch("/api/incidents")
-      .then(r => r.ok ? r.json() : [])
-      .then((data: ApiIncident[]) => {
+      .then(r => r.ok ? r.json() as Promise<{ data: ApiIncident[]; nextCursor: string | null }> : Promise.resolve({ data: [] as ApiIncident[], nextCursor: null }))
+      .then(res => {
         if (!mounted) return;
-        const display = (Array.isArray(data) ? data : []).map(toDisplay);
+        const list = res.data ?? []
+        const display = list.map(toDisplay);
         setIncidents(display);
         if (display.length > 0) {
           const firstActive = display.find(i => i.status === "active");

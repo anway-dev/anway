@@ -104,7 +104,7 @@ export async function incidentRoutes(app: FastifyInstance) {
   })
 
   app.patch<{ Params: { id: string }; Body: { status?: IncidentStatus } }>('/api/incidents/:id', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params
@@ -127,7 +127,7 @@ export async function incidentRoutes(app: FastifyInstance) {
   })
 
   app.post<{ Params: { id: string } }>('/api/incidents/:id/resolve', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params

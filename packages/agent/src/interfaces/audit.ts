@@ -17,6 +17,7 @@ export type AuditEventType =
   | 'graph_miss'
   | 'perimeter_changed'
   | 'trigger_fired'
+  | 'gate_approved'
 
 export interface AuditEvent {
   readonly id: string

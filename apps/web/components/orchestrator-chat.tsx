@@ -344,6 +344,8 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
   const [gateRequired, setGateRequired] = useState<{ gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [noProvider, setNoProvider] = useState(false);
+  const [userEmail, setUserEmail] = useState("—");
+  const [workspaceName, setWorkspaceName] = useState("—");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -354,6 +356,20 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logLines]);
   useEffect(() => () => timeoutsRef.current.forEach(clearTimeout), []);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() as Promise<{ email: string; role: string; tenantId: string }> : null)
+      .then(d => {
+        if (d?.email) setUserEmail(d.email)
+        if (d?.role) setCurrentAuthRole(d.role)
+      })
+      .catch(() => {})
+    fetch("/api/settings/workspace")
+      .then(r => r.ok ? r.json() as Promise<{ name: string }> : null)
+      .then(d => { if (d?.name) setWorkspaceName(d.name) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (initialContext && !firedInitialContext.current) {
@@ -565,7 +581,7 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
           }} />
           <span style={{ fontSize: "11px", fontWeight: 700, color: "#10b981", fontFamily: "monospace", letterSpacing: "0.1em" }}>ANVAY</span>
           <span style={{ fontSize: "10px", color: "#222", fontFamily: "monospace" }}>·</span>
-          <span style={{ fontSize: "10px", color: "#333", fontFamily: "monospace" }}>acme-platform</span>
+          <span style={{ fontSize: "10px", color: "#333", fontFamily: "monospace" }}>anvay</span>
 
           {contextSource && (
             <div style={{
@@ -760,9 +776,9 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
         {/* Context */}
         <div style={{ padding: "10px 14px", borderBottom: "1px solid #080808" }}>
           {[
-            ["user", "alex@acme.dev", "#444"],
-            ["auth", currentAuthRole + (currentAuthRole !== currentInferredRole ? ` → ${currentInferredRole}` : ""), ROLE_COLORS[currentAuthRole] || "#444"],
-            ["workspace", "acme-platform", "#333"],
+            ["user", userEmail || "—", "#444"],
+            ["auth", currentAuthRole + (currentAuthRole !== currentInferredRole ? ` \u2192 ${currentInferredRole}` : ""), ROLE_COLORS[currentAuthRole] || "#444"],
+            ["workspace", workspaceName || "—", "#333"],
             ["scope", `${CONNECTORS_ONLINE.length} connectors`, "#333"],
           ].map(([k, v, c]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", fontFamily: "monospace", marginBottom: "2px" }}>

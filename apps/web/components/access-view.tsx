@@ -34,7 +34,7 @@ const YAML_TEMPLATE = `# Anvay access provisioning template
 # Apply via: anvay access apply -f access.yaml
 
 user: alice
-workspace: acme-platform
+workspace: [your-workspace-slug]
 auth_role: dev
 
 connectors:

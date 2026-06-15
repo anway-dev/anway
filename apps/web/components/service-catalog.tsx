@@ -175,9 +175,11 @@ export function ServiceCatalog({ onTriggerOrchestrator, onGoToConnectors }: Prop
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/services').then(r => r.json() as Promise<ServiceAPI[]>).catch(() => [] as ServiceAPI[]),
-      fetch('/api/incidents').then(r => r.json() as Promise<IncidentAPI[]>).catch(() => [] as IncidentAPI[]),
-    ]).then(([svcs, incs]) => {
+      fetch('/api/services').then(r => r.json() as Promise<{ data: ServiceAPI[]; nextCursor: string | null }>).catch(() => ({ data: [] as ServiceAPI[], nextCursor: null })),
+      fetch('/api/incidents').then(r => r.json() as Promise<{ data: IncidentAPI[]; nextCursor: string | null }>).catch(() => ({ data: [] as IncidentAPI[], nextCursor: null })),
+    ]).then(([svcRes, incRes]) => {
+      const svcs = svcRes.data ?? []
+      const incs = incRes.data ?? []
       setServices(svcs)
       setIncidents(incs)
       const degraded = svcs.find(s => s.health === 'degraded')

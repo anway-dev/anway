@@ -125,6 +125,7 @@ resource "aws_db_instance" "anvay" {
   backup_retention_period = var.environment == "prod" ? 7 : 1
   deletion_protection     = var.environment == "prod"
   skip_final_snapshot     = var.environment != "prod"
+  multi_az                = var.environment == "prod" ? true : false
 
   # pgvector extension is installed via migration, not here
   parameter_group_name = aws_db_parameter_group.anvay.name

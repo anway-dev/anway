@@ -120,10 +120,10 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
     try {
       const r = await fetch("/api/pipelines");
       if (r.ok) {
-        const data = await r.json() as Pipeline[];
-        setPipelines(data);
+        const { data } = await r.json() as { data: Pipeline[]; nextCursor: string | null };
+        setPipelines(data ?? []);
         if (selected) {
-          const updated = data.find(p => p.id === selected.id);
+          const updated = (data ?? []).find(p => p.id === selected.id);
           if (updated) setSelected(updated);
         }
       }
@@ -135,9 +135,9 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
     try {
       const r = await fetch(`/api/pipelines/${id}`);
       if (r.ok) {
-        const data = await r.json() as Pipeline;
-        setSelected(data);
-        setPipelines(prev => prev.map(p => p.id === id ? data : p));
+        const pipeline = await r.json() as Pipeline;
+        setSelected(pipeline);
+        setPipelines(prev => prev.map(p => p.id === id ? pipeline : p));
       }
     } catch { /* ignore */ }
   }, []);

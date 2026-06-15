@@ -30,7 +30,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   })
 
   app.post<{ Body: { eventType: string; condition: Record<string, unknown>; actions: TriggerAction[] } }>('/api/automations/triggers', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
     schema: {
       body: {
         type: 'object',
@@ -100,7 +100,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   })
 
   app.patch<{ Params: { id: string }; Body: Partial<{ enabled: boolean; condition: Record<string, unknown>; actions: TriggerAction[] }> }>('/api/automations/triggers/:id', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
@@ -123,7 +123,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   })
 
   app.delete<{ Params: { id: string } }>('/api/automations/triggers/:id', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
@@ -144,7 +144,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   })
 
   app.post<{ Body: { name: string; schedule: string; jobType: string } }>('/api/automations/monitors', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
     schema: {
       body: {
         type: 'object',
@@ -181,7 +181,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   })
 
   app.patch<{ Params: { id: string }; Body: { enabled: boolean } }>('/api/automations/monitors/:id', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     await withTenant(prisma, tenantId, (tx) =>

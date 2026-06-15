@@ -17,7 +17,7 @@ export async function healthRoutes(app: FastifyInstance) {
     return reply.send({ status: 'ok' })
   })
 
-  // Readiness: drains on shutdown, then verifies DB is reachable
+  // Readiness: drains on shutdown, then verifies DB + Redis are reachable
   app.get('/health/ready', async (_request, reply) => {
     // During graceful shutdown, signal not-ready so LBs stop routing traffic
     if (isDraining()) {
@@ -25,7 +25,6 @@ export async function healthRoutes(app: FastifyInstance) {
     }
     try {
       await prisma.$queryRaw`SELECT 1`
-      return reply.send({ status: 'ok', db: 'connected' })
     } catch (err) {
       return reply.status(503).send({
         status: 'not_ready',
@@ -33,6 +32,18 @@ export async function healthRoutes(app: FastifyInstance) {
         error: err instanceof Error ? err.message : 'unknown',
       })
     }
+    if (process.env['REDIS_URL']) {
+      try {
+        const { createClient } = await import('redis')
+        const redis = createClient({ url: process.env['REDIS_URL'] })
+        await redis.connect()
+        await redis.ping()
+        await redis.disconnect()
+      } catch {
+        return reply.status(503).send({ status: 'not_ready', redis: 'unreachable' })
+      }
+    }
+    return reply.send({ status: 'ok', db: 'connected' })
   })
 
   app.get('/health/startup', async (_request, reply) => {

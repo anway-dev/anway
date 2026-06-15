@@ -24,6 +24,29 @@ interface AuditRow {
   user_id: string | null
 }
 
+export async function appendAuditEvent(params: {
+  tenantId: string
+  userId: string
+  action: string
+  resource: string
+  outcome: string
+  metadata: Record<string, unknown>
+}): Promise<void> {
+  await withTenant(prisma, params.tenantId, (tx) =>
+    tx.$executeRaw`
+      INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
+      VALUES (gen_random_uuid(), ${params.tenantId}::uuid, ${params.userId}::uuid,
+              ${params.action},
+              ${JSON.stringify({
+                resource: params.resource,
+                outcome: params.outcome,
+                ...params.metadata,
+              })}::jsonb,
+              NOW())
+    `
+  )
+}
+
 export async function auditRoutes(app: FastifyInstance) {
   app.get('/api/audit', {
     preHandler: [app.authenticate],
@@ -36,7 +59,7 @@ export async function auditRoutes(app: FastifyInstance) {
       tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
         FROM audit_events
-        ${cursor ? Prisma.sql`WHERE id > ${cursor}::uuid` : Prisma.sql``}
+        ${cursor ? Prisma.sql`WHERE id < ${cursor}::uuid` : Prisma.sql``}
         ORDER BY id DESC
         LIMIT ${limit + 1}
       `

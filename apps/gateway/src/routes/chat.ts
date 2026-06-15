@@ -85,9 +85,7 @@ export class InMemorySessionMemory implements ISessionMemory {
       : 'No prior conversation to summarize.'
     const summaryTurn: ConversationTurn = { role: 'system' as const, content: `[Summary of earlier conversation]: ${summary}`, timestamp: Date.now() }
     const kept = [summaryTurn, ...ctx.turns.slice(ctx.turns.length - 10)]
-    // InMemorySessionMemory stores turns directly
-    const existing = this.turns.get(sessionId) ?? []
-    this.turns.set(sessionId, [...summaryLines.length > 0 ? [summaryTurn] : [], ...existing.slice(-9)])
+    this.turns.set(sessionId, kept)
   }
 
   async clear(sessionId: SessionId): Promise<void> {
@@ -230,6 +228,17 @@ function recordSessionUsed(sessionId: string, tokens: number): void {
   cacheSet(sessionTokenUsage, sessionId, { used: prev + tokens, lastSeen: Date.now() })
 }
 
+// Redis budget client — singleton to avoid O(requests) connections per handler invocation
+let _redisBudget: RedisClientType | null = null
+function getRedisBudget(): RedisClientType | null {
+  if (!process.env['REDIS_URL']) return null
+  if (!_redisBudget) {
+    _redisBudget = createClient({ url: process.env['REDIS_URL'] }) as RedisClientType
+    _redisBudget.connect().catch(() => { _redisBudget = null })
+  }
+  return _redisBudget
+}
+
 // Module-level singletons — one per gateway process
 const inMemoryStore = new InMemorySessionMemory()
 
@@ -313,16 +322,15 @@ export async function chatRoutes(app: FastifyInstance) {
     // Token budget enforcement — check Redis counter before processing
     if (redisUrl) {
       try {
-        const redisBudget = createClient({ url: redisUrl }) as RedisClientType
-        await redisBudget.connect()
-        const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
-        const used = parseInt(await redisBudget.get(monthKey) ?? '0', 10)
-        const budget = (dbTenant as { token_budget_monthly?: number } | null)?.token_budget_monthly ?? 1_000_000
-        if (used >= budget) {
-          await redisBudget.quit()
-          return reply.code(429).send({ error: 'token budget exceeded', code: 'BUDGET_EXCEEDED', used, budget })
+        const redisBudget = getRedisBudget()
+        if (redisBudget) {
+          const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
+          const used = parseInt(await redisBudget.get(monthKey) ?? '0', 10)
+          const budget = (dbTenant as { token_budget_monthly?: number } | null)?.token_budget_monthly ?? 1_000_000
+          if (used >= budget) {
+            return reply.code(429).send({ error: 'token budget exceeded', code: 'BUDGET_EXCEEDED', used, budget })
+          }
         }
-        await redisBudget.quit()
       } catch { /* Redis may be unavailable — skip budget check */ }
     }
 
@@ -500,13 +508,13 @@ export async function chatRoutes(app: FastifyInstance) {
               // Redis token counter (real-time budget tracking)
               if (redisUrl) {
                 try {
-                  const redisBudget = createClient({ url: redisUrl }) as RedisClientType
-                  await redisBudget.connect()
-                  const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
-                  await redisBudget.incrBy(monthKey, totalTokens)
-                  const nextMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)
-                  await redisBudget.expireAt(monthKey, Math.floor(nextMonth.getTime() / 1000))
-                  await redisBudget.quit()
+                  const redisBudget = getRedisBudget()
+                  if (redisBudget) {
+                    const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
+                    await redisBudget.incrBy(monthKey, totalTokens)
+                    const nextMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)
+                    await redisBudget.expireAt(monthKey, Math.floor(nextMonth.getTime() / 1000))
+                  }
                 } catch { /* Redis may be unavailable */ }
               }
               try {

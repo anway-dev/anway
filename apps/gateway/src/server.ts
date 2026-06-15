@@ -31,6 +31,15 @@ import type { IScheduler } from '@anvay/agent'
 const DEFAULT_REDIS_URL = 'redis://localhost:6379'
 const bootstrapLog = pino({ level: 'info' })
 
+process.on('unhandledRejection', (reason, promise) => {
+  console.error({ msg: 'unhandledRejection', reason, promise })
+})
+
+process.on('uncaughtException', (err) => {
+  console.error({ msg: 'uncaughtException', err })
+  process.exit(1)
+})
+
 async function main() {
   // Validate environment before any other setup
   const env = validateEnv()

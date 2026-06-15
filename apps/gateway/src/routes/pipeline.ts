@@ -769,6 +769,22 @@ export async function pipelineRoutes(app: FastifyInstance) {
             break
           }
 
+          case 'rollback': {
+            sse({ type: 'log', line: 'Running rollback' })
+            const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
+            const prevState = pipelineMeta?.['previousTfState']
+            if (prevState) {
+              await runRollback(id, tenantId, prevState, request.log)
+              sse({ type: 'done', output: { summary: 'Rollback complete' } })
+            } else {
+              sse({ type: 'status', message: 'No previous terraform state to rollback to' })
+              const summary = 'Rollback skipped — no previous state'
+              await finishRun('done', { summary })
+              sse({ type: 'done', output: { summary } })
+            }
+            break
+          }
+
           default: {
             sse({ type: 'status', message: `Running ${stageName}…` })
             await new Promise(r => setTimeout(r, 500))

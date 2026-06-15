@@ -283,7 +283,21 @@ async function main() {
       )
     ON CONFLICT DO NOTHING
   `
-  log('4 Pipelines seeded.')
+  await prisma.$executeRaw`
+    INSERT INTO pipelines (id, tenant_id, name, description, stages, status, metadata)
+    VALUES
+      (
+        '20000000-0000-0000-0000-000000000005'::uuid,
+        ${DEMO_TENANT_ID}::uuid,
+        'checkout-service-deploy',
+        'CI/CD pipeline for checkout-service',
+        '[{"id":"build","name":"Build & Test"},{"id":"security-scan","name":"Security Scan"},{"id":"deploy-staging","name":"Deploy to Staging"},{"id":"integration-tests","name":"Integration Tests"},{"id":"deploy-prod","name":"Deploy to Production"}]'::jsonb,
+        'idle',
+        '{"service":"checkout-service","triggered_by":"manual"}'::jsonb
+      )
+    ON CONFLICT DO NOTHING
+  `
+  log('5 Pipelines seeded.')
 
   // Stage runs for payments-api-deploy (running — mid-flight)
   await prisma.$executeRaw`

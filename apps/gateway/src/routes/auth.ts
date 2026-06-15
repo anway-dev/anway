@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { appendAuditEvent } from './audit.js'
 
 interface TokenBody {
   email: string
@@ -92,6 +93,14 @@ export async function authRoutes(app: FastifyInstance) {
     } catch { /* ignore */ }
     if (!user) return reply.code(503).send({ error: 'Demo tenant not seeded — run pnpm seed first' })
     const token = await reply.jwtSign({ sub: user.id, email: DEMO_EMAIL, tenantId: DEMO_TENANT, role: user.role })
+    await appendAuditEvent({
+      tenantId: DEMO_TENANT,
+      userId: 'demo',
+      action: 'auth.demo_login',
+      resource: 'auth:demo',
+      outcome: 'action_executed',
+      metadata: { source: 'demo_endpoint' },
+    }).catch(() => {})
     return reply.send({ token, expiresIn: '24h' })
   })
 

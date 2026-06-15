@@ -920,3 +920,24 @@ test.describe('CERT AE: backup script exists', () => {
     expect(typeof body['uptime']).toBe('number')
   })
 })
+
+test.describe('CERT AF: pipeline stage run SSE', () => {
+  test('AF.1 pipeline stage run emits SSE and completes', async ({ request }) => {
+    const pipelineId = '40000000-0000-0000-0000-000000000001'
+    const stageId = 'build'
+
+    const resp = await request.post(
+      `${GATEWAY}/api/pipelines/${pipelineId}/stages/${stageId}/run`,
+      {
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        data: {},
+      },
+    )
+    expect(resp.status()).toBe(200)
+    expect(resp.headers()['content-type']).toContain('text/event-stream')
+
+    const body = await resp.text()
+    expect(body).toContain('"type"')
+    expect(body).toMatch(/"done"\s*:\s*true|"status"\s*:\s*"completed"/)
+  })
+})

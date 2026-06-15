@@ -29,7 +29,7 @@ export async function serviceRoutes(app: FastifyInstance) {
     '/api/services',
     { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
-      const { tenantId } = request.user as { tenantId: string }
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
       const { repoUrl, name } = request.body
       if (!repoUrl && !name) return reply.code(400).send({ error: 'repoUrl or name required' })
       const serviceName = name ??
@@ -44,7 +44,15 @@ export async function serviceRoutes(app: FastifyInstance) {
         `
       ).catch(() => [])
       if (rows.length === 0) return reply.code(500).send({ error: 'create failed' })
-      return reply.code(201).send({ id: (rows as Array<{ id: string }>)[0]!.id, name: serviceName })
+      const newId = (rows as Array<{ id: string }>)[0]!.id
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'service.create',
+        resource: `service:${newId}`,
+        outcome: 'action_executed',
+        metadata: { name: serviceName },
+      }).catch(() => {})
+      return reply.code(201).send({ id: newId, name: serviceName })
     },
   )
 
@@ -138,6 +146,24 @@ export async function serviceRoutes(app: FastifyInstance) {
       return { data: result, nextCursor: hasMore ? data[data.length - 1]!.id : null }
     })
   })
+
+  app.get<{ Params: { id: string } }>(
+    '/api/services/:id',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { id } = request.params
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string; name: string; status: string; metadata: unknown }>>`
+          SELECT id, name, type, metadata FROM entities
+          WHERE id = ${id}::uuid AND type = 'Service' AND tenant_id = ${tenantId}::uuid
+          LIMIT 1
+        `
+      ).catch(() => [] as Array<{ id: string; name: string; status: string; metadata: unknown }>)
+      if (rows.length === 0) return reply.code(404).send({ error: 'not found' })
+      return reply.send(rows[0])
+    },
+  )
 
   app.delete<{ Params: { id: string } }>(
     '/api/services/:id',

@@ -271,10 +271,19 @@ async function main() {
         '[{"id":"changelog","name":"Changelog Generation"},{"id":"build-all","name":"Build All Services"},{"id":"smoke-tests","name":"Smoke Tests"},{"id":"canary-prod","name":"Canary Deploy"},{"id":"full-prod","name":"Full Production Rollout"}]'::jsonb,
         'failed',
         '{"version":"v1.14.0","triggered_by":"schedule","release_train":"weekly"}'::jsonb
+      ),
+      (
+        '40000000-0000-0000-0000-000000000001'::uuid,
+        ${DEMO_TENANT_ID}::uuid,
+        'anvay-self-deploy',
+        'Anvay deploys itself — no external CI',
+        '[{"id":"build","label":"Build Images","type":"build"},{"id":"test","label":"Type Check + CI","type":"test"},{"id":"gate-staging","label":"Staging Gate","type":"gate"},{"id":"deploy-staging","label":"Deploy Staging","type":"deploy"},{"id":"monitor","label":"Monitor 10min","type":"monitor"},{"id":"gate-prod","label":"Production Gate","type":"gate"},{"id":"deploy-prod","label":"Deploy Production","type":"deploy"}]'::jsonb,
+        'running',
+        '{"sha":"a4f21bc9","triggered_by":"pr_merged","service":"anvay"}'::jsonb
       )
     ON CONFLICT DO NOTHING
   `
-  log('3 Pipelines seeded.')
+  log('4 Pipelines seeded.')
 
   // Stage runs for payments-api-deploy (running — mid-flight)
   await prisma.$executeRaw`
@@ -355,7 +364,75 @@ async function main() {
   `
   log('Pipeline stage runs seeded.')
 
-  // ── 7. Gate Events ────────────────────────────────────────────────────────────
+  // Stage runs for anvay-self-deploy (running — build complete, test in progress)
+  await prisma.$executeRaw`
+    INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at, finished_at)
+    VALUES
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'build', 'success',
+       '{"duration_ms":62000,"images":["anvay-gateway","anvay-web","anvay-agent-service"]}'::jsonb,
+       now() - interval '28 minutes', now() - interval '19 minutes'),
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'test', 'running',
+       '{"tsc":"pass","packages":14,"gateway_tests":{"passed":62,"failed":0},"agent_tests":{"passed":93,"failed":0}}'::jsonb,
+       now() - interval '19 minutes', NULL),
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'gate-staging', 'pending',
+       '{}'::jsonb,
+       NULL, NULL),
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'deploy-staging', 'pending',
+       '{}'::jsonb,
+       NULL, NULL),
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'monitor', 'pending',
+       '{}'::jsonb,
+       NULL, NULL),
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'gate-prod', 'pending',
+       '{}'::jsonb,
+       NULL, NULL),
+      (gen_random_uuid(), '40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'deploy-prod', 'pending',
+       '{}'::jsonb,
+       NULL, NULL)
+  `
+  log('Self-deploy pipeline stage runs seeded.')
+
+  // ── 7. Trigger Rules — self-healing automation ───────────────────────────────
+  await prisma.$executeRaw`
+    INSERT INTO trigger_rules (id, tenant_id, event_type, condition, actions, enabled)
+    VALUES
+      ('10000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'alert_fired',
+       '{"alertName":"AnvayPodCrashLooping"}'::jsonb,
+       '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"Pod crash loop detected — SRE agent triaging"}]'::jsonb,
+       true),
+      ('10000000-0000-0000-0000-000000000002'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'alert_fired',
+       '{"alertName":"AnvayHighErrorRate"}'::jsonb,
+       '[{"type":"open_war_room","severity":"warning"},{"type":"surface_context","message":"Error rate spike — checking recent deploys"}]'::jsonb,
+       true),
+      ('10000000-0000-0000-0000-000000000003'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'alert_fired',
+       '{"alertName":"AnvayDBConnectionsHigh"}'::jsonb,
+       '[{"type":"surface_context","message":"DB connection saturation — checking pool config"},{"type":"notify_oncall"}]'::jsonb,
+       true),
+      ('10000000-0000-0000-0000-000000000004'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'alert_fired',
+       '{"alertName":"AnvayRedisMemoryHigh"}'::jsonb,
+       '[{"type":"surface_context","message":"Redis memory >85% — checking BullMQ failed jobs"},{"type":"notify_oncall"}]'::jsonb,
+       true),
+      ('10000000-0000-0000-0000-000000000005'::uuid, ${DEMO_TENANT_ID}::uuid,
+       'alert_fired',
+       '{"alertName":"AnvaySloBurnRateCritical"}'::jsonb,
+       '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"SLO budget burning fast — root cause analysis running"},{"type":"escalate"}]'::jsonb,
+       true)
+    ON CONFLICT DO NOTHING
+  `
+  log('5 Trigger rules seeded.')
+
+  // ── 8. Gate Events ────────────────────────────────────────────────────────────
   // pending gate
   await prisma.$executeRaw`
     INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, decided_by, decided_at)

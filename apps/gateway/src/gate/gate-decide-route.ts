@@ -9,6 +9,30 @@ const redisUrl = process.env['REDIS_URL']
 const gateSink = redisUrl ? new RedisGateSink(redisUrl) : null
 
 export async function gateDecideRoutes(app: FastifyInstance) {
+  // GET /api/gate/pending — list all pending gate events for the tenant
+  app.get('/api/gate/pending', {
+    preHandler: [app.authenticate],
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ id: string; tool_name: string; tool_args: Record<string, unknown> | null; created_at: Date }>>`
+        SELECT id, tool_name, tool_args, created_at
+        FROM gate_events
+        WHERE tenant_id = ${tenantId}::uuid AND status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT 50
+      `
+    ).catch(() => [])
+    return rows.map(r => ({
+      id: r.id,
+      toolName: r.tool_name,
+      description: typeof r.tool_args?.target === 'string'
+        ? `${r.tool_name.replace(/_/g, ' ')} — ${r.tool_args.target}`
+        : r.tool_name.replace(/_/g, ' '),
+      createdAt: r.created_at.toISOString(),
+    }))
+  })
+
   app.post<{ Params: { gateId: string }; Body: { decision: 'approved' | 'rejected' } }>(
     '/api/gate/:gateId/decide', {
       preHandler: [app.authenticate],

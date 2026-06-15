@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect } from "react";
-import { CONNECTOR_MANIFESTS } from "@/lib/mock";
 
 const ROLE_COLORS: Record<string, string> = {
   dev: "#3b82f6",
@@ -153,7 +152,57 @@ function ConnectorPerimeterRow({ entry }: { entry: PerimeterEntry }) {
   );
 }
 
+const CONNECTOR_DEFAULT_CAPS: Record<string, { read: string[]; write: string[] }> = {
+  github:         { read: ["org/*"], write: [] },
+  datadog:        { read: ["*"], write: [] },
+  loki:           { read: ["*"], write: [] },
+  k8s:            { read: ["*"], write: ["deployments/*"] },
+  argocd:         { read: ["*"], write: ["apps/*"] },
+  linear:         { read: ["team-*/*"], write: [] },
+  prometheus:     { read: ["*"], write: [] },
+  pagerduty:      { read: ["*"], write: ["incidents/*"] },
+  slack:          { read: ["*"], write: ["channels/*"] },
+  jira:           { read: ["*"], write: [] },
+  sentry:         { read: ["*"], write: [] },
+  coralogix:      { read: ["*"], write: [] },
+  notion:         { read: ["*"], write: [] },
+  confluence:     { read: ["*"], write: [] },
+  grafana:        { read: ["*"], write: [] },
+  elastic:        { read: ["*"], write: [] },
+  dynatrace:      { read: ["*"], write: [] },
+  newrelic:       { read: ["*"], write: [] },
+  jenkins:        { read: ["*"], write: [] },
+  circleci:       { read: ["*"], write: [] },
+  vercel:         { read: ["*"], write: [] },
+  terraform:      { read: ["*"], write: [] },
+  vault:          { read: ["*"], write: [] },
+  snyk:           { read: ["*"], write: [] },
+  sonarqube:      { read: ["*"], write: [] },
+  opsgenie:       { read: ["*"], write: ["alerts/*"] },
+  launchdarkly:   { read: ["*"], write: [] },
+  eks:            { read: ["*"], write: [] },
+  gke:            { read: ["*"], write: [] },
+  "aws-cloudwatch": { read: ["*"], write: [] },
+  "aws-health":     { read: ["*"], write: [] },
+  "gcp-monitoring": { read: ["*"], write: [] },
+  "azure-monitor":  { read: ["*"], write: [] },
+}
+
+interface ConnectorConfigRow { connectorType: string; enabled: boolean }
+
 function ManifestSection({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  const [manifests, setManifests] = useState<ConnectorConfigRow[]>([]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    fetch("/api/settings/connectors")
+      .then(r => r.json() as Promise<ConnectorConfigRow[]>)
+      .then(list => setManifests(list.filter(c => c.enabled)))
+      .catch(() => {});
+  }, [expanded]);
+
+  const entries = manifests.length > 0 ? manifests : [];
+
   return (
     <div style={{ marginTop: "16px", background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "8px" }}>
       <div
@@ -167,31 +216,38 @@ function ManifestSection({ expanded, onToggle }: { expanded: boolean; onToggle: 
       </div>
       {expanded && (
         <div style={{ padding: "0 16px 16px" }}>
-          {CONNECTOR_MANIFESTS.map((m) => (
-            <div key={m.connectorId} style={{ marginBottom: "10px", background: "#111", border: "1px solid #1a1a1a", borderRadius: "6px", padding: "10px 12px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                <div style={{
-                  width: "22px", height: "22px", borderRadius: "4px",
-                  background: `${m.color}18`, border: `1px solid ${m.color}33`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: "9px", color: m.color, fontWeight: 700, flexShrink: 0,
-                }}>
-                  {m.icon}
+          {entries.length === 0 && (
+            <div style={{ fontSize: "11px", color: "#555", padding: "8px 0" }}>No connectors enabled yet.</div>
+          )}
+          {entries.map((m) => {
+            const iconDef = CONNECTOR_ICON[m.connectorType] ?? { icon: m.connectorType.slice(0, 2).toUpperCase(), color: "#888" };
+            const caps = CONNECTOR_DEFAULT_CAPS[m.connectorType] ?? { read: ["*"], write: [] };
+            return (
+              <div key={m.connectorType} style={{ marginBottom: "10px", background: "#111", border: "1px solid #1a1a1a", borderRadius: "6px", padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                  <div style={{
+                    width: "22px", height: "22px", borderRadius: "4px",
+                    background: `${iconDef.color}18`, border: `1px solid ${iconDef.color}33`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: "9px", color: iconDef.color, fontWeight: 700, flexShrink: 0,
+                  }}>
+                    {iconDef.icon}
+                  </div>
+                  <span style={{ fontSize: "12px", color: "#d1d5db", fontFamily: "monospace" }}>{m.connectorType}</span>
                 </div>
-                <span style={{ fontSize: "12px", color: "#d1d5db", fontFamily: "monospace" }}>{m.connectorId}</span>
+                <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: "4px" }}>
+                  <span style={{ fontSize: "10px", color: "#555" }}>read</span>
+                  <span style={{ fontSize: "10px", fontFamily: "monospace", color: "#3b82f6" }}>
+                    [{caps.read.map((r) => `"${r}"`).join(", ")}]
+                  </span>
+                  <span style={{ fontSize: "10px", color: "#555" }}>write</span>
+                  <span style={{ fontSize: "10px", fontFamily: "monospace", color: caps.write.length ? "#10b981" : "#333" }}>
+                    {caps.write.length ? `[${caps.write.map((r) => `"${r}"`).join(", ")}]` : "[]"}
+                  </span>
+                </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: "4px" }}>
-                <span style={{ fontSize: "10px", color: "#555" }}>read</span>
-                <span style={{ fontSize: "10px", fontFamily: "monospace", color: "#3b82f6" }}>
-                  [{m.capabilities.read.map((r) => `"${r}"`).join(", ")}]
-                </span>
-                <span style={{ fontSize: "10px", color: "#555" }}>write</span>
-                <span style={{ fontSize: "10px", fontFamily: "monospace", color: m.capabilities.write.length ? "#10b981" : "#333" }}>
-                  {m.capabilities.write.length ? `[${m.capabilities.write.map((r) => `"${r}"`).join(", ")}]` : "[]"}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

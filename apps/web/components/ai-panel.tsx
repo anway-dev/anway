@@ -1,6 +1,5 @@
 "use client";
 import type { StageNode } from "@/components/lifecycle";
-import { AI_RESPONSES } from "@/lib/mock";
 import { useState, useEffect, useRef } from "react";
 
 interface Props {
@@ -20,55 +19,114 @@ export function AiPanel({ node, action, onClose }: Props) {
   useEffect(() => {
     if (!node) return;
 
-    const key = action && AI_RESPONSES[action] ? action : "default";
-    const chunks = AI_RESPONSES[key];
+    setLines([]);
+    setDone(false);
+    setInput("");
+    setStreaming(true);
 
-    let i = 0;
-    const resetTimer = setTimeout(() => {
-      setLines([]);
-      setDone(false);
-      setInput("");
-      setStreaming(true);
-    }, 0);
-    const interval = setInterval(() => {
-      if (i >= chunks.length) {
-        clearInterval(interval);
-        setStreaming(false);
-        setDone(true);
-        return;
-      }
-      setLines((prev) => {
-        const last = prev[prev.length - 1] ?? "";
-        const chunk = chunks[i];
-        if (!chunk) return prev;
-        if (chunk.includes("\n")) {
-          const parts = (last + chunk).split("\n");
-          return [...prev.slice(0, -1), ...parts];
+    const prompt = action
+      ? `You are an AI assistant for the Anvay platform. The user is working on the "${node.label}" stage of their software lifecycle. They want to: ${action}. Provide a concise, helpful analysis.`
+      : `You are an AI assistant for the Anvay platform. Analyze the "${node.label}" stage (${node.connector ?? "no connector"}) and provide relevant insights.`;
+
+    let aborted = false;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: prompt, sessionId: `ai-panel-${node.id}` }),
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) { setStreaming(false); setDone(true); return; }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || aborted) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
+            try {
+              const event = JSON.parse(data) as { type: string; content?: string };
+              if (event.type === 'text_delta' && event.content) {
+                setLines(prev => {
+                  const last = prev[prev.length - 1] ?? '';
+                  const chunk = event.content!;
+                  if (chunk.includes('\n')) {
+                    const parts = (last + chunk).split('\n');
+                    return [...prev.slice(0, -1), ...parts];
+                  }
+                  return [...prev.slice(0, -1), last + chunk];
+                });
+              }
+            } catch { continue; }
+          }
         }
-        return [...prev.slice(0, -1), last + chunk];
-      });
-      i++;
-    }, 60);
+      } catch {
+        // swallow abort / network errors
+      } finally {
+        if (!aborted) { setStreaming(false); setDone(true); }
+      }
+    })();
 
-    return () => { clearTimeout(resetTimer); clearInterval(interval); };
+    return () => { aborted = true; controller.abort(); };
   }, [node, action]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines, chatHistory]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
     const msg = input.trim();
     setInput("");
-    setChatHistory((prev) => [...prev, { role: "user", text: msg }]);
+    setChatHistory(prev => [...prev, { role: "user", text: msg }]);
+    const placeholder = { role: "ai" as const, text: "" };
+    setChatHistory(prev => [...prev, placeholder]);
 
-    setTimeout(() => {
-      setChatHistory((prev) => [
-        ...prev,
-        { role: "ai", text: "Analyzing across GitHub, Linear, and Datadog...\n\nBased on the spec, TC-004 is failing because the risk threshold is undefined for amounts between $50-$100. The spec says 'skip 3DS for amounts < $50' but doesn't handle the boundary case. Recommend adding a guard clause in payment-service `RiskEvaluator::evaluate()` at line 47." },
-      ]);
-    }, 800);
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: msg, sessionId: `ai-panel-chat-${node?.id}` }),
+      });
+      if (!response.ok || !response.body) {
+        setChatHistory(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, text: "Error: could not reach AI." } : m));
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const event = JSON.parse(data) as { type: string; content?: string };
+            if (event.type === 'text_delta' && event.content) {
+              setChatHistory(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, text: m.text + event.content! } : m));
+            }
+          } catch { continue; }
+        }
+      }
+    } catch {
+      setChatHistory(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, text: "Network error." } : m));
+    }
   };
 
   if (!node) return null;

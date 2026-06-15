@@ -22,8 +22,13 @@ import { auditRoutes } from './routes/audit.js'
 import { accessRoutes } from './routes/access.js'
 import { lifecycleRoutes } from './routes/lifecycle.js'
 import { cloudRoutes } from './routes/cloud.js'
+import { k8sRoutes } from './routes/k8s.js'
 import { oidcRoutes } from './routes/oidc.js'
 import { sessionRoutes } from './routes/sessions.js'
+import { terraformRoutes } from './routes/terraform.js'
+import { editorRoutes } from './routes/editor.js'
+import { pipelineRoutes } from './routes/pipeline.js'
+import { environmentRoutes } from './routes/environments.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -81,8 +86,13 @@ export async function buildApp() {
   await app.register(accessRoutes)
   await app.register(lifecycleRoutes)
   await app.register(cloudRoutes)
+  await app.register(k8sRoutes)
   await app.register(oidcRoutes)
   await app.register(sessionRoutes)
+  await app.register(terraformRoutes)
+  await app.register(editorRoutes)
+  await app.register(pipelineRoutes)
+  await app.register(environmentRoutes)
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

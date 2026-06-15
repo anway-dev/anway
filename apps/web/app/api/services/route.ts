@@ -1,27 +1,30 @@
+import { resolveAuthHeader } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:4000"
 
-
-async function getToken(): Promise<string | null> {
+export async function GET(request: Request) {
   try {
-    const { cookies } = await import("next/headers")
-    return (await cookies()).get("anvay_token")?.value ?? null
+    const auth = await resolveAuthHeader(request)
+    const resp = await fetch(`${GATEWAY_URL}/api/services`, {
+      headers: { ...(auth ? { Authorization: auth } : {}) },
+    })
+    return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
   } catch {
-    return null
+    return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
 }
 
-export async function GET() {
-  const token = await getToken()
-  if (!token) return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
-
+export async function POST(request: Request) {
   try {
+    const auth = await resolveAuthHeader(request)
+    const body = await request.json()
     const resp = await fetch(`${GATEWAY_URL}/api/services`, {
-      headers: { Authorization: `Bearer ${token}` },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) },
+      body: JSON.stringify(body),
     })
-    const data = await resp.text()
-    return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })
+    return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
   } catch {
-    return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    return Response.json({ error: 'proxy error' }, { status: 502 })
   }
 }

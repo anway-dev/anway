@@ -1,6 +1,14 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { AgentActivity } from "@/lib/mock";
+
+interface AgentActivity {
+  id: string;
+  name: string;
+  status: "pending" | "running" | "done" | "error";
+  detail: string;
+  startDelay: number;
+  duration: number;
+}
 
 interface ScenarioSuggestion {
   id: string;
@@ -322,7 +330,7 @@ function EmptyState({ onScenario }: { onScenario: (s: ScenarioSuggestion) => voi
   );
 }
 
-export function OrchestratorChat({ initialContext }: { initialContext?: OrchestratorContext }) {
+export function OrchestratorChat({ initialContext, onNavigate }: { initialContext?: OrchestratorContext; onNavigate?: (view: string) => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [logLines, setLogLines] = useState<LogLine[]>([]);
   const [agentStates, setAgentStates] = useState<AgentState[]>([]);
@@ -335,6 +343,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
   const [confidence, setConfidence] = useState<number | null>(null);
   const [gateRequired, setGateRequired] = useState<{ gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [noProvider, setNoProvider] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -373,6 +382,7 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
     setConfidence(null);
     setIsThinking(true);
     setGateRequired(null);
+    setNoProvider(false);
     setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: "user", content: text }]);
 
     const respId = `resp-${Date.now()}`;
@@ -393,6 +403,18 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const ct = response.headers.get('content-type') ?? ''
+      if (ct.includes('application/json')) {
+        const d = await response.json() as { code?: string; error?: string }
+        if (d.code === 'NO_PROVIDER') {
+          setNoProvider(true)
+          setMessages(prev => prev.filter(m => m.id !== respId))
+          pushLog({ actor: 'SYSTEM', actorColor: '#f59e0b', text: 'No LLM provider configured', status: 'error' })
+          setIsThinking(false)
+          return
+        }
       }
 
       const reader = response.body?.getReader();
@@ -612,6 +634,33 @@ export function OrchestratorChat({ initialContext }: { initialContext?: Orchestr
           ) : (
             <>
               {messages.map(msg => <MessageBlock key={msg.id} message={msg} />)}
+              {noProvider && (
+                <div style={{
+                  margin: "16px 0", padding: "14px 16px",
+                  background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.3)",
+                  borderRadius: "8px", display: "flex", alignItems: "center", gap: "12px",
+                }}>
+                  <span style={{ fontSize: "18px", flexShrink: 0 }}>&#9881;</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: "12px", color: "#f59e0b", fontWeight: 600, marginBottom: "4px" }}>
+                      No AI model configured
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#888" }}>
+                      Configure a model in Settings &rarr; Models
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setNoProvider(false); onNavigate?.('models'); }}
+                    style={{
+                      padding: "5px 12px", background: "rgba(245,158,11,0.15)",
+                      border: "1px solid rgba(245,158,11,0.3)", borderRadius: "4px",
+                      color: "#f59e0b", fontSize: "11px", cursor: "pointer", fontFamily: "monospace",
+                    }}
+                  >
+                    Configure
+                  </button>
+                </div>
+              )}
               {followUps.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginTop: "6px" }}>
                   {followUps.map(chip => (

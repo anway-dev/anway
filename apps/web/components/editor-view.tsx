@@ -1,70 +1,59 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
-type EditorState = "writing" | "analyzing" | "gate" | "running" | "done";
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type EditorState = "idle" | "loading" | "writing" | "analyzing" | "gate" | "running" | "done";
 type BottomTab = "problems" | "tests" | "terminal";
 type ActivityTab = "explorer" | "search" | "git";
+type ProjectSource = "demo" | "disk" | "github";
 
-const SYNTAX: { text: string; color: string }[][] = [
-  [{ text: "import", color: "#c586c0" }, { text: " { db } ", color: "#d4d4d4" }, { text: "from", color: "#c586c0" }, { text: " '../lib/db'", color: "#ce9178" }],
-  [{ text: "import", color: "#c586c0" }, { text: " { paymentService } ", color: "#d4d4d4" }, { text: "from", color: "#c586c0" }, { text: " '../services/payment'", color: "#ce9178" }],
-  [],
-  [{ text: "export", color: "#c586c0" }, { text: " async ", color: "#c586c0" }, { text: "function", color: "#c586c0" }, { text: " quickCheckout", color: "#dcdcaa" }, { text: "(req, res) {", color: "#d4d4d4" }],
-  [{ text: "  ", color: "#d4d4d4" }, { text: "const", color: "#c586c0" }, { text: " { userId, methodId, amount, currency } = req.body", color: "#d4d4d4" }],
-  [],
-  [{ text: "  // fetch saved payment method", color: "#6a9955" }],
-  [{ text: "  ", color: "#d4d4d4" }, { text: "const", color: "#c586c0" }, { text: " method = ", color: "#d4d4d4" }, { text: "await", color: "#c586c0" }, { text: " db.paymentMethods.", color: "#d4d4d4" }, { text: "findOne", color: "#dcdcaa" }, { text: "(methodId)", color: "#d4d4d4" }],
-  [{ text: "  ", color: "#d4d4d4" }, { text: "if", color: "#c586c0" }, { text: " (!method || method.userId !== userId) {", color: "#d4d4d4" }],
-  [{ text: "    return", color: "#c586c0" }, { text: " res.", color: "#d4d4d4" }, { text: "status", color: "#dcdcaa" }, { text: "(", color: "#d4d4d4" }, { text: "403", color: "#b5cea8" }, { text: ").", color: "#d4d4d4" }, { text: "json", color: "#dcdcaa" }, { text: "({ error: ", color: "#d4d4d4" }, { text: "'Forbidden'", color: "#ce9178" }, { text: " })", color: "#d4d4d4" }],
-  [{ text: "  }", color: "#d4d4d4" }],
-  [],
-  [{ text: "  // create payment", color: "#6a9955" }],
-  [{ text: "  ", color: "#d4d4d4" }, { text: "const", color: "#c586c0" }, { text: " payment = ", color: "#d4d4d4" }, { text: "await", color: "#c586c0" }, { text: " paymentService.", color: "#d4d4d4" }, { text: "create", color: "#dcdcaa" }, { text: "({", color: "#d4d4d4" }],
-  [{ text: "    userId, methodId, amount, currency", color: "#d4d4d4" }],
-  [{ text: "  })", color: "#d4d4d4" }],
-  [],
-  [{ text: "  return", color: "#c586c0" }, { text: " res.", color: "#d4d4d4" }, { text: "status", color: "#dcdcaa" }, { text: "(", color: "#d4d4d4" }, { text: "201", color: "#b5cea8" }, { text: ").", color: "#d4d4d4" }, { text: "json", color: "#dcdcaa" }, { text: "(payment)", color: "#d4d4d4" }],
-  [{ text: "}", color: "#d4d4d4" }],
-];
+interface FileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  depth: number;
+  active?: boolean;
+}
 
-const FINDINGS = [
-  { line: 8,  severity: "warn",  title: "No input validation",    body: "amount and currency are passed directly to paymentService.create() without validation. Negative amounts and unsupported currencies will cause downstream errors.", test: "POST /checkout { amount: -100 } → expect 422" },
-  { line: 14, severity: "error", title: "Race condition possible", body: "No idempotency check before creating payment. Concurrent requests with the same methodId could create duplicate charges.", test: "Concurrent POST with same body → expect same paymentId" },
-];
+interface Finding {
+  line: number;
+  severity: "error" | "warn" | "info";
+  title: string;
+  body: string;
+  test: string;
+}
 
-const TEST_PLAN = [
-  { id: "TC-001", label: "Happy path — low value, no 3DS",         status: "queued" },
-  { id: "TC-002", label: "amount: -100 → expect 422",              status: "queued", generated: true },
-  { id: "TC-003", label: "Invalid methodId → expect 403",          status: "queued" },
-  { id: "TC-004", label: "Unsupported currency → expect 422",      status: "queued", generated: true },
-  { id: "TC-005", label: "Concurrent duplicate → same paymentId",  status: "queued", generated: true },
-  { id: "TC-006", label: "Expired payment method → expect 402",    status: "queued" },
-  { id: "TC-007", label: "Missing required fields → expect 400",   status: "queued", generated: true },
-];
+interface TestCase {
+  id: string;
+  label: string;
+  generated: boolean;
+  status?: "queued" | "pass" | "fail" | "running";
+  ms?: number;
+  reason?: string;
+}
 
-const RUN_SEQUENCE: { id: string; result: "pass" | "fail"; ms: number }[] = [
-  { id: "TC-001", result: "pass", ms: 234 },
-  { id: "TC-003", result: "pass", ms: 89 },
-  { id: "TC-006", result: "pass", ms: 145 },
-  { id: "TC-007", result: "pass", ms: 67 },
-  { id: "TC-002", result: "pass", ms: 312 },
-  { id: "TC-004", result: "pass", ms: 198 },
-  { id: "TC-005", result: "fail", ms: 890 },
-];
+interface DeployTarget {
+  id: string;
+  label: string;
+  platform: string;
+  tfEnv: string;
+  connectorType: string;
+  meta: Record<string, string>;
+}
 
-const FILE_TREE = [
-  { name: "payments-service", isDir: true, depth: 0, open: true },
-  { name: "routes", isDir: true, depth: 1, open: true },
-  { name: "checkout.ts", isDir: false, depth: 2, active: true, modified: true },
-  { name: "payment.ts", isDir: false, depth: 2 },
-  { name: "refund.ts", isDir: false, depth: 2 },
-  { name: "services", isDir: true, depth: 1, open: true },
-  { name: "payment.ts", isDir: false, depth: 2 },
-  { name: "risk.ts", isDir: false, depth: 2 },
-  { name: "utils", isDir: true, depth: 1, open: true },
-  { name: "validation.ts", isDir: false, depth: 2 },
-  { name: "idempotency.ts", isDir: false, depth: 2 },
-];
+interface DeployState {
+  phase: "idle" | "detecting" | "picking" | "planning" | "confirming" | "applying" | "done" | "error";
+  lines: string[];
+  exitCode?: number;
+  targets?: DeployTarget[];
+  selectedTarget?: DeployTarget;
+}
+
+// Demo project path — the real chaotic payments-api
+const DEMO_PATH = process.env.NEXT_PUBLIC_DEMO_SERVICES_PATH ?? "/infra/demo/services/payments-api";
+
+// ── Activity bar icons ─────────────────────────────────────────────────────────
 
 const ACTIVITY_ICONS: { id: ActivityTab; icon: string; title: string }[] = [
   { id: "explorer", icon: "⊞", title: "Explorer" },
@@ -72,66 +61,398 @@ const ACTIVITY_ICONS: { id: ActivityTab; icon: string; title: string }[] = [
   { id: "git",      icon: "⬡", title: "Source Control" },
 ];
 
-const TERMINAL_LINES = [
-  { text: "$ pnpm test --watch", color: "#d4d4d4" },
-  { text: "", color: "" },
-  { text: "  payments-service › routes › checkout", color: "#888" },
-  { text: "", color: "" },
-  { text: "  ✓ TC-001 happy path (234ms)", color: "#10b981" },
-  { text: "  ✓ TC-002 negative amount (312ms)", color: "#10b981" },
-  { text: "  ✓ TC-003 invalid method (89ms)", color: "#10b981" },
-  { text: "  ✓ TC-004 unsupported currency (198ms)", color: "#10b981" },
-  { text: "  ✗ TC-005 concurrent duplicate (890ms)", color: "#ef4444" },
-  { text: "  ✓ TC-006 expired method (145ms)", color: "#10b981" },
-  { text: "  ✓ TC-007 missing fields (67ms)", color: "#10b981" },
-  { text: "", color: "" },
-  { text: "  Tests: 6 passed, 1 failed, 7 total", color: "#d4d4d4" },
-  { text: "  Time: 2.0s", color: "#888" },
-];
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extIcon(name: string): string {
+  const ext = name.split(".").pop() ?? "";
+  if (["ts", "tsx"].includes(ext)) return "TS";
+  if (["js", "jsx", "mjs", "cjs"].includes(ext)) return "JS";
+  if (ext === "py") return "PY";
+  if (ext === "go") return "GO";
+  if (ext === "sh") return "SH";
+  if (["json", "yaml", "yml", "toml"].includes(ext)) return "{}";
+  if (ext === "tf") return "TF";
+  if (ext === "md") return "MD";
+  return "◻";
+}
+
+async function readSSE(
+  url: string,
+  init: RequestInit,
+  onEvent: (data: object) => void,
+): Promise<void> {
+  const resp = await fetch(url, init);
+  if (!resp.body) return;
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (line.startsWith("data: ")) {
+        try { onEvent(JSON.parse(line.slice(6))); } catch { /* skip */ }
+      }
+    }
+  }
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
 
 export function EditorView() {
-  const [state, setState] = useState<EditorState>("writing");
+  // Project source
+  const [source, setSource] = useState<ProjectSource>("demo");
+  const [diskPath, setDiskPath]     = useState("");
+  const [githubUrl, setGithubUrl]   = useState("");
+  const [showSourcePicker, setShowSourcePicker] = useState(false);
+
+  // File tree
+  const [fileTree, setFileTree]     = useState<FileEntry[]>([]);
+  const [activeFile, setActiveFile] = useState<FileEntry | null>(null);
+
+  // File content
+  const [fileContent, setFileContent] = useState("");
+  const [filename, setFilename]         = useState("");
+  const [language, setLanguage]         = useState("javascript");
+
+  // Analysis
+  const [state, setState]             = useState<EditorState>("idle");
+  const [analyzeSteps, setAnalyzeSteps] = useState<{ label: string; done: boolean; active: boolean }[]>([]);
+  const [findings, setFindings]       = useState<Finding[]>([]);
+  const [testPlan, setTestPlan]       = useState<TestCase[]>([]);
+  const [confidence, setConfidence]   = useState<number | null>(null);
+  const [analysisSummary, setSummary] = useState("");
   const [activeFinding, setActiveFinding] = useState<number | null>(null);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
-  const [testResults, setTestResults] = useState<Record<string, "pass" | "fail">>({});
-  const [activeTest, setActiveTest] = useState<string | null>(null);
-  const [runIndex, setRunIndex] = useState(0);
-  const [bottomTab, setBottomTab] = useState<BottomTab>("problems");
+
+  // Test execution
+  const [terminalLines, setTerminalLines] = useState<string[]>([]);
+  const [generatedTestCode, setGeneratedTestCode] = useState("");
+
+  // Deploy
+  const [deploy, setDeploy] = useState<DeployState>({ phase: "idle", lines: [] });
+  const [gateId, setGateId] = useState<string | null>(null);
+
+  // UI
+  const [bottomTab, setBottomTab]   = useState<BottomTab>("problems");
   const [activityTab, setActivityTab] = useState<ActivityTab>("explorer");
   const [showSidebar, setShowSidebar] = useState(true);
   const [bottomHeight, setBottomHeight] = useState(180);
 
-  useEffect(() => {
-    if (state !== "analyzing") return;
-    const t = setInterval(() => {
-      setAnalysisProgress((p) => {
-        if (p >= 100) { clearInterval(t); setState("gate"); return 100; }
-        return p + 6;
-      });
-    }, 80);
-    return () => clearInterval(t);
-  }, [state]);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const passCount = testPlan.filter(t => t.status === "pass").length;
+  const failCount = testPlan.filter(t => t.status === "fail").length;
+  const errorCount = findings.filter(f => f.severity === "error").length;
+  const warnCount  = findings.filter(f => f.severity === "warn").length;
+  const showFindings = ["gate","running","done"].includes(state);
+
+  // ── Load file tree ──────────────────────────────────────────────────────────
+
+  const loadTree = useCallback(async (rootPath: string) => {
+    try {
+      const resp = await fetch(`/api/editor/files?path=${encodeURIComponent(rootPath)}`);
+      if (!resp.ok) return;
+      const tree: FileEntry[] = await resp.json();
+      setFileTree(tree);
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Load file content ───────────────────────────────────────────────────────
+
+  const loadFile = useCallback(async (filePath: string) => {
+    setState("loading");
+    setFindings([]);
+    setTestPlan([]);
+    setConfidence(null);
+    setSummary("");
+    setActiveFinding(null);
+    setTerminalLines([]);
+    setGeneratedTestCode("");
+    setDeploy({ phase: "idle", lines: [] });
+
+    try {
+      const resp = await fetch(`/api/editor/file?path=${encodeURIComponent(filePath)}`);
+      if (!resp.ok) { setState("writing"); return; }
+      const data = await resp.json();
+      setFileContent(data.content ?? "");
+      setFilename(data.filename ?? "");
+      setLanguage(data.language ?? "plaintext");
+      setState("writing");
+    } catch {
+      setState("writing");
+    }
+  }, []);
+
+  // ── Load demo on mount ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (state !== "running") return;
-    if (runIndex >= RUN_SEQUENCE.length) { setTimeout(() => { setState("done"); setBottomTab("tests"); }, 0); return; }
-    const { id, result, ms } = RUN_SEQUENCE[runIndex];
-    const t = setTimeout(() => {
-      setActiveTest(id);
-      setTimeout(() => {
-        setTestResults((prev) => ({ ...prev, [id]: result }));
-        setActiveTest(null);
-        setRunIndex((i) => i + 1);
-      }, Math.min(ms, 500));
-    }, 0);
-    return () => clearTimeout(t);
-  }, [state, runIndex]);
+    loadDemoProject();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const passCount = Object.values(testResults).filter(r => r === "pass").length;
-  const failCount = Object.values(testResults).filter(r => r === "fail").length;
-  const showFindings = state === "gate" || state === "running" || state === "done";
-  const errorCount = showFindings ? FINDINGS.filter(f => f.severity === "error").length : 0;
-  const warnCount = showFindings ? FINDINGS.filter(f => f.severity === "warn").length : 0;
+  async function loadDemoProject() {
+    setState("loading");
+    // Load demo file tree
+    const demoRoot = DEMO_PATH;
+    await loadTree(demoRoot);
+
+    // Load the main server.js
+    const mainFile = `${demoRoot}/server.js`;
+    const resp = await fetch(`/api/editor/file?path=${encodeURIComponent(mainFile)}`).catch(() => null);
+
+    if (resp?.ok) {
+      const data = await resp.json();
+      setFileContent(data.content ?? "");
+      setFilename(data.filename ?? "server.js");
+      setLanguage(data.language ?? "javascript");
+      setActiveFile({ name: "server.js", path: mainFile, isDir: false, depth: 1, active: true });
+    } else {
+      // Fallback to demo code if path not accessible
+      setFileContent(DEMO_FALLBACK_CODE);
+      setFilename("payments-api/server.js");
+      setLanguage("javascript");
+    }
+    setState("writing");
+  }
+
+  // ── Project source switch ───────────────────────────────────────────────────
+
+  async function applySource() {
+    setShowSourcePicker(false);
+    setFindings([]);
+    setTestPlan([]);
+    setState("loading");
+
+    if (source === "demo") {
+      await loadDemoProject();
+      return;
+    }
+
+    if (source === "disk" && diskPath) {
+      await loadTree(diskPath);
+      // try to load package.json or main file
+      const mainGuesses = ["index.ts", "index.js", "src/index.ts", "src/index.js", "main.ts", "main.go"];
+      for (const guess of mainGuesses) {
+        const tryPath = `${diskPath}/${guess}`;
+        const resp = await fetch(`/api/editor/file?path=${encodeURIComponent(tryPath)}`).catch(() => null);
+        if (resp?.ok) {
+          await loadFile(tryPath);
+          return;
+        }
+      }
+      setState("writing");
+      return;
+    }
+
+    if (source === "github" && githubUrl) {
+      // Clone via gateway — for now show message
+      setFileContent(`# GitHub import\n# URL: ${githubUrl}\n# Clone support coming — connect GitHub connector first.`);
+      setFilename("README");
+      setLanguage("markdown");
+      setState("writing");
+    }
+  }
+
+  // ── Run analysis ──────────────────────────────────────────────────────────
+
+  async function runAnalysis() {
+    if (!fileContent || !filename) return;
+
+    setState("analyzing");
+    setFindings([]);
+    setTestPlan([]);
+    setConfidence(null);
+    setSummary("");
+    setAnalyzeSteps([
+      { label: "Reading file structure",    done: false, active: true  },
+      { label: "Checking security issues",  done: false, active: false },
+      { label: "Analyzing race conditions", done: false, active: false },
+      { label: "Generating test cases",     done: false, active: false },
+    ]);
+    setBottomTab("problems");
+
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
+    let stepIdx = 0;
+
+    await readSSE(
+      "/api/editor/analyze",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: fileContent, filename, language }),
+        signal: abortRef.current.signal,
+      },
+      (event) => {
+        const e = event as Record<string, unknown>;
+
+        if (e.type === "status") {
+          // Advance step
+          if (stepIdx < 3) {
+            setAnalyzeSteps(prev => prev.map((s, i) => ({
+              ...s,
+              done: i < stepIdx,
+              active: i === stepIdx,
+            })));
+            stepIdx++;
+          }
+        }
+
+        if (e.type === "findings") {
+          setFindings((e.findings as Finding[]) ?? []);
+        }
+
+        if (e.type === "testPlan") {
+          setTestPlan(((e.testPlan as TestCase[]) ?? []).map(tc => ({ ...tc, status: "queued" })));
+        }
+
+        if (e.type === "confidence") {
+          setConfidence(e.confidence as number);
+        }
+
+        if (e.type === "summary") {
+          setSummary(e.summary as string);
+        }
+
+        if (e.type === "done") {
+          setAnalyzeSteps(prev => prev.map(s => ({ ...s, done: true, active: false })));
+          setState("gate");
+        }
+      },
+    ).catch(() => {
+      setState("writing");
+    });
+  }
+
+  // ── Run tests ─────────────────────────────────────────────────────────────
+
+  async function runTests() {
+    setState("running");
+    setBottomTab("tests");
+    setTerminalLines([]);
+    setGeneratedTestCode("");
+    setTestPlan(prev => prev.map(t => ({ ...t, status: "queued" })));
+
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
+    await readSSE(
+      "/api/editor/run-tests",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: fileContent, filename, language, findings, testPlan }),
+        signal: abortRef.current.signal,
+      },
+      (event) => {
+        const e = event as Record<string, unknown>;
+
+        if (e.type === "testCode") {
+          setGeneratedTestCode(e.code as string);
+        }
+
+        if (e.type === "testResult") {
+          const r = e.result as { id: string; label: string; status: "pass" | "fail"; ms: number; reason?: string };
+          setTestPlan(prev => {
+            const existing = prev.find(t => t.id === r.id);
+            if (existing) {
+              return prev.map(t => t.id === r.id ? { ...t, status: r.status, ms: r.ms, reason: r.reason } : t);
+            }
+            // New test from LLM
+            return [...prev, { id: r.id, label: r.label, generated: true, status: r.status, ms: r.ms, reason: r.reason }];
+          });
+        }
+
+        if (e.type === "terminal") {
+          setTerminalLines(prev => [...prev, e.line as string]);
+        }
+
+        if (e.type === "done") {
+          setState("done");
+        }
+      },
+    ).catch(() => {
+      setState("gate");
+    });
+  }
+
+  // ── Deploy via Terraform ───────────────────────────────────────────────────
+
+  async function detectAndDeploy() {
+    setDeploy({ phase: "detecting", lines: [] });
+    setBottomTab("terminal");
+
+    try {
+      const resp = await fetch("/api/terraform/detect");
+      const targets: DeployTarget[] = resp.ok ? await resp.json() : [];
+
+      if (targets.length === 0) {
+        setDeploy({ phase: "error", lines: ["No deployment targets found. Connect a cloud or Kubernetes connector first."] });
+        return;
+      }
+
+      // Single meaningful target → auto-plan
+      const real = targets.filter(t => t.platform !== "docker");
+      if (real.length === 1) {
+        await runTerraformPlan(real[0]!, targets);
+        return;
+      }
+
+      // Multiple → show picker
+      setDeploy({ phase: "picking", lines: [], targets });
+    } catch (err) {
+      setDeploy({ phase: "error", lines: [String(err)] });
+    }
+  }
+
+  async function runTerraformPlan(target: DeployTarget, targets?: DeployTarget[]) {
+    setDeploy({ phase: "planning", lines: [], selectedTarget: target, targets });
+    setBottomTab("terminal");
+
+    await readSSE(
+      `/api/terraform/${target.tfEnv}/plan`,
+      { signal: undefined },
+      (event) => {
+        const e = event as Record<string, unknown>;
+        if (e.line) setDeploy(prev => ({ ...prev, lines: [...prev.lines, e.line as string] }));
+        if (e.done) setDeploy(prev => ({ ...prev, phase: "confirming", exitCode: e.exitCode as number }));
+      },
+    ).catch((err) => {
+      setDeploy(prev => ({ ...prev, phase: "error", lines: [...prev.lines, String(err)] }));
+    });
+  }
+
+  async function runTerraformApply() {
+    const target = deploy.selectedTarget;
+    if (!target) return;
+    setDeploy(prev => ({ ...prev, phase: "applying" }));
+
+    await readSSE(
+      `/api/terraform/${target.tfEnv}/apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gateId }),
+      },
+      (event) => {
+        const e = event as Record<string, unknown>;
+        if (e.line) setDeploy(prev => ({ ...prev, lines: [...prev.lines, e.line as string] }));
+        if (e.done) setDeploy(prev => ({ ...prev, phase: e.exitCode === 0 ? "done" : "error", exitCode: e.exitCode as number }));
+      },
+    ).catch((err) => {
+      setDeploy(prev => ({ ...prev, phase: "error", lines: [...prev.lines, String(err)] }));
+    });
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const codeLines = fileContent.split("\n");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#1e1e1e", fontFamily: "monospace" }}>
@@ -140,37 +461,91 @@ export function EditorView() {
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
       `}</style>
 
-      {/* Tab bar */}
+      {/* Tab bar + project picker */}
       <div style={{ height: "35px", background: "#252526", borderBottom: "1px solid #1a1a1a", display: "flex", alignItems: "stretch", flexShrink: 0 }}>
-        {/* Active tab */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 16px", background: "#1e1e1e", borderRight: "1px solid #1a1a1a", borderTop: "1px solid #0078d4", fontSize: "12px", color: "#d4d4d4", cursor: "default" }}>
-          <span style={{ color: "#3dc9b0" }}>TS</span>
-          checkout.ts
-          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#e5c07b", display: "inline-block" }} title="modified" />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 14px", background: "#2d2d2d", borderRight: "1px solid #1a1a1a", fontSize: "12px", color: "#888", cursor: "pointer" }}>
-          <span style={{ color: "#3dc9b0" }}>TS</span>
-          payment.ts
-        </div>
-        {/* Analysis progress stripe */}
-        {state === "analyzing" && (
-          <div style={{ position: "absolute", top: "35px", left: 0, right: 0, height: "2px", background: "#1a1a1a", zIndex: 10 }}>
-            <div style={{ height: "100%", background: "#0078d4", width: `${analysisProgress}%`, transition: "width 0.1s", boxShadow: "0 0 6px #0078d4" }} />
+        {/* File tab */}
+        {filename && (
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0 16px", background: "#1e1e1e", borderRight: "1px solid #1a1a1a", borderTop: "1px solid #0078d4", fontSize: "12px", color: "#d4d4d4" }}>
+            <span style={{ color: "#3dc9b0", fontSize: "10px" }}>{extIcon(filename)}</span>
+            {filename}
+          </div>
+        )}
+
+        {/* Project source button */}
+        <button
+          onClick={() => setShowSourcePicker(v => !v)}
+          style={{ marginLeft: "auto", background: "rgba(255,255,255,0.05)", border: "none", borderLeft: "1px solid #1a1a1a", color: "#888", padding: "0 12px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "5px" }}
+        >
+          <span>{source === "demo" ? "🔴 Demo" : source === "disk" ? "💾 Disk" : "🐙 GitHub"}</span>
+          <span>▾</span>
+        </button>
+
+        {/* Source picker dropdown */}
+        {showSourcePicker && (
+          <div style={{ position: "absolute", top: "35px", right: 0, width: "360px", background: "#252526", border: "1px solid #2a2a2a", borderRadius: "4px", zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", padding: "12px" }}>
+            <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "10px", fontWeight: 600 }}>Open project</div>
+
+            {/* Source type tabs */}
+            <div style={{ display: "flex", gap: "4px", marginBottom: "10px" }}>
+              {(["demo","disk","github"] as ProjectSource[]).map(s => (
+                <button key={s} onClick={() => setSource(s)} style={{ flex: 1, background: source === s ? "#0e639c" : "rgba(255,255,255,0.06)", border: "none", color: source === s ? "#fff" : "#888", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", textTransform: "capitalize" }}>
+                  {s === "demo" ? "🔴 Demo" : s === "disk" ? "💾 Disk" : "🐙 GitHub"}
+                </button>
+              ))}
+            </div>
+
+            {source === "demo" && (
+              <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif", lineHeight: "1.6" }}>
+                Loads the chaotic <strong style={{ color: "#d4d4d4" }}>payments-api</strong> from the demo stack — real bugs, real chaos injection, real LLM analysis.
+              </div>
+            )}
+
+            {source === "disk" && (
+              <div>
+                <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "5px" }}>Absolute path to project root</div>
+                <input
+                  value={diskPath}
+                  onChange={e => setDiskPath(e.target.value)}
+                  placeholder="/path/to/your/project"
+                  style={{ width: "100%", background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "11px", padding: "6px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box", fontFamily: "monospace" }}
+                />
+              </div>
+            )}
+
+            {source === "github" && (
+              <div>
+                <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "5px" }}>GitHub repo URL</div>
+                <input
+                  value={githubUrl}
+                  onChange={e => setGithubUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo"
+                  style={{ width: "100%", background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "11px", padding: "6px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box", fontFamily: "monospace" }}
+                />
+                <div style={{ fontSize: "10px", color: "#555", marginTop: "5px", fontFamily: "sans-serif" }}>Requires GitHub connector — connect via Connectors</div>
+              </div>
+            )}
+
+            <button
+              onClick={applySource}
+              style={{ marginTop: "12px", width: "100%", background: "#0e639c", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontFamily: "sans-serif", fontWeight: 600 }}
+            >
+              Open project
+            </button>
           </div>
         )}
       </div>
 
       {/* Breadcrumb */}
       <div style={{ height: "22px", background: "#1e1e1e", borderBottom: "1px solid #252526", display: "flex", alignItems: "center", padding: "0 12px", gap: "4px", flexShrink: 0 }}>
-        {["payments-service", "routes", "checkout.ts", "quickCheckout"].map((crumb, i, arr) => (
-          <span key={crumb} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ fontSize: "11px", color: i === arr.length - 1 ? "#d4d4d4" : "#888", cursor: "pointer" }}>{crumb}</span>
+        {filename.split("/").map((crumb, i, arr) => (
+          <span key={i} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <span style={{ fontSize: "11px", color: i === arr.length - 1 ? "#d4d4d4" : "#888" }}>{crumb}</span>
             {i < arr.length - 1 && <span style={{ fontSize: "10px", color: "#555" }}>›</span>}
           </span>
         ))}
       </div>
 
-      {/* Main body: activity bar + sidebar + editor + minimap */}
+      {/* Main body */}
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
 
         {/* Activity bar */}
@@ -179,221 +554,177 @@ export function EditorView() {
             <button
               key={a.id}
               title={a.title}
-              onClick={() => { if (activityTab === a.id && showSidebar) { setShowSidebar(false); } else { setActivityTab(a.id); setShowSidebar(true); } }}
-              style={{
-                width: "34px", height: "34px", borderRadius: "4px",
-                background: activityTab === a.id && showSidebar ? "rgba(255,255,255,0.1)" : "transparent",
-                border: "none", color: activityTab === a.id && showSidebar ? "#d4d4d4" : "#888",
-                fontSize: "16px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                borderLeft: activityTab === a.id && showSidebar ? "2px solid #d4d4d4" : "2px solid transparent",
-              }}
+              onClick={() => { if (activityTab === a.id && showSidebar) setShowSidebar(false); else { setActivityTab(a.id); setShowSidebar(true); } }}
+              style={{ width: "34px", height: "34px", borderRadius: "4px", background: activityTab === a.id && showSidebar ? "rgba(255,255,255,0.1)" : "transparent", border: "none", color: activityTab === a.id && showSidebar ? "#d4d4d4" : "#888", fontSize: "16px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", borderLeft: activityTab === a.id && showSidebar ? "2px solid #d4d4d4" : "2px solid transparent" }}
             >
               {a.icon}
             </button>
           ))}
           <div style={{ flex: 1 }} />
-          {/* AI badge */}
-          <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "10px", fontSize: "10px", color: "#10b981", fontWeight: 700, cursor: "pointer" }} title="Anvay AI">
-            ✦
-          </div>
+          <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "10px", fontSize: "10px", color: "#10b981", fontWeight: 700 }} title="Anvay AI">✦</div>
         </div>
 
-        {/* Sidebar panel */}
+        {/* Sidebar */}
         {showSidebar && (
           <div style={{ width: "220px", background: "#252526", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+
             {activityTab === "explorer" && (
               <>
                 <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>
-                  Explorer
+                  {source === "demo" ? "payments-api (demo)" : source === "disk" ? diskPath.split("/").pop() : "GitHub"}
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
-                  {FILE_TREE.map((f, i) => (
+                  {fileTree.length === 0 && state !== "loading" && (
+                    <div style={{ padding: "12px", fontSize: "11px", color: "#555", fontFamily: "sans-serif" }}>No files loaded</div>
+                  )}
+                  {fileTree.map((f, i) => (
                     <div
                       key={i}
-                      style={{
-                        display: "flex", alignItems: "center", gap: "4px",
-                        padding: "2px 0 2px " + (8 + f.depth * 14) + "px",
-                        fontSize: "12px",
-                        color: (f as { active?: boolean }).active ? "#d4d4d4" : f.isDir ? "#d4d4d4" : "#a6a6a6",
-                        background: (f as { active?: boolean }).active ? "#094771" : "transparent",
-                        cursor: "pointer", fontFamily: "sans-serif",
-                      }}
+                      onClick={() => { if (!f.isDir) { setActiveFile({ ...f, active: true }); loadFile(f.path); } }}
+                      style={{ display: "flex", alignItems: "center", gap: "4px", padding: `2px 0 2px ${8 + f.depth * 14}px`, fontSize: "12px", color: activeFile?.path === f.path ? "#d4d4d4" : f.isDir ? "#d4d4d4" : "#a6a6a6", background: activeFile?.path === f.path ? "#094771" : "transparent", cursor: f.isDir ? "default" : "pointer", fontFamily: "sans-serif" }}
                     >
                       {f.isDir ? (
-                        <span style={{ color: "#dcb67a", fontSize: "10px" }}>{(f as { open?: boolean }).open ? "▾" : "▸"}</span>
+                        <span style={{ color: "#dcb67a", fontSize: "10px" }}>▾</span>
                       ) : (
-                        <span style={{ fontSize: "10px", color: "#3dc9b0", width: "12px" }}>TS</span>
+                        <span style={{ fontSize: "10px", color: "#3dc9b0", width: "14px" }}>{extIcon(f.name)}</span>
                       )}
                       <span>{f.name}</span>
-                      {(f as { modified?: boolean }).modified && (
-                        <span style={{ marginLeft: "auto", paddingRight: "8px", width: "6px", height: "6px", borderRadius: "50%", background: "#e5c07b", display: "inline-block" }} />
-                      )}
                     </div>
                   ))}
                 </div>
-                {/* Test panel in sidebar */}
-                <div style={{ borderTop: "1px solid #1a1a1a" }}>
-                  <div style={{ padding: "6px 12px 4px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif" }}>
-                    Testing
-                  </div>
-                  {TEST_PLAN.map(tc => {
-                    const result = testResults[tc.id];
-                    const isRunning = activeTest === tc.id;
-                    return (
+
+                {/* Test panel */}
+                {testPlan.length > 0 && (
+                  <div style={{ borderTop: "1px solid #1a1a1a" }}>
+                    <div style={{ padding: "6px 12px 4px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif" }}>Testing</div>
+                    {testPlan.map(tc => (
                       <div key={tc.id} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "2px 12px" }}>
-                        <span style={{ fontSize: "10px", color: isRunning ? "#0078d4" : result === "pass" ? "#10b981" : result === "fail" ? "#f44747" : "#555", width: "10px" }}>
-                          {isRunning ? "▶" : result === "pass" ? "✓" : result === "fail" ? "✗" : "○"}
+                        <span style={{ fontSize: "10px", color: tc.status === "running" ? "#0078d4" : tc.status === "pass" ? "#10b981" : tc.status === "fail" ? "#f44747" : "#555", width: "10px" }}>
+                          {tc.status === "running" ? "▶" : tc.status === "pass" ? "✓" : tc.status === "fail" ? "✗" : "○"}
                         </span>
-                        <span style={{ fontSize: "10px", fontFamily: "sans-serif", color: isRunning ? "#d4d4d4" : result ? (result === "pass" ? "#888" : "#f44747") : "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {tc.id}
-                        </span>
-                        {tc.generated && !result && <span style={{ fontSize: "8px", color: "#c678dd", marginLeft: "auto", flexShrink: 0 }}>AI</span>}
+                        <span style={{ fontSize: "10px", fontFamily: "monospace", color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.id}</span>
+                        {tc.generated && <span style={{ fontSize: "8px", color: "#c678dd", marginLeft: "auto", flexShrink: 0 }}>AI</span>}
                       </div>
-                    );
-                  })}
-                  <div style={{ height: "8px" }} />
+                    ))}
+                    <div style={{ height: "8px" }} />
+                  </div>
+                )}
+              </>
+            )}
+
+            {activityTab === "search" && (
+              <>
+                <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>Search</div>
+                <div style={{ padding: "8px 10px" }}>
+                  <input placeholder="Search" style={{ width: "100%", background: "#3c3c3c", border: "1px solid #555", color: "#d4d4d4", fontSize: "12px", padding: "5px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box" }} />
                 </div>
               </>
             )}
 
             {activityTab === "git" && (
               <>
-                <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>
-                  Source Control
-                </div>
+                <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>Source Control</div>
                 <div style={{ padding: "10px 12px" }}>
-                  <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "8px" }}>
-                    feat/quick-checkout
-                  </div>
-                  {["M  routes/checkout.ts", "A  utils/idempotency.ts"].map((f, i) => (
-                    <div key={i} style={{ display: "flex", gap: "6px", padding: "3px 0", fontSize: "11px", fontFamily: "sans-serif" }}>
-                      <span style={{ color: f.startsWith("M") ? "#e5c07b" : "#10b981", width: "12px" }}>{f[0]}</span>
-                      <span style={{ color: "#a6a6a6" }}>{f.slice(3)}</span>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: "12px" }}>
-                    <input placeholder="Commit message" style={{ width: "100%", background: "#3c3c3c", border: "1px solid #555", color: "#d4d4d4", fontSize: "11px", padding: "5px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box", fontFamily: "sans-serif" }} />
-                    <button style={{ marginTop: "6px", width: "100%", background: "#0e639c", border: "none", color: "#fff", fontSize: "11px", padding: "5px", borderRadius: "3px", cursor: "pointer", fontFamily: "sans-serif" }}>
-                      Commit to feat/quick-checkout
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activityTab === "search" && (
-              <>
-                <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>
-                  Search
-                </div>
-                <div style={{ padding: "8px 10px" }}>
-                  <input placeholder="Search" style={{ width: "100%", background: "#3c3c3c", border: "1px solid #555", color: "#d4d4d4", fontSize: "12px", padding: "5px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box" }} />
+                  <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "8px" }}>main</div>
+                  <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif" }}>No staged changes</div>
                 </div>
               </>
             )}
           </div>
         )}
 
-        {/* Editor + right review panel */}
+        {/* Editor + right panel */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
-          {/* Code area + minimap */}
           <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-            {/* Code */}
+
+            {/* Code area */}
             <div style={{ flex: 1, overflowY: "auto", overflowX: "auto", position: "relative" }}>
-              <div style={{ padding: "8px 0", minWidth: "520px" }}>
-                {SYNTAX.map((tokens, idx) => {
-                  const lineNum = idx + 1;
-                  const finding = FINDINGS.find(f => f.line === lineNum);
-                  const isActive = activeFinding === lineNum;
-                  const showFinding = finding && showFindings;
-                  return (
-                    <div key={lineNum}>
-                      <div
-                        onClick={() => finding && showFindings && setActiveFinding(isActive ? null : lineNum)}
-                        style={{
-                          display: "flex", alignItems: "center", minHeight: "19px",
-                          background: isActive ? "rgba(255,255,255,0.04)" : showFinding ? (finding.severity === "error" ? "rgba(244,71,71,0.06)" : "rgba(229,192,123,0.06)") : "transparent",
-                          cursor: finding && showFindings ? "pointer" : "text",
-                        }}
-                      >
-                        {/* Line number */}
-                        <span style={{ width: "44px", textAlign: "right", paddingRight: "14px", fontSize: "12px", color: "#858585", flexShrink: 0, userSelect: "none", lineHeight: "19px" }}>
-                          {lineNum}
-                        </span>
-                        {/* Gutter */}
-                        <span style={{ width: "18px", flexShrink: 0, textAlign: "center" }}>
+              {state === "loading" && (
+                <div style={{ padding: "40px 20px", color: "#555", fontSize: "12px", fontFamily: "sans-serif" }}>
+                  Loading…
+                </div>
+              )}
+              {state === "idle" && (
+                <div style={{ padding: "40px 20px", color: "#555", fontSize: "12px", fontFamily: "sans-serif" }}>
+                  Open a project using the project picker in the top-right corner.
+                </div>
+              )}
+              {fileContent && state !== "loading" && (
+                <div style={{ padding: "8px 0", minWidth: "520px" }}>
+                  {codeLines.map((lineText, idx) => {
+                    const lineNum = idx + 1;
+                    const finding = findings.find(f => f.line === lineNum);
+                    const isActive = activeFinding === lineNum;
+                    const showFinding = finding && showFindings;
+                    return (
+                      <div key={lineNum}>
+                        <div
+                          onClick={() => finding && showFindings && setActiveFinding(isActive ? null : lineNum)}
+                          style={{ display: "flex", alignItems: "center", minHeight: "19px", background: isActive ? "rgba(255,255,255,0.04)" : showFinding ? (finding.severity === "error" ? "rgba(244,71,71,0.06)" : "rgba(229,192,123,0.06)") : "transparent", cursor: finding && showFindings ? "pointer" : "text" }}
+                        >
+                          <span style={{ width: "44px", textAlign: "right", paddingRight: "14px", fontSize: "12px", color: "#858585", flexShrink: 0, userSelect: "none", lineHeight: "19px" }}>
+                            {lineNum}
+                          </span>
+                          <span style={{ width: "18px", flexShrink: 0, textAlign: "center" }}>
+                            {showFinding && (
+                              <span style={{ fontSize: "11px", color: finding.severity === "error" ? "#f44747" : "#cca700" }}>●</span>
+                            )}
+                          </span>
+                          <span style={{ fontSize: "13px", lineHeight: "19px", color: "#d4d4d4", whiteSpace: "pre" }}>
+                            {lineText}
+                          </span>
                           {showFinding && (
-                            <span style={{ fontSize: "11px", color: finding.severity === "error" ? "#f44747" : "#cca700" }}>
-                              {finding.severity === "error" ? "●" : "●"}
+                            <span style={{ marginLeft: "20px", fontSize: "11px", fontFamily: "sans-serif", color: finding.severity === "error" ? "#f44747" : "#cca700", opacity: 0.9, flexShrink: 0 }}>
+                              {finding.title}
                             </span>
                           )}
-                        </span>
-                        {/* Syntax tokens */}
-                        <span style={{ fontSize: "13px", lineHeight: "19px" }}>
-                          {tokens.map((t, ti) => (
-                            <span key={ti} style={{ color: t.color }}>{t.text}</span>
-                          ))}
-                        </span>
-                        {/* Inline finding hint */}
-                        {showFinding && (
-                          <span style={{ marginLeft: "20px", fontSize: "11px", fontFamily: "sans-serif", color: finding.severity === "error" ? "#f44747" : "#cca700", opacity: 0.9, flexShrink: 0 }}>
-                            {finding.title}
-                          </span>
+                        </div>
+                        {isActive && finding && (
+                          <div style={{ margin: "2px 62px 6px", background: "#252526", border: `1px solid ${finding.severity === "error" ? "#f4474766" : "#cca70066"}`, borderRadius: "4px", padding: "10px 12px", fontSize: "11px", fontFamily: "sans-serif" }}>
+                            <div style={{ color: finding.severity === "error" ? "#f44747" : "#cca700", fontWeight: 600, marginBottom: "5px" }}>{finding.title}</div>
+                            <div style={{ color: "#9d9d9d", lineHeight: "1.5", marginBottom: "8px" }}>{finding.body}</div>
+                            {finding.test && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(197,134,192,0.1)", border: "1px solid rgba(197,134,192,0.2)", borderRadius: "3px", padding: "5px 8px" }}>
+                                <span style={{ color: "#c586c0", fontSize: "10px" }}>✦ Test generated:</span>
+                                <code style={{ fontSize: "11px", color: "#ce9178" }}>{finding.test}</code>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
-                      {/* Expanded finding */}
-                      {isActive && finding && (
-                        <div style={{ margin: "2px 62px 6px", background: "#252526", border: `1px solid ${finding.severity === "error" ? "#f4474766" : "#cca70066"}`, borderRadius: "4px", padding: "10px 12px", fontSize: "11px", fontFamily: "sans-serif" }}>
-                          <div style={{ color: finding.severity === "error" ? "#f44747" : "#cca700", fontWeight: 600, marginBottom: "5px" }}>{finding.title}</div>
-                          <div style={{ color: "#9d9d9d", lineHeight: "1.5", marginBottom: "8px" }}>{finding.body}</div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "rgba(197,134,192,0.1)", border: "1px solid rgba(197,134,192,0.2)", borderRadius: "3px", padding: "5px 8px" }}>
-                            <span style={{ color: "#c586c0", fontSize: "10px" }}>✦ Test generated:</span>
-                            <code style={{ fontSize: "11px", color: "#ce9178" }}>{finding.test}</code>
-                          </div>
-                        </div>
-                      )}
+                    );
+                  })}
+                  {state === "writing" && (
+                    <div style={{ display: "flex", alignItems: "center", minHeight: "19px", paddingLeft: "62px" }}>
+                      <span style={{ display: "inline-block", width: "1px", height: "14px", background: "#d4d4d4", animation: "blink 1.2s step-end infinite" }} />
                     </div>
-                  );
-                })}
-                {/* Cursor blink on last writing line */}
-                {state === "writing" && (
-                  <div style={{ display: "flex", alignItems: "center", minHeight: "19px", paddingLeft: "62px" }}>
-                    <span style={{ display: "inline-block", width: "1px", height: "14px", background: "#d4d4d4", animation: "blink 1.2s step-end infinite" }} />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Minimap */}
-            <div style={{ width: "60px", background: "#1e1e1e", borderLeft: "1px solid #252526", flexShrink: 0, opacity: 0.4, overflow: "hidden" }}>
-              {SYNTAX.map((tokens, i) => (
-                <div key={i} style={{ height: "3px", display: "flex", alignItems: "center", paddingLeft: "4px", gap: "1px" }}>
-                  {tokens.slice(0, 8).map((t, ti) => (
-                    <div key={ti} style={{ height: "2px", background: t.color, width: `${t.text.length * 2}px`, borderRadius: "1px", maxWidth: "24px" }} />
-                  ))}
+                  )}
                 </div>
-              ))}
+              )}
             </div>
 
-            {/* Right review panel — always visible */}
-            <div style={{ width: "250px", background: "#252526", borderLeft: "1px solid #1a1a1a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+            {/* Right review panel */}
+            <div style={{ width: "260px", background: "#252526", borderLeft: "1px solid #1a1a1a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
               <div style={{ padding: "8px 12px", borderBottom: "1px solid #1a1a1a", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
                 <span style={{ color: "#10b981" }}>✦</span> Anvay
                 {state === "analyzing" && <span style={{ marginLeft: "auto", color: "#0078d4", animation: "pulse-dot 1s infinite" }}>●</span>}
               </div>
 
-              {/* Writing state */}
-              {state === "writing" && (
+              {/* Idle/writing */}
+              {(state === "idle" || state === "loading") && (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", textAlign: "center" }}>
+                  <div style={{ fontSize: "28px", marginBottom: "10px", opacity: 0.2 }}>✦</div>
+                  <div style={{ fontSize: "12px", color: "#444", fontFamily: "sans-serif" }}>Open a project to get started</div>
+                </div>
+              )}
+
+              {state === "writing" && fileContent && (
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", textAlign: "center" }}>
                   <div style={{ fontSize: "28px", marginBottom: "10px", opacity: 0.3 }}>✦</div>
-                  <div style={{ fontSize: "12px", color: "#666", fontFamily: "sans-serif", lineHeight: "1.6" }}>
-                    AI review runs on save or commit
-                  </div>
-                  <div style={{ fontSize: "10px", color: "#444", marginTop: "8px", fontFamily: "sans-serif" }}>
-                    Finds issues · generates tests · gates deploy
-                  </div>
+                  <div style={{ fontSize: "12px", color: "#666", fontFamily: "sans-serif", lineHeight: "1.6" }}>AI review finds bugs and generates tests</div>
+                  <div style={{ fontSize: "10px", color: "#444", marginTop: "8px", fontFamily: "sans-serif" }}>Analysis · Tests · Terraform deploy</div>
                   <button
-                    onClick={() => { setState("analyzing"); setAnalysisProgress(0); setBottomTab("problems"); }}
+                    onClick={runAnalysis}
                     style={{ marginTop: "16px", background: "rgba(0,120,212,0.15)", border: "1px solid rgba(0,120,212,0.4)", color: "#0078d4", padding: "6px 14px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}
                   >
                     Analyze now ✦
@@ -401,151 +732,198 @@ export function EditorView() {
                 </div>
               )}
 
-              {/* Analyzing state — step progress */}
+              {/* Analyzing */}
               {state === "analyzing" && (
-                <div style={{ padding: "14px 14px", flex: 1 }}>
-                  <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "12px" }}>Analyzing diff…</div>
-                  {[
-                    "Reading changed routes",
-                    "Checking input validation",
-                    "Analyzing race conditions",
-                    "Generating test cases",
-                  ].map((step, i) => {
-                    const done = analysisProgress > (i + 1) * 25;
-                    const active = analysisProgress > i * 25 && !done;
-                    return (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", opacity: analysisProgress > i * 25 ? 1 : 0.25, transition: "opacity 0.3s" }}>
-                        <span style={{ fontSize: "11px", color: done ? "#10b981" : active ? "#0078d4" : "#555", width: "12px", flexShrink: 0 }}>
-                          {done ? "✓" : active ? "▶" : "○"}
-                        </span>
-                        <span style={{ fontSize: "11px", color: done ? "#888" : active ? "#d4d4d4" : "#666", fontFamily: "sans-serif" }}>{step}</span>
-                      </div>
-                    );
-                  })}
-                  <div style={{ marginTop: "8px", height: "2px", background: "#3c3c3c", borderRadius: "1px" }}>
-                    <div style={{ width: `${analysisProgress}%`, height: "100%", background: "#0078d4", borderRadius: "1px", transition: "width 0.1s" }} />
-                  </div>
+                <div style={{ padding: "14px", flex: 1 }}>
+                  <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "12px" }}>Analyzing {filename}…</div>
+                  {analyzeSteps.map((step, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", opacity: step.done || step.active ? 1 : 0.25, transition: "opacity 0.3s" }}>
+                      <span style={{ fontSize: "11px", color: step.done ? "#10b981" : step.active ? "#0078d4" : "#555", width: "12px", flexShrink: 0 }}>
+                        {step.done ? "✓" : step.active ? "▶" : "○"}
+                      </span>
+                      <span style={{ fontSize: "11px", color: step.done ? "#888" : step.active ? "#d4d4d4" : "#666", fontFamily: "sans-serif" }}>{step.label}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* Gate / Running / Done — full panel */}
+              {/* Gate / Running / Done */}
               {showFindings && (
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                  {/* PR info */}
+                  {/* Summary */}
                   <div style={{ padding: "10px 12px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
-                    <div style={{ fontSize: "11px", color: "#d4d4d4", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "3px" }}>feat: quick checkout v2</div>
-                    <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif" }}>main ← feat/quick-checkout · +47 −12</div>
+                    <div style={{ fontSize: "11px", color: "#d4d4d4", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "3px" }}>{filename}</div>
+                    {analysisSummary && <div style={{ fontSize: "10px", color: "#888", fontFamily: "sans-serif", lineHeight: "1.4", marginBottom: "5px" }}>{analysisSummary}</div>}
                     <div style={{ display: "flex", gap: "8px", marginTop: "5px" }}>
                       <span style={{ fontSize: "10px", color: "#f44747" }}>● {errorCount}</span>
                       <span style={{ fontSize: "10px", color: "#cca700" }}>▲ {warnCount}</span>
-                      <span style={{ fontSize: "10px", color: "#c586c0" }}>✦ 4 AI tests</span>
+                      <span style={{ fontSize: "10px", color: "#c586c0" }}>✦ {testPlan.filter(t => t.generated).length} AI tests</span>
                     </div>
                   </div>
 
                   {/* Findings */}
-                  <div style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
-                    <div style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", marginBottom: "5px" }}>Review</div>
-                    {FINDINGS.map(f => (
-                      <div
-                        key={f.line}
-                        onClick={() => setActiveFinding(activeFinding === f.line ? null : f.line)}
-                        style={{ padding: "5px 7px", borderRadius: "3px", marginBottom: "3px", cursor: "pointer", background: activeFinding === f.line ? "#3c3c3c" : "transparent", display: "flex", gap: "6px", alignItems: "flex-start" }}
-                      >
-                        <span style={{ fontSize: "10px", color: f.severity === "error" ? "#f44747" : "#cca700", flexShrink: 0, marginTop: "1px" }}>●</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: "11px", color: "#d4d4d4", fontFamily: "sans-serif" }}>{f.title}</div>
-                          <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif" }}>checkout.ts:{f.line}</div>
+                  {findings.length > 0 && (
+                    <div style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
+                      <div style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", marginBottom: "5px" }}>Review</div>
+                      {findings.map(f => (
+                        <div
+                          key={f.line}
+                          onClick={() => setActiveFinding(activeFinding === f.line ? null : f.line)}
+                          style={{ padding: "5px 7px", borderRadius: "3px", marginBottom: "3px", cursor: "pointer", background: activeFinding === f.line ? "#3c3c3c" : "transparent", display: "flex", gap: "6px", alignItems: "flex-start" }}
+                        >
+                          <span style={{ fontSize: "10px", color: f.severity === "error" ? "#f44747" : "#cca700", flexShrink: 0, marginTop: "1px" }}>●</span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: "11px", color: "#d4d4d4", fontFamily: "sans-serif" }}>{f.title}</div>
+                            <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif" }}>{filename}:{f.line}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
 
-                  {/* Test plan — the key panel the user wants back */}
+                  {/* Test plan */}
                   <div style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a1a", flex: 1, overflowY: "auto" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                       <span style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif" }}>Test Plan</span>
                       <span style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif" }}>
-                        {state === "done" ? `${passCount}✓ ${failCount > 0 ? failCount + "✗" : ""}` : `${TEST_PLAN.length} cases`}
+                        {state === "done" ? `${passCount}✓ ${failCount > 0 ? failCount + "✗" : ""}` : `${testPlan.length} cases`}
                       </span>
                     </div>
-                    {TEST_PLAN.map(tc => {
-                      const result = testResults[tc.id];
-                      const isRunning = activeTest === tc.id;
-                      return (
-                        <div key={tc.id} style={{ display: "flex", alignItems: "flex-start", gap: "6px", marginBottom: "6px", padding: "4px 6px", borderRadius: "3px", background: isRunning ? "rgba(0,120,212,0.1)" : result === "fail" ? "rgba(244,71,71,0.06)" : "transparent" }}>
-                          <span style={{ fontSize: "11px", color: isRunning ? "#0078d4" : result === "pass" ? "#10b981" : result === "fail" ? "#f44747" : "#555", flexShrink: 0, marginTop: "1px", width: "12px" }}>
-                            {isRunning ? "▶" : result === "pass" ? "✓" : result === "fail" ? "✗" : "○"}
-                          </span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>{tc.id}</div>
-                            <div style={{ fontSize: "11px", color: isRunning ? "#d4d4d4" : result === "fail" ? "#f44747" : result === "pass" ? "#888" : "#666", fontFamily: "sans-serif", lineHeight: "1.3", marginTop: "1px" }}>
-                              {tc.label}
-                            </div>
-                          </div>
-                          {tc.generated && (
-                            <span style={{ fontSize: "9px", color: "#c586c0", flexShrink: 0, marginTop: "2px", background: "rgba(197,134,192,0.1)", border: "1px solid rgba(197,134,192,0.2)", borderRadius: "2px", padding: "0 3px" }}>
-                              AI
-                            </span>
-                          )}
+                    {testPlan.map(tc => (
+                      <div key={tc.id} style={{ display: "flex", alignItems: "flex-start", gap: "6px", marginBottom: "6px", padding: "4px 6px", borderRadius: "3px", background: tc.status === "running" ? "rgba(0,120,212,0.1)" : tc.status === "fail" ? "rgba(244,71,71,0.06)" : "transparent" }}>
+                        <span style={{ fontSize: "11px", color: tc.status === "running" ? "#0078d4" : tc.status === "pass" ? "#10b981" : tc.status === "fail" ? "#f44747" : "#555", flexShrink: 0, marginTop: "1px", width: "12px" }}>
+                          {tc.status === "running" ? "▶" : tc.status === "pass" ? "✓" : tc.status === "fail" ? "✗" : "○"}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: "10px", color: "#888", fontFamily: "monospace" }}>{tc.id}</div>
+                          <div style={{ fontSize: "11px", color: tc.status === "fail" ? "#f44747" : tc.status === "pass" ? "#888" : "#666", fontFamily: "sans-serif", lineHeight: "1.3", marginTop: "1px" }}>{tc.label}</div>
+                          {tc.ms !== undefined && <div style={{ fontSize: "9px", color: "#555", marginTop: "1px" }}>{tc.ms}ms</div>}
                         </div>
-                      );
-                    })}
+                        {tc.generated && (
+                          <span style={{ fontSize: "9px", color: "#c586c0", flexShrink: 0, marginTop: "2px", background: "rgba(197,134,192,0.1)", border: "1px solid rgba(197,134,192,0.2)", borderRadius: "2px", padding: "0 3px" }}>AI</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
 
                   {/* Confidence */}
-                  <div style={{ padding: "8px 12px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif" }}>Confidence</span>
-                      <span style={{ fontSize: "11px", color: "#cca700", fontFamily: "monospace", fontWeight: 700 }}>0.72</span>
+                  {confidence !== null && (
+                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif" }}>Confidence</span>
+                        <span style={{ fontSize: "11px", color: confidence >= 0.9 ? "#10b981" : confidence >= 0.7 ? "#cca700" : "#f44747", fontFamily: "monospace", fontWeight: 700 }}>{confidence.toFixed(2)}</span>
+                      </div>
+                      <div style={{ height: "3px", background: "#3c3c3c", borderRadius: "2px" }}>
+                        <div style={{ width: `${confidence * 100}%`, height: "100%", background: confidence >= 0.9 ? "#10b981" : confidence >= 0.7 ? "#cca700" : "#f44747", borderRadius: "2px" }} />
+                      </div>
+                      {confidence < 0.9 && <div style={{ fontSize: "10px", color: "#555", marginTop: "4px", fontFamily: "sans-serif" }}>Below 0.90 — human gate required</div>}
                     </div>
-                    <div style={{ height: "3px", background: "#3c3c3c", borderRadius: "2px" }}>
-                      <div style={{ width: "72%", height: "100%", background: "#cca700", borderRadius: "2px" }} />
-                    </div>
-                    <div style={{ fontSize: "10px", color: "#555", marginTop: "4px", fontFamily: "sans-serif" }}>
-                      Below 0.90 — human gate required
-                    </div>
-                  </div>
+                  )}
 
                   {/* Actions */}
                   <div style={{ padding: "10px 12px", flexShrink: 0 }}>
                     {state === "gate" && (
                       <>
                         <button
-                          onClick={() => { setState("running"); setRunIndex(0); setTestResults({}); setBottomTab("tests"); }}
+                          onClick={runTests}
                           style={{ width: "100%", background: "#0e639c", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "5px" }}
                         >
-                          Approve & Run Tests
+                          Approve &amp; Run Tests
                         </button>
-                        <button style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}>
-                          Request Changes
+                        <button onClick={runAnalysis} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}>
+                          Re-analyze
                         </button>
                       </>
                     )}
                     {state === "running" && (
                       <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif" }}>
                         <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span>
-                        Running {activeTest ?? "…"}
+                        Running tests…
                       </div>
                     )}
                     {state === "done" && (
                       <>
                         {failCount === 0 ? (
-                          <button style={{ width: "100%", background: "#16825d", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif" }}>
-                            Deploy to staging →
-                          </button>
+                          <>
+                            {deploy.phase === "idle" && (
+                              <button onClick={detectAndDeploy} style={{ width: "100%", background: "#16825d", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "5px" }}>
+                                Deploy ✦
+                              </button>
+                            )}
+                            {deploy.phase === "detecting" && (
+                              <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
+                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Detecting targets…
+                              </div>
+                            )}
+                            {deploy.phase === "picking" && deploy.targets && (
+                              <div>
+                                <div style={{ fontSize: "10px", color: "#cca700", fontFamily: "sans-serif", marginBottom: "6px" }}>Multiple deployment targets found — pick one:</div>
+                                {deploy.targets.map(t => (
+                                  <button
+                                    key={t.id}
+                                    onClick={() => runTerraformPlan(t, deploy.targets)}
+                                    style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2a", color: "#d4d4d4", padding: "7px 10px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", marginBottom: "4px", textAlign: "left", display: "flex", alignItems: "center", gap: "6px" }}
+                                  >
+                                    <span style={{ fontSize: "10px", color: t.platform === "docker" ? "#888" : "#10b981" }}>
+                                      {t.platform === "k8s" ? "⎈" : t.platform === "ecs" ? "▣" : t.platform === "gitops" ? "⬡" : "◻"}
+                                    </span>
+                                    <span>{t.label}</span>
+                                  </button>
+                                ))}
+                                <button onClick={() => setDeploy({ phase: "idle", lines: [] })} style={{ width: "100%", background: "transparent", border: "1px solid #333", color: "#666", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>Cancel</button>
+                              </div>
+                            )}
+                            {deploy.phase === "planning" && (
+                              <div>
+                                <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "4px" }}>
+                                  → {deploy.selectedTarget?.label}
+                                </div>
+                                <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Planning…
+                                </div>
+                              </div>
+                            )}
+                            {deploy.phase === "confirming" && (
+                              <div>
+                                <div style={{ fontSize: "10px", color: "#cca700", fontFamily: "sans-serif", marginBottom: "6px" }}>
+                                  Plan ready for <strong>{deploy.selectedTarget?.label}</strong> — review in terminal, then apply:
+                                </div>
+                                <button onClick={runTerraformApply} style={{ width: "100%", background: "#16825d", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "5px" }}>
+                                  terraform apply ✓
+                                </button>
+                                <button onClick={() => setDeploy({ phase: "idle", lines: [] })} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}>
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+                            {deploy.phase === "applying" && (
+                              <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
+                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Applying to {deploy.selectedTarget?.label}…
+                              </div>
+                            )}
+                            {deploy.phase === "done" && (
+                              <div style={{ fontSize: "11px", color: "#10b981", fontFamily: "sans-serif" }}>✓ Deployed to {deploy.selectedTarget?.label}</div>
+                            )}
+                            {deploy.phase === "error" && (
+                              <div>
+                                <div style={{ fontSize: "11px", color: "#f44747", fontFamily: "sans-serif", marginBottom: "5px" }}>✗ Failed — see terminal</div>
+                                <button onClick={detectAndDeploy} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>Retry</button>
+                              </div>
+                            )}
+                          </>
                         ) : (
                           <>
                             <div style={{ fontSize: "11px", color: "#f44747", fontFamily: "sans-serif", background: "rgba(244,71,71,0.08)", border: "1px solid rgba(244,71,71,0.2)", borderRadius: "3px", padding: "7px 10px", marginBottom: "6px" }}>
-                              ✗ Blocked — TC-005 failing
+                              ✗ Blocked — {failCount} test{failCount > 1 ? "s" : ""} failing
                             </div>
-                            <button style={{ width: "100%", background: "rgba(197,134,192,0.1)", border: "1px solid rgba(197,134,192,0.3)", color: "#c586c0", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", marginBottom: "5px" }}>
-                              ✦ Explain failure
+                            <button onClick={runAnalysis} style={{ width: "100%", background: "rgba(197,134,192,0.1)", border: "1px solid rgba(197,134,192,0.3)", color: "#c586c0", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", marginBottom: "5px" }}>
+                              ✦ Re-analyze
                             </button>
                           </>
                         )}
                         <button
-                          onClick={() => { setState("writing"); setTestResults({}); setActiveFinding(null); setRunIndex(0); }}
-                          style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}
+                          onClick={() => { setState("writing"); setFindings([]); setTestPlan([]); setConfidence(null); setSummary(""); setActiveFinding(null); setDeploy({ phase: "idle", lines: [] }); }}
+                          style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", marginTop: "4px" }}
                         >
                           Reset
                         </button>
@@ -557,21 +935,14 @@ export function EditorView() {
             </div>
           </div>
 
-          {/* Bottom panel: Problems / Tests / Terminal */}
+          {/* Bottom panel */}
           <div style={{ height: bottomHeight + "px", background: "#1e1e1e", borderTop: "1px solid #252526", flexShrink: 0, display: "flex", flexDirection: "column" }}>
-            {/* Panel tabs */}
             <div style={{ height: "28px", background: "#252526", display: "flex", alignItems: "stretch", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
-              {(["problems", "tests", "terminal"] as BottomTab[]).map(tab => (
+              {(["problems","tests","terminal"] as BottomTab[]).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setBottomTab(tab)}
-                  style={{
-                    padding: "0 14px", background: bottomTab === tab ? "#1e1e1e" : "transparent",
-                    border: "none", borderTop: bottomTab === tab ? "1px solid #0078d4" : "1px solid transparent",
-                    color: bottomTab === tab ? "#d4d4d4" : "#888",
-                    fontSize: "11px", cursor: "pointer", fontFamily: "sans-serif", textTransform: "capitalize",
-                    display: "flex", alignItems: "center", gap: "5px",
-                  }}
+                  style={{ padding: "0 14px", background: bottomTab === tab ? "#1e1e1e" : "transparent", border: "none", borderTop: bottomTab === tab ? "1px solid #0078d4" : "1px solid transparent", color: bottomTab === tab ? "#d4d4d4" : "#888", fontSize: "11px", cursor: "pointer", fontFamily: "sans-serif", textTransform: "capitalize", display: "flex", alignItems: "center", gap: "5px" }}
                 >
                   {tab === "problems" && errorCount + warnCount > 0 && (
                     <span style={{ width: "14px", height: "14px", borderRadius: "50%", background: errorCount > 0 ? "#f44747" : "#cca700", fontSize: "8px", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>
@@ -586,67 +957,71 @@ export function EditorView() {
                   {tab}
                 </button>
               ))}
-              {/* Panel resize handle — cosmetic */}
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", paddingRight: "10px" }}>
                 <button onClick={() => setBottomHeight(h => h === 180 ? 300 : 180)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "12px" }}>
                   {bottomHeight > 180 ? "▾" : "▴"}
                 </button>
-                <button onClick={() => setBottomHeight(0)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "14px" }}>
-                  ×
-                </button>
+                <button onClick={() => setBottomHeight(0)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "14px" }}>×</button>
               </div>
             </div>
 
-            {/* Panel content */}
             <div style={{ flex: 1, overflowY: "auto", padding: "6px 14px" }}>
               {bottomTab === "problems" && (
                 <>
-                  {!showFindings && (
-                    <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif", padding: "8px 0" }}>
-                      No problems detected. Click &quot;Analyze now&quot; to run AI review.
-                    </div>
-                  )}
-                  {showFindings && FINDINGS.map(f => (
-                    <div
-                      key={f.line}
-                      onClick={() => setActiveFinding(activeFinding === f.line ? null : f.line)}
-                      style={{ display: "flex", gap: "8px", padding: "4px 0", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", alignItems: "flex-start" }}
-                    >
+                  {!showFindings && <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif", padding: "8px 0" }}>No problems detected. Click &quot;Analyze now&quot; to run AI review.</div>}
+                  {showFindings && findings.length === 0 && <div style={{ fontSize: "11px", color: "#10b981", fontFamily: "sans-serif", padding: "8px 0" }}>✓ No issues found</div>}
+                  {showFindings && findings.map(f => (
+                    <div key={f.line} onClick={() => setActiveFinding(activeFinding === f.line ? null : f.line)} style={{ display: "flex", gap: "8px", padding: "4px 0", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", alignItems: "flex-start" }}>
                       <span style={{ color: f.severity === "error" ? "#f44747" : "#cca700", flexShrink: 0 }}>●</span>
                       <span style={{ color: "#d4d4d4" }}>{f.title}</span>
-                      <span style={{ color: "#666" }}>checkout.ts:{f.line}</span>
+                      <span style={{ color: "#666" }}>{filename}:{f.line}</span>
                       <span style={{ color: "#555", marginLeft: "auto" }}>Anvay</span>
                     </div>
                   ))}
                 </>
               )}
+
               {bottomTab === "tests" && (
                 <div>
-                  {TEST_PLAN.map(tc => {
-                    const result = testResults[tc.id];
-                    const isRunning = activeTest === tc.id;
-                    return (
-                      <div key={tc.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "3px 0", fontSize: "11px", fontFamily: "sans-serif" }}>
-                        <span style={{ color: isRunning ? "#0078d4" : result === "pass" ? "#10b981" : result === "fail" ? "#f44747" : "#555", width: "12px" }}>
-                          {isRunning ? "▶" : result === "pass" ? "✓" : result === "fail" ? "✗" : "○"}
-                        </span>
-                        <span style={{ color: result === "fail" ? "#f44747" : "#888" }}>{tc.id}</span>
-                        <span style={{ color: "#666" }}>—</span>
-                        <span style={{ color: result === "fail" ? "#f44747" : result === "pass" ? "#888" : "#555", flex: 1 }}>{tc.label}</span>
-                        {tc.generated && <span style={{ fontSize: "9px", color: "#c586c0" }}>AI</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {bottomTab === "terminal" && (
-                <div>
-                  {(state === "done" ? TERMINAL_LINES : TERMINAL_LINES.slice(0, 3)).map((line, i) => (
-                    <div key={i} style={{ fontSize: "12px", color: line.color || "#d4d4d4", lineHeight: "1.5", minHeight: "18px" }}>
-                      {line.text || " "}
+                  {testPlan.length === 0 && <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif", padding: "8px 0" }}>No tests yet. Run analysis first.</div>}
+                  {testPlan.map(tc => (
+                    <div key={tc.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "3px 0", fontSize: "11px", fontFamily: "sans-serif" }}>
+                      <span style={{ color: tc.status === "running" ? "#0078d4" : tc.status === "pass" ? "#10b981" : tc.status === "fail" ? "#f44747" : "#555", width: "12px" }}>
+                        {tc.status === "running" ? "▶" : tc.status === "pass" ? "✓" : tc.status === "fail" ? "✗" : "○"}
+                      </span>
+                      <span style={{ color: tc.status === "fail" ? "#f44747" : "#888" }}>{tc.id}</span>
+                      <span style={{ color: "#666" }}>—</span>
+                      <span style={{ color: tc.status === "fail" ? "#f44747" : tc.status === "pass" ? "#888" : "#555", flex: 1 }}>{tc.label}</span>
+                      {tc.ms !== undefined && <span style={{ color: "#555", fontSize: "10px" }}>{tc.ms}ms</span>}
+                      {tc.generated && <span style={{ fontSize: "9px", color: "#c586c0" }}>AI</span>}
                     </div>
                   ))}
-                  {state !== "done" && (
+                </div>
+              )}
+
+              {bottomTab === "terminal" && (
+                <div>
+                  {/* Deploy output */}
+                  {deploy.lines.map((line, i) => (
+                    <div key={i} style={{ fontSize: "12px", color: line.includes("Error") || line.includes("error") ? "#f44747" : line.includes("Apply complete") || line.includes("Apply") ? "#10b981" : "#d4d4d4", lineHeight: "1.5", minHeight: "18px", whiteSpace: "pre-wrap" }}>
+                      {line || " "}
+                    </div>
+                  ))}
+                  {/* Test terminal output */}
+                  {terminalLines.map((line, i) => (
+                    <div key={`t${i}`} style={{ fontSize: "12px", color: "#888", lineHeight: "1.5" }}>{line}</div>
+                  ))}
+                  {/* Generated test code */}
+                  {generatedTestCode && deploy.lines.length === 0 && (
+                    <>
+                      <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif", marginBottom: "4px", marginTop: "8px" }}>Generated test code:</div>
+                      <pre style={{ fontSize: "11px", color: "#d4d4d4", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {generatedTestCode.slice(0, 800)}
+                        {generatedTestCode.length > 800 && "\n… (truncated)"}
+                      </pre>
+                    </>
+                  )}
+                  {(state === "writing" || state === "idle") && deploy.lines.length === 0 && terminalLines.length === 0 && (
                     <span style={{ display: "inline-block", width: "6px", height: "13px", background: "#d4d4d4", animation: "blink 1.2s step-end infinite" }} />
                   )}
                 </div>
@@ -656,16 +1031,16 @@ export function EditorView() {
         </div>
       </div>
 
-      {/* VS Code status bar */}
+      {/* Status bar */}
       <div style={{ height: "22px", background: "#007acc", display: "flex", alignItems: "center", padding: "0 10px", gap: "14px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#fff" }}>
           <span>⬡</span>
-          <span>feat/quick-checkout</span>
+          <span>{source === "demo" ? "demo/payments-api" : source === "disk" ? diskPath.split("/").pop() ?? "project" : "GitHub"}</span>
         </div>
         {showFindings && (
           <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", color: "#fff" }}>
-            <span>● {errorCount} errors</span>
-            <span>▲ {warnCount} warnings</span>
+            <span>● {errorCount}</span>
+            <span>▲ {warnCount}</span>
           </div>
         )}
         {(state === "running" || state === "done") && (
@@ -674,17 +1049,14 @@ export function EditorView() {
           </div>
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "12px", fontSize: "11px", color: "#ffffffb0" }}>
-          <span>TypeScript</span>
+          <span>{language}</span>
           <span>UTF-8</span>
-          <span>Ln 14, Col 42</span>
-          <span style={{ color: "#fff", background: "rgba(255,255,255,0.15)", padding: "0 6px", borderRadius: "2px" }}>
-            ✦ Anvay
-          </span>
+          {filename && <span>{codeLines.length} lines</span>}
+          <span style={{ color: "#fff", background: "rgba(255,255,255,0.15)", padding: "0 6px", borderRadius: "2px" }}>✦ Anvay</span>
         </div>
-        {/* Bottom trigger button only in writing state (status bar integrated) */}
-        {state === "writing" && (
+        {state === "writing" && fileContent && (
           <button
-            onClick={() => { setState("analyzing"); setAnalysisProgress(0); setBottomTab("problems"); }}
+            onClick={runAnalysis}
             style={{ marginLeft: "8px", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", padding: "1px 8px", borderRadius: "2px", cursor: "pointer", fontSize: "11px" }}
           >
             Analyze ✦
@@ -694,3 +1066,38 @@ export function EditorView() {
     </div>
   );
 }
+
+// ── Demo fallback — shown when gateway is unreachable ──────────────────────────
+
+const DEMO_FALLBACK_CODE = `const express = require('express');
+const app = express();
+app.use(express.json());
+
+const PORT = 3010;
+const SERVICE = 'payments-api';
+let errorRate = 0.15;  // BUG: intentional chaos injection
+let inSpike = false;
+let reqSuccess = 0, reqError = 0;
+
+// Spike error rate every ~90s for 20s
+setInterval(() => {
+  if (!inSpike) {
+    inSpike = true;
+    errorRate = 0.6;  // BUG: 60% error rate during spike
+    setTimeout(() => { errorRate = 0.15; inSpike = false; }, 20000);
+  }
+}, 90000 + Math.random() * 30000);
+
+app.get('/health', (_req, res) => { reqSuccess++; res.json({ status: 'ok', service: SERVICE }); });
+
+app.post('/pay', (req, res) => {
+  if (Math.random() < errorRate) {  // BUG: random failures
+    reqError++;
+    return res.status(500).json({ error: 'payment_failed' });
+  }
+  reqSuccess++;
+  res.json({ status: 'ok', transactionId: Math.random().toString(36).slice(2) });  // BUG: weak ID
+});
+
+app.listen(PORT, () => console.log(JSON.stringify({ level: 'info', service: SERVICE, msg: 'started', port: PORT })));
+`.trim();

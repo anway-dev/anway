@@ -115,6 +115,14 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     return { models: [] }
   })
 
+  app.get('/api/settings/workspace', { preHandler: [app.authenticate] }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ name: string }[]>`SELECT name FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1`
+    ).catch(() => [])
+    return { name: rows[0]?.name ?? 'Anvay' }
+  })
+
   app.get('/api/settings/connectors', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const configs = await withTenant(prisma, tenantId, (tx) =>

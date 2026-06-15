@@ -1,10 +1,17 @@
 "use client";
-import { CONNECTORS, Connector } from "@/lib/mock";
-import { useState, useEffect } from "react";
+import { EmptyState } from "@/components/empty-state"
+import { useState, useEffect, useRef } from "react";
 
-interface ConnectorStatus {
-  connectorType: string;
-  enabled: boolean;
+interface Connector {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  color: string;
+  icon: string;
+  capabilities: string[];
+  configFields: { label: string; key: string; type: string }[];
+  connected: boolean;
 }
 
 const CATEGORIES = ["All", "Code & CI", "CI/CD", "Observability", "Logging", "Issue Tracking", "Error Tracking", "Alerting", "Deployment", "Kubernetes", "Infrastructure", "Security", "Code Quality", "Collaboration", "Docs", "Cloud Health", "Feature Flags"];
@@ -13,37 +20,44 @@ export function ConnectorsView() {
   const [filter, setFilter] = useState("All");
   const [modal, setModal] = useState<Connector | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
-  const [configuredMap, setConfiguredMap] = useState<Record<string, boolean>>({});
+  const [catalog, setCatalog] = useState<Connector[]>([]);
   const [bootstrapInfo, setBootstrapInfo] = useState<Record<string, { bootstrapped: boolean; bootstrappedAt?: string }>>({});
   const [bootstrapping, setBootstrapping] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const pollTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
-  // Auth: the /api proxy routes resolve the anvay_token session cookie server-side
-  const [liveConnectors, setLiveConnectors] = useState<{ id: string; type: string }[]>([]);
+  function startBootstrapPoll(connectorId: string) {
+    if (pollTimers.current[connectorId]) return
+    let attempts = 0
+    pollTimers.current[connectorId] = setInterval(async () => {
+      attempts++
+      try {
+        const r = await fetch(`/api/connectors/${connectorId}/bootstrap-status`)
+        const data = await r.json() as { bootstrapped: boolean; bootstrappedAt?: string }
+        setBootstrapInfo(prev => ({ ...prev, [connectorId]: { ...data } }))
+        if (data.bootstrapped || attempts >= 12) {
+          clearInterval(pollTimers.current[connectorId])
+          delete pollTimers.current[connectorId]
+          if (bootstrapping === connectorId) setBootstrapping(null)
+        }
+      } catch { /* ignore */ }
+    }, 5000)
+  }
 
-  // Fetch live connector instances from API
+  useEffect(() => () => { Object.values(pollTimers.current).forEach(t => clearInterval(t)) }, [])
+
   useEffect(() => {
-    fetch("/api/connectors")
-      .then(r => r.json() as Promise<{ id: string; type: string }[]>)
-      .then(setLiveConnectors)
-      .catch(() => {})
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/settings/connectors")
-      .then(r => r.json())
-      .then((list: ConnectorStatus[]) => {
-        const map: Record<string, boolean> = {};
-        for (const c of list) map[c.connectorType] = c.enabled;
-        setConfiguredMap(map);
-        // Fetch bootstrap status for each configured connector
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<Connector[]>)
+      .then(list => {
+        setCatalog(list);
         for (const c of list) {
-          if (c.enabled) {
-            fetch(`/api/connectors/${c.connectorType}/bootstrap-status`)
+          if (c.connected) {
+            fetch(`/api/connectors/${c.id}/bootstrap-status`)
               .then(r => r.json())
               .then((data: { bootstrapped: boolean; bootstrappedAt?: string }) => {
-                if (data.bootstrapped) setBootstrapInfo(prev => ({ ...prev, [c.connectorType]: data }))
+                if (data.bootstrapped) setBootstrapInfo(prev => ({ ...prev, [c.id]: data }))
               })
               .catch(() => {});
           }
@@ -52,9 +66,8 @@ export function ConnectorsView() {
       .catch(() => {});
   }, []);
 
-  const visible = filter === "All" ? CONNECTORS : CONNECTORS.filter((c) => c.category === filter);
-  const isLive = (id: string) => liveConnectors.some(lc => lc.type === id) || !!configuredMap[id];
-  const connected = liveConnectors.length || Object.values(configuredMap).filter(Boolean).length;
+  const visible = filter === "All" ? catalog : catalog.filter((c) => c.category === filter);
+  const connected = catalog.filter(c => c.connected).length;
 
   async function handleConnect() {
     if (!modal) return;
@@ -75,7 +88,7 @@ export function ConnectorsView() {
         return
       }
       setSaveError(null)
-      setConfiguredMap(prev => ({ ...prev, [modal.id]: true }));
+      setCatalog(prev => prev.map(c => c.id === modal.id ? { ...c, connected: true } : c));
       setModal(null);
     } finally {
       setSaving(false);
@@ -89,7 +102,7 @@ export function ConnectorsView() {
         <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Integrations</div>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
           <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", margin: 0 }}>Connect Your Stack</h2>
-          <span style={{ fontSize: "12px", color: "#10b981" }}>{connected} / {CONNECTORS.length} connected</span>
+          <span style={{ fontSize: "12px", color: "#10b981" }}>{connected} / {catalog.length} connected</span>
         </div>
         <p style={{ fontSize: "12px", color: "#888", marginTop: "6px", maxWidth: "520px" }}>
           Anvay reads from your existing tools — no data migration, no rip-and-replace. Connect once, get unified lifecycle visibility.
@@ -114,11 +127,19 @@ export function ConnectorsView() {
       </div>
 
       {/* Grid */}
+      {catalog.length === 0 ? (
+        <EmptyState
+          icon="⬡"
+          title="Connector catalog unavailable"
+          description="Unable to load the connector catalog. Check gateway connectivity."
+        />
+      ) : (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={isLive(conn.id)} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST', }).catch(() => {}).finally(() => setBootstrapping(null)); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={conn.connected} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST' }).catch(() => {}); startBootstrapPoll(conn.id); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
         ))}
       </div>
+      )}
 
       {/* Modal */}
       {modal && (
@@ -215,21 +236,29 @@ function ConnectorCard({ connector: c, configured, bootstrap, bootstrapping, onB
       </div>
 
       <div style={{ fontSize: "11px", color: "#888" }}>{c.description}</div>
-      {configured && bootstrap && (
+      {configured && (
         <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>
-          {bootstrap.bootstrapped ? (
-            <span>Bootstrapped {bootstrap.bootstrappedAt ? new Date(bootstrap.bootstrappedAt).toLocaleString() : ''}</span>
+          {bootstrapping ? (
+            <span style={{ color: "#888" }}>&#8635; Bootstrapping&hellip;</span>
+          ) : bootstrap?.bootstrapped ? (
+            <span style={{ color: "#10b981" }}>
+              &#10003; Last synced {bootstrap.bootstrappedAt ? (() => {
+                const ms = Date.now() - new Date(bootstrap.bootstrappedAt).getTime()
+                const mins = Math.floor(ms / 60000)
+                return mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`
+              })() : ''}
+            </span>
           ) : (
             <span>
-              Not bootstrapped
-              <button onClick={onBootstrap} disabled={bootstrapping}
+              <span style={{ color: "#f59e0b" }}>&#9888; Not synced</span>
+              <button onClick={onBootstrap}
                 style={{
                   marginLeft: "8px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
-                  color: bootstrapping ? "#444" : "#10b981", padding: "2px 8px", borderRadius: "3px",
-                  cursor: bootstrapping ? "not-allowed" : "pointer", fontSize: "9px", fontFamily: "monospace",
+                  color: "#10b981", padding: "2px 8px", borderRadius: "3px",
+                  cursor: "pointer", fontSize: "9px", fontFamily: "monospace",
                 }}
               >
-                {bootstrapping ? '...' : 'Bootstrap now'}
+                Retry
               </button>
             </span>
           )}

@@ -1,4 +1,6 @@
 "use client";
+import { EmptyState } from "@/components/empty-state"
+import { PreviewBanner } from "@/components/preview-banner"
 import { useState, useEffect } from "react";
 
 type Tab = "overview" | "security" | "config" | "capacity";
@@ -205,8 +207,9 @@ function ConfigRow({ c, onDebug }: { c: CloudConfigIssue; onDebug: (msg: string)
   );
 }
 
-export function CloudView({ onTriggerOrchestrator }: {
+export function CloudView({ onTriggerOrchestrator, onGoToConnectors }: {
   onTriggerOrchestrator?: (query: string, context: { title: string; source: string }) => void;
+  onGoToConnectors?: () => void;
 }) {
   const [provider, setProvider] = useState<string>("aws");
   const [tab, setTab] = useState<Tab>("overview");
@@ -246,6 +249,7 @@ export function CloudView({ onTriggerOrchestrator }: {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#080808" }}>
+      <PreviewBanner />
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         {/* Left: provider selector */}
         <div style={{ width: "220px", flexShrink: 0, background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>
@@ -295,10 +299,14 @@ export function CloudView({ onTriggerOrchestrator }: {
 
         {/* Right: main content */}
         {!pSummary.connected ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "12px" }}>
-            <div style={{ fontSize: "32px", opacity: 0.2 }}>☁</div>
-            <div style={{ fontSize: "14px", color: "#555" }}>{pSummary.label} not connected</div>
-            <div style={{ fontSize: "12px", color: "#444" }}>Add credentials via Connectors → Cloud Health</div>
+          <div style={{ flex: 1 }}>
+            <EmptyState
+              icon="☁"
+              title="No cloud accounts connected"
+              description="Connect AWS, GCP, or Azure to view resources and security findings."
+              ctaLabel="Connect a connector"
+              onCta={onGoToConnectors}
+            />
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>

@@ -21,10 +21,15 @@ import { K8sView } from "@/components/k8s-view";
 import { SettingsView } from "@/components/settings-view";
 import { ApprovalsView } from "@/components/approvals-view";
 import { ProjectsView } from "@/components/projects-view";
+import { PipelineView } from "@/components/pipeline-view";
+import { EnvironmentsView } from "@/components/environments-view";
+import { EnvSelector } from "@/components/env-selector";
+import { EnvProvider } from "@/lib/env-context";
 import type { StageNode } from "@/components/lifecycle";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 
-type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings" | "projects";
+type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings" | "projects" | "pipeline" | "environments";
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "chat",        label: "Anvay",        icon: "✦" },
@@ -32,7 +37,9 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "incident",    label: "War Room",     icon: "⚠" },
   { id: "catalog",     label: "Services",     icon: "⬢" },
   { id: "projects",    label: "Projects",     icon: "◫" },
-  { id: "routing",     label: "Routing",      icon: "⇉" },
+  { id: "pipeline",      label: "Pipeline",      icon: "⬡" },
+  { id: "environments",  label: "Environments",  icon: "⬢" },
+  { id: "routing",       label: "Routing",       icon: "⇉" },
   { id: "lifecycle",   label: "Lifecycle",    icon: "◈" },
   { id: "editor",      label: "Editor",       icon: "⌗" },
   { id: "kb",          label: "Knowledge",    icon: "◉" },
@@ -60,6 +67,8 @@ export default function App() {
   const [criticalCount, setCriticalCount] = useState(0);
   const [activeIncidents, setActiveIncidents] = useState(0);
   const [cloudIssues, setCloudIssues] = useState(0);
+  const [workspaceName, setWorkspaceName] = useState("Anvay");
+  const [connectorCount, setConnectorCount] = useState<number | null>(null);
 
   useEffect(() => {
     // Fetch critical alerts count
@@ -79,6 +88,18 @@ export default function App() {
       .then(r => r.json() as Promise<{ id: string; query: string }[]>)
       .then(list => setRecentQueries(list.slice(0, 3)))
       .catch(() => setRecentQueries([]))
+
+    // Fetch workspace name
+    fetch("/api/settings/workspace")
+      .then(r => r.json() as Promise<{ name: string }>)
+      .then(d => { if (d.name) setWorkspaceName(d.name); })
+      .catch(() => {})
+
+    // Fetch connector count
+    fetch("/api/connectors/catalog")
+      .then(r => r.json() as Promise<{ connected: boolean }[]>)
+      .then(list => setConnectorCount(list.filter(c => c.connected).length))
+      .catch(() => {})
   }, [])
 
   const handleNodeClick = (node: StageNode, action?: string) => {
@@ -92,12 +113,13 @@ export default function App() {
   };
 
   return (
+    <EnvProvider>
     <div style={{ display: "flex", height: "100vh", background: "#080808" }}>
       {/* Sidebar */}
       <div style={{ width: "220px", background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         {/* Logo */}
-        <div style={{ padding: "18px 16px", borderBottom: "1px solid #1a1a1a" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #1a1a1a" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: 8 }}>
             <div style={{ width: "24px", height: "24px", background: "#10b981", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 900, color: "#000" }}>
               A
             </div>
@@ -106,6 +128,8 @@ export default function App() {
               beta
             </span>
           </div>
+          {/* Env selector — always visible, switches all views */}
+          <EnvSelector />
         </div>
 
         {/* Workspace */}
@@ -115,7 +139,7 @@ export default function App() {
             <div style={{ width: "18px", height: "18px", borderRadius: "4px", background: "#1a2030", border: "1px solid #2a3a50", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "#3b82f6", fontWeight: 700 }}>
               A
             </div>
-            <span style={{ fontSize: "12px", color: "#d1d5db" }}>Acme Platform</span>
+            <span style={{ fontSize: "12px", color: "#d1d5db" }}>{workspaceName}</span>
             <span style={{ marginLeft: "auto", color: "#555", fontSize: "12px" }}>⌄</span>
           </div>
         </div>
@@ -140,9 +164,9 @@ export default function App() {
             >
               <span style={{ fontSize: "13px", width: "18px", textAlign: "center" }}>{item.icon}</span>
               {item.label}
-              {item.id === "connectors" && (
+              {item.id === "connectors" && connectorCount !== null && connectorCount > 0 && (
                 <span style={{ marginLeft: "auto", fontSize: "10px", background: "#1a2a1a", color: "#10b981", border: "1px solid rgba(16,185,129,0.2)", padding: "1px 5px", borderRadius: "10px" }}>
-                  7
+                  {connectorCount}
                 </span>
               )}
               {item.id === "chat" && (
@@ -197,6 +221,18 @@ export default function App() {
               <div style={{ fontSize: "10px", color: "#555" }}>Admin</div>
             </div>
           </div>
+          <button
+            onClick={async () => {
+              try {
+                const r = await fetch('/api/auth/demo', { method: 'POST' })
+                const d = await r.json() as { token?: string }
+                if (d.token) { document.cookie = `anvay-token=${d.token}; path=/; max-age=86400`; window.location.reload() }
+              } catch { /* ignore */ }
+            }}
+            style={{ marginTop: '8px', width: '100%', padding: '6px', background: '#1a2a1a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '5px', color: '#10b981', fontSize: '11px', cursor: 'pointer' }}
+          >
+            Try Demo
+          </button>
         </div>
       </div>
 
@@ -204,32 +240,28 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
         {/* View area */}
         <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
-          {view === "chat" && <OrchestratorChat key={orchestratorContext?.query} initialContext={orchestratorContext} />}
-          {view === "alerts" && (
-            <AlertsView onTriggerOrchestrator={handleTriggerOrchestrator} />
-          )}
-          {view === "routing" && <IntakeView />}
-          {view === "kb" && <KbView />}
-          {view === "lifecycle" && (
-            <div style={{ height: "100%", overflowY: "auto" }}>
-              <LifecycleView onNodeClick={handleNodeClick} activeNodeId={activeNode?.id ?? null} />
-            </div>
-          )}
-          {view === "editor" && <EditorView />}
-          {view === "workflow" && <WorkflowView />}
-          {view === "approvals" && <ApprovalsView />}
-          {view === "api" && <ApiClientView />}
-          {view === "connectors" && <ConnectorsView />}
-          {view === "audit" && <AuditView />}
-          {view === "access" && <AccessView />}
-          {view === "models" && <ModelConfig />}
-          {view === "cloud" && <CloudView onTriggerOrchestrator={handleTriggerOrchestrator} />}
-          {view === "incident" && <IncidentView onTriggerOrchestrator={handleTriggerOrchestrator} />}
-          {view === "catalog" && <ServiceCatalog onTriggerOrchestrator={handleTriggerOrchestrator} />}
-          {view === "projects" && <ProjectsView activeProject="" setActiveProject={() => {}} />}
-          {view === "automations" && <AutomationsView />}
-          {view === "settings" && <SettingsView />}
-          {view === "k8s" && <K8sView />}
+          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat key={orchestratorContext?.query} initialContext={orchestratorContext} onNavigate={(v: string) => setView(v as View)} /></ErrorBoundary>}
+          {view === "alerts" && <ErrorBoundary viewName="Signals"><AlertsView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
+          {view === "routing" && <ErrorBoundary viewName="Routing"><IntakeView /></ErrorBoundary>}
+          {view === "kb" && <ErrorBoundary viewName="Knowledge"><KbView /></ErrorBoundary>}
+          {view === "lifecycle" && <ErrorBoundary viewName="Lifecycle"><div style={{ height: "100%", overflowY: "auto" }}><LifecycleView onNodeClick={handleNodeClick} activeNodeId={activeNode?.id ?? null} /></div></ErrorBoundary>}
+          {view === "editor" && <ErrorBoundary viewName="Editor"><EditorView /></ErrorBoundary>}
+          {view === "workflow" && <ErrorBoundary viewName="Workflows"><WorkflowView /></ErrorBoundary>}
+          {view === "approvals" && <ErrorBoundary viewName="Approvals"><ApprovalsView /></ErrorBoundary>}
+          {view === "api" && <ErrorBoundary viewName="API Client"><ApiClientView /></ErrorBoundary>}
+          {view === "connectors" && <ErrorBoundary viewName="Connectors"><ConnectorsView /></ErrorBoundary>}
+          {view === "audit" && <ErrorBoundary viewName="Audit"><AuditView /></ErrorBoundary>}
+          {view === "access" && <ErrorBoundary viewName="Access"><AccessView /></ErrorBoundary>}
+          {view === "models" && <ErrorBoundary viewName="Models"><ModelConfig /></ErrorBoundary>}
+          {view === "cloud" && <ErrorBoundary viewName="Cloud"><CloudView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
+          {view === "incident" && <ErrorBoundary viewName="War Room"><IncidentView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
+          {view === "catalog" && <ErrorBoundary viewName="Services"><ServiceCatalog onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
+          {view === "projects" && <ErrorBoundary viewName="Projects"><ProjectsView activeProject="" setActiveProject={() => {}} /></ErrorBoundary>}
+          {view === "pipeline" && <ErrorBoundary viewName="Pipeline"><PipelineView onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
+          {view === "environments" && <ErrorBoundary viewName="Environments"><EnvironmentsView /></ErrorBoundary>}
+          {view === "automations" && <ErrorBoundary viewName="Automations"><AutomationsView /></ErrorBoundary>}
+          {view === "settings" && <ErrorBoundary viewName="Settings"><SettingsView /></ErrorBoundary>}
+          {view === "k8s" && <ErrorBoundary viewName="K8s"><K8sView onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
         </div>
 
         {/* AI Panel (only for lifecycle view) */}
@@ -242,6 +274,7 @@ export default function App() {
         )}
       </div>
     </div>
+    </EnvProvider>
   );
 }
 

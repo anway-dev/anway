@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/empty-state"
 import { useState, useEffect } from "react";
 
 // Types matching gateway /api/alerts response
@@ -30,6 +31,7 @@ interface LiveAlert {
 
 interface Props {
   onTriggerOrchestrator: (query: string, context: { title: string; source: string }) => void;
+  onGoToConnectors?: () => void;
 }
 
 type Tab = "all" | "alert" | "error" | "ci" | "ticket" | "customer" | "metric";
@@ -258,7 +260,7 @@ function SignalRow({ alert, onWhy }: { alert: LiveAlert; onWhy: () => void }) {
 
 const SEV_ORDER: Record<AlertSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
-export function AlertsView({ onTriggerOrchestrator }: Props) {
+export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
   const [tab, setTab] = useState<Tab>("all");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "all">("all");
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
@@ -282,6 +284,20 @@ export function AlertsView({ onTriggerOrchestrator }: Props) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#080808", color: "#555", fontSize: "12px", fontFamily: "monospace" }}>
         Loading signals...
+      </div>
+    )
+  }
+
+  if (alerts.length === 0) {
+    return (
+      <div style={{ height: "100%", background: "#080808" }}>
+        <EmptyState
+          icon="◎"
+          title="No signals yet"
+          description="Connect a monitoring source to start receiving alerts."
+          ctaLabel="Connect a connector"
+          onCta={onGoToConnectors}
+        />
       </div>
     )
   }

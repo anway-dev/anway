@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/empty-state"
 import { useState, useEffect } from "react";
 
 interface ServiceMetrics { errorRate: number; p99ms: number; rps: number; uptime: number }
@@ -47,6 +48,7 @@ const LANG_COLOR: Record<string, string> = {
 
 interface Props {
   onTriggerOrchestrator: (query: string, context: { title: string; source: string }) => void;
+  onGoToConnectors?: () => void;
 }
 
 function DepGraph({ svc, allServices }: { svc: ServiceAPI; allServices: ServiceAPI[] }) {
@@ -162,7 +164,7 @@ function incidentDuration(inc: IncidentAPI): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`
 }
 
-export function ServiceCatalog({ onTriggerOrchestrator }: Props) {
+export function ServiceCatalog({ onTriggerOrchestrator, onGoToConnectors }: Props) {
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [services, setServices] = useState<ServiceAPI[]>([]);
   const [incidents, setIncidents] = useState<IncidentAPI[]>([]);
@@ -210,13 +212,16 @@ export function ServiceCatalog({ onTriggerOrchestrator }: Props) {
 
   if (services.length === 0) {
     return (
-      <div style={{ display: "flex", height: "100%", background: "#080808", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "12px" }}>
-        <div style={{ fontSize: "14px", color: "#555", fontWeight: 600 }}>No services indexed</div>
-        <div style={{ fontSize: "12px", color: "#444", maxWidth: "360px", textAlign: "center", lineHeight: "1.6" }}>
-          Register a connector (GitHub, K8s, ArgoCD) and Anvay will bootstrap the service graph automatically.
-        </div>
+      <div style={{ height: "100%", background: "#080808" }}>
+        <EmptyState
+          icon="⬢"
+          title="No services indexed"
+          description="Connect GitHub or another source-control connector to index your services."
+          ctaLabel="Connect GitHub"
+          onCta={onGoToConnectors}
+        />
       </div>
-    );
+    )
   }
 
   return (

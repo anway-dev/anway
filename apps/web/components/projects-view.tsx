@@ -121,12 +121,24 @@ export function ProjectsView({
       .finally(() => setLoading(false));
   }, []);
 
-  function handleDiscover() {
+  async function handleDiscover() {
     if (!repoUrl.trim()) return;
     setDiscoveryStep("scanning");
-    setTimeout(() => setDiscoveryStep("found"), 1400);
-    setTimeout(() => setDiscoveryStep("creating"), 2800);
-    setTimeout(() => setDiscoveryStep("done"), 4200);
+    try {
+      setDiscoveryStep("found");
+      const resp = await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoUrl: repoUrl.trim() }),
+      });
+      if (!resp.ok) throw new Error('create failed');
+      setDiscoveryStep("creating");
+      const svcs = await fetch('/api/services').then(r => r.ok ? r.json() as Promise<ServiceData[]> : []);
+      if (Array.isArray(svcs)) setProjects(svcs.map(serviceToProject));
+      setDiscoveryStep("done");
+    } catch {
+      setDiscoveryStep("idle");
+    }
   }
 
   function closeModal() {

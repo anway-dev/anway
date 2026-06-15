@@ -15,6 +15,7 @@ import { startTriggerExecutor } from './triggers/executor.js'
 import { startIncidentSubscriber } from './events/incident-subscriber.js'
 import { startAlertSubscriber } from './events/alert-subscriber.js'
 import { beginDraining, isDraining } from './lifecycle.js'
+import { startPipelineBootstrapSubscriber } from './pipeline-bootstrap.js'
 import type { IScheduler } from '@anvay/agent'
 
 const DEFAULT_REDIS_URL = 'redis://localhost:6379'
@@ -102,6 +103,11 @@ async function main() {
       await startAlertSubscriber(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)
     } catch (err) {
       app.log.warn({ err }, 'Alert subscriber not started — Redis may be unavailable')
+    }
+    try {
+      await startPipelineBootstrapSubscriber(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL, app.log)
+    } catch (err) {
+      app.log.warn({ err }, 'Pipeline bootstrap subscriber not started — Redis may be unavailable')
     }
   } catch (err) {
     const log = app?.log ?? bootstrapLog

@@ -80,10 +80,13 @@ export function ModelConfig() {
     );
   };
 
-  const handleTest = (providerId: string) => {
+  const handleTest = async (providerId: string) => {
     setTestState((s) => ({ ...s, [providerId]: "testing" }));
-    setTimeout(() => {
-      const success = providerId === "anthropic" || Math.random() > 0.3;
+    try {
+      const resp = await fetch('/api/providers');
+      const data = await resp.json() as { providers: { id: string; configured: boolean }[] };
+      const found = data.providers.find(p => p.id === providerId);
+      const success = found?.configured ?? false;
       setTestState((s) => ({ ...s, [providerId]: success ? "success" : "fail" }));
       if (success) {
         setProviders((prev) =>
@@ -91,16 +94,10 @@ export function ModelConfig() {
             ? { ...p, connected: true, activeModel: p.activeModel ?? p.models[0] }
             : p)
         );
-        if (providerId === "ollama" || providerId === "lmstudio") {
-          const mock = providerId === "ollama"
-            ? ["llama3.2:latest", "codellama:7b", "mistral:latest"]
-            : ["local-model-7b", "local-model-13b"];
-          setProviders((prev) =>
-            prev.map((p) => p.id === providerId ? { ...p, models: mock, activeModel: mock[0] } : p)
-          );
-        }
       }
-    }, 1400);
+    } catch {
+      setTestState((s) => ({ ...s, [providerId]: "fail" }));
+    }
   };
 
   const handleDisconnect = (providerId: string) => {

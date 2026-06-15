@@ -21,6 +21,7 @@ declare module '@fastify/jwt' {
       email: string
       tenantId: string
       role: string
+      env: string  // active environment — from X-Anvay-Env header, defaults to 'prod'
     }
   }
 }
@@ -51,6 +52,10 @@ export default fp(async function jwtPlugin(app: FastifyInstance) {
   ) {
     try {
       await request.jwtVerify()
+      // Inject active env from header — lowercase slug, alphanumeric+hyphen only
+      const rawEnv = request.headers['x-anvay-env']
+      const envHeader = typeof rawEnv === 'string' ? rawEnv.toLowerCase().replace(/[^a-z0-9-]/g, '') : ''
+      ;(request.user as { env: string }).env = envHeader || 'prod'
     } catch (err) {
       reply.send(err)
     }

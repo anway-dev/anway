@@ -37,12 +37,6 @@ const WORKFLOW_STAGES: WorkflowStage[] = [
   { id: "monitor", name: "Monitor", icon: "📊", description: "Continuous observability post-deploy", gate: { type: "disabled", requiredApprovals: 0, autoApproveConfidence: 0.90, requiredApprovers: [] }, agents: ["datadog-agent", "loki-agent", "k8s-agent"] },
 ];
 
-const FALLBACK_SERVICES: ServicePolicy[] = [
-  { id: "payments-api", name: "payments-api", autonomyLevel: "L2", description: "High-value service. Agent can analyze and recommend; all actions require approval." },
-  { id: "catalog-service", name: "catalog-service", autonomyLevel: "L3", description: "Medium-risk. Agent can execute non-destructive actions; destructive actions supervised." },
-  { id: "auth-service", name: "auth-service", autonomyLevel: "L2", description: "Security-critical. Agent can analyze only; all changes require human approval." },
-];
-
 const GATE_COLORS: Record<GateType, string> = {
   manual: "#f59e0b",
   auto: "#10b981",
@@ -315,11 +309,20 @@ function GatePolicySection() {
 }
 
 function AutonomyDial({ service, onChange }: {
-  service: ServicePolicy;
+  service: ServicePolicy | null;
   onChange: (level: AutonomyLevel) => void;
 }) {
   const levels: AutonomyLevel[] = ["L1", "L2", "L3", "L4"];
-  const cfg = AUTONOMY_CONFIG[service.autonomyLevel];
+  const activeLevel: AutonomyLevel = service?.autonomyLevel ?? "L2";
+  const cfg = AUTONOMY_CONFIG[activeLevel];
+
+  if (!service) {
+    return (
+      <div style={{ padding: "12px 14px", background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px" }}>
+        <div style={{ fontSize: "11px", color: "#555" }}>Select a service to configure autonomy level</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "12px 14px", background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px" }}>
@@ -345,9 +348,9 @@ function AutonomyDial({ service, onChange }: {
             key={l}
             onClick={() => onChange(l)}
             style={{
-              background: service.autonomyLevel === l ? `${AUTONOMY_CONFIG[l].color}22` : "transparent",
-              border: `1px solid ${service.autonomyLevel === l ? AUTONOMY_CONFIG[l].color + "44" : "#1a1a1a"}`,
-              color: service.autonomyLevel === l ? AUTONOMY_CONFIG[l].color : "#555",
+              background: activeLevel === l ? `${AUTONOMY_CONFIG[l].color}22` : "transparent",
+              border: `1px solid ${activeLevel === l ? AUTONOMY_CONFIG[l].color + "44" : "#1a1a1a"}`,
+              color: activeLevel === l ? AUTONOMY_CONFIG[l].color : "#555",
               padding: "3px 6px", borderRadius: "3px", fontSize: "10px", cursor: "pointer", fontWeight: 700,
             }}
           >
@@ -414,8 +417,8 @@ function AgentLoop({ activeStageIdx }: { activeStageIdx: number }) {
 }
 
 export function WorkflowView() {
-  const [selectedService, setSelectedService] = useState<ServicePolicy>(FALLBACK_SERVICES[0]);
-  const [services, setServices] = useState<ServicePolicy[]>(FALLBACK_SERVICES);
+  const [selectedService, setSelectedService] = useState<ServicePolicy | null>(null);
+  const [services, setServices] = useState<ServicePolicy[]>([]);
   const [stages, setStages] = useState<WorkflowStage[]>(WORKFLOW_STAGES);
 
   useEffect(() => {
@@ -430,7 +433,7 @@ export function WorkflowView() {
           description: `${s.name} — gate policy managed via Workflows`,
         }));
         setServices(mapped);
-        setSelectedService(mapped[0]);
+        setSelectedService(mapped[0] ?? null);
       })
       .catch(() => {});
   }, []);
@@ -442,11 +445,14 @@ export function WorkflowView() {
   }
 
   function updateServiceAutonomy(level: AutonomyLevel) {
+    if (!selectedService) return;
     setServices((prev) => prev.map((s) => (s.id === selectedService.id ? { ...s, autonomyLevel: level } : s)));
-    setSelectedService((prev) => ({ ...prev, autonomyLevel: level }));
+    setSelectedService((prev) => prev ? { ...prev, autonomyLevel: level } : null);
   }
 
-  const currentSvc = services.find((s) => s.id === selectedService.id) || selectedService;
+  const currentSvc = selectedService
+    ? (services.find((s) => s.id === selectedService.id) ?? selectedService)
+    : null;
 
   return (
     <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>
@@ -454,19 +460,22 @@ export function WorkflowView() {
       <div style={{ width: "220px", flexShrink: 0, background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a" }}>
           <div style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>Service</div>
+          {services.length === 0 && (
+            <div style={{ fontSize: "11px", color: "#555", padding: "8px 0" }}>No services yet</div>
+          )}
           {services.map((svc) => (
             <button
               key={svc.id}
               onClick={() => setSelectedService(svc)}
               style={{
                 display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: "6px",
-                background: currentSvc.id === svc.id ? "#1a2a1a" : "transparent",
-                border: `1px solid ${currentSvc.id === svc.id ? "rgba(16,185,129,0.3)" : "transparent"}`,
-                color: currentSvc.id === svc.id ? "#10b981" : "#888",
+                background: currentSvc?.id === svc.id ? "#1a2a1a" : "transparent",
+                border: `1px solid ${currentSvc?.id === svc.id ? "rgba(16,185,129,0.3)" : "transparent"}`,
+                color: currentSvc?.id === svc.id ? "#10b981" : "#888",
                 fontSize: "12px", cursor: "pointer", marginBottom: "2px",
               }}
             >
-              <div style={{ fontFamily: "monospace", fontWeight: currentSvc.id === svc.id ? 600 : 400 }}>{svc.name}</div>
+              <div style={{ fontFamily: "monospace", fontWeight: currentSvc?.id === svc.id ? 600 : 400 }}>{svc.name}</div>
               <div style={{ fontSize: "10px", color: `${AUTONOMY_CONFIG[svc.autonomyLevel].color}`, marginTop: "2px" }}>
                 {AUTONOMY_CONFIG[svc.autonomyLevel].label}
               </div>
@@ -487,9 +496,9 @@ export function WorkflowView() {
         <div style={{ marginBottom: "20px" }}>
           <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Workflow Pipeline</div>
           <div style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5" }}>
-            {currentSvc.name}
+            {currentSvc?.name ?? "No service selected"}
           </div>
-          <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>{currentSvc.description}</div>
+          <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>{currentSvc?.description ?? "Connect services via Connectors to configure workflow gates"}</div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0", maxWidth: "640px" }}>

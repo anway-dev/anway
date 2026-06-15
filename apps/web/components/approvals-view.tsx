@@ -9,20 +9,21 @@ interface PendingGate {
   createdAt: string;
 }
 
-const MOCK_PENDING: PendingGate[] = [
-  { id: "gate-1", toolName: "create_incident", description: "Create incident for payments-api error rate spike", confidence: 0.72, createdAt: new Date(Date.now() - 120_000).toISOString() },
-  { id: "gate-2", toolName: "notify_oncall", description: "Notify oncall team about deploy failure in auth-service", confidence: 0.85, createdAt: new Date(Date.now() - 300_000).toISOString() },
-];
-
 export function ApprovalsView() {
-  const [pending, setPending] = useState<PendingGate[]>(MOCK_PENDING);
+  const [pending, setPending] = useState<PendingGate[]>([]);
   const [processing, setProcessing] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  const fetchPending = () => {
+    fetch('/api/gate/pending')
+      .then(r => r.json() as Promise<PendingGate[]>)
+      .then(setPending)
+      .catch(() => setPending([]));
+  };
+
   useEffect(() => {
-    const iv = setInterval(async () => {
-      // Refresh every 10s — currently uses mock
-    }, 10_000);
+    fetchPending();
+    const iv = setInterval(fetchPending, 10_000);
     return () => clearInterval(iv);
   }, []);
 

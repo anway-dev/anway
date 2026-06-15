@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/empty-state"
 import { useState, useEffect } from "react";
 
 // Shape returned by /api/incidents
@@ -251,8 +252,9 @@ function PulsingDot({ color }: { color: string }) {
   );
 }
 
-export function IncidentView({ onTriggerOrchestrator }: {
+export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   onTriggerOrchestrator: (query: string, context: { title: string; source: string }) => void;
+  onGoToConnectors?: () => void;
 }) {
   const [incidents, setIncidents] = useState<DisplayIncident[]>([]);
   const [loading, setLoading] = useState(true);
@@ -280,6 +282,20 @@ export function IncidentView({ onTriggerOrchestrator }: {
 
   const filtered = incidents.filter(i => filter === "all" || i.status === filter);
   const selected = selectedId ? incidents.find(i => i.id === selectedId) ?? incidents[0] : incidents[0];
+
+  if (!loading && incidents.length === 0) {
+    return (
+      <div style={{ height: "100%", background: "#080808" }}>
+        <EmptyState
+          icon="⚠"
+          title="No incidents"
+          description="Active incidents will appear here when triggered from alerts."
+          ctaLabel="Connect a connector"
+          onCta={onGoToConnectors}
+        />
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>

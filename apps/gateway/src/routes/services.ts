@@ -22,6 +22,29 @@ interface IncidentRow {
 }
 
 export async function serviceRoutes(app: FastifyInstance) {
+  app.post<{ Body: { repoUrl?: string; name?: string } }>(
+    '/api/services',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { repoUrl, name } = request.body
+      if (!repoUrl && !name) return reply.code(400).send({ error: 'repoUrl or name required' })
+      const serviceName = name ??
+        (repoUrl!.split('/').pop() ?? 'unknown').replace(/\.git$/, '')
+      const meta = JSON.stringify({ repoUrl: repoUrl ?? null, source: 'manual' })
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          INSERT INTO entities (id, tenant_id, type, name, metadata)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, 'Service', ${serviceName}, ${meta}::jsonb)
+          ON CONFLICT (tenant_id, type, name) DO UPDATE SET metadata = EXCLUDED.metadata
+          RETURNING id
+        `
+      ).catch(() => [])
+      if (rows.length === 0) return reply.code(500).send({ error: 'create failed' })
+      return reply.code(201).send({ id: (rows as Array<{ id: string }>)[0]!.id, name: serviceName })
+    },
+  )
+
   app.get('/api/services', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
 

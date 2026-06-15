@@ -272,7 +272,7 @@ export async function chatRoutes(app: FastifyInstance) {
           : resolveProviderConfig(modelOverride))
       : dbConfig ?? resolveProviderConfig()
     if (!providerConfig) {
-      return reply.code(503).send({ error: 'No LLM provider configured — configure in Settings > AI Provider in the web UI' })
+      return reply.code(200).send({ error: 'No LLM provider configured', code: 'NO_PROVIDER' })
     }
 
     // Load connectors + tenant in parallel — both are best-effort

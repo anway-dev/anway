@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { requireRole } from '../plugins/rbac.js'
 
 interface EntityRow {
   id: string
@@ -25,7 +26,7 @@ interface IncidentRow {
 export async function serviceRoutes(app: FastifyInstance) {
   app.post<{ Body: { repoUrl?: string; name?: string } }>(
     '/api/services',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { repoUrl, name } = request.body

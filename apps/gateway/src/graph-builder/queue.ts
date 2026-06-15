@@ -12,7 +12,7 @@ function getRedisConnection() {
 }
 
 export const graphQueue = getRedisConnection()
-  ? new Queue(QUEUE_NAME, { connection: getRedisConnection()! })
+  ? new Queue(QUEUE_NAME, { connection: getRedisConnection()!, defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 100, removeOnFail: false } })
   : null
 
 export function startGraphWorker(

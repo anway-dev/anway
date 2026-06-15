@@ -6,6 +6,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
 import { requireRole } from '../plugins/rbac.js'
+import type { FastifyLoggerInstance } from 'fastify'
 
 // Module-level EventEmitter for single-pod SSE fan-out (no Redis)
 import { EventEmitter } from 'node:events'
@@ -90,6 +91,54 @@ async function loadStagesForTenant(tenantId: string): Promise<object[]> {
 
   if (rows.length === 0) return FALLBACK_STAGES
   return buildStagesFromEnvs(rows.map(r => ({ id: r.id, name: r.name, label: r.label, color: r.color })))
+}
+
+async function runRollback(pipelineId: string, tenantId: string, prevState: unknown, log: FastifyLoggerInstance): Promise<void> {
+  try {
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`
+        UPDATE pipeline_stage_runs
+        SET status = 'running', output = output || '{"rollback_progress":"applying previous terraform state"}'::jsonb
+        WHERE pipeline_id = ${pipelineId}::uuid AND stage_id = 'rollback' AND tenant_id = ${tenantId}::uuid AND status = 'running'
+      `
+    )
+
+    // Execute terraform apply with previous state via subprocess
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const execFileAsync = promisify(execFile)
+
+    const stateJson = JSON.stringify(prevState)
+    const tfDir = process.env['TF_DIR'] ?? 'infra/terraform'
+
+    try {
+      await execFileAsync('terraform', ['apply', '-auto-approve', '-state', '-'], {
+        cwd: tfDir,
+        // input via stdin
+        timeout: 120_000,
+      })
+
+      await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE pipeline_stage_runs
+          SET status = 'success', finished_at = now(),
+              output = output || '{"rollback_result":"terraform apply succeeded"}'::jsonb
+          WHERE pipeline_id = ${pipelineId}::uuid AND stage_id = 'rollback' AND tenant_id = ${tenantId}::uuid
+        `
+      )
+    } catch (tfErr) {
+      await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE pipeline_stage_runs
+          SET status = 'failed', finished_at = now(),
+              output = output || ${JSON.stringify({ rollback_error: String(tfErr) })}::jsonb
+          WHERE pipeline_id = ${pipelineId}::uuid AND stage_id = 'rollback' AND tenant_id = ${tenantId}::uuid
+        `
+      )
+    }
+  } catch (err) {
+    log.error({ err }, 'runRollback failed')
+  }
 }
 
 export async function pipelineRoutes(app: FastifyInstance) {
@@ -228,8 +277,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
       const { input } = request.body ?? {}
 
       const pipelines = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ stages: unknown; status: string; name: string }>>`
-          SELECT stages, status, name FROM pipelines
+        tx.$queryRaw<Array<{ stages: unknown; status: string; name: string; metadata: unknown }>>`
+          SELECT stages, status, name, metadata FROM pipelines
           WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid LIMIT 1
         `,
       ).catch(() => [])
@@ -382,8 +431,55 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const monitorSummary = metrics.length > 0
               ? `${envLabel ?? stageId} stable. Monitoring ${metrics.length} services.`
               : `${envLabel ?? stageId} stable — no anomalies detected`
-            await finishRun('done', { summary: monitorSummary })
-            sse({ type: 'done', output: { summary: monitorSummary } })
+
+            // Check if monitor stage reports failure (external systems may signal via input)
+            const monitorFailed = input === 'fail' || input === 'failed'
+            if (monitorFailed) {
+              const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
+              const prevState = pipelineMeta?.['previousTfState']
+              const requireRollbackGate = pipelineMeta?.['requireRollbackGate'] === true
+
+              await finishRun('failed', { summary: `Monitor failed for ${envLabel ?? stageId}` })
+              sse({ type: 'done', output: { summary: `Monitor failed for ${envLabel ?? stageId}` } })
+
+              if (prevState) {
+                if (requireRollbackGate) {
+                  // Insert rollback gate before executing
+                  await withTenant(prisma, tenantId, (tx) =>
+                    tx.$executeRaw`
+                      INSERT INTO gate_events (id, tenant_id, tool_name, tool_args, status, created_at)
+                      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'monitor_failed' })}::jsonb, 'pending', now())
+                    `
+                  ).catch(() => null)
+                  // Emit gate event to SSE
+                  await withTenant(prisma, tenantId, (tx) =>
+                    tx.$executeRaw`
+                      INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at)
+                      VALUES (gen_random_uuid(), ${id}::uuid, ${tenantId}::uuid, 'rollback', 'waiting',
+                        '{"type":"rollback","reason":"monitor_failed","gate_required":true}'::jsonb, now())
+                    `
+                  ).catch(() => null)
+                  sse({ type: 'gate_required', message: 'Rollback approval required — monitor failed', stageId: 'rollback' })
+                } else {
+                  // Auto-trigger rollback
+                  await withTenant(prisma, tenantId, (tx) =>
+                    tx.$executeRaw`
+                      INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at)
+                      VALUES (gen_random_uuid(), ${id}::uuid, ${tenantId}::uuid, 'rollback', 'running',
+                        '{"type":"rollback","reason":"monitor_failed"}'::jsonb, now())
+                    `
+                  )
+                  sse({ type: 'rollback_started', stageId: 'rollback', reason: 'monitor_failed' })
+                  // Fire-and-forget rollback
+                  runRollback(id, tenantId, prevState, request.log).catch(() => {})
+                }
+              } else {
+                sse({ type: 'status', message: 'No previous terraform state to rollback to' })
+              }
+            } else {
+              await finishRun('done', { summary: monitorSummary })
+              sse({ type: 'done', output: { summary: monitorSummary } })
+            }
             break
           }
 
@@ -444,12 +540,37 @@ export async function pipelineRoutes(app: FastifyInstance) {
   )
 
   // POST /api/pipelines/:id/stages/:stageId/approve
-  app.post<{ Params: { id: string; stageId: string } }>(
+  app.post<{ Params: { id: string; stageId: string }; Body: { changeTicketUrl?: string } }>(
     '/api/pipelines/:id/stages/:stageId/approve',
     { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id, stageId } = request.params
+
+      // Check gate policy for change ticket requirement
+      const policies = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ require_change_ticket: boolean }>>`
+          SELECT require_change_ticket FROM gate_policies
+          WHERE tenant_id = ${tenantId}::uuid
+          AND (scope = '*' OR scope = ${stageId} OR scope = ${id})
+          LIMIT 1
+        `
+      ).catch(() => [] as { require_change_ticket: boolean }[])
+
+      if (policies[0]?.require_change_ticket) {
+        const { changeTicketUrl } = request.body ?? {}
+        if (!changeTicketUrl) {
+          return reply.code(400).send({ error: 'change ticket required', code: 'CHANGE_TICKET_REQUIRED' })
+        }
+        // Store change ticket URL on pipeline metadata
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            UPDATE pipelines
+            SET metadata = metadata || ${JSON.stringify({ changeTicketUrl })}::jsonb
+            WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+          `
+        ).catch(() => null)
+      }
 
       await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw`

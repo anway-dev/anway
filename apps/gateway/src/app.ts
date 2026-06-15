@@ -4,6 +4,7 @@ import cookie from '@fastify/cookie'
 import corsPlugin from './plugins/cors.js'
 import jwtPlugin from './plugins/jwt.js'
 import requestLoggerPlugin from './plugins/request-logger.js'
+import * as Sentry from '@sentry/node'
 import { healthRoutes } from './routes/health.js'
 import { metricsRoutes } from './routes/metrics.js'
 import { authRoutes } from './routes/auth.js'
@@ -29,6 +30,7 @@ import { terraformRoutes } from './routes/terraform.js'
 import { editorRoutes } from './routes/editor.js'
 import { pipelineRoutes } from './routes/pipeline.js'
 import { environmentRoutes } from './routes/environments.js'
+import { slackCommandRoutes } from './routes/slack-commands.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -93,6 +95,18 @@ export async function buildApp() {
   await app.register(editorRoutes)
   await app.register(pipelineRoutes)
   await app.register(environmentRoutes)
+  await app.register(slackCommandRoutes)
+
+  app.setErrorHandler((error, request, reply) => {
+    if (process.env['SENTRY_DSN']) {
+      Sentry.withScope((scope) => {
+        scope.setTag('tenantId', (request.user as { tenantId?: string })?.tenantId ?? 'unknown')
+        Sentry.captureException(error)
+      })
+    }
+    request.log.error(error)
+    return reply.code(500).send({ error: 'Internal server error' })
+  })
 
   app.addHook('onResponse', async (request, reply) => {
     const route = request.routeOptions?.url ?? request.url

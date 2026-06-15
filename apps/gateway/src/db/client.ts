@@ -7,3 +7,13 @@ export const prisma = new PrismaClient({
     },
   },
 })
+
+export const prismaReplica = process.env['DATABASE_REPLICA_URL']
+  ? new PrismaClient({
+      datasources: {
+        db: {
+          url: process.env['DATABASE_REPLICA_URL'],
+        },
+      },
+    })
+  : null

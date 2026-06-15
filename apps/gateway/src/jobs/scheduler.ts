@@ -129,6 +129,42 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     },
   })
 
+  // SLO burn rate check — runs every 5 minutes per CLAUDE Wave-4 C7
+  await scheduler.register({
+    id: 'slo-burn-check',
+    name: 'slo_burn_check',
+    schedule: '*/5 * * * *',
+    async run() {
+      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM tenants LIMIT 1000`
+      for (const t of tenants) {
+        await withTenant(prisma, t.id, async (tx) => {
+          const services = await tx.$queryRaw<{ id: string; name: string; metadata: Record<string, unknown> }[]>`
+            SELECT id, name, metadata FROM entities WHERE tenant_id = ${t.id}::uuid AND type = 'Service'
+            AND metadata->>'slo' IS NOT NULL
+          ` as { id: string; name: string; metadata: Record<string, unknown> }[]
+          for (const svc of services) {
+            const slo = (svc.metadata as Record<string, unknown>)?.['slo'] as { errorBudget?: number } | undefined
+            if (!slo) continue
+            const recentIncidents = await tx.$queryRaw<{ count: string }[]>`
+              SELECT COUNT(*) as count FROM incidents
+              WHERE tenant_id = ${t.id}::uuid AND status = 'active'
+              AND created_at > now() - interval '1 hour'
+            `
+            const burnRate = parseInt(recentIncidents[0]?.count ?? '0', 10)
+            if (burnRate > 2) {
+              await tx.$executeRaw`
+                INSERT INTO incidents (tenant_id, title, severity, status, description)
+                VALUES (${t.id}::uuid, ${'SLO burn rate alert: ' + svc.name}, 'high', 'active',
+                  ${'Error budget burning at ' + burnRate + 'x normal rate'})
+                ON CONFLICT DO NOTHING
+              `
+            }
+          }
+        }).catch(() => { /* best-effort — don't let one tenant block others */ })
+      }
+    },
+  })
+
   // Freshness daemon — replaces setInterval with persistent IScheduler job
   await scheduler.register({
     id: 'freshness-decay',

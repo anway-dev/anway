@@ -107,6 +107,13 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
   const [runningStage, setRunningStage] = useState<string | null>(null);
   const [logs, setLogs] = useState<{ stageId: string; lines: string[] }[]>([]);
   const [activeLogStage, setActiveLogStage] = useState<string | null>(null);
+  const [gateApprovalState, setGateApprovalState] = useState<{
+    pipelineId: string;
+    stageId: string;
+    requireChangeTicket: boolean;
+  } | null>(null);
+  const [changeTicketUrl, setChangeTicketUrl] = useState("");
+  const [approving, setApproving] = useState(false);
   const logsRef = useRef<HTMLDivElement>(null);
 
   const fetchPipelines = useCallback(async () => {
@@ -191,9 +198,46 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
     }
   };
 
-  const approveGate = async (pipelineId: string, stageId: string) => {
-    await fetch(`/api/pipelines/${pipelineId}/stages/${stageId}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (selected) await fetchPipeline(selected.id);
+  const approveGate = async (pipelineId: string, stageId: string, changeTicketUrl?: string) => {
+    setApproving(true);
+    try {
+      const body = changeTicketUrl ? JSON.stringify({ changeTicketUrl }) : "{}";
+      const resp = await fetch(`/api/pipelines/${pipelineId}/stages/${stageId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!resp.ok) {
+        const err = await resp.json() as { error?: string; code?: string };
+        if (err["code"] === "CHANGE_TICKET_REQUIRED") {
+          setGateApprovalState({ pipelineId, stageId, requireChangeTicket: true });
+          return;
+        }
+      }
+      setGateApprovalState(null);
+      setChangeTicketUrl("");
+      if (selected) await fetchPipeline(selected.id);
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const initiateApprove = async (pipelineId: string, stageId: string) => {
+    // Fetch gate policy to check if change ticket is required
+    try {
+      const resp = await fetch(`/api/gate-policies?pipelineId=${pipelineId}&stageId=${stageId}`);
+      if (resp.ok) {
+        const policies = await resp.json() as Array<{ requireChangeTicket?: boolean; require_change_ticket?: boolean }>;
+        const policy = policies[0];
+        if (policy && (policy.requireChangeTicket || policy.require_change_ticket)) {
+          setGateApprovalState({ pipelineId, stageId, requireChangeTicket: true });
+          return;
+        }
+      }
+    } catch { /* proceed without gate policy check */ }
+
+    // Proceed with approval
+    await approveGate(pipelineId, stageId);
   };
 
   const runEnvSequential = async (pipelineId: string, env: EnvGroup) => {
@@ -310,6 +354,45 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
           </div>
         )}
 
+        {/* Gate change ticket modal */}
+        {gateApprovalState?.requireChangeTicket && (
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+            <div style={{ background: "#0e0e0e", border: "1px solid #2a2a2a", borderRadius: 8, padding: 24, width: 420 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Gate Approval — Change Ticket Required</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
+                This gate requires a change ticket URL before approval.
+              </div>
+              <input
+                autoFocus
+                value={changeTicketUrl}
+                onChange={e => setChangeTicketUrl(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && changeTicketUrl.trim()) void approveGate(gateApprovalState.pipelineId, gateApprovalState.stageId, changeTicketUrl.trim()); if (e.key === "Escape") { setGateApprovalState(null); setChangeTicketUrl(""); } }}
+                placeholder="Jira change ticket URL (e.g. https://jira.company.com/browse/CHG-1234)"
+                style={{ width: "100%", padding: "8px 12px", background: "#111", border: "1px solid #2a2a2a", borderRadius: 4, color: "#e5e5e5", fontSize: 13, marginBottom: 16, boxSizing: "border-box" }}
+              />
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => { setGateApprovalState(null); setChangeTicketUrl(""); }} style={{ padding: "6px 14px", background: "transparent", border: "1px solid #2a2a2a", borderRadius: 4, color: "#888", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                <button
+                  disabled={!changeTicketUrl.trim() || approving}
+                  onClick={() => void approveGate(gateApprovalState.pipelineId, gateApprovalState.stageId, changeTicketUrl.trim())}
+                  style={{
+                    padding: "6px 14px",
+                    background: changeTicketUrl.trim() ? "#8b5cf6" : "#333",
+                    border: "none",
+                    borderRadius: 4,
+                    color: changeTicketUrl.trim() ? "#fff" : "#555",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: changeTicketUrl.trim() ? "pointer" : "not-allowed",
+                  }}
+                >
+                  {approving ? "Approving…" : "Approve"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {!selected ? (
           <div style={{ flex: 1 }}>
             {!loading && pipelines.length === 0 ? (
@@ -372,7 +455,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
                       <div key={gate.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 8px", minHeight: 240, gap: 8 }}>
                         {gateStatus === "waiting" ? (
                           <button
-                            onClick={() => void approveGate(selected.id, gate.id)}
+                            onClick={() => void initiateApprove(selected.id, gate.id)}
                             style={{ padding: "8px 14px", background: "#8b5cf6", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
                           >
                             ✓ Approve

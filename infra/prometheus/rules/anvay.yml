@@ -1,0 +1,55 @@
+groups:
+  - name: anvay
+    interval: 30s
+    rules:
+
+      - alert: AnvayPodCrashLooping
+        expr: |
+          kube_pod_container_status_waiting_reason{
+            reason="CrashLoopBackOff",
+            namespace=~"anvay.*"
+          } > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash looping"
+          description: "Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} has been in CrashLoopBackOff for >2m."
+          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#pod-oomkilled-or-crash-loop"
+
+      - alert: AnvayHighErrorRate
+        expr: |
+          rate(http_requests_total{namespace=~"anvay.*",status=~"5.."}[5m])
+          /
+          rate(http_requests_total{namespace=~"anvay.*"}[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Anvay error rate >1%"
+          description: "HTTP 5xx rate is {{ $value | humanizePercentage }} over the last 5m."
+          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#high-error-rate"
+
+      - alert: AnvayDBConnectionsHigh
+        expr: pg_stat_database_numbackends{datname="anvay"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Anvay DB connections high ({{ $value }})"
+          description: "Postgres connections to anvay DB exceed 80. PgBouncer or pool misconfiguration."
+          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#db-connections-exhausted"
+
+      - alert: AnvayRedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Anvay Redis memory high ({{ $value | humanizePercentage }})"
+          description: "Redis memory usage exceeds 85%. Consider scaling or eviction policy review."
+          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#redis-memory-high"

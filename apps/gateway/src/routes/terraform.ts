@@ -1,3 +1,4 @@
+import { requireRole } from '../plugins/rbac.js'
 import type { FastifyInstance } from 'fastify'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -101,6 +102,7 @@ export async function terraformRoutes(app: FastifyInstance) {
 
       // Verify gate approval exists for this environment
       const { gateId } = request.body ?? {}
+      if (!gateId) return reply.code(400).send({ error: 'gateId is required' })
       if (gateId) {
         const { prisma } = await import('../db/client.js')
         const { withTenant } = await import('../db/prisma.js')

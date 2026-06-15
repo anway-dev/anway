@@ -1,3 +1,4 @@
+import { requireRole } from '../plugins/rbac.js'
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'

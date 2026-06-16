@@ -72,12 +72,10 @@ export class RedisGateSink implements IGateSink {
     const rows = this.tenantId
       ? await withTenant(prisma, this.tenantId, (tx) =>
           tx.$queryRaw<Array<{ status: string }>>`
-            SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND status IN ('approved','rejected') LIMIT 1
+            SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND tenant_id = ${this.tenantId!}::uuid AND status IN ('approved','rejected') LIMIT 1
           `
         ).catch(() => [] as Array<{ status: string }>)
-      : await prisma.$queryRaw<Array<{ status: string }>>`
-          SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND status IN ('approved','rejected') LIMIT 1
-        `.catch(() => [] as Array<{ status: string }>)
+      : [] as Array<{ status: string }>
     return (rows[0]?.status as 'approved' | 'rejected') ?? null
   }
 

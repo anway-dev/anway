@@ -23,14 +23,14 @@ function webhookTenantFor(request: FastifyRequest): string | null {
   return process.env['ANVAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
 }
 
-function verifyGitHubSignature(body: string, signature: string, secret: string): boolean {
+function verifyGitHubSignature(body: Buffer, signature: string, secret: string): boolean {
   try {
     const expected = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex')
     return timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
   } catch { return false }
 }
 
-function verifyDatadogSignature(body: string, signature: string, secret: string): boolean {
+function verifyDatadogSignature(body: Buffer, signature: string, secret: string): boolean {
   try {
     const expected = createHmac('sha256', secret).update(body).digest('hex')
     return timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
@@ -38,7 +38,8 @@ function verifyDatadogSignature(body: string, signature: string, secret: string)
 }
 
 function verifyWebhookSignatures(request: FastifyRequest): boolean {
-  const body = JSON.stringify(request.body)
+  const rawBody: Buffer | undefined = (request as unknown as { rawBodyString?: Buffer }).rawBodyString
+  const body = rawBody ?? Buffer.from(JSON.stringify(request.body))
   const ghSecret = process.env['GITHUB_WEBHOOK_SECRET']
   const ddSecret = process.env['DD_WEBHOOK_SECRET']
   const hubSig = request.headers['x-hub-signature-256'] as string | undefined
@@ -91,6 +92,16 @@ const SEVERITY_MAP: Record<string, string> = {
 }
 
 export async function eventRoutes(app: FastifyInstance) {
+  // Capture raw request body for webhook HMAC verification (avoids re-serialization discrepancies)
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body: Buffer, done) => {
+    (_req as unknown as { rawBodyString: Buffer }).rawBodyString = body
+    try {
+      done(null, JSON.parse(body.toString('utf-8')))
+    } catch (err) {
+      done(err as Error)
+    }
+  })
+
   // Accept either the static webhook token or a tenant JWT
   const authenticateEvent = async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyWebhookSignatures(request)) {

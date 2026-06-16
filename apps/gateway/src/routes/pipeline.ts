@@ -870,12 +870,27 @@ export async function pipelineRoutes(app: FastifyInstance) {
           }
 
           case 'rollback': {
-            sse({ type: 'log', line: 'Running rollback' })
+            sse({ type: 'log', line: 'Rollback stage requires approval' })
             const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
             const prevState = pipelineMeta?.['previousTfState']
             if (prevState) {
-              await runRollback(id, tenantId, prevState, request.log)
-              sse({ type: 'done', output: { summary: 'Rollback complete' } })
+              // V1: ALL write actions require explicit user confirmation — no auto-proceed
+              const rollbackUserId = (request.user as { sub: string }).sub
+              await withTenant(prisma, tenantId, (tx) =>
+                tx.$executeRaw`
+                  INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
+                  VALUES (gen_random_uuid(), ${tenantId}::uuid, ${rollbackUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'manual' })}::jsonb, 'pending', now())
+                `
+              ).catch(() => null)
+              await withTenant(prisma, tenantId, (tx) =>
+                tx.$executeRaw`
+                  INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at)
+                  VALUES (gen_random_uuid(), ${id}::uuid, ${tenantId}::uuid, 'rollback', 'waiting',
+                    '{"type":"rollback","reason":"manual","gate_required":true}'::jsonb, now())
+                `
+              ).catch(() => null)
+              sse({ type: 'gate_required', message: 'Rollback approval required', stageId: 'rollback' })
+              await finishRun('waiting', { message: 'Waiting for rollback approval' })
             } else {
               sse({ type: 'status', message: 'No previous terraform state to rollback to' })
               const summary = 'Rollback skipped — no previous state'

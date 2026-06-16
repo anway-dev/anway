@@ -70,7 +70,13 @@ const ORCHESTRATOR_SYSTEM_PROMPT =
   '\nApproval routing:\n' +
   'When user says "approve", "yes", "ship it", "go ahead", "lgtm" AND there is a pending gate in context:\n' +
   '1. Call approve_gate tool with the gate_id from the most recent gate_required event\n' +
-  '2. Confirm: "✓ Gate approved — [next stage] is running"\n'
+  '2. Confirm: "✓ Gate approved — [next stage] is running"\n' +
+  '\nSpecialist routing:\n' +
+  '- incident/alert/outage/oncall/paged/down/error spike → route to sre agent\n' +
+  '- code review/PR/test/bug/why is this broken/regression → route to dev agent\n' +
+  '- feature status/ticket/PRD/roadmap/progress/ETA → route to pm agent\n' +
+  '- metrics/SLO/latency/error rate/dashboard → route to sre agent\n' +
+  '- deploy/release/pipeline/rollout → trigger_pipeline tool, then sre agent for monitoring\n'
 
 const INTENT_SYSTEM_PROMPT =
   'Classify the user query. Respond ONLY with a JSON object — no prose: ' +

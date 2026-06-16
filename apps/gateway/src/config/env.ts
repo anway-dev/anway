@@ -3,7 +3,9 @@ import { z } from 'zod'
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
+  JWT_SECRET: z.string().optional(),
+  JWT_PRIVATE_KEY: z.string().optional(),
+  JWT_PUBLIC_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
@@ -36,8 +38,11 @@ export function validateEnv(): Env {
 
 export function assertSecureJwtSecret(): void {
   if (process.env['NODE_ENV'] !== 'production') return
-  const secret = process.env['JWT_SECRET']
-  if (!secret || secret === 'dev-secret-change-in-production' || secret.length < 32) {
-    throw new Error('JWT_SECRET must be at least 32 characters in production (not the dev default)')
+  const hasRs256 = process.env['JWT_PRIVATE_KEY'] && process.env['JWT_PUBLIC_KEY']
+  if (!hasRs256) {
+    const secret = process.env['JWT_SECRET']
+    if (!secret || secret === 'dev-secret-change-in-production' || secret.length < 32) {
+      throw new Error('Production requires either JWT_PRIVATE_KEY+JWT_PUBLIC_KEY (RS256) or JWT_SECRET >=32 chars')
+    }
   }
 }

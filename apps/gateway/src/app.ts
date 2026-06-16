@@ -37,6 +37,7 @@ const isDev = process.env.NODE_ENV === 'development'
 
 export async function buildApp() {
   const app = Fastify({
+    bodyLimit: 10 * 1024 * 1024, // 10 MiB — allows large chat context payloads
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
       base: {

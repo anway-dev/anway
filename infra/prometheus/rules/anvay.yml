@@ -64,3 +64,14 @@ groups:
           summary: "SLO burn rate critical ({{ $value }}x)"
           description: "Error budget burning at {{ $value }}x the safe rate. At this pace budget exhausts in {{ $value | humanizeDuration }}."
           runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#high-error-rate"
+
+      - alert: AnvayGatewayDown
+        expr: absent(up{job="anvay-gateway"}) or up{job="anvay-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Anvay gateway is down"
+          description: "No gateway scrape target found or target reports down for >1 minute."
+          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md"

@@ -142,4 +142,18 @@ export async function authRoutes(app: FastifyInstance) {
     const user = request.user as { sub: string; email: string; tenantId: string; role: string }
     return { email: user.email, role: user.role, tenantId: user.tenantId, sub: user.sub }
   })
+
+  // POST /api/auth/refresh — issue a fresh 24h JWT for an authenticated user
+  app.post('/api/auth/refresh', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const user = request.user as { sub: string; email: string; tenantId: string; role: string }
+    const token = await reply.jwtSign(
+      { sub: user.sub, email: user.email, tenantId: user.tenantId, role: user.role },
+    )
+    return reply.send({ token, expiresIn: '24h' })
+  })
+
+  // POST /api/auth/logout — signals the client to clear session (JWT is stateless)
+  app.post('/api/auth/logout', { preHandler: [app.authenticate] }, async (_request, reply) => {
+    return reply.send({ ok: true })
+  })
 }

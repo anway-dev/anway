@@ -114,6 +114,15 @@ export async function accessRoutes(app: FastifyInstance) {
           createdAt: new Date(),
         })
       }
+      const submittedNames = request.body.perimeter.map(p => p.connectorName)
+      await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$executeRaw`
+          DELETE FROM user_perimeters
+          WHERE tenant_id = ${user.tenantId}::uuid
+            AND user_id = ${userId}::uuid
+            AND connector_name != ALL(${submittedNames}::text[])
+        `
+      ).catch(() => null)
       if (failed > 0) {
         reply.code(207)
         return { ok: false, count, failed }

@@ -160,7 +160,7 @@ export async function auditRoutes(app: FastifyInstance) {
       `
     }).catch(() => [] as AuditRow[])
 
-    const body = rows.map(r => JSON.stringify(r)).join('\n')
+    const body = rows.map(r => JSON.stringify({ ...r, payload: redactSecrets(r.payload as Record<string, unknown>) })).join('\n')
     return reply
       .header('Content-Type', 'application/x-ndjson')
       .header('Content-Disposition', 'attachment; filename="audit-export.ndjson"')

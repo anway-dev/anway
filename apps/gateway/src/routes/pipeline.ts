@@ -379,6 +379,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
       }
 
       let sse: (data: object) => void
+      let redisCleaned = false
+      let cleanRedis: () => Promise<void> = async () => {
+        if (redisCleaned) return
+        redisCleaned = true
+      }
       const redisUrl = process.env['REDIS_URL']
 
       if (redisUrl && runId) {
@@ -390,11 +395,16 @@ export async function pipelineRoutes(app: FastifyInstance) {
         await sub.subscribe(channel, (message, _channel) => {
           reply.raw.write(`data: ${message}\n\n`)
         })
+        cleanRedis = async () => {
+          if (redisCleaned) return
+          redisCleaned = true
+          try { await sub.unsubscribe(channel) } catch {}
+          try { await sub.quit() } catch {}
+          try { await pub.quit() } catch {}
+        }
         request.raw.on('close', async () => {
           if (runId) killRunChildren(runId)
-          await sub.unsubscribe(channel)
-          await sub.quit()
-          await pub.quit()
+          await cleanRedis()
         })
         sse = (data: object) => { void pub.publish(channel, JSON.stringify(data)) }
       } else {
@@ -885,6 +895,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
         await finishRun('failed', { error: String(err) })
         sse({ type: 'error', message: String(err) })
       } finally {
+        await cleanRedis()
         releaseRunSlot(tenantId)
         if (runId) activeRunChildren.delete(runId)
       }

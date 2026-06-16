@@ -2,8 +2,6 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
-import { PostgresAuditSink } from '../audit/postgres-sink.js'
-import { TenantId, UserId, SessionId } from '@anvay/types'
 
 const K8S_CONNECTOR_TYPES = ['k8s', 'eks', 'gke']
 
@@ -134,7 +132,6 @@ export async function k8sRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
-      // Enforce namespace perimeter for non-admin sre users — fail closed on query error
       if (user.role !== 'admin') {
         let perimeterQueryFailed = false
         const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
@@ -151,17 +148,7 @@ export async function k8sRoutes(app: FastifyInstance) {
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }
-      const audit = new PostgresAuditSink(prisma, () => {})
-      void audit.append({
-        id: crypto.randomUUID(),
-        tenantId: TenantId(user.tenantId),
-        userId: UserId(user.sub),
-        sessionId: SessionId(''),
-        eventType: 'tool_call_allowed' as const,
-        payload: { action: 'k8s.pod.restart', namespace, pod: name },
-        createdAt: new Date(),
-      })
-      return reply.send({ ok: true, action: 'pod.restart', namespace, pod: name })
+      return reply.code(501).send({ ok: false, status: 'not_implemented', message: 'K8s write actions require connector wiring' })
     },
   )
 
@@ -192,17 +179,7 @@ export async function k8sRoutes(app: FastifyInstance) {
       if (typeof replicas !== 'number' || replicas < 0) {
         return reply.code(400).send({ error: 'replicas must be a non-negative number' })
       }
-      const audit = new PostgresAuditSink(prisma, () => {})
-      void audit.append({
-        id: crypto.randomUUID(),
-        tenantId: TenantId(user.tenantId),
-        userId: UserId(user.sub),
-        sessionId: SessionId(''),
-        eventType: 'connector_write' as any,
-        payload: { namespace, deployment: name, replicas },
-        createdAt: new Date(),
-      })
-      return reply.send({ ok: true, action: 'deployment.scale', namespace, deployment: name, replicas })
+      return reply.code(501).send({ ok: false, status: 'not_implemented', message: 'K8s write actions require connector wiring' })
     },
   )
 
@@ -230,17 +207,7 @@ export async function k8sRoutes(app: FastifyInstance) {
           return reply.code(403).send({ error: 'node not in your perimeter' })
         }
       }
-      const audit = new PostgresAuditSink(prisma, () => {})
-      void audit.append({
-        id: crypto.randomUUID(),
-        tenantId: TenantId(user.tenantId),
-        userId: UserId(user.sub),
-        sessionId: SessionId(''),
-        eventType: 'connector_write' as any,
-        payload: { node: name },
-        createdAt: new Date(),
-      })
-      return reply.send({ ok: true, action: 'node.cordon', node: name })
+      return reply.code(501).send({ ok: false, status: 'not_implemented', message: 'K8s write actions require connector wiring' })
     },
   )
 }

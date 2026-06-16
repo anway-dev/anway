@@ -89,7 +89,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'service_health_sweep',
     schedule: '*/5 * * * *',
     async run() {
-      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
           .catch(() => [] as { id: string }[])
       for (const { id } of tenants) {
         const sweep = new ServiceHealthSweep()
@@ -104,7 +104,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'hourly_slo_deploy',
     schedule: '0 * * * *',
     async run() {
-      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
           .catch(() => [] as { id: string }[])
       for (const { id } of tenants) {
         const slo = new SloBurnCheck()
@@ -122,7 +122,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'oncall_morning_brief',
     schedule: '0 8 * * *',
     async run() {
-      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors`
           .catch(() => [] as { id: string }[])
       for (const { id } of tenants) {
         const brief = new OncallMorningBrief()
@@ -138,7 +138,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'slo_burn_check',
     schedule: '*/5 * * * *',
     async run() {
-      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT id FROM tenants LIMIT 1000`.catch(() => [] as { id: string }[])
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT id FROM tenants`.catch(() => [] as { id: string }[])
       for (const t of tenants) {
         await withTenant(prisma, t.id, async (tx) => {
           const services = await tx.$queryRaw<{ id: string; name: string; metadata: Record<string, unknown> }[]>`

@@ -34,6 +34,7 @@ function runTerraform(
   environment: string,
   args: string[],
   onData: (chunk: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ code: number }> {
   return new Promise((resolve, reject) => {
     const cwd = path.join(TERRAFORM_ROOT, 'environments', environment)
@@ -43,6 +44,10 @@ function runTerraform(
     }
 
     const proc = spawn('terraform', args, { cwd, env: { ...process.env } })
+    const TERRAFORM_TIMEOUT_MS = 10 * 60 * 1000  // 10 min
+    const killTimer = setTimeout(() => proc.kill('SIGTERM'), TERRAFORM_TIMEOUT_MS)
+    proc.once('exit', () => clearTimeout(killTimer))
+    signal?.addEventListener('abort', () => proc.kill('SIGTERM'), { once: true })
 
     proc.stdout.on('data', (d: Buffer) => onData(d.toString()))
     proc.stderr.on('data', (d: Buffer) => onData(d.toString()))
@@ -77,8 +82,11 @@ export async function terraformRoutes(app: FastifyInstance) {
         }
       }
 
+      const abortController = new AbortController()
+      request.raw.on('close', () => abortController.abort())
+
       try {
-        const { code } = await runTerraform(env, ['plan', '-no-color'], send)
+        const { code } = await runTerraform(env, ['plan', '-no-color'], send, abortController.signal)
         reply.raw.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`)
       } catch (err) {
         request.log.error({ err }, 'terraform plan failed')
@@ -156,10 +164,11 @@ export async function terraformRoutes(app: FastifyInstance) {
             return reply.code(409).send({ error: 'deploy in progress', code: 'LOCK_HELD' })
           }
         } catch {
-          // Redis unavailable — skip lock (non-blocking, single-instance deploys)
+          // Redis unavailable — fail closed for apply
           if (redis) { try { await redis.disconnect() } catch { /* ignore */ } }
-          redis = null
-          lockKey = null
+          reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: 'could not acquire apply lock — retry' })}\n\n`)
+          reply.raw.end()
+          return
         }
       }
 
@@ -176,11 +185,21 @@ export async function terraformRoutes(app: FastifyInstance) {
         }
       }
 
+      const abortController = new AbortController()
+      request.raw.on('close', () => {
+        abortController.abort()
+        if (redis && lockKey) {
+          void redis.del(lockKey).catch(() => null)
+          void redis.quit().catch(() => null)
+        }
+      })
+
       try {
         const { code } = await runTerraform(
           env,
           ['apply', '-auto-approve', '-no-color'],
           send,
+          abortController.signal,
         )
         await appendAuditEvent({
           tenantId,

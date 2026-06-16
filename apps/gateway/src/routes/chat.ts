@@ -300,7 +300,7 @@ export async function chatRoutes(app: FastifyInstance) {
           : resolveProviderConfig(modelOverride))
       : dbConfig ?? resolveProviderConfig()
     if (!providerConfig) {
-      return reply.code(200).send({ error: 'No LLM provider configured', code: 'NO_PROVIDER' })
+      return reply.code(503).send({ error: 'No LLM provider configured', code: 'NO_PROVIDER' })
     }
 
     // Load connectors + tenant in parallel — both are best-effort
@@ -320,22 +320,12 @@ export async function chatRoutes(app: FastifyInstance) {
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
-    // Token budget enforcement — check Redis counter before processing
-    if (redisUrl) {
-      try {
-        const redisBudget = getRedisBudget()
-        if (redisBudget) {
-          const monthKey = `tokens:${tenantId}:${new Date().toISOString().slice(0, 7)}`
-          const used = parseInt(await redisBudget.get(monthKey) ?? '0', 10)
-          const budget = (dbTenant as { token_budget_monthly?: number } | null)?.token_budget_monthly ?? 1_000_000
-          if (used >= budget) {
-            return reply.code(429).send({ error: 'token budget exceeded', code: 'BUDGET_EXCEEDED', used, budget })
-          }
-        }
-      } catch {
-        // Redis unavailable — fail closed for budget enforcement
-        return reply.code(503).send({ error: 'budget service unavailable — retry', code: 'BUDGET_UNAVAILABLE' })
-      }
+    // Token budget enforcement — Postgres authoritative check (not Redis-only)
+    const usage = await loadTokenUsage(tenantId)
+    const monthly = usage.monthly ?? 0
+    const monthlyBudget = dbTenant?.token_budget_monthly
+    if (monthlyBudget != null && monthly >= Number(monthlyBudget)) {
+      return reply.code(429).send({ error: 'monthly token budget exceeded', code: 'BUDGET_EXCEEDED' })
     }
 
     // Build perimeter from connector config.
@@ -444,7 +434,6 @@ export async function chatRoutes(app: FastifyInstance) {
       request.log.error({ err }, 'audit write failed')
     })
     const sessionUsed = getSessionUsed(sessionId)
-    const usage = await loadTokenUsage(tenantId)
     const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed, usage.daily, usage.monthly)
 
     const knowledgeGraph: IKnowledgeGraph = new StructuralGraph(

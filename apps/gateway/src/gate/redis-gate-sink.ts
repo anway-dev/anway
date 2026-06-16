@@ -63,10 +63,13 @@ export class RedisGateSink implements IGateSink {
       const key = `${GATE_KEY_PREFIX}${gateId}:decision`
       const value = await c.get(key)
       if (value === 'approved' || value === 'rejected') return value
-      return null
-    } catch {
-      return null
-    }
+    } catch { /* fall through to Postgres */ }
+
+    // Postgres fallback — authoritative when Redis evicts/misses
+    const rows = await prisma.$queryRaw<Array<{ status: string }>>`
+      SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND status IN ('approved','rejected') LIMIT 1
+    `.catch(() => [])
+    return (rows[0]?.status as 'approved' | 'rejected') ?? null
   }
 
   async record(gateId: string, decision: 'approved' | 'rejected', _decidedBy: string): Promise<void> {

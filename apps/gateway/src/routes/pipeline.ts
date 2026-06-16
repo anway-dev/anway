@@ -569,6 +569,29 @@ export async function pipelineRoutes(app: FastifyInstance) {
           }
 
           case 'deploy': {
+            // Gate enforcement: if the pipeline has a gate.<env> stage preceding this deploy,
+            // it must have been approved before we allow execution.
+            const deployEnv = stage['env'] as string | undefined
+            const gateStageId = deployEnv ? `gate.${deployEnv}` : null
+            if (gateStageId) {
+              const hasGateStage = stages.some(s => s['id'] === gateStageId)
+              if (hasGateStage) {
+                const gateRuns = await withTenant(prisma, tenantId, (tx) =>
+                  tx.$queryRaw<Array<{ status: string }>>`
+                    SELECT status FROM pipeline_stage_runs
+                    WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+                      AND stage_id = ${gateStageId}
+                    ORDER BY started_at DESC LIMIT 1
+                  `
+                ).catch(() => [] as Array<{ status: string }>)
+                if (gateRuns[0]?.status !== 'approved') {
+                  sse({ type: 'error', message: `Gate ${gateStageId} must be approved before deploying to ${deployEnv}` })
+                  await finishRun('failed', { error: 'gate_required', gateStageId })
+                  break
+                }
+              }
+            }
+
             const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
             const imageTag = (pipelineMeta?.['imageTag'] as string | undefined)
               ?? (input && !['fail','failed'].includes(input) ? input : undefined)
@@ -600,6 +623,15 @@ export async function pipelineRoutes(app: FastifyInstance) {
                 sse({ type: 'log', line })
               }
               const deploySummary = `[DEMO] Deployed ${imageTag} to ${helmNamespace}`
+              if (gateStageId) {
+                await withTenant(prisma, tenantId, (tx) =>
+                  tx.$executeRaw`
+                    UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
+                    WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+                      AND stage_id = ${gateStageId} AND status = 'approved'
+                  `
+                ).catch(() => null)
+              }
               await finishRun('done', { summary: deploySummary, imageTag, namespace: helmNamespace, demo: true })
               sse({ type: 'done', output: { summary: deploySummary } })
               break
@@ -663,6 +695,15 @@ export async function pipelineRoutes(app: FastifyInstance) {
             })
 
             const deploySummary = `Deployed ${imageTag} to ${helmNamespace}`
+            if (gateStageId) {
+              await withTenant(prisma, tenantId, (tx) =>
+                tx.$executeRaw`
+                  UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
+                  WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+                    AND stage_id = ${gateStageId} AND status = 'approved'
+                `
+              ).catch(() => null)
+            }
             await finishRun('done', { summary: deploySummary, imageTag, namespace: helmNamespace })
             sse({ type: 'done', output: { summary: deploySummary } })
             break

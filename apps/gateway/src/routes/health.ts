@@ -55,10 +55,12 @@ export async function healthRoutes(app: FastifyInstance) {
   try {
     // Debug routes must not exist in production — schema introspection leak.
     if (process.env['NODE_ENV'] === 'production') return reply.code(404).send({ error: 'not found' })
-    const user = _request.user as { role?: string }
+    const user = _request.user as { role?: string; tenantId?: string }
     if (user.role !== 'admin') return reply.code(403).send({ error: 'admin required' })
     const { prisma } = await import('../db/client.js')
-    // Check plaintext columns have been dropped
+    const { withTenant } = await import('../db/prisma.js')
+    const tenantId = user.tenantId ?? '00000000-0000-0000-0000-000000000001'
+    // Check plaintext columns have been dropped (information_schema is not tenant-scoped)
     const cols = await prisma.$queryRaw<{ column_name: string }[]>`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public'
@@ -66,10 +68,12 @@ export async function healthRoutes(app: FastifyInstance) {
         OR (table_name='provider_config' AND column_name IN ('api_key')))
     `
     const plaintextColumns = cols.map(c => c.column_name)
-    // Check an enc column has v1: prefix
-    const samples = await prisma.$queryRaw<{ credentials_enc: string | null }[]>`
-      SELECT credentials_enc FROM connector_config LIMIT 1
-    `
+    // Check an enc column has v1: prefix — scoped to caller's tenant only
+    const samples = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ credentials_enc: string | null }[]>`
+        SELECT credentials_enc FROM connector_config LIMIT 1
+      `
+    ).catch(() => [] as { credentials_enc: string | null }[])
     const sampleEncPrefix = samples[0]?.credentials_enc?.startsWith('v1:') ?? false
     return { plaintextColumns, sampleEncPrefix }
   } catch (err) {

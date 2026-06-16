@@ -401,14 +401,17 @@ export async function chatRoutes(app: FastifyInstance) {
       registrationTools.map((t) => t.name),
     )
 
-    // Ownership check: reject if sessionId is claimed by a different tenant OR user
+    // Ownership check: reject if sessionId is claimed by a different tenant OR user.
+    // Fail closed on Redis error — client-supplied sessionId must not bypass ownership check.
     try {
       const existingSession = await sessionMemory.get(SessionId(sessionId))
       if (existingSession !== null &&
           (existingSession.tenantId !== tenantId || existingSession.userId !== userId)) {
         return reply.code(403).send({ error: 'session not found' })
       }
-    } catch { /* best-effort — don't block on Redis failure */ }
+    } catch {
+      return reply.code(503).send({ error: 'session store unavailable — retry' })
+    }
 
     // Initialize session identity for all memory implementations
     try {

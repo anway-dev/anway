@@ -114,9 +114,11 @@ export async function accessRoutes(app: FastifyInstance) {
           createdAt: new Date(),
         })
       }
-      return failed > 0
-        ? { ok: false, count, failed }
-        : { ok: true, count }
+      if (failed > 0) {
+        reply.code(207)
+        return { ok: false, count, failed }
+      }
+      return { ok: true, count }
     },
   )
 }

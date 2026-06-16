@@ -171,7 +171,7 @@ function mapOutcome(eventType: string, payload: Record<string, unknown>): AuditE
   const outcomeMap: Record<string, AuditEvent['outcome']> = {
     'query_completed': 'root_cause_found',
     'gate_required': 'gate_required',
-    'gate_approved': 'auto_approved',
+    'gate_approved': 'action_executed',
     'access_denied': 'access_denied',
     'action_executed': 'action_executed',
     'action_failed': 'action_failed',

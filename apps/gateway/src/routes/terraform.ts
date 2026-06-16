@@ -119,6 +119,9 @@ export async function terraformRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'gate approval required before apply' })
       }
       {
+        const { sub: applier } = request.user as { sub: string }
+        const sentinel = '00000000-0000-0000-0000-000000000000'
+        // SoD: sentinel-approved (Slack/auto) and self-approved gates are not valid for terraform apply
         const consumed = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
@@ -127,6 +130,9 @@ export async function terraformRoutes(app: FastifyInstance) {
               AND status = 'approved'
               AND created_at > NOW() - INTERVAL '24 hours'
               AND tool_args->>'env' = ${env}
+              AND decided_by IS NOT NULL
+              AND decided_by <> ${sentinel}::uuid
+              AND decided_by <> ${applier}::uuid
           `
         ).catch(() => 0)
 

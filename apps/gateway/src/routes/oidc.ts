@@ -131,33 +131,37 @@ export async function oidcRoutes(app: FastifyInstance) {
 
       // Upsert user — fall back to no oidc_sub column if migration not applied
       let userId: string | null = null
+      let userRole: string = 'dev'
       try {
         const rows = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<{ id: string }[]>`
+          tx.$queryRaw<{ id: string; role: string }[]>`
             INSERT INTO users (id, tenant_id, email, role, oidc_sub)
             VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'dev', ${sub})
             ON CONFLICT (tenant_id, email) DO UPDATE SET oidc_sub = EXCLUDED.oidc_sub
-            RETURNING id
+            RETURNING id, role
           `
         )
         userId = rows[0]?.id ?? null
+        userRole = rows[0]?.role ?? 'dev'
       } catch {
         try {
           const rows = await withTenant(prisma, tenantId, (tx) =>
-            tx.$queryRaw<{ id: string }[]>`
+            tx.$queryRaw<{ id: string; role: string }[]>`
               INSERT INTO users (id, tenant_id, email, role)
               VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'dev')
               ON CONFLICT (tenant_id, email) DO NOTHING
-              RETURNING id
+              RETURNING id, role
             `
           )
           if (rows.length === 0) {
             const existing = await withTenant(prisma, tenantId, (tx) =>
-              tx.$queryRaw<{ id: string }[]>`SELECT id FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1`
+              tx.$queryRaw<{ id: string; role: string }[]>`SELECT id, role FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1`
             )
             userId = existing[0]?.id ?? null
+            userRole = existing[0]?.role ?? 'dev'
           } else {
             userId = rows[0]!.id
+            userRole = rows[0]!.role
           }
         } catch { /* fall through */ }
       }
@@ -169,11 +173,16 @@ export async function oidcRoutes(app: FastifyInstance) {
         ).catch(() => {})
       } catch { /* tenant table may differ */ }
 
+      if (!userId) {
+        request.log.error({ sub, email }, 'user upsert failed during OIDC callback — refusing to mint token')
+        return reply.code(500).send({ error: 'authentication failed' })
+      }
+
       const token = app.jwt.sign({
-        sub: userId ?? sub,
+        sub: userId,
         email,
         tenantId,
-        role: 'dev',
+        role: userRole,
       })
 
       reply.clearCookie('oidc_state', { path: '/auth/oidc' })

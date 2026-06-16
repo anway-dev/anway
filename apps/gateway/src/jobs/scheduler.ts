@@ -1,6 +1,6 @@
 // Cron jobs factory — creates IScheduler backed by BullMQ.
 // node-cron removed per CLAUDE.md §11: no in-process cron in production.
-import { prisma } from '../db/client.js'
+import { prisma, servicePrisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief, CloudSecurityScan, CostAnomalyDetection, IncidentRetrospective, DataRetentionJob } from './cron-monitors.js'
 import { SchedulerFactory } from '../scheduler/factory.js'
@@ -89,7 +89,8 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'service_health_sweep',
     schedule: '*/5 * * * *',
     async run() {
-      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+          .catch(() => [] as { id: string }[])
       for (const { id } of tenants) {
         const sweep = new ServiceHealthSweep()
         const result = await sweep.run(id)
@@ -103,7 +104,8 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'hourly_slo_deploy',
     schedule: '0 * * * *',
     async run() {
-      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+          .catch(() => [] as { id: string }[])
       for (const { id } of tenants) {
         const slo = new SloBurnCheck()
         const sloResult = await slo.run(id)
@@ -120,7 +122,8 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'oncall_morning_brief',
     schedule: '0 8 * * *',
     async run() {
-      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT DISTINCT tenant_id AS id FROM connectors LIMIT 1000`
+          .catch(() => [] as { id: string }[])
       for (const { id } of tenants) {
         const brief = new OncallMorningBrief()
         const result = await brief.run(id)
@@ -135,7 +138,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     name: 'slo_burn_check',
     schedule: '*/5 * * * *',
     async run() {
-      const tenants = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM tenants LIMIT 1000`
+      const tenants = await servicePrisma.$queryRaw<{ id: string }[]>`SELECT id FROM tenants LIMIT 1000`.catch(() => [] as { id: string }[])
       for (const t of tenants) {
         await withTenant(prisma, t.id, async (tx) => {
           const services = await tx.$queryRaw<{ id: string; name: string; metadata: Record<string, unknown> }[]>`

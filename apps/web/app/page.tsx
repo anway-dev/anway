@@ -113,9 +113,12 @@ export default function App() {
       })
       .catch(() => {})
 
-    // Fetch user identity
+    // Fetch user identity — redirect to login on expired session
     fetch("/api/auth/me")
-      .then(r => r.ok ? r.json() as Promise<{ email: string; role: string }> : null)
+      .then(r => {
+        if (r.status === 401) { window.location.href = '/login'; return null }
+        return r.ok ? r.json() as Promise<{ email: string; role: string }> : null
+      })
       .then(d => {
         if (d) {
           if (d.email) setUserEmail(d.email)
@@ -250,7 +253,7 @@ export default function App() {
               try {
                 const r = await fetch('/api/auth/demo', { method: 'POST' })
                 const d = await r.json() as { token?: string }
-                if (d.token) { document.cookie = `anvay-token=${d.token}; path=/; max-age=86400`; window.location.reload() }
+                if (d.token) { await fetch('/api/auth/set-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: d.token }) }); window.location.reload() }
               } catch { /* ignore */ }
             }}
             style={{ marginTop: '8px', width: '100%', padding: '6px', background: '#1a2a1a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '5px', color: '#10b981', fontSize: '11px', cursor: 'pointer' }}

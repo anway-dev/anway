@@ -17,6 +17,14 @@ export default fp(async function requestLoggerPlugin(app: FastifyInstance) {
     request.traceId = traceId
   })
 
+  app.addHook('preHandler', async (request) => {
+    if (request.user) {
+      const u = request.user as { tenantId?: string; sub?: string }
+      request.tenantId = u.tenantId
+      request.userId = u.sub
+    }
+  })
+
   app.addHook('onResponse', async (request, reply) => {
     request.log.info(
       {

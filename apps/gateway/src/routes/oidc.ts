@@ -135,7 +135,7 @@ export async function oidcRoutes(app: FastifyInstance) {
         const rows = await withTenant(prisma, tenantId, (tx) =>
           tx.$queryRaw<{ id: string }[]>`
             INSERT INTO users (id, tenant_id, email, role, oidc_sub)
-            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'member', ${sub})
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'dev', ${sub})
             ON CONFLICT (tenant_id, email) DO UPDATE SET oidc_sub = EXCLUDED.oidc_sub
             RETURNING id
           `
@@ -146,7 +146,7 @@ export async function oidcRoutes(app: FastifyInstance) {
           const rows = await withTenant(prisma, tenantId, (tx) =>
             tx.$queryRaw<{ id: string }[]>`
               INSERT INTO users (id, tenant_id, email, role)
-              VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'member')
+              VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'dev')
               ON CONFLICT (tenant_id, email) DO NOTHING
               RETURNING id
             `
@@ -173,7 +173,7 @@ export async function oidcRoutes(app: FastifyInstance) {
         sub: userId ?? sub,
         email,
         tenantId,
-        role: 'member',
+        role: 'dev',
       })
 
       reply.clearCookie('oidc_state', { path: '/auth/oidc' })

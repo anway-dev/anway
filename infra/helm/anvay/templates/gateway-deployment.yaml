@@ -20,17 +20,11 @@ spec:
           imagePullPolicy: {{ .Values.image.gateway.pullPolicy }}
           ports:
             - containerPort: 4000
-          env:
-            - name: JWT_SECRET
-              value: {{ .Values.env.jwtSecret | quote }}
-            - name: ANVAY_ENCRYPTION_KEY
-              value: {{ .Values.env.encryptionKey | quote }}
-            - name: DATABASE_URL
-              value: {{ .Values.env.databaseUrl | quote }}
-            - name: REDIS_URL
-              value: {{ .Values.env.redisUrl | quote }}
-            - name: OLLAMA_ENDPOINT
-              value: {{ .Values.env.ollamaEndpoint | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-gateway-config
+            - secretRef:
+                name: {{ .Release.Name }}-gateway-secrets
           resources:
             requests:
               cpu: "250m"

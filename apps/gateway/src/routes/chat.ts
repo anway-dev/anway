@@ -268,7 +268,7 @@ export async function chatRoutes(app: FastifyInstance) {
         type: 'object',
         required: ['query', 'sessionId'],
         properties: {
-          query: { type: 'string', minLength: 1 },
+          query: { type: 'string', minLength: 1, maxLength: 32768 },
           sessionId: { type: 'string', minLength: 1 },
           model: {
             type: 'object',
@@ -459,9 +459,10 @@ export async function chatRoutes(app: FastifyInstance) {
     reply.header('Connection', 'keep-alive')
     reply.header('X-Accel-Buffering', 'no')
 
-    // Create abort controller for client disconnect
+    // Create abort controller for client disconnect or 120s LLM timeout
     const abortController = new AbortController()
-    request.raw.on('close', () => abortController.abort())
+    const llmTimeout = setTimeout(() => abortController.abort(), 120_000)
+    request.raw.on('close', () => { clearTimeout(llmTimeout); abortController.abort() })
 
     // Redis SSE fan-out — enables multi-pod gateway deployments
     const chatRedisUrl = process.env['REDIS_URL']
@@ -558,6 +559,7 @@ export async function chatRoutes(app: FastifyInstance) {
           stream.push(`data: ${JSON.stringify(errPayload)}\n\n`)
         }
       } finally {
+        clearTimeout(llmTimeout)
         if (totalTokens > 0) recordSessionUsed(sessionId, totalTokens)
         stream.push(null)
         // Trigger session summarisation if turns exceed threshold

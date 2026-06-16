@@ -48,6 +48,10 @@ export async function k8sRoutes(app: FastifyInstance) {
     if (enabledConnectors.length === 0) {
       return { connected: false, namespaces: [], workloads: [], events: [], summary: null }
     }
+    // Non-admin with empty perimeter has no namespace access — hide connector count
+    if (allowedNs !== null && allowedNs.length === 0 && !allowedNs.includes('*')) {
+      return { connected: false, namespaces: [], workloads: [], events: [], summary: null }
+    }
 
     const entities = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<EntityRow[]>`
@@ -207,8 +211,25 @@ export async function k8sRoutes(app: FastifyInstance) {
     '/api/k8s/nodes/:name/cordon',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
-      const user = request.user as { tenantId: string; sub: string }
+      const user = request.user as { tenantId: string; sub: string; role?: string }
       const { name } = request.params
+      // Enforce write perimeter for non-admin users — node name treated as scope
+      if (user.role !== 'admin') {
+        let perimeterQueryFailed = false
+        const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
+          tx.$queryRaw<{ write_scopes: string[] }[]>`
+            SELECT write_scopes FROM user_perimeters
+            WHERE tenant_id = ${user.tenantId}::uuid AND user_id = ${user.sub}::uuid
+              AND connector_name = ANY(ARRAY['k8s','eks','gke']::text[])
+            LIMIT 1
+          `
+        ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
+        if (perimeterQueryFailed) return reply.code(403).send({ error: 'perimeter check failed' })
+        const allowed = perimeters[0]?.write_scopes ?? []
+        if (!allowed.includes('*') && !allowed.includes(name)) {
+          return reply.code(403).send({ error: 'node not in your perimeter' })
+        }
+      }
       const audit = new PostgresAuditSink(prisma, () => {})
       void audit.append({
         id: crypto.randomUUID(),

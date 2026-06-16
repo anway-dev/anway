@@ -102,6 +102,29 @@ export async function automationsRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: { id: string }; Body: Partial<{ enabled: boolean; condition: Record<string, unknown>; actions: TriggerAction[] }> }>('/api/automations/triggers/:id', {
     preHandler: [app.authenticate, requireRole('admin', 'sre')],
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          enabled: { type: 'boolean' },
+          condition: { type: 'object' },
+          actions: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              required: ['type'],
+              additionalProperties: false,
+              properties: {
+                type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate'] },
+                params: { type: 'object' },
+              },
+            },
+          },
+        },
+      },
+    },
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params

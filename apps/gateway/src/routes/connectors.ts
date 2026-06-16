@@ -267,7 +267,10 @@ async function getBootstrapPub(): Promise<import('redis').RedisClientType | null
         await client.connect()
         _pub = client
         return client
-      })()
+      })().catch((err) => {
+        _pubPromise = null  // allow retry on next call
+        throw err
+      })
     }
     return _pubPromise
   }

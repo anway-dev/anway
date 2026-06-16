@@ -129,7 +129,8 @@ test.describe('CERT E: Graph indexing', () => {
       async () => {
         const r = await request.get(`${GATEWAY}/api/services`, { headers })
         if (r.status() !== 200) return []
-        return await r.json() as Array<{ name: string }>
+        const body = await r.json() as { data?: Array<{ name: string }> } | Array<{ name: string }>
+        return Array.isArray(body) ? body : (body as { data?: Array<{ name: string }> }).data ?? []
       },
       (list) => list.length > 0,
       { intervalMs: 2000, timeoutMs: 30000 },
@@ -180,7 +181,8 @@ test.describe('CERT F: Alert flow — webhook → incident → signals', () => {
       async () => {
         const r = await request.get(`${GATEWAY}/api/incidents`, { headers })
         if (r.status() !== 200) return undefined
-        const list = await r.json() as Array<{ title: string; severity: string }>
+        const body = await r.json() as { data?: Array<{ title: string; severity: string }> } | Array<{ title: string; severity: string }>
+        const list = Array.isArray(body) ? body : (body as { data?: Array<{ title: string; severity: string }> }).data ?? []
         return list.find(i => i.title === alertName)
       },
       (i) => i !== undefined,
@@ -196,7 +198,8 @@ test.describe('CERT F: Alert flow — webhook → incident → signals', () => {
       async () => {
         const r = await request.get(`${GATEWAY}/api/alerts`, { headers })
         if (r.status() !== 200) return undefined
-        const list = await r.json() as Array<{ title: string }>
+        const body = await r.json() as { data?: Array<{ title: string }> } | Array<{ title: string }>
+        const list = Array.isArray(body) ? body : (body as { data?: Array<{ title: string }> }).data ?? []
         return list.find(a => a.title === alertName)
       },
       (a) => a !== undefined,
@@ -290,8 +293,8 @@ test.describe('CERT H: Audit', () => {
   test('H.1 audit log queryable and contains entries', async ({ request }) => {
     const r = await request.get(`${GATEWAY}/api/audit`, { headers })
     expect(r.status()).toBe(200)
-    const body = await r.json() as Array<unknown> | { events?: Array<unknown> }
-    const events = Array.isArray(body) ? body : (body.events ?? [])
+    const body = await r.json() as Array<unknown> | { data?: Array<unknown>; events?: Array<unknown> }
+    const events = Array.isArray(body) ? body : ((body as { data?: Array<unknown>; events?: Array<unknown> }).data ?? (body as { events?: Array<unknown> }).events ?? [])
     // Actions above (connector register, triggers, webhook) must have produced audit entries
     expect(events.length, 'audit log must contain entries after certified actions').toBeGreaterThan(0)
   })
@@ -432,7 +435,8 @@ test.describe('CERT L: graph triage', () => {
     // triage endpoint resolves a primary entity + its one-hop neighbourhood.
     const svcResp = await request.get(`${GATEWAY}/api/services`, { headers })
     expect(svcResp.status(), 'services must be queryable for triage precondition').toBe(200)
-    const services = await svcResp.json() as Array<{ name: string }>
+    const svcBody = await svcResp.json() as Array<{ name: string }> | { data?: Array<{ name: string }> }
+    const services = Array.isArray(svcBody) ? svcBody : ((svcBody as { data?: Array<{ name: string }> }).data ?? [])
     expect(
       services.length,
       'CERT FAIL: no services indexed — triage has no entity to resolve'

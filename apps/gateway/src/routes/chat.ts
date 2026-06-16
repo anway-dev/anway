@@ -332,7 +332,10 @@ export async function chatRoutes(app: FastifyInstance) {
             return reply.code(429).send({ error: 'token budget exceeded', code: 'BUDGET_EXCEEDED', used, budget })
           }
         }
-      } catch { /* Redis may be unavailable — skip budget check */ }
+      } catch {
+        // Redis unavailable — fail closed for budget enforcement
+        return reply.code(503).send({ error: 'budget service unavailable — retry', code: 'BUDGET_UNAVAILABLE' })
+      }
     }
 
     // Build perimeter from connector config.
@@ -364,11 +367,14 @@ export async function chatRoutes(app: FastifyInstance) {
       const scope = connectorScopes[i]!
       const row = userPerimeterRows.find(r => r.connector_name === scope.connectorId)
       if (!row) continue
-      // When a user perimeter row exists, use its scopes directly — empty = deny, don't fall back to connector default
+      // Intersect user perimeter with connector manifest defaults.
+      // A user cannot exceed what the connector manifest declares — prevents a rogue
+      // admin granting write:['*'] on a read-only connector via user_perimeters.
       connectorScopes[i] = {
         connectorId: scope.connectorId,
         read: row.read_scopes,
-        write: row.write_scopes,
+        // Deny write if the manifest-derived default is empty (read-only connector)
+        write: scope.write.length === 0 ? [] : row.write_scopes,
       }
     }
 
@@ -488,7 +494,7 @@ export async function chatRoutes(app: FastifyInstance) {
       await chatPub.connect()
       await chatSub.connect()
       const channel = `sse:chat:${sessionId}`
-      await chatSub.subscribe(channel, (_channel, message) => {
+      await chatSub.subscribe(channel, (message, _channel) => {
         reply.raw.write(`data: ${message}\n\n`)
       })
       request.raw.on('close', async () => {

@@ -355,9 +355,15 @@ export async function pipelineRoutes(app: FastifyInstance) {
       ).catch(() => [] as Array<{ id: string }>)
 
       const runId = runRows[0]?.id ?? null
+      if (!runId) {
+        reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: 'failed to create run record' })}\n\n`)
+        reply.raw.end()
+        releaseRunSlot(tenantId)
+        return
+      }
 
       // Track children for this run so we can kill on disconnect or cancel
-      if (runId) activeRunChildren.set(runId, [])
+      activeRunChildren.set(runId, [])
 
       const trackChild = (child: ChildProcess): ChildProcess => {
         if (runId) {
@@ -380,7 +386,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
         const pub = createClient({ url: redisUrl }) as RedisClientType
         await pub.connect()
         const sub = pub.duplicate()
-        await sub.subscribe(channel, (_channel, message) => {
+        await sub.subscribe(channel, (message, _channel) => {
           reply.raw.write(`data: ${message}\n\n`)
         })
         request.raw.on('close', async () => {
@@ -576,15 +582,16 @@ export async function pipelineRoutes(app: FastifyInstance) {
             if (gateStageId) {
               const hasGateStage = stages.some(s => s['id'] === gateStageId)
               if (hasGateStage) {
-                const gateRuns = await withTenant(prisma, tenantId, (tx) =>
-                  tx.$queryRaw<Array<{ status: string }>>`
-                    SELECT status FROM pipeline_stage_runs
+                // Atomically consume the gate before deploy starts — prevents concurrent deploys
+                // both seeing 'approved' and proceeding before either marks it consumed.
+                const consumed = await withTenant(prisma, tenantId, (tx) =>
+                  tx.$executeRaw`
+                    UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
                     WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
-                      AND stage_id = ${gateStageId}
-                    ORDER BY started_at DESC LIMIT 1
+                      AND stage_id = ${gateStageId} AND status = 'approved'
                   `
-                ).catch(() => [] as Array<{ status: string }>)
-                if (gateRuns[0]?.status !== 'approved') {
+                ).catch(() => 0)
+                if (Number(consumed) === 0) {
                   sse({ type: 'error', message: `Gate ${gateStageId} must be approved before deploying to ${deployEnv}` })
                   await finishRun('failed', { error: 'gate_required', gateStageId })
                   break
@@ -623,15 +630,6 @@ export async function pipelineRoutes(app: FastifyInstance) {
                 sse({ type: 'log', line })
               }
               const deploySummary = `[DEMO] Deployed ${imageTag} to ${helmNamespace}`
-              if (gateStageId) {
-                await withTenant(prisma, tenantId, (tx) =>
-                  tx.$executeRaw`
-                    UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
-                    WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
-                      AND stage_id = ${gateStageId} AND status = 'approved'
-                  `
-                ).catch(() => null)
-              }
               await finishRun('done', { summary: deploySummary, imageTag, namespace: helmNamespace, demo: true })
               sse({ type: 'done', output: { summary: deploySummary } })
               break
@@ -695,15 +693,6 @@ export async function pipelineRoutes(app: FastifyInstance) {
             })
 
             const deploySummary = `Deployed ${imageTag} to ${helmNamespace}`
-            if (gateStageId) {
-              await withTenant(prisma, tenantId, (tx) =>
-                tx.$executeRaw`
-                  UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
-                  WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
-                    AND stage_id = ${gateStageId} AND status = 'approved'
-                `
-              ).catch(() => null)
-            }
             await finishRun('done', { summary: deploySummary, imageTag, namespace: helmNamespace })
             sse({ type: 'done', output: { summary: deploySummary } })
             break
@@ -780,7 +769,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             if (monitorFailed) {
               const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
               const prevState = pipelineMeta?.['previousTfState']
-              const requireRollbackGate = pipelineMeta?.['requireRollbackGate'] === true
+              const requireRollbackGate = pipelineMeta?.['requireRollbackGate'] !== false
 
               await finishRun('failed', { summary: `Monitor failed for ${envLabel ?? stageId}` })
               sse({ type: 'done', output: { summary: `Monitor failed for ${envLabel ?? stageId}` } })
@@ -981,7 +970,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
       ).catch(() => [] as Array<{ user_id: string | null }>)
       const requesterId = gateRequestRows[0]?.user_id ?? null
       const approverId = (request.user as { sub: string }).sub
-      if (requesterId && requesterId === approverId) {
+      // Fail closed: no requester row means we cannot verify SoD — deny approval
+      if (requesterId === null) {
+        return reply.code(409).send({ error: 'gate request not found or already decided' })
+      }
+      if (requesterId === approverId) {
         return reply.code(403).send({ error: 'cannot approve your own gate request' })
       }
 

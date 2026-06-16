@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { redactSecrets } from '../utils/redact.js'
 
 interface AuditEvent {
   id: string
@@ -37,11 +38,11 @@ export async function appendAuditEvent(params: {
       INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
       VALUES (gen_random_uuid(), ${params.tenantId}::uuid, ${params.userId}::uuid,
               ${params.action},
-              ${JSON.stringify({
+              ${JSON.stringify(redactSecrets({
                 resource: params.resource,
                 outcome: params.outcome,
                 ...params.metadata,
-              })}::jsonb,
+              }) as object)}::jsonb,
               NOW())
     `
   )

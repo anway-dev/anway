@@ -125,6 +125,11 @@ export async function oidcRoutes(app: FastifyInstance) {
 
       const claims = tokens.claims()
       if (!claims) return reply.code(500).send({ error: 'OIDC callback failed — no claims in token' })
+      // Require email_verified to prevent account takeover via unverified email assertion
+      const emailVerified = claims['email_verified']
+      if (emailVerified === false) {
+        return reply.code(403).send({ error: 'OIDC login requires a verified email address' })
+      }
       const email = (claims['email'] as string) ?? `${claims['sub']}@oidc.local`
       const sub = (claims['sub'] as string) ?? 'unknown'
       const tenantId = decoded.tenantId || cfg.tenantId

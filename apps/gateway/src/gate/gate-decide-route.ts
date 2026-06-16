@@ -72,6 +72,20 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       const { sub: userId, tenantId } = request.user as { sub: string; tenantId: string }
 
       if (redisUrl) {
+        // Separation of duties: cannot approve/reject your own gate request
+        const gateRows = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ user_id: string }>>`
+            SELECT user_id FROM gate_events
+            WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending' LIMIT 1
+          `
+        ).catch(() => [] as Array<{ user_id: string }>)
+        if (gateRows.length === 0) {
+          return reply.code(404).send({ error: 'gate not found or already decided' })
+        }
+        if (gateRows[0]!.user_id === userId) {
+          return reply.code(403).send({ error: 'cannot approve your own gate request' })
+        }
+
         // Redis path: gate_events row required; decision published via Redis
         const affected = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`

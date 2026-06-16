@@ -1,4 +1,4 @@
-import Fastify from 'fastify'
+import Fastify, { type FastifyError } from 'fastify'
 import sensible from '@fastify/sensible'
 import cookie from '@fastify/cookie'
 import corsPlugin from './plugins/cors.js'
@@ -98,13 +98,26 @@ export async function buildApp() {
   await app.register(environmentRoutes)
   await app.register(slackCommandRoutes)
 
-  app.setErrorHandler((error, request, reply) => {
+  app.setErrorHandler((error: FastifyError, request, reply) => {
     if (process.env['SENTRY_DSN']) {
       Sentry.withScope((scope) => {
         scope.setTag('tenantId', (request.user as { tenantId?: string })?.tenantId ?? 'unknown')
         Sentry.captureException(error)
       })
     }
+    // Pass through explicit status codes (validation errors, intentional 4xx)
+    const status = error.statusCode ?? 500
+    if (status < 500) {
+      return reply.code(status).send({
+        error: error.message,
+        // Include AJV validation detail when present
+        ...(error.validation ? { validation: error.validation } : {}),
+      })
+    }
+    // Map Prisma unique/FK constraint errors to 409/400 instead of 500
+    const prismaCode = (error as { code?: string }).code
+    if (prismaCode === 'P2002') return reply.code(409).send({ error: 'Conflict — resource already exists' })
+    if (prismaCode === 'P2003') return reply.code(400).send({ error: 'Invalid reference — related resource not found' })
     request.log.error(error)
     return reply.code(500).send({ error: 'Internal server error' })
   })

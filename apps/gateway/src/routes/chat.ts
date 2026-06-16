@@ -400,6 +400,14 @@ export async function chatRoutes(app: FastifyInstance) {
       registrationTools.map((t) => t.name),
     )
 
+    // Ownership check: reject if sessionId is already claimed by another tenant
+    try {
+      const existingSession = await sessionMemory.get(SessionId(sessionId))
+      if (existingSession !== null && existingSession.tenantId !== tenantId) {
+        return reply.code(403).send({ error: 'session not found' })
+      }
+    } catch { /* best-effort — don't block on Redis failure */ }
+
     // Initialize session identity for all memory implementations
     try {
       await sessionMemory.initSession?.({

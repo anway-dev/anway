@@ -11,8 +11,38 @@ import type { FastifyLoggerInstance } from 'fastify'
 // Module-level EventEmitter for single-pod SSE fan-out (no Redis)
 import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 const stageRunEvents = new EventEmitter()
 stageRunEvents.setMaxListeners(200)
+
+// Per-tenant concurrency limit for expensive stage runs (docker build, helm, terraform)
+const MAX_CONCURRENT_RUNS_PER_TENANT = 3
+const tenantRunCount = new Map<string, number>()
+
+function acquireRunSlot(tenantId: string): boolean {
+  const current = tenantRunCount.get(tenantId) ?? 0
+  if (current >= MAX_CONCURRENT_RUNS_PER_TENANT) return false
+  tenantRunCount.set(tenantId, current + 1)
+  return true
+}
+
+function releaseRunSlot(tenantId: string): void {
+  const current = tenantRunCount.get(tenantId) ?? 1
+  const next = Math.max(0, current - 1)
+  if (next === 0) tenantRunCount.delete(tenantId)
+  else tenantRunCount.set(tenantId, next)
+}
+
+// Track active child processes by runId so we can kill on disconnect or cancel
+const activeRunChildren = new Map<string, ChildProcess[]>()
+
+function killRunChildren(runId: string): void {
+  const children = activeRunChildren.get(runId) ?? []
+  for (const child of children) {
+    try { child.kill('SIGTERM') } catch { /* already exited */ }
+  }
+  activeRunChildren.delete(runId)
+}
 
 interface PipelineRow {
   id: string
@@ -303,6 +333,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
       const stage = stages.find(s => s['id'] === stageId)
       if (!stage) return reply.code(404).send({ error: 'stage not found' })
 
+      // Rate limit: max 3 concurrent stage runs per tenant to prevent resource exhaustion
+      if (!acquireRunSlot(tenantId)) {
+        return reply.code(429).send({ error: 'too many concurrent stage runs — try again shortly' })
+      }
+
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -321,6 +356,22 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
       const runId = runRows[0]?.id ?? null
 
+      // Track children for this run so we can kill on disconnect or cancel
+      if (runId) activeRunChildren.set(runId, [])
+
+      const trackChild = (child: ChildProcess): ChildProcess => {
+        if (runId) {
+          const list = activeRunChildren.get(runId) ?? []
+          list.push(child)
+          activeRunChildren.set(runId, list)
+          child.once('exit', () => {
+            const current = activeRunChildren.get(runId ?? '') ?? []
+            activeRunChildren.set(runId ?? '', current.filter(c => c !== child))
+          })
+        }
+        return child
+      }
+
       let sse: (data: object) => void
       const redisUrl = process.env['REDIS_URL']
 
@@ -333,12 +384,14 @@ export async function pipelineRoutes(app: FastifyInstance) {
           reply.raw.write(`data: ${message}\n\n`)
         })
         request.raw.on('close', async () => {
+          if (runId) killRunChildren(runId)
           await sub.unsubscribe(channel)
           await sub.quit()
           await pub.quit()
         })
         sse = (data: object) => { void pub.publish(channel, JSON.stringify(data)) }
       } else {
+        request.raw.on('close', () => { if (runId) killRunChildren(runId) })
         sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
       }
 
@@ -416,18 +469,18 @@ export async function pipelineRoutes(app: FastifyInstance) {
               for (const [context, image] of [['apps/gateway', gatewayImage], ['apps/web', webImage]] as const) {
                 sse({ type: 'log', line: `→ docker build ${context} -t ${image}` })
                 await new Promise<void>((resolve, reject) => {
-                  const child = spawn('docker', ['build', context, '-t', image, '-f', `${context}/Dockerfile`], {
+                  const child = trackChild(spawn('docker', ['build', context, '-t', image, '-f', `${context}/Dockerfile`], {
                     stdio: ['ignore', 'pipe', 'pipe'],
-                  })
-                  child.stdout.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
-                  child.stderr.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+                  }))
+                  child.stdout!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+                  child.stderr!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
                   child.on('close', (code: number) => code === 0 ? resolve() : reject(new Error(`docker build failed (${code})`)))
                   child.on('error', reject)
                   setTimeout(() => { child.kill(); reject(new Error('docker build timed out')) }, 600_000)
                 })
                 await new Promise<void>((resolve, reject) => {
-                  const child = spawn('docker', ['push', image], { stdio: ['ignore', 'pipe', 'pipe'] })
-                  child.stdout.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+                  const child = trackChild(spawn('docker', ['push', image], { stdio: ['ignore', 'pipe', 'pipe'] }))
+                  child.stdout!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
                   child.on('close', (code: number) => code === 0 ? resolve() : reject(new Error(`docker push failed (${code})`)))
                   child.on('error', reject)
                   setTimeout(() => { child.kill(); reject(new Error('docker push timed out')) }, 300_000)
@@ -485,11 +538,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
               sse({ type: 'log', line: `→ tsc --noEmit (${label})` })
               const result = await new Promise<{ code: number; output: string }>((resolve) => {
                 let out = ''
-                const child = spawn('npx', ['tsc', '--noEmit', '-p', tsconfig], {
+                const child = trackChild(spawn('npx', ['tsc', '--noEmit', '-p', tsconfig], {
                   stdio: ['ignore', 'pipe', 'pipe'],
-                })
-                child.stdout.on('data', (d: Buffer) => { out += d.toString() })
-                child.stderr.on('data', (d: Buffer) => { out += d.toString() })
+                }))
+                child.stdout!.on('data', (d: Buffer) => { out += d.toString() })
+                child.stderr!.on('data', (d: Buffer) => { out += d.toString() })
                 child.on('close', (code: number) => resolve({ code: code ?? 1, output: out }))
                 child.on('error', (err) => resolve({ code: 1, output: err.message }))
                 setTimeout(() => { child.kill(); resolve({ code: 1, output: 'tsc timed out' }) }, 120_000)
@@ -571,16 +624,16 @@ export async function pipelineRoutes(app: FastifyInstance) {
             sse({ type: 'log', line: `→ helm ${helmArgs.join(' ')}` })
 
             await new Promise<void>((resolve, reject) => {
-              const child = spawn('helm', helmArgs, {
+              const child = trackChild(spawn('helm', helmArgs, {
                 env: { ...process.env, KUBECONFIG: kubeconfig },
                 stdio: ['ignore', 'pipe', 'pipe'],
-              })
-              child.stdout.on('data', (d: Buffer) => {
+              }))
+              child.stdout!.on('data', (d: Buffer) => {
                 for (const line of d.toString().split('\n').filter(Boolean)) {
                   sse({ type: 'log', line })
                 }
               })
-              child.stderr.on('data', (d: Buffer) => {
+              child.stderr!.on('data', (d: Buffer) => {
                 for (const line of d.toString().split('\n').filter(Boolean)) {
                   sse({ type: 'log', line })
                 }
@@ -593,7 +646,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             // Run prisma migrate after deploy
             sse({ type: 'log', line: '→ Running database migrations…' })
             await new Promise<void>((resolve) => {
-              const child = spawn('kubectl', [
+              const child = trackChild(spawn('kubectl', [
                 'run', `migrate-${Date.now()}`,
                 '--image', `${registry ? `${registry}/anvay-gateway` : 'anvay-gateway'}:${imageTag}`,
                 '--namespace', helmNamespace,
@@ -602,9 +655,9 @@ export async function pipelineRoutes(app: FastifyInstance) {
               ], {
                 env: { ...process.env, KUBECONFIG: kubeconfig },
                 stdio: ['ignore', 'pipe', 'pipe'],
-              })
-              child.stdout.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
-              child.stderr.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+              }))
+              child.stdout!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+              child.stderr!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
               child.on('close', () => resolve())
               child.on('error', () => resolve())
             })
@@ -798,9 +851,45 @@ export async function pipelineRoutes(app: FastifyInstance) {
       } catch (err) {
         await finishRun('failed', { error: String(err) })
         sse({ type: 'error', message: String(err) })
+      } finally {
+        releaseRunSlot(tenantId)
+        if (runId) activeRunChildren.delete(runId)
       }
 
       reply.raw.end()
+    },
+  )
+
+  // POST /api/pipelines/runs/:runId/cancel — kill a running stage
+  app.post<{ Params: { runId: string } }>(
+    '/api/pipelines/runs/:runId/cancel',
+    { preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { runId } = request.params
+
+      // Verify the run belongs to this tenant
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string; status: string }>>`
+          SELECT id, status FROM pipeline_stage_runs
+          WHERE id = ${runId}::uuid AND tenant_id = ${tenantId}::uuid LIMIT 1
+        `
+      ).catch(() => [] as Array<{ id: string; status: string }>)
+
+      if (rows.length === 0) return reply.code(404).send({ error: 'run not found' })
+      if (rows[0]!.status !== 'running') return reply.code(409).send({ error: 'run is not in progress' })
+
+      killRunChildren(runId)
+
+      await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw`
+          UPDATE pipeline_stage_runs
+          SET status = 'cancelled', finished_at = now()
+          WHERE id = ${runId}::uuid AND status = 'running'
+        `
+      ).catch(() => null)
+
+      return reply.send({ ok: true, runId, status: 'cancelled' })
     },
   )
 

@@ -39,7 +39,7 @@ interface IncidentRow {
 export async function alertRoutes(app: FastifyInstance) {
   app.get('/api/alerts', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
@@ -55,7 +55,7 @@ export async function alertRoutes(app: FastifyInstance) {
         cursorDate = new Date(cursor)
       }
       if (isNaN(cursorDate.getTime()) || (cursorId !== null && !/^[0-9a-f-]{36}$/.test(cursorId))) {
-        return { data: [], nextCursor: null }
+        return reply.code(400).send({ error: 'invalid cursor' })
       }
     }
 

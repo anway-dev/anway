@@ -5,10 +5,11 @@ export interface TriggerRule {
   condition: Record<string, unknown>
   actions: TriggerAction[]
   enabled: boolean
+  perimeter?: Array<{ connectorId: string; read: string[]; write: string[] }> | null
 }
 
 export interface TriggerAction {
-  type: 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook'
+  type: 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook' | 'notify_channel' | 'escalate' | 'block_deploy_gate'
   params: Record<string, unknown>
 }
 

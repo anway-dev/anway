@@ -16,8 +16,15 @@ export type AuditEventType =
   | 'intent_parse_failed'
   | 'graph_miss'
   | 'perimeter_changed'
+  | 'perimeter_removed'
   | 'trigger_fired'
   | 'gate_approved'
+  | 'connector.delete'
+  | 'service.create'
+  | 'service.delete'
+  | 'gate_policy.upsert'
+  | 'monitor.delete'
+  | 'incident.delete'
 
 export interface AuditEvent {
   readonly id: string

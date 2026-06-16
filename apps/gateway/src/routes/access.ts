@@ -89,22 +89,39 @@ export async function accessRoutes(app: FastifyInstance) {
       const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'access audit write failed'))
       let count = 0
       let failed = 0
+      const prunedNames: string[] = []
 
-      for (const p of request.body.perimeter) {
-        const writeOk = await withTenant(prisma, user.tenantId, (tx) =>
-          tx.$executeRaw`
-            INSERT INTO user_perimeters (tenant_id, user_id, connector_name, read_scopes, write_scopes)
-            VALUES (${user.tenantId}::uuid, ${userId}::uuid, ${p.connectorName},
-              ${p.readScopes}::text[], ${p.writeScopes}::text[])
-            ON CONFLICT (tenant_id, user_id, connector_name)
-            DO UPDATE SET read_scopes = ${p.readScopes}::text[], write_scopes = ${p.writeScopes}::text[]
-          `
-        ).then(() => true).catch(() => false)
+      // Wrap all upserts and DELETE in a single withTenant transaction
+      await withTenant(prisma, user.tenantId, async (tx) => {
+        for (const p of request.body.perimeter) {
+          try {
+            await tx.$executeRaw`
+              INSERT INTO user_perimeters (tenant_id, user_id, connector_name, read_scopes, write_scopes)
+              VALUES (${user.tenantId}::uuid, ${userId}::uuid, ${p.connectorName},
+                ${p.readScopes}::text[], ${p.writeScopes}::text[])
+              ON CONFLICT (tenant_id, user_id, connector_name)
+              DO UPDATE SET read_scopes = ${p.readScopes}::text[], write_scopes = ${p.writeScopes}::text[]
+            `
+            count++
+          } catch { failed++ }
+        }
+        // Only DELETE after all upserts succeed
+        if (failed === 0) {
+          const submittedNames = request.body.perimeter.map(p => p.connectorName)
+          const removed = await tx.$queryRaw<Array<{ connector_name: string }>>`
+            DELETE FROM user_perimeters
+            WHERE tenant_id = ${user.tenantId}::uuid
+              AND user_id = ${userId}::uuid
+              AND connector_name != ALL(${submittedNames}::text[])
+            RETURNING connector_name
+          `.catch(() => [] as Array<{ connector_name: string }>)
+          for (const r of removed) prunedNames.push(r.connector_name)
+        }
+      })
 
-        if (!writeOk) { failed++; continue }
-        count++
-
-        void audit.append({
+      // Audit events per upsert
+      for (const p of request.body.perimeter.slice(0, count)) {
+        await audit.append({
           id: crypto.randomUUID(),
           tenantId: user.tenantId as import('@anvay/types').TenantId,
           userId: user.sub as import('@anvay/types').UserId,
@@ -112,17 +129,21 @@ export async function accessRoutes(app: FastifyInstance) {
           eventType: 'perimeter_changed',
           payload: { userId, connectorName: p.connectorName, readScopes: p.readScopes, writeScopes: p.writeScopes },
           createdAt: new Date(),
-        })
+        }).catch((err) => request.log.error({ err }, 'perimeter_changed audit write failed'))
       }
-      const submittedNames = request.body.perimeter.map(p => p.connectorName)
-      await withTenant(prisma, user.tenantId, (tx) =>
-        tx.$executeRaw`
-          DELETE FROM user_perimeters
-          WHERE tenant_id = ${user.tenantId}::uuid
-            AND user_id = ${userId}::uuid
-            AND connector_name != ALL(${submittedNames}::text[])
-        `
-      ).catch(() => null)
+
+      // Audit removed connectors
+      for (const name of prunedNames) {
+        await audit.append({
+          id: crypto.randomUUID(),
+          tenantId: user.tenantId as import('@anvay/types').TenantId,
+          userId: user.sub as import('@anvay/types').UserId,
+          sessionId: '' as import('@anvay/types').SessionId,
+          eventType: 'perimeter_removed',
+          payload: { userId, connectorName: name },
+          createdAt: new Date(),
+        }).catch((err) => request.log.error({ err }, 'perimeter_removed audit write failed'))
+      }
       if (failed > 0) {
         reply.code(207)
         return { ok: false, count, failed }

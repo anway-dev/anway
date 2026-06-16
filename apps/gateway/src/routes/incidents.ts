@@ -12,15 +12,21 @@ import { appendAuditEvent } from './audit.js'
 import { UUID_RE } from '../utils/validators.js'
 
 let _pub: RedisClientType | null = null
+let _pubConnecting: Promise<RedisClientType | null> | null = null
 
 async function getPub(): Promise<RedisClientType | null> {
   const url = process.env['REDIS_URL']
   if (!url) return null
-  if (!_pub) {
-    _pub = createClient({ url }) as RedisClientType
-    await _pub.connect()
-  }
-  return _pub
+  if (_pub) return _pub
+  if (_pubConnecting) return _pubConnecting
+  _pubConnecting = (async () => {
+    const client = createClient({ url, socket: { reconnectStrategy: (r) => Math.min(r * 100, 3000) } }) as RedisClientType
+    client.on('error', () => {})
+    await client.connect()
+    _pub = client
+    return client
+  })().catch(() => { _pubConnecting = null; return null })
+  return _pubConnecting
 }
 
 export async function incidentRoutes(app: FastifyInstance) {
@@ -94,7 +100,7 @@ export async function incidentRoutes(app: FastifyInstance) {
 
     // Audit log (best-effort — must not block response)
     const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'incident audit write failed'))
-    void audit.append({
+    await audit.append({
       id: crypto.randomUUID(),
       tenantId: TenantId(user.tenantId),
       userId: UserId(user.sub),
@@ -102,13 +108,25 @@ export async function incidentRoutes(app: FastifyInstance) {
       eventType: 'incident_created',
       payload: { incidentId: incident.id, title, severity },
       createdAt: new Date(),
-    })
+    }).catch((err) => request.log.error({ err }, 'incident_created audit append failed'))
 
     return incident
   })
 
-  app.patch<{ Params: { id: string }; Body: { status?: IncidentStatus } }>('/api/incidents/:id', {
+  app.patch<{ Params: { id: string }; Body: { status?: IncidentStatus; title?: string; severity?: string; description?: string } }>('/api/incidents/:id', {
     preHandler: [app.authenticate, requireRole('admin', 'sre')],
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', enum: ['active', 'investigating', 'identified', 'monitoring'] },
+          title: { type: 'string' },
+          severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
+          description: { type: 'string' },
+        },
+      },
+    },
   }, async (request, reply) => {
     const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params

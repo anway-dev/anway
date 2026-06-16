@@ -68,16 +68,20 @@ export async function auditRoutes(app: FastifyInstance) {
       } else {
         cursorDate = new Date(cursor)
       }
+      if (isNaN(cursorDate.getTime()) || (cursorId !== null && !/^[0-9a-f-]{36}$/.test(cursorId))) {
+        return { data: [], nextCursor: null }
+      }
     }
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
         FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid
         ${cursorDate && cursorId
-          ? Prisma.sql`WHERE (created_at, id) < (${cursorDate}, ${cursorId}::uuid)`
+          ? Prisma.sql`AND (created_at, id) < (${cursorDate}, ${cursorId}::uuid)`
           : cursorDate
-            ? Prisma.sql`WHERE created_at < ${cursorDate}`
+            ? Prisma.sql`AND created_at < ${cursorDate}`
             : Prisma.sql``}
         ORDER BY created_at DESC, id DESC
         LIMIT ${limit + 1}
@@ -133,7 +137,7 @@ export async function auditRoutes(app: FastifyInstance) {
         return tx.$queryRaw<AuditRow[]>`
           SELECT id, event_type, payload, created_at, user_id
           FROM audit_events
-          WHERE created_at >= ${from} AND created_at <= ${to}
+          WHERE tenant_id = ${tenantId}::uuid AND created_at >= ${from} AND created_at <= ${to}
           ORDER BY created_at ASC LIMIT 10000
         `
       }
@@ -141,7 +145,7 @@ export async function auditRoutes(app: FastifyInstance) {
         return tx.$queryRaw<AuditRow[]>`
           SELECT id, event_type, payload, created_at, user_id
           FROM audit_events
-          WHERE created_at >= ${from}
+          WHERE tenant_id = ${tenantId}::uuid AND created_at >= ${from}
           ORDER BY created_at ASC LIMIT 10000
         `
       }
@@ -149,13 +153,14 @@ export async function auditRoutes(app: FastifyInstance) {
         return tx.$queryRaw<AuditRow[]>`
           SELECT id, event_type, payload, created_at, user_id
           FROM audit_events
-          WHERE created_at <= ${to}
+          WHERE tenant_id = ${tenantId}::uuid AND created_at <= ${to}
           ORDER BY created_at ASC LIMIT 10000
         `
       }
       return tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
         FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid
         ORDER BY created_at ASC LIMIT 10000
       `
     }).catch(() => [] as AuditRow[])

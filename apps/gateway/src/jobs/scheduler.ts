@@ -155,11 +155,17 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
             `
             const burnRate = parseInt(recentIncidents[0]?.count ?? '0', 10)
             if (burnRate > 2) {
+              // Dedup: check for existing open SLO-burn incident for this service
+              const existing = await tx.$queryRaw<Array<{ count: string }>>`
+                SELECT COUNT(*) as count FROM incidents
+                WHERE tenant_id = ${t.id}::uuid AND status = 'active'
+                AND title = ${'SLO burn rate alert: ' + svc.name}
+              `
+              if (parseInt(existing[0]?.count ?? '0', 10) > 0) continue
               await tx.$executeRaw`
                 INSERT INTO incidents (tenant_id, title, severity, status, description)
                 VALUES (${t.id}::uuid, ${'SLO burn rate alert: ' + svc.name}, 'high', 'active',
                   ${'Error budget burning at ' + burnRate + 'x normal rate'})
-                ON CONFLICT DO NOTHING
               `
             }
           }

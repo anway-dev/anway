@@ -18,8 +18,11 @@ const GATE_TTL_SECONDS = 600 // must exceed orchestrator poll timeout (default 5
  */
 export class RedisGateSink implements IGateSink {
   private pub: ReturnType<typeof createClient> | null = null
+  private readonly tenantId: string | undefined
 
-  constructor(private readonly redisUrl: string) {}
+  constructor(private readonly redisUrl: string, tenantId?: string) {
+    this.tenantId = tenantId
+  }
 
   private async getPub(): Promise<ReturnType<typeof createClient>> {
     if (!this.pub) {
@@ -66,9 +69,15 @@ export class RedisGateSink implements IGateSink {
     } catch { /* fall through to Postgres */ }
 
     // Postgres fallback — authoritative when Redis evicts/misses
-    const rows = await prisma.$queryRaw<Array<{ status: string }>>`
-      SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND status IN ('approved','rejected') LIMIT 1
-    `.catch(() => [])
+    const rows = this.tenantId
+      ? await withTenant(prisma, this.tenantId, (tx) =>
+          tx.$queryRaw<Array<{ status: string }>>`
+            SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND status IN ('approved','rejected') LIMIT 1
+          `
+        ).catch(() => [] as Array<{ status: string }>)
+      : await prisma.$queryRaw<Array<{ status: string }>>`
+          SELECT status FROM gate_events WHERE id = ${gateId}::uuid AND status IN ('approved','rejected') LIMIT 1
+        `.catch(() => [] as Array<{ status: string }>)
     return (rows[0]?.status as 'approved' | 'rejected') ?? null
   }
 

@@ -40,15 +40,21 @@ function verifyDatadogSignature(body: string, signature: string, secret: string)
 function verifyWebhookSignatures(request: FastifyRequest): boolean {
   const body = JSON.stringify(request.body)
   const ghSecret = process.env['GITHUB_WEBHOOK_SECRET']
+  const ddSecret = process.env['DD_WEBHOOK_SECRET']
   const hubSig = request.headers['x-hub-signature-256'] as string | undefined
+  const ddSig = request.headers['dd-request-signature'] as string | undefined
+
+  // If ANVAY_WEBHOOK_TOKEN is set but no webhook secret is configured,
+  // require at least one signature to be verified — refuse auto-allow
+  if (!ghSecret && !ddSecret) {
+    if (process.env['ANVAY_WEBHOOK_TOKEN']) return false
+    return true
+  }
+
   if (ghSecret) {
-    // Secret configured — reject if header is absent or invalid
     if (!hubSig || !verifyGitHubSignature(body, hubSig, ghSecret)) return false
   }
-  const ddSecret = process.env['DD_WEBHOOK_SECRET']
-  const ddSig = request.headers['dd-request-signature'] as string | undefined
   if (ddSecret) {
-    // Secret configured — reject if header is absent or invalid
     if (!ddSig || !verifyDatadogSignature(body, ddSig, ddSecret)) return false
   }
   return true
@@ -179,8 +185,16 @@ export async function eventRoutes(app: FastifyInstance) {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
-    const payload = request.body as Record<string, unknown>
-    payload.tenantId = tenantId
+    const body = request.body as { service: string; sha: string; env?: string; version?: string; status?: string }
+    const payload: Record<string, unknown> = {
+      type: 'deploy_completed',
+      tenantId,
+      service: body.service,
+      sha: body.sha,
+      ...(body.env ? { env: body.env } : {}),
+      ...(body.version ? { version: body.version } : {}),
+      ...(body.status ? { status: body.status } : {}),
+    }
     const pub = await getEventPub()
     await tryPublish(pub, 'deploy_completed', payload)
     return { ok: true }
@@ -207,8 +221,16 @@ export async function eventRoutes(app: FastifyInstance) {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
-    const payload = request.body as Record<string, unknown>
-    payload.tenantId = tenantId
+    const body = request.body as { repo: string; prNumber?: number; title?: string; author?: string; sha?: string }
+    const payload: Record<string, unknown> = {
+      type: 'pr_merged',
+      tenantId,
+      repo: body.repo,
+      ...(body.prNumber != null ? { prNumber: body.prNumber } : {}),
+      ...(body.title ? { title: body.title } : {}),
+      ...(body.author ? { author: body.author } : {}),
+      ...(body.sha ? { sha: body.sha } : {}),
+    }
     const pub = await getEventPub()
     await tryPublish(pub, 'pr_merged', payload)
     return { ok: true }
@@ -233,8 +255,15 @@ export async function eventRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) return reply.code(401).send({ error: 'invalid tenant' })
-    const payload = request.body as Record<string, unknown>
-    payload.tenantId = user.tenantId
+    const body = request.body as { title: string; severity?: string; service?: string; description?: string }
+    const payload: Record<string, unknown> = {
+      type: 'incident_created',
+      tenantId: user.tenantId,
+      title: body.title,
+      ...(body.severity ? { severity: body.severity } : {}),
+      ...(body.service ? { service: body.service } : {}),
+      ...(body.description ? { description: body.description } : {}),
+    }
     const pub = await getEventPub()
     await tryPublish(pub, 'incident_created', payload)
     return { ok: true }

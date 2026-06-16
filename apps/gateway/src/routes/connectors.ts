@@ -5,6 +5,7 @@ import { createClient } from 'redis'
 import { UUID_RE } from '../utils/validators.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
+import { appendAuditEvent } from './audit.js'
 
 interface ConfigField { label: string; key: string; type: string }
 interface CatalogEntry { id: string; name: string; category: string; description: string; color: string; icon: string; capabilities: string[]; configFields: ConfigField[] }
@@ -93,9 +94,10 @@ export async function connectorsRoutes(app: FastifyInstance) {
   // T9: Bootstrap status
   app.get<{ Params: { type: string } }>('/api/connectors/:type/bootstrap-status', {
     preHandler: [app.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
+    if (!KNOWN_CONNECTORS.has(type)) return reply.code(400).send({ error: `unknown connector type: ${type}` })
     const row = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<{ bootstrapped_at: Date | null; last_bootstrap_summary: unknown }[]>`
         SELECT bootstrapped_at AS bootstrapped_at, last_bootstrap_summary AS last_bootstrap_summary
@@ -112,6 +114,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
+    if (!KNOWN_CONNECTORS.has(type)) return reply.code(400).send({ error: `unknown connector type: ${type}` })
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ enabled: boolean; bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }>>`
@@ -133,6 +136,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
   })
 
   const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','pagerduty','k8s','aws-cloudwatch'])
+const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
 
   // T9: Trigger bootstrap
   app.post<{ Params: { type: string } }>('/api/connectors/:type/bootstrap', {
@@ -149,7 +153,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
-    const creds = effectiveCredentials(rows[0])
+    if (rows.length === 0) return reply.code(404).send({ error: 'connector not registered' })
 
     const pub = await getBootstrapPub()
     if (pub) {
@@ -158,7 +162,6 @@ export async function connectorsRoutes(app: FastifyInstance) {
         tenantId,
         connectorType: type,
         connectorId: type,
-        payload: creds,
       }))
     }
     return { ok: true, message: `Bootstrap triggered for ${type}` }
@@ -193,6 +196,13 @@ export async function connectorsRoutes(app: FastifyInstance) {
         rows = adapterRows
       }
       if (rows.length === 0) return reply.code(404).send({ error: 'not found' })
+      await appendAuditEvent({
+        tenantId, userId: (request.user as { sub: string }).sub,
+        action: 'connector.delete',
+        resource: `connector:${id}`,
+        outcome: 'action_executed',
+        metadata: { id, connectorType: rows[0]!.connector_type },
+      }).catch(() => {})
       const pub = await getBootstrapPub()
       if (pub) {
         await pub.publish('connector_removed', JSON.stringify({
@@ -239,7 +249,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
         WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
       `
     ).catch(() => [])
-    const creds = effectiveCredentials(rows[0])
+    if (rows.length === 0) return reply.code(404).send({ error: 'connector not registered' })
     const pub = await getBootstrapPub()
     if (pub) {
       await pub.publish('connector_reconnected', JSON.stringify({
@@ -247,7 +257,6 @@ export async function connectorsRoutes(app: FastifyInstance) {
         tenantId,
         connectorType: type,
         connectorId: type,
-        payload: creds,
       }))
     }
     return { ok: true, message: `Reconnect triggered for ${type}` }

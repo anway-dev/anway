@@ -231,13 +231,22 @@ function recordSessionUsed(sessionId: string, tokens: number): void {
 
 // Redis budget client — singleton to avoid O(requests) connections per handler invocation
 let _redisBudget: RedisClientType | null = null
+let _redisBudgetConnecting: Promise<RedisClientType | null> | null = null
 function getRedisBudget(): RedisClientType | null {
   if (!process.env['REDIS_URL']) return null
-  if (!_redisBudget) {
-    _redisBudget = createClient({ url: process.env['REDIS_URL'] }) as RedisClientType
-    _redisBudget.connect().catch(() => { _redisBudget = null })
-  }
-  return _redisBudget
+  if (_redisBudget) return _redisBudget
+  if (_redisBudgetConnecting) return null  // connecting — caller handles null
+  _redisBudgetConnecting = (async () => {
+    const client = createClient({
+      url: process.env['REDIS_URL'],
+      socket: { reconnectStrategy: (r) => Math.min(r * 100, 3000) },
+    }) as RedisClientType
+    client.on('error', () => {})
+    await client.connect()
+    _redisBudget = client
+    return client
+  })().catch(() => { _redisBudgetConnecting = null; return null })
+  return null  // connecting — caller retries next time
 }
 
 // Module-level singletons — one per gateway process
@@ -445,7 +454,7 @@ export async function chatRoutes(app: FastifyInstance) {
     const allTools = [...connectorTools, ...registrationTools, ...deployTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
-    const gateSink = redisUrl ? new RedisGateSink(redisUrl) : getMemoryGateSink()
+    const gateSink = redisUrl ? new RedisGateSink(redisUrl, tenantId) : getMemoryGateSink()
     if (!redisUrl) {
       request.log.warn('REDIS_URL not set — using in-process gate sink (single-instance only)')
     }
@@ -478,19 +487,27 @@ export async function chatRoutes(app: FastifyInstance) {
     let chatSub: RedisClientType | null = null
 
     if (chatRedisUrl) {
-      chatPub = createClient({ url: chatRedisUrl }) as RedisClientType
-      chatSub = chatPub.duplicate()
-      await chatPub.connect()
-      await chatSub.connect()
-      const channel = `sse:chat:${sessionId}`
-      await chatSub.subscribe(channel, (message, _channel) => {
-        reply.raw.write(`data: ${message}\n\n`)
-      })
-      request.raw.on('close', async () => {
-        try { await chatSub!.unsubscribe(channel) } catch { /* */ }
-        try { await chatSub!.quit() } catch { /* */ }
-        try { await chatPub!.quit() } catch { /* */ }
-      })
+      try {
+        chatPub = createClient({ url: chatRedisUrl }) as RedisClientType
+        chatSub = chatPub.duplicate()
+        await chatPub.connect()
+        await chatSub.connect()
+        const channel = `sse:chat:${sessionId}`
+        await chatSub.subscribe(channel, (message, _channel) => {
+          reply.raw.write(`data: ${message}\n\n`)
+        })
+        request.raw.on('close', async () => {
+          try { await chatSub!.unsubscribe(channel) } catch {}
+          try { await chatSub!.quit() } catch {}
+          try { await chatPub!.quit() } catch {}
+        })
+      } catch (err) {
+        request.log.warn({ err }, 'chat Redis fan-out failed — falling back to direct stream')
+        try { await chatSub?.quit() } catch {}
+        try { await chatPub?.quit() } catch {}
+        chatPub = null
+        chatSub = null
+      }
     }
 
     // Agent loop runs in background; aborted on client disconnect
@@ -538,7 +555,7 @@ export async function chatRoutes(app: FastifyInstance) {
                     DO UPDATE SET tokens_used = token_usage_daily.tokens_used + ${totalTokens}, updated_at = NOW()
                   `
                 )
-              } catch { /* token tracking is best-effort */ }
+              } catch (err) { request.log.error({ err }, 'token usage write failed — budget may be undercounted') }
             }
           }
           const msg = JSON.stringify(event)

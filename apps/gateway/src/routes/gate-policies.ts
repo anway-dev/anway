@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { appendAuditEvent } from './audit.js'
 
 interface GatePolicyRow {
   id: string
@@ -38,8 +39,8 @@ export async function gatePolicyRoutes(app: FastifyInstance) {
     '/api/gate/policies',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
-      const user = request.user as { tenantId: string; role?: string }
-      const { tenantId } = user
+      const user = request.user as { tenantId: string; role?: string; sub: string }
+      const { tenantId, sub: userId } = user
       if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
 
       const { scope, approversRequired, autoApproveThreshold } = request.body
@@ -52,11 +53,13 @@ export async function gatePolicyRoutes(app: FastifyInstance) {
       if (typeof autoApproveThreshold !== 'number' || autoApproveThreshold < 0 || autoApproveThreshold > 1) {
         return reply.code(400).send({ error: 'autoApproveThreshold must be a number between 0 and 1' })
       }
+      // V1: clamp minimum threshold to 0.95 — ALL write actions require explicit human confirmation
+      const clampedThreshold = Math.max(autoApproveThreshold, 0.95)
 
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<GatePolicyRow[]>`
           INSERT INTO gate_policies (id, tenant_id, scope, approvers_required, auto_approve_threshold, created_at)
-          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${scope}, ${approversRequired}::int, ${autoApproveThreshold}::double precision, NOW())
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${scope}, ${approversRequired}::int, ${clampedThreshold}::double precision, NOW())
           ON CONFLICT (tenant_id, scope) DO UPDATE SET
             approvers_required = EXCLUDED.approvers_required,
             auto_approve_threshold = EXCLUDED.auto_approve_threshold
@@ -65,6 +68,14 @@ export async function gatePolicyRoutes(app: FastifyInstance) {
       )
       const r = rows[0]
       if (!r) return reply.code(500).send({ error: 'upsert failed' })
+
+      await appendAuditEvent({
+        tenantId, userId: user.sub,
+        action: 'gate_policy.upsert',
+        resource: `gate_policy:${r.id}`,
+        outcome: 'action_executed',
+        metadata: { scope, approversRequired, autoApproveThreshold: clampedThreshold },
+      }).catch(() => {})
       return reply.code(200).send({
         id: r.id,
         scope: r.scope,

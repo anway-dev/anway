@@ -54,6 +54,9 @@ export async function alertRoutes(app: FastifyInstance) {
       } else {
         cursorDate = new Date(cursor)
       }
+      if (isNaN(cursorDate.getTime()) || (cursorId !== null && !/^[0-9a-f-]{36}$/.test(cursorId))) {
+        return { data: [], nextCursor: null }
+      }
     }
 
     const rows = await withTenant(prisma, tenantId, (tx) =>

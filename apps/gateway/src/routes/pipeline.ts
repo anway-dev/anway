@@ -140,10 +140,16 @@ async function runRollback(pipelineId: string, tenantId: string, prevState: unkn
 
     try {
       const { spawn } = await import('node:child_process')
+      const filteredEnv: Record<string, string | undefined> = {}
+      for (const [k, v] of Object.entries(process.env)) {
+        if (/^(AWS_|GCP_|AZURE_|TF_|KUBECONFIG|HELM_|DOCKER_|GITHUB_)/.test(k)) filteredEnv[k] = v
+      }
+      filteredEnv['PATH'] = process.env['PATH']
+      filteredEnv['HOME'] = process.env['HOME']
       await new Promise<void>((resolve, reject) => {
         const child = spawn('terraform', ['apply', '-auto-approve', '-state', '-'], {
           cwd: tfDir,
-          env: process.env,
+          env: filteredEnv as Record<string, string>,
           stdio: ['pipe', 'pipe', 'pipe'],
         })
         child.stdin.write(stateJson)
@@ -334,6 +340,10 @@ export async function pipelineRoutes(app: FastifyInstance) {
       if (!stage) return reply.code(404).send({ error: 'stage not found' })
 
       // Rate limit: max 3 concurrent stage runs per tenant to prevent resource exhaustion
+      let slotReleased = false
+      const releaseSlot = () => {
+        if (!slotReleased) { slotReleased = true; releaseRunSlot(tenantId) }
+      }
       if (!acquireRunSlot(tenantId)) {
         return reply.code(429).send({ error: 'too many concurrent stage runs — try again shortly' })
       }
@@ -345,6 +355,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
         'X-Accel-Buffering': 'no',
       })
 
+      try {
       // Create run record first so we have a runId for the Redis channel name
       const runRows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
@@ -358,7 +369,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
       if (!runId) {
         reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: 'failed to create run record' })}\n\n`)
         reply.raw.end()
-        releaseRunSlot(tenantId)
+        releaseSlot()
         return
       }
 
@@ -387,26 +398,32 @@ export async function pipelineRoutes(app: FastifyInstance) {
       const redisUrl = process.env['REDIS_URL']
 
       if (redisUrl && runId) {
-        const channel = `sse:run:${runId}`
-        const pub = createClient({ url: redisUrl }) as RedisClientType
-        await pub.connect()
-        const sub = pub.duplicate()
-        await sub.connect()
-        await sub.subscribe(channel, (message, _channel) => {
-          reply.raw.write(`data: ${message}\n\n`)
-        })
-        cleanRedis = async () => {
-          if (redisCleaned) return
-          redisCleaned = true
-          try { await sub.unsubscribe(channel) } catch {}
-          try { await sub.quit() } catch {}
-          try { await pub.quit() } catch {}
+        try {
+          const channel = `sse:run:${runId}`
+          const pub = createClient({ url: redisUrl }) as RedisClientType
+          await pub.connect()
+          const sub = pub.duplicate()
+          await sub.connect()
+          await sub.subscribe(channel, (message, _channel) => {
+            reply.raw.write(`data: ${message}\n\n`)
+          })
+          cleanRedis = async () => {
+            if (redisCleaned) return
+            redisCleaned = true
+            try { await sub.unsubscribe(channel) } catch {}
+            try { await sub.quit() } catch {}
+            try { await pub.quit() } catch {}
+          }
+          request.raw.on('close', async () => {
+            if (runId) killRunChildren(runId)
+            await cleanRedis()
+          })
+          sse = (data: object) => { void pub.publish(channel, JSON.stringify(data)) }
+        } catch (err) {
+          request.log.warn({ err }, 'pipeline Redis fan-out failed — falling back to direct stream')
+          try { await cleanRedis() } catch {}
+          sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
         }
-        request.raw.on('close', async () => {
-          if (runId) killRunChildren(runId)
-          await cleanRedis()
-        })
-        sse = (data: object) => { void pub.publish(channel, JSON.stringify(data)) }
       } else {
         request.raw.on('close', () => { if (runId) killRunChildren(runId) })
         sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
@@ -418,14 +435,14 @@ export async function pipelineRoutes(app: FastifyInstance) {
           tx.$queryRaw`
             UPDATE pipeline_stage_runs
             SET status = ${status}, output = ${JSON.stringify(output)}::jsonb, finished_at = now()
-            WHERE id = ${runId}::uuid
+            WHERE id = ${runId}::uuid AND tenant_id = ${tenantId}::uuid
           `,
         ).catch(() => null)
         const pipelineStatus = status === 'failed' ? 'failed' : status === 'waiting' ? 'waiting' : 'running'
         await withTenant(prisma, tenantId, (tx) =>
           tx.$queryRaw`
             UPDATE pipelines SET status = ${pipelineStatus}, updated_at = now()
-            WHERE id = ${id}::uuid
+            WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
           `,
         ).catch(() => null)
       }
@@ -510,7 +527,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
                 tx.$queryRaw`
                   UPDATE pipelines
                   SET metadata = metadata || ${JSON.stringify({ imageTag: gitSha })}::jsonb
-                  WHERE id = ${id}::uuid
+                  WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
                 `
               ).catch(() => null)
 
@@ -534,7 +551,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             }
             await withTenant(prisma, tenantId, (tx) =>
               tx.$queryRaw`
-                UPDATE pipelines SET metadata = metadata || ${JSON.stringify({ imageTag: fakeSha })}::jsonb WHERE id = ${id}::uuid
+                UPDATE pipelines SET metadata = metadata || ${JSON.stringify({ imageTag: fakeSha })}::jsonb WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
               `
             ).catch(() => null)
             const buildSummary = `[DEMO] Build complete (${fakeSha})`
@@ -780,14 +797,12 @@ export async function pipelineRoutes(app: FastifyInstance) {
             if (monitorFailed) {
               const pipelineMeta = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
               const prevState = pipelineMeta?.['previousTfState']
-              const requireRollbackGate = pipelineMeta?.['requireRollbackGate'] !== false
 
               await finishRun('failed', { summary: `Monitor failed for ${envLabel ?? stageId}` })
               sse({ type: 'done', output: { summary: `Monitor failed for ${envLabel ?? stageId}` } })
 
               if (prevState) {
-                if (requireRollbackGate) {
-                  // Insert rollback gate before executing
+                  // Always require L2 gate in V1 — all write actions need explicit user confirmation
                   const rollbackUserId = (request.user as { sub: string }).sub
                   await withTenant(prisma, tenantId, (tx) =>
                     tx.$executeRaw`
@@ -804,19 +819,6 @@ export async function pipelineRoutes(app: FastifyInstance) {
                     `
                   ).catch(() => null)
                   sse({ type: 'gate_required', message: 'Rollback approval required — monitor failed', stageId: 'rollback' })
-                } else {
-                  // Auto-trigger rollback
-                  await withTenant(prisma, tenantId, (tx) =>
-                    tx.$executeRaw`
-                      INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at)
-                      VALUES (gen_random_uuid(), ${id}::uuid, ${tenantId}::uuid, 'rollback', 'running',
-                        '{"type":"rollback","reason":"monitor_failed"}'::jsonb, now())
-                    `
-                  )
-                  sse({ type: 'rollback_started', stageId: 'rollback', reason: 'monitor_failed' })
-                  // Fire-and-forget rollback
-                  runRollback(id, tenantId, prevState, request.log).catch(() => {})
-                }
               } else {
                 sse({ type: 'status', message: 'No previous terraform state to rollback to' })
               }
@@ -896,13 +898,16 @@ export async function pipelineRoutes(app: FastifyInstance) {
         sse({ type: 'error', message: String(err) })
       } finally {
         await cleanRedis()
-        releaseRunSlot(tenantId)
+        releaseSlot()
         if (runId) activeRunChildren.delete(runId)
       }
 
       // Give Redis pub/sub time to deliver the final SSE event before closing
       await new Promise(r => setTimeout(r, 150))
       reply.raw.end()
+      } finally {
+        releaseSlot()
+      }
     },
   )
 
@@ -931,7 +936,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
         tx.$queryRaw`
           UPDATE pipeline_stage_runs
           SET status = 'cancelled', finished_at = now()
-          WHERE id = ${runId}::uuid AND status = 'running'
+          WHERE id = ${runId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'running'
         `
       ).catch(() => null)
 
@@ -948,11 +953,13 @@ export async function pipelineRoutes(app: FastifyInstance) {
       const { id, stageId } = request.params
 
       // Check gate policy for change ticket requirement
+      // Order by specificity: stage-level > pipeline-level > global ('*')
       const policies = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ require_change_ticket: boolean }>>`
-          SELECT require_change_ticket FROM gate_policies
+        tx.$queryRaw<Array<{ require_change_ticket: boolean; id: string }>>`
+          SELECT require_change_ticket, id FROM gate_policies
           WHERE tenant_id = ${tenantId}::uuid
           AND (scope = '*' OR scope = ${stageId} OR scope = ${id})
+          ORDER BY CASE WHEN scope = ${stageId} THEN 0 WHEN scope = ${id} THEN 1 ELSE 2 END
           LIMIT 1
         `
       ).catch(() => [] as { require_change_ticket: boolean }[])
@@ -973,56 +980,45 @@ export async function pipelineRoutes(app: FastifyInstance) {
       }
 
       // SoD: requester cannot approve their own gate
+      // Scope to a specific gate event ID to avoid concurrent approval race
       const gateRequestRows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ user_id: string | null }>>`
-          SELECT user_id FROM gate_events
+        tx.$queryRaw<Array<{ user_id: string | null; id: string }>>`
+          SELECT id, user_id FROM gate_events
           WHERE tenant_id = ${tenantId}::uuid AND status = 'pending'
             AND tool_args->>'pipelineId' = ${id}
             AND tool_args->>'stageId' = ${stageId}
           ORDER BY created_at DESC LIMIT 1
         `
-      ).catch(() => [] as Array<{ user_id: string | null }>)
+      ).catch(() => [] as Array<{ user_id: string | null; id: string }>)
       const requesterId = gateRequestRows[0]?.user_id ?? null
+      const gateEventId = gateRequestRows[0]?.id ?? null
       const approverId = (request.user as { sub: string }).sub
       // Fail closed: no requester row means we cannot verify SoD — deny approval
-      if (requesterId === null) {
+      if (requesterId === null || gateEventId === null) {
         return reply.code(409).send({ error: 'gate request not found or already decided' })
       }
       if (requesterId === approverId) {
         return reply.code(403).send({ error: 'cannot approve your own gate request' })
       }
 
-      await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw`
+      // Merge stage_run UPDATE, gate_event UPDATE, and audit insert into a single transaction
+      await withTenant(prisma, tenantId, async (tx) => {
+        await tx.$queryRaw`
           UPDATE pipeline_stage_runs
           SET status = 'approved', finished_at = now()
           WHERE pipeline_id = ${id}::uuid AND stage_id = ${stageId}
             AND tenant_id = ${tenantId}::uuid AND status = 'waiting'
-        `,
-      ).catch(() => null)
-
-      await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw`
+        `
+        await tx.$queryRaw`
           UPDATE gate_events SET status = 'approved', decided_by = ${approverId}::uuid, decided_at = now()
-          WHERE tenant_id = ${tenantId}::uuid AND status = 'pending'
-            AND tool_args->>'pipelineId' = ${id}
-            AND tool_args->>'stageId' = ${stageId}
-        `,
-      ).catch(() => null)
-
-      // Audit log — gate approval event
-      const { PostgresAuditSink } = await import('../audit/postgres-sink.js')
-      const { TenantId, UserId, SessionId } = await import('@anvay/types')
-      const auditSink = new PostgresAuditSink(prisma, () => {})
-      auditSink.append({
-        id: crypto.randomUUID(),
-        tenantId: TenantId(tenantId),
-        userId: UserId((request.user as { sub: string }).sub),
-        sessionId: SessionId(''),
-        eventType: 'gate_approved',
-        payload: { pipelineId: id, stageId, decidedBy: (request.user as { email?: string }).email ?? 'unknown' },
-        createdAt: new Date(),
-      }).catch(() => {})
+          WHERE id = ${gateEventId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
+        `
+        await tx.$executeRaw`
+          INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${approverId}::uuid, 'gate_approved',
+            ${JSON.stringify({ pipelineId: id, stageId, decidedBy: (request.user as { email?: string }).email ?? 'unknown' })}::jsonb, NOW())
+        `
+      }).catch(() => null)
 
       return reply.send({ approved: true })
     },

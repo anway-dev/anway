@@ -53,7 +53,7 @@ export async function buildApp() {
         ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
         : {}),
     },
-    trustProxy: true,
+    trustProxy: Number(process.env['TRUST_PROXY_HOPS'] ?? 1),
   })
 
   await app.register(sensible)
@@ -108,8 +108,9 @@ export async function buildApp() {
     // Pass through explicit status codes (validation errors, intentional 4xx)
     const status = error.statusCode ?? 500
     if (status < 500) {
+      const message = error.validation ? error.message : 'Bad Request'
       return reply.code(status).send({
-        error: error.message,
+        error: message,
         // Include AJV validation detail when present
         ...(error.validation ? { validation: error.validation } : {}),
       })

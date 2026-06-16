@@ -121,7 +121,8 @@ export async function graphEventRoutes(app: FastifyInstance) {
       const entities = await tx.$queryRaw<GraphEntityRow[]>`
         SELECT id, name, type, metadata, updated_at AS "updatedAt"
         FROM entities
-        ${cursor ? Prisma.sql`WHERE id > ${cursor}::uuid` : Prisma.sql``}
+        WHERE tenant_id = ${tenantId}::uuid
+        ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
         ORDER BY id ASC
         LIMIT ${limit + 1}
       `
@@ -129,7 +130,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
       const entityData = hasMore ? entities.slice(0, limit) : entities
       const relationships = await tx.$queryRaw<GraphRelRow[]>`
         SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
-        FROM relationships LIMIT 2000
+        FROM relationships WHERE tenant_id = ${tenantId}::uuid LIMIT 2000
       `
       return { data: entityData, relationships, nextCursor: hasMore ? entityData[entityData.length - 1]!.id : null }
     })
@@ -240,8 +241,8 @@ export async function graphEventRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'forbidden — API key is not authorized for this tenantId' })
     }
 
-    // Tenant-selected provider (DB) wins; env-resolved singleton is the fallback
-    const tenantProvider = await tenantProviderFor(event.tenantId) ?? provider
+    // Tenant-selected provider (DB) wins; no fallback to shared env provider
+    const tenantProvider = await tenantProviderFor(event.tenantId)
     if (!tenantProvider) {
       return reply.code(503).send({ error: 'GraphBuilderAgent not configured — no LLM provider' })
     }
@@ -255,9 +256,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
       return { ok: true }
     } catch (err) {
       request.log.error({ err, eventType: event.type }, 'GraphBuilderAgent event handling failed')
-      return reply.code(500).send({
-        error: err instanceof Error ? err.message : 'graph event processing failed',
-      })
+      return reply.code(500).send({ error: 'internal error' })
     }
   })
 }

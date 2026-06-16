@@ -19,6 +19,7 @@ interface RelRow {
 }
 
 interface IncidentRow {
+  id: string
   title: string
   status: string
   suggested_root_cause: string | null
@@ -68,7 +69,7 @@ export async function serviceRoutes(app: FastifyInstance) {
     return withTenant(prisma, tenantId, async (tx) => {
       const entities = await tx.$queryRaw<EntityRow[]>`
         SELECT id, name, type, metadata FROM entities
-        WHERE type = 'Service'
+        WHERE tenant_id = ${tenantId}::uuid AND type = 'Service'
         ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
         ORDER BY id ASC
         LIMIT ${limit + 1}
@@ -79,14 +80,14 @@ export async function serviceRoutes(app: FastifyInstance) {
       const data = hasMore ? entities.slice(0, limit) : entities
 
       const allEntities = await tx.$queryRaw<EntityRow[]>`
-        SELECT id, name, type, metadata FROM entities LIMIT 1000
+        SELECT id, name, type, metadata FROM entities WHERE tenant_id = ${tenantId}::uuid LIMIT 1000
       `
       const allRels = await tx.$queryRaw<RelRow[]>`
         SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
-        FROM relationships LIMIT 2000
+        FROM relationships WHERE tenant_id = ${tenantId}::uuid LIMIT 2000
       `
       const activeIncidents = await tx.$queryRaw<IncidentRow[]>`
-        SELECT title, status, suggested_root_cause FROM incidents WHERE status IN ('active', 'investigating') ORDER BY created_at DESC LIMIT 100
+        SELECT title, status, suggested_root_cause FROM incidents WHERE tenant_id = ${tenantId}::uuid AND status IN ('active', 'investigating') ORDER BY created_at DESC LIMIT 100
       `
 
       const entityById = new Map(allEntities.map(e => [e.id, e]))
@@ -99,6 +100,44 @@ export async function serviceRoutes(app: FastifyInstance) {
         relsByFrom.get(r.fromEntityId)!.push(r)
         if (!relsByTo.has(r.toEntityId)) relsByTo.set(r.toEntityId, [])
         relsByTo.get(r.toEntityId)!.push(r)
+      }
+
+      // Correlate incidents via relationship edges (AFFECTS/RELATES_TO) instead of title substring
+      // Map incident entity IDs to affected service IDs via graph edges
+      const incidentEntityToServices = new Map<string, Set<string>>()
+      const serviceAffectedByIncidentTitle = new Map<string, Set<string>>()
+      for (const r of allRels) {
+        if (r.relType === 'AFFECTS' || r.relType === 'RELATES_TO') {
+          const fromEntity = entityById.get(r.fromEntityId)
+          if (fromEntity?.type === 'Incident') {
+            if (!incidentEntityToServices.has(r.fromEntityId)) incidentEntityToServices.set(r.fromEntityId, new Set())
+            incidentEntityToServices.get(r.fromEntityId)!.add(r.toEntityId)
+          }
+        }
+      }
+      // Build incident title -> entity ID mapping for correlation
+      const incidentEntityByTitle = new Map<string, Set<string>>()
+      for (const [eid, e] of entityById) {
+        if (e.type === 'Incident') {
+          const name = e.name.toLowerCase()
+          if (!incidentEntityByTitle.has(name)) incidentEntityByTitle.set(name, new Set())
+          incidentEntityByTitle.get(name)!.add(eid)
+        }
+      }
+      // Pre-compute incident counts per service
+      const incidentCountByService = new Map<string, number>()
+      for (const inc of activeIncidents) {
+        const matchingEntities = incidentEntityByTitle.get(inc.title.toLowerCase())
+        if (matchingEntities) {
+          for (const incEid of matchingEntities) {
+            const affected = incidentEntityToServices.get(incEid)
+            if (affected) {
+              for (const svcId of affected) {
+                incidentCountByService.set(svcId, (incidentCountByService.get(svcId) ?? 0) + 1)
+              }
+            }
+          }
+        }
       }
 
       const result = data.map(entity => {
@@ -135,10 +174,7 @@ export async function serviceRoutes(app: FastifyInstance) {
           description: (meta['description'] as string) ?? '',
           dependencies: depNames,
           callers: callerNames,
-          activeIncidents: activeIncidents.filter(i =>
-            i.title.toLowerCase().includes(entity.name.toLowerCase()) ||
-            (i.suggested_root_cause?.toLowerCase().includes(entity.name.toLowerCase()) ?? false)
-          ).length,
+          activeIncidents: incidentCountByService.get(entity.id) ?? 0,
           metrics: {
             errorRate: (meta['errorRate'] as number) ?? 0,
             p99ms: (meta['p99ms'] as number) ?? 0,

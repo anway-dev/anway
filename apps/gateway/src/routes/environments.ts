@@ -56,7 +56,24 @@ export async function environmentRoutes(app: FastifyInstance) {
           `,
         ).catch(() => null)
       }
-      return reply.send(defaults.map((d, i) => ({ id: `seed-${i}`, ...d, createdAt: new Date(), updatedAt: new Date() })))
+      // Re-SELECT actual rows with real UUIDs after seeding
+      const envs = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<EnvRow[]>`
+          SELECT id, name, label, color, sort_order, created_at, updated_at
+          FROM environments
+          WHERE tenant_id = ${tenantId}::uuid
+          ORDER BY sort_order ASC, created_at ASC
+        `,
+      ).catch(() => [] as EnvRow[])
+      return reply.send(envs.map(r => ({
+        id: r.id,
+        name: r.name,
+        label: r.label,
+        color: r.color,
+        sortOrder: r.sort_order,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      })))
     }
 
     return reply.send(rows.map(r => ({
@@ -96,8 +113,8 @@ export async function environmentRoutes(app: FastifyInstance) {
           VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${label}, ${color ?? '#888888'}, ${sortOrder}, now(), now())
           RETURNING id
         `,
-      ).catch((err: Error) => {
-        if (err.message?.includes('unique')) throw Object.assign(new Error('env name already exists'), { statusCode: 409 })
+      ).catch((err: Error & { code?: string }) => {
+        if ((err as { code?: string }).code === '23505') throw Object.assign(new Error('env name already exists'), { statusCode: 409 })
         return [] as Array<{ id: string }>
       })
 

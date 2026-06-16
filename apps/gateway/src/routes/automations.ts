@@ -56,12 +56,26 @@ export async function automationsRoutes(app: FastifyInstance) {
       },
     },
   }, async (request) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
     const { eventType, condition, actions } = request.body
+    // Load creating user's perimeter to store as trigger perimeter scope
+    const userPerimeterRows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ connector_name: string; read_scopes: string[]; write_scopes: string[] }[]>`
+        SELECT connector_name, read_scopes, write_scopes FROM user_perimeters
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
+      `
+    ).catch(() => [] as { connector_name: string; read_scopes: string[]; write_scopes: string[] }[])
+    const perimeter = userPerimeterRows.length > 0
+      ? userPerimeterRows.map(r => ({
+          connectorId: r.connector_name,
+          read: r.read_scopes,
+          write: r.write_scopes,
+        }))
+      : null
     const rule = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<TriggerRule[]>`
-        INSERT INTO trigger_rules (tenant_id, event_type, condition, actions)
-        VALUES (${tenantId}::uuid, ${eventType}, ${JSON.stringify(condition ?? {})}::jsonb, ${JSON.stringify(actions)}::jsonb)
+        INSERT INTO trigger_rules (tenant_id, event_type, condition, actions, perimeter)
+        VALUES (${tenantId}::uuid, ${eventType}, ${JSON.stringify(condition ?? {})}::jsonb, ${JSON.stringify(actions)}::jsonb, ${perimeter ? JSON.stringify(perimeter) : null}::jsonb)
         RETURNING
           id,
           tenant_id     AS "tenantId",
@@ -179,13 +193,16 @@ export async function automationsRoutes(app: FastifyInstance) {
           name: { type: 'string', minLength: 1 },
           schedule: { type: 'string', minLength: 1 },
           // Only job types with real implementations are creatable — see MONITOR_IMPLS
-          jobType: { type: 'string', enum: ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief', 'cloud_security_scan', 'cost_anomaly_detection', 'incident_retrospective'] },
+          jobType: { type: 'string', enum: ['service_health_sweep', 'slo_burn_check', 'deploy_health_report', 'oncall_morning_brief', 'cloud_security_scan', 'cost_anomaly_detection', 'incident_retrospective', 'data_retention'] },
         },
       },
     },
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { name, schedule, jobType } = request.body
+    if (!/^(\S+ ){4}\S+$/.test(schedule)) {
+      return reply.code(400).send({ error: 'invalid schedule — must be a 5-field cron expression' })
+    }
     if (!MONITOR_IMPLS[jobType]) {
       return reply.code(400).send({ error: `unsupported jobType: ${jobType}` })
     }

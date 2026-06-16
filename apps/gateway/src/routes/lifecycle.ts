@@ -6,6 +6,8 @@ import { TenantId } from '@anvay/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { providerConfigFromEnv, resolveProviderConfig } from './chat.js'
+import { requireRole } from '../plugins/rbac.js'
+import { appendAuditEvent } from './audit.js'
 import { decryptJson } from '../utils/crypto.js'
 
 const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
@@ -37,7 +39,7 @@ export async function lifecycleRoutes(app: FastifyInstance) {
 
   app.post<{ Body: { featureRequest: string } }>(
     '/api/lifecycle/prd',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('pm', 'admin')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { featureRequest } = request.body
@@ -72,23 +74,31 @@ export async function lifecycleRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { id: string } }>(
     '/api/lifecycle/prd/:id/approve',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('pm', 'admin')] },
     async (request, reply) => {
-      const { tenantId } = request.user as { tenantId: string }
+      const { tenantId, sub: userId, role } = request.user as { tenantId: string; sub: string; role: string }
+      const { id } = request.params
       const affected = await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
           UPDATE artifacts SET status = 'approved', updated_at = NOW()
-          WHERE id = ${request.params.id}::uuid AND kind = 'prd' AND tenant_id = ${tenantId}::uuid
+          WHERE id = ${id}::uuid AND kind = 'prd' AND tenant_id = ${tenantId}::uuid
         `
       )
       if (Number(affected) === 0) return reply.code(404).send({ error: 'PRD not found' })
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'gate_approved',
+        resource: `prd:${id}`,
+        outcome: 'action_executed',
+        metadata: { artifactId: id, role, kind: 'prd' },
+      }).catch(() => {})
       return { ok: true }
     },
   )
 
   app.post<{ Body: { prdId: string } }>(
     '/api/lifecycle/techspec',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('dev', 'pm', 'admin')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { prdId } = request.body
@@ -127,11 +137,35 @@ export async function lifecycleRoutes(app: FastifyInstance) {
     },
   )
 
+  app.post<{ Params: { id: string } }>(
+    '/api/lifecycle/techspec/:id/approve',
+    { preHandler: [app.authenticate, requireRole('pm', 'admin')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId, role } = request.user as { tenantId: string; sub: string; role: string }
+      const { id } = request.params
+      const affected = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE artifacts SET status = 'approved', updated_at = NOW()
+          WHERE id = ${id}::uuid AND kind = 'techspec' AND tenant_id = ${tenantId}::uuid
+        `
+      )
+      if (Number(affected) === 0) return reply.code(404).send({ error: 'TechSpec not found' })
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'gate_approved',
+        resource: `techspec:${id}`,
+        outcome: 'action_executed',
+        metadata: { artifactId: id, role, kind: 'techspec' },
+      }).catch(() => {})
+      return { ok: true }
+    },
+  )
+
   app.get('/api/lifecycle/artifacts', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ id: string; kind: string; title: string; status: string; parent_id: string | null; created_at: Date }>>`
-        SELECT id, kind, title, status, parent_id, created_at FROM artifacts ORDER BY created_at DESC LIMIT 50
+        SELECT id, kind, title, status, parent_id, created_at FROM artifacts WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 50
       `
     ).catch(() => [])
     return rows.map(r => ({

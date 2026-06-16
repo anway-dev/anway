@@ -9,6 +9,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
+import { UUID_RE } from '../utils/validators.js'
 
 let _pub: RedisClientType | null = null
 
@@ -50,6 +51,7 @@ export async function incidentRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const incident = await service.get(id, tenantId)
     if (!incident) { reply.code(404); return { error: 'Incident not found' } }
     return incident
@@ -110,6 +112,7 @@ export async function incidentRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const updates = request.body
     const result = await service.update(id, user.tenantId, updates)
     if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
@@ -133,6 +136,7 @@ export async function incidentRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const user = request.user as { tenantId: string; sub: string }
     const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const result = await service.resolve(id, user.tenantId)
     if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
 
@@ -156,6 +160,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
       const { id } = request.params
+      if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
           DELETE FROM incidents WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid RETURNING id

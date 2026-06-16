@@ -30,9 +30,13 @@ const READ_ACTION_PATTERNS = [
   /^find_/, /^lookup_/, /^export_/,
 ]
 
-/** Known safe built-in tool names that never require gating. */
+/** Known safe built-in tool names that never require gating.
+ * approve_gate: approval mechanism itself — cannot require its own gate.
+ * register_connector and trigger_pipeline perform real writes (DB mutations,
+ * deploy kickoffs) and must go through the L2 gate like all write actions.
+ */
 const BUILTIN_READ_TOOLS = new Set([
-  'register_connector', 'trigger_pipeline', 'approve_gate',
+  'approve_gate',
 ])
 
 export function isWriteAction(toolName: string): boolean {

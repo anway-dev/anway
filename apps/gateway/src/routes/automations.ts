@@ -76,7 +76,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   })
 
   app.post<{ Body: { eventType: string; payload: Record<string, unknown> } }>('/api/automations/evaluate', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const { eventType, payload } = request.body
@@ -213,12 +213,23 @@ export async function automationsRoutes(app: FastifyInstance) {
     return reply.send({ deleted: true, id })
   })
 
-  // T8: Trigger run history — mock data for now
   app.get<{ Params: { id: string } }>('/api/triggers/:id/runs', {
     preHandler: [app.authenticate],
-  }, async () => ({
-    runs: [],
-  }))
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    if (!UUID_RE.test(id)) { reply.code(400); return { error: 'invalid id' } }
+    const runs = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`
+        SELECT id, status, summary, started_at AS "startedAt", finished_at AS "finishedAt"
+        FROM automation_runs
+        WHERE tenant_id = ${tenantId}::uuid AND kind = 'trigger' AND ref_id = ${id}::uuid
+        ORDER BY started_at DESC
+        LIMIT 20
+      `
+    ).catch(() => [])
+    return { runs }
+  })
 
   app.get<{ Params: { id: string } }>('/api/cron/:id/runs', {
     preHandler: [app.authenticate],

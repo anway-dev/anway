@@ -28,7 +28,9 @@ function checkRateLimit(ip: string): boolean {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post<{ Body: TokenBody }>('/auth/token', {
+  // /auth/token is a dev/test shortcut — never available in production.
+  // Real auth goes through OIDC (/api/auth/oidc/* routes).
+  if (process.env['NODE_ENV'] !== 'production') app.post<{ Body: TokenBody }>('/auth/token', {
     schema: {
       body: {
         type: 'object',

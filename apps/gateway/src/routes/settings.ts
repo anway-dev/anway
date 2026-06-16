@@ -105,7 +105,8 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       try {
         const headers: Record<string, string> = {}
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-        const resp = await fetch(url, { headers })
+        const resp = await fetch(url, { headers, redirect: 'manual' })
+        if (resp.status >= 300 && resp.status < 400) return { models: [] }
         const data = await resp.json() as { models?: { name: string }[]; data?: { id: string }[] }
         // Handle both Ollama format ({ models: [{ name }] }) and OpenAI format ({ data: [{ id }] })
         if (data.models) return { models: data.models.map((m: { name: string }) => m.name) }

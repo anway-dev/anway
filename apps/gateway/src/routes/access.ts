@@ -48,7 +48,31 @@ export async function accessRoutes(app: FastifyInstance) {
   // PUT /api/access/users/:userId/perimeter — upsert user's connector permissions
   app.put<{ Params: { userId: string }; Body: { perimeter: Array<{ connectorName: string; readScopes: string[]; writeScopes: string[] }> } }>(
     '/api/access/users/:userId/perimeter',
-    { preHandler: [app.authenticate] },
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['perimeter'],
+          properties: {
+            perimeter: {
+              type: 'array',
+              maxItems: 50,
+              items: {
+                type: 'object',
+                required: ['connectorName', 'readScopes', 'writeScopes'],
+                additionalProperties: false,
+                properties: {
+                  connectorName: { type: 'string', minLength: 1, maxLength: 100 },
+                  readScopes: { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 200 } },
+                  writeScopes: { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 200 } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string; sub: string }
       if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })

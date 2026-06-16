@@ -386,6 +386,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
         const pub = createClient({ url: redisUrl }) as RedisClientType
         await pub.connect()
         const sub = pub.duplicate()
+        await sub.connect()
         await sub.subscribe(channel, (message, _channel) => {
           reply.raw.write(`data: ${message}\n\n`)
         })
@@ -888,6 +889,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
         if (runId) activeRunChildren.delete(runId)
       }
 
+      // Give Redis pub/sub time to deliver the final SSE event before closing
+      await new Promise(r => setTimeout(r, 150))
       reply.raw.end()
     },
   )

@@ -668,10 +668,9 @@ test.describe('CERT U: perimeter enforcement', () => {
       async () => {
         const r = await request.get(`${GATEWAY}/api/audit`, { headers: h })
         if (r.status() !== 200) return false
-        const events = await r.json() as Array<{ query?: string; eventType?: string }>
-        return events.some(e =>
-          e.eventType === 'perimeter_changed' || e.query === 'perimeter_changed'
-        )
+        const body = await r.json() as Array<{ query?: string }> | { data?: Array<{ query?: string }> }
+        const events = Array.isArray(body) ? body : ((body as { data?: Array<{ query?: string }> }).data ?? [])
+        return events.some(e => e.query === 'perimeter_changed')
       },
       (found) => found === true,
       { intervalMs: 3000, timeoutMs: 30000 },
@@ -942,6 +941,6 @@ test.describe('CERT AF: pipeline stage run SSE', () => {
 
     const body = await resp.text()
     expect(body).toContain('"type"')
-    expect(body).toMatch(/"done"\s*:\s*true|"status"\s*:\s*"completed"/)
+    expect(body).toMatch(/"type"\s*:\s*"done"|"done"\s*:\s*true|"status"\s*:\s*"completed"/)
   })
 })

@@ -41,13 +41,15 @@ function verifyWebhookSignatures(request: FastifyRequest): boolean {
   const body = JSON.stringify(request.body)
   const ghSecret = process.env['GITHUB_WEBHOOK_SECRET']
   const hubSig = request.headers['x-hub-signature-256'] as string | undefined
-  if (ghSecret && hubSig) {
-    if (!verifyGitHubSignature(body, hubSig, ghSecret)) return false
+  if (ghSecret) {
+    // Secret configured — reject if header is absent or invalid
+    if (!hubSig || !verifyGitHubSignature(body, hubSig, ghSecret)) return false
   }
   const ddSecret = process.env['DD_WEBHOOK_SECRET']
   const ddSig = request.headers['dd-request-signature'] as string | undefined
-  if (ddSecret && ddSig) {
-    if (!verifyDatadogSignature(body, ddSig, ddSecret)) return false
+  if (ddSecret) {
+    // Secret configured — reject if header is absent or invalid
+    if (!ddSig || !verifyDatadogSignature(body, ddSig, ddSecret)) return false
   }
   return true
 }

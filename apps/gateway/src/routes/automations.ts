@@ -105,6 +105,7 @@ export async function automationsRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const { enabled, condition, actions } = request.body
     const sets: string[] = []
     const params: unknown[] = []
@@ -125,9 +126,10 @@ export async function automationsRoutes(app: FastifyInstance) {
 
   app.delete<{ Params: { id: string } }>('/api/automations/triggers/:id', {
     preHandler: [app.authenticate, requireRole('admin', 'sre')],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     await withTenant(prisma, tenantId, (tx) =>
       tx.$executeRaw`DELETE FROM trigger_rules WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid`
     )
@@ -183,10 +185,12 @@ export async function automationsRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: { id: string }; Body: { enabled: boolean } }>('/api/automations/monitors/:id', {
     preHandler: [app.authenticate, requireRole('admin', 'sre')],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     await withTenant(prisma, tenantId, (tx) =>
-      tx.$executeRaw`UPDATE cron_jobs SET enabled = ${request.body.enabled} WHERE id = ${request.params.id}::uuid AND tenant_id = ${tenantId}::uuid`
+      tx.$executeRaw`UPDATE cron_jobs SET enabled = ${request.body.enabled} WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid`
     )
     return { updated: true }
   })

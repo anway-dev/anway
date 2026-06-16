@@ -56,7 +56,7 @@ export async function terraformRoutes(app: FastifyInstance) {
   // GET /api/terraform/:env/plan — streams `terraform plan` output as SSE
   app.get<{ Params: { env: string } }>(
     '/api/terraform/:env/plan',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { env } = request.params
 
@@ -81,7 +81,8 @@ export async function terraformRoutes(app: FastifyInstance) {
         const { code } = await runTerraform(env, ['plan', '-no-color'], send)
         reply.raw.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`)
       } catch (err) {
-        reply.raw.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`)
+        request.log.error({ err }, 'terraform plan failed')
+        reply.raw.write(`data: ${JSON.stringify({ error: 'terraform plan failed' })}\n\n`)
       } finally {
         reply.raw.end()
       }
@@ -112,24 +113,24 @@ export async function terraformRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'invalid environment' })
       }
 
-      // Verify gate approval exists — always required, never skippable
+      // Verify and atomically consume gate approval — prevents replay and cross-action reuse
       const { gateId } = request.body
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before apply' })
       }
       {
-        const { prisma } = await import('../db/client.js')
-        const { withTenant } = await import('../db/prisma.js')
-
-        const rows = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ status: string }>>`
-            SELECT status FROM gate_events
+        const consumed = await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            UPDATE gate_events
+            SET status = 'consumed', decided_at = COALESCE(decided_at, NOW())
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
-            LIMIT 1
-          `,
-        ).catch(() => [])
+              AND status = 'approved'
+              AND created_at > NOW() - INTERVAL '24 hours'
+              AND tool_args->>'env' = ${env}
+          `
+        ).catch(() => 0)
 
-        if (rows.length === 0 || rows[0]!.status !== 'approved') {
+        if (Number(consumed) === 0) {
           return reply.code(403).send({ error: 'gate approval required before apply' })
         }
       }
@@ -185,15 +186,16 @@ export async function terraformRoutes(app: FastifyInstance) {
         }).catch(() => { /* non-blocking */ })
         reply.raw.write(`data: ${JSON.stringify({ done: true, exitCode: code })}\n\n`)
       } catch (err) {
+        request.log.error({ err, env, gateId }, 'terraform apply failed')
         await appendAuditEvent({
           tenantId,
           userId: (request.user as { sub: string }).sub,
           action: 'terraform.apply',
           resource: `env:${env}`,
           outcome: 'action_failed',
-          metadata: { env, gateId, error: String(err) },
+          metadata: { env, gateId },
         }).catch(() => { /* non-blocking */ })
-        reply.raw.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`)
+        reply.raw.write(`data: ${JSON.stringify({ error: 'terraform apply failed' })}\n\n`)
       } finally {
         if (redis && lockKey) {
           try { await redis.del(lockKey) } catch { /* ignore */ }
@@ -207,7 +209,7 @@ export async function terraformRoutes(app: FastifyInstance) {
   // GET /api/terraform/:env/output — returns `terraform output -json`
   app.get<{ Params: { env: string } }>(
     '/api/terraform/:env/output',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { env } = request.params
 
@@ -222,12 +224,14 @@ export async function terraformRoutes(app: FastifyInstance) {
         })
 
         if (code !== 0) {
-          return reply.code(500).send({ error: 'terraform output failed', detail: lines.join('') })
+          request.log.error({ env, output: lines.join('') }, 'terraform output non-zero exit')
+          return reply.code(500).send({ error: 'terraform output failed' })
         }
 
         return reply.send(JSON.parse(lines.join('')))
       } catch (err) {
-        return reply.code(500).send({ error: String(err) })
+        request.log.error({ err, env }, 'terraform output failed')
+        return reply.code(500).send({ error: 'terraform output failed' })
       }
     },
   )

@@ -79,11 +79,19 @@ export async function accessRoutes(app: FastifyInstance) {
       const { userId } = request.params
       if (!UUID_RE.test(userId)) return reply.code(400).send({ error: 'invalid userId' })
 
+      const targetUserRows = await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM users WHERE id = ${userId}::uuid AND tenant_id = ${user.tenantId}::uuid LIMIT 1
+        `
+      ).catch(() => [])
+      if (targetUserRows.length === 0) return reply.code(404).send({ error: 'user not found' })
+
       const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'access audit write failed'))
       let count = 0
+      let failed = 0
 
       for (const p of request.body.perimeter) {
-        await withTenant(prisma, user.tenantId, (tx) =>
+        const writeOk = await withTenant(prisma, user.tenantId, (tx) =>
           tx.$executeRaw`
             INSERT INTO user_perimeters (tenant_id, user_id, connector_name, read_scopes, write_scopes)
             VALUES (${user.tenantId}::uuid, ${userId}::uuid, ${p.connectorName},
@@ -91,7 +99,9 @@ export async function accessRoutes(app: FastifyInstance) {
             ON CONFLICT (tenant_id, user_id, connector_name)
             DO UPDATE SET read_scopes = ${p.readScopes}::text[], write_scopes = ${p.writeScopes}::text[]
           `
-        ).catch(() => {})
+        ).then(() => true).catch(() => false)
+
+        if (!writeOk) { failed++; continue }
         count++
 
         void audit.append({
@@ -104,7 +114,9 @@ export async function accessRoutes(app: FastifyInstance) {
           createdAt: new Date(),
         })
       }
-      return { ok: true, count }
+      return failed > 0
+        ? { ok: false, count, failed }
+        : { ok: true, count }
     },
   )
 }

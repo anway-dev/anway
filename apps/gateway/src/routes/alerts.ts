@@ -44,19 +44,36 @@ export async function alertRoutes(app: FastifyInstance) {
     const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
+    let cursorDate: Date | null = null
+    let cursorId: string | null = null
+    if (cursor) {
+      const sepIdx = cursor.lastIndexOf(',')
+      if (sepIdx > 0) {
+        cursorDate = new Date(cursor.slice(0, sepIdx))
+        cursorId = cursor.slice(sepIdx + 1)
+      } else {
+        cursorDate = new Date(cursor)
+      }
+    }
+
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<IncidentRow[]>`
         SELECT id, title, severity, status, description, suggested_root_cause, created_at
         FROM incidents
         WHERE tenant_id = ${tenantId}::uuid
-        ${cursor ? Prisma.sql`AND id < ${cursor}::uuid` : Prisma.sql``}
-        ORDER BY id DESC
+        ${cursorDate && cursorId
+          ? Prisma.sql`AND (created_at, id) < (${cursorDate}, ${cursorId}::uuid)`
+          : cursorDate
+            ? Prisma.sql`AND created_at < ${cursorDate}`
+            : Prisma.sql``}
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit + 1}
       `
     ).catch(() => [] as IncidentRow[])
 
     const hasMore = rows.length > limit
     const data = hasMore ? rows.slice(0, limit) : rows
+    const last = data[data.length - 1]
 
     return {
       data: data.map(r => ({
@@ -73,7 +90,7 @@ export async function alertRoutes(app: FastifyInstance) {
       triageSummary: r.suggested_root_cause ?? undefined,
       orchestratorQuery: `Explain: ${r.title}`,
     })),
-      nextCursor: hasMore ? data[data.length - 1]!.id : null,
+      nextCursor: hasMore && last ? `${last.created_at.toISOString()},${last.id}` : null,
     }
   })
 }

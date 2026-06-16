@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
+import { UUID_RE } from '../utils/validators.js'
 
 async function formatIncidentList(tenantId: string, userId: string): Promise<string> {
   const incidents = await withTenant(prisma, tenantId, (tx) =>
@@ -128,23 +129,29 @@ export async function slackCommandRoutes(app: FastifyInstance) {
       // /anvay approve <gate-id>
       if (trimmed.startsWith('approve ')) {
         const gateId = trimmed.split(' ')[1]
-        if (!gateId) {
-          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anvay approve <gate-id>' })
+        if (!gateId || !UUID_RE.test(gateId)) {
+          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anvay approve <gate-id> (must be a valid UUID)' })
         }
-        await withTenant(prisma, tenantId, (tx) =>
+        const slashUserId = (request.body as Record<string, string> | undefined)?.['user_id'] ?? 'slack-unknown'
+        // Use sentinel UUID for decided_by (Slack user_id is not an Anvay UUID)
+        const affected = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
-            UPDATE gate_events SET status = 'approved'
+            UPDATE gate_events
+            SET status = 'approved', decided_by = '00000000-0000-0000-0000-000000000000'::uuid, decided_at = NOW()
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
           `
-        ).catch(() => null)
-        const slashUserId = (request.body as Record<string, string> | undefined)?.['user_id'] ?? 'slack-unknown'
+        ).catch(() => 0)
+        if (Number(affected) === 0) {
+          return reply.send({ response_type: 'ephemeral', text: `Gate *${gateId}* not found or already decided.` })
+        }
+        // Slack user_id is not a UUID — use sentinel + store slackUser in metadata
         await appendAuditEvent({
           tenantId,
-          userId: slashUserId,
+          userId: '00000000-0000-0000-0000-000000000000',
           action: 'gate.approve',
           resource: `gate_event:${gateId}`,
           outcome: 'action_executed',
-          metadata: { source: 'slack_slash_command', command: '/anvay approve', gateId },
+          metadata: { source: 'slack_slash_command', command: '/anvay approve', gateId, slackUser: slashUserId },
         }).catch(() => { /* non-blocking */ })
         return reply.send({ response_type: 'ephemeral', text: `Gate *${gateId}* approved.` })
       }

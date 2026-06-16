@@ -47,6 +47,21 @@ const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "launchdarkly", name: "LaunchDarkly", category: "Feature Flags", description: "Feature flags, A/B tests, rollouts", color: "#405bff", icon: "LD", capabilities: ["flags", "releases"], configFields: [{ label: "SDK Key", key: "sdk_key", type: "password" }, { label: "Project Key", key: "project", type: "text" }] },
 ]
 
+const BOOTSTRAP_UNSAFE_KEYS = new Set(['error', 'stack', 'stackTrace', 'stderr', 'stdout'])
+
+function sanitizeBootstrapSummary(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (BOOTSTRAP_UNSAFE_KEYS.has(k)) {
+      out[k] = typeof v === 'string' ? v.slice(0, 200) : '[redacted]'
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
+
 export async function connectorsRoutes(app: FastifyInstance) {
   app.get('/api/connectors', {
     preHandler: [app.authenticate],
@@ -88,7 +103,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
       `
     ).catch(() => [])
     if (row.length === 0) return { bootstrapped: false }
-    return { bootstrapped: row[0]!.bootstrapped_at !== null, bootstrappedAt: row[0]!.bootstrapped_at, summary: row[0]!.last_bootstrap_summary }
+    return { bootstrapped: row[0]!.bootstrapped_at !== null, bootstrappedAt: row[0]!.bootstrapped_at, summary: sanitizeBootstrapSummary(row[0]!.last_bootstrap_summary) }
   })
 
   // BB1: Connector health/status — polls live connector endpoint
@@ -112,7 +127,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
       type,
       enabled: row.enabled,
       bootstrappedAt: row.bootstrapped_at?.toISOString() ?? null,
-      lastBootstrapSummary: row.last_bootstrap_summary ?? null,
+      lastBootstrapSummary: sanitizeBootstrapSummary(row.last_bootstrap_summary) ?? null,
       status: row.bootstrapped_at ? 'bootstrapped' : 'pending',
     })
   })

@@ -19,15 +19,22 @@ export async function k8sRoutes(app: FastifyInstance) {
     const user = request.user as { tenantId: string; sub: string; role?: string }
     const { tenantId } = user
 
-    // Resolve user's allowed namespaces from user_perimeters
+    // Resolve user's allowed namespaces from user_perimeters (read_scopes on k8s connectors)
     let allowedNs: string[] | null = null
     if (user.role !== 'admin') {
+      let perimeterQueryFailed = false
       const perimeters = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<{ allowed_namespaces: string[] | null }[]>`
-          SELECT allowed_namespaces FROM user_perimeters WHERE user_id = ${user.sub}::uuid LIMIT 1
+        tx.$queryRaw<{ read_scopes: string[] }[]>`
+          SELECT read_scopes FROM user_perimeters
+          WHERE tenant_id = ${tenantId}::uuid AND user_id = ${user.sub}::uuid
+            AND connector_name = ANY(ARRAY['k8s','eks','gke']::text[])
+          LIMIT 1
         `
-      ).catch(() => [])
-      allowedNs = perimeters[0]?.allowed_namespaces ?? null
+      ).catch(() => { perimeterQueryFailed = true; return [] as { read_scopes: string[] }[] })
+      if (perimeterQueryFailed) {
+        return { connected: false, namespaces: [], workloads: [], events: [], summary: null }
+      }
+      allowedNs = perimeters[0]?.read_scopes ?? []
     }
 
     const connectors = await withTenant(prisma, tenantId, (tx) =>
@@ -54,6 +61,9 @@ export async function k8sRoutes(app: FastifyInstance) {
     const serviceEntities = entities.filter(e => e.type === 'Service')
     const alertEntities = entities.filter(e => e.type === 'Alert')
 
+    const nsAllowed = (name: string) =>
+      allowedNs === null || allowedNs.includes('*') || allowedNs.includes(name)
+
     const namespaces = namespaceEntities.map(ns => {
       const meta = (ns.metadata ?? {}) as Record<string, unknown>
       return {
@@ -65,19 +75,24 @@ export async function k8sRoutes(app: FastifyInstance) {
         memTotal: typeof meta.memTotal === 'number' ? meta.memTotal : 1,
         status: typeof meta.status === 'string' ? meta.status : 'Active',
       }
-    }).filter(ns => allowedNs === null || allowedNs.includes(ns.name))
+    }).filter(ns => nsAllowed(ns.name))
 
-    const workloads = serviceEntities.map(svc => {
+    const workloads = serviceEntities.flatMap(svc => {
       const meta = (svc.metadata ?? {}) as Record<string, unknown>
-      return {
+      const nsRaw = typeof meta.namespace === 'string' ? meta.namespace : null
+      // For non-admin users, exclude workloads with absent namespace metadata (can't verify perimeter)
+      if (nsRaw === null && allowedNs !== null) return []
+      const namespace = nsRaw ?? 'default'
+      if (!nsAllowed(namespace)) return []
+      return [{
         name: svc.name,
-        namespace: typeof meta.namespace === 'string' ? meta.namespace : 'default',
+        namespace,
         type: typeof meta.workloadType === 'string' ? meta.workloadType : 'Deployment',
         ready: typeof meta.readyReplicas === 'number' ? meta.readyReplicas : 0,
         desired: typeof meta.desiredReplicas === 'number' ? meta.desiredReplicas : 0,
         status: typeof meta.health === 'string' ? meta.health : 'Unknown',
-      }
-    }).filter(w => allowedNs === null || allowedNs.includes(w.namespace))
+      }]
+    })
 
     const events = alertEntities.slice(0, 10).map(alert => {
       const meta = (alert.metadata ?? {}) as Record<string, unknown>
@@ -115,15 +130,20 @@ export async function k8sRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
-      // Enforce namespace perimeter for non-admin sre users
+      // Enforce namespace perimeter for non-admin sre users — fail closed on query error
       if (user.role !== 'admin') {
+        let perimeterQueryFailed = false
         const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
-          tx.$queryRaw<{ allowed_namespaces: string[] | null }[]>`
-            SELECT allowed_namespaces FROM user_perimeters WHERE user_id = ${user.sub}::uuid LIMIT 1
+          tx.$queryRaw<{ write_scopes: string[] }[]>`
+            SELECT write_scopes FROM user_perimeters
+            WHERE tenant_id = ${user.tenantId}::uuid AND user_id = ${user.sub}::uuid
+              AND connector_name = ANY(ARRAY['k8s','eks','gke']::text[])
+            LIMIT 1
           `
-        ).catch(() => [])
-        const allowed = perimeters[0]?.allowed_namespaces ?? null
-        if (allowed && !allowed.includes(namespace)) {
+        ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
+        if (perimeterQueryFailed) return reply.code(403).send({ error: 'perimeter check failed' })
+        const allowed = perimeters[0]?.write_scopes ?? []
+        if (!allowed.includes('*') && !allowed.includes(namespace)) {
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }
@@ -149,13 +169,18 @@ export async function k8sRoutes(app: FastifyInstance) {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
       if (user.role !== 'admin') {
+        let perimeterQueryFailed = false
         const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
-          tx.$queryRaw<{ allowed_namespaces: string[] | null }[]>`
-            SELECT allowed_namespaces FROM user_perimeters WHERE user_id = ${user.sub}::uuid LIMIT 1
+          tx.$queryRaw<{ write_scopes: string[] }[]>`
+            SELECT write_scopes FROM user_perimeters
+            WHERE tenant_id = ${user.tenantId}::uuid AND user_id = ${user.sub}::uuid
+              AND connector_name = ANY(ARRAY['k8s','eks','gke']::text[])
+            LIMIT 1
           `
-        ).catch(() => [])
-        const allowed = perimeters[0]?.allowed_namespaces ?? null
-        if (allowed && !allowed.includes(namespace)) {
+        ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
+        if (perimeterQueryFailed) return reply.code(403).send({ error: 'perimeter check failed' })
+        const allowed = perimeters[0]?.write_scopes ?? []
+        if (!allowed.includes('*') && !allowed.includes(namespace)) {
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }

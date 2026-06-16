@@ -5,6 +5,7 @@ import { RedisGateSink } from './redis-gate-sink.js'
 import { getMemoryGateSink } from './memory-gate-fallback.js'
 import { UUID_RE } from '../utils/validators.js'
 import { gateDecisionsTotal } from '../metrics.js'
+import { requireRole } from '../plugins/rbac.js'
 
 const redisUrl = process.env['REDIS_URL']
 const gateSink = redisUrl ? new RedisGateSink(redisUrl) : null
@@ -54,7 +55,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { gateId: string }; Body: { decision: 'approved' | 'rejected' } }>(
     '/api/gate/:gateId/decide', {
-      preHandler: [app.authenticate],
+      preHandler: [app.authenticate, requireRole('admin', 'sre')],
       schema: {
         body: {
           type: 'object',
@@ -71,14 +72,16 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       const { decision } = request.body
       const { sub: userId, tenantId } = request.user as { sub: string; tenantId: string }
 
+      // SoD: look up gate owner before Redis/in-memory split — applies to both paths
+      const gateRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ user_id: string }>>`
+          SELECT user_id FROM gate_events
+          WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending' LIMIT 1
+        `
+      ).catch(() => [] as Array<{ user_id: string }>)
+
       if (redisUrl) {
-        // Separation of duties: cannot approve/reject your own gate request
-        const gateRows = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ user_id: string }>>`
-            SELECT user_id FROM gate_events
-            WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending' LIMIT 1
-          `
-        ).catch(() => [] as Array<{ user_id: string }>)
+        // Redis path requires a gate_events row
         if (gateRows.length === 0) {
           return reply.code(404).send({ error: 'gate not found or already decided' })
         }
@@ -86,7 +89,6 @@ export async function gateDecideRoutes(app: FastifyInstance) {
           return reply.code(403).send({ error: 'cannot approve your own gate request' })
         }
 
-        // Redis path: gate_events row required; decision published via Redis
         const affected = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
@@ -103,7 +105,23 @@ export async function gateDecideRoutes(app: FastifyInstance) {
           request.log.warn({ err, gateId }, 'failed to publish gate decision to Redis')
         }
       } else {
-        // In-memory path: no gate_events row; resolve pollGate() directly
+        // In-memory path: apply SoD when a DB row exists (best-effort)
+        if (gateRows.length > 0 && gateRows[0]!.user_id === userId) {
+          return reply.code(403).send({ error: 'cannot approve your own gate request' })
+        }
+        // Persist decision to gate_events when a row exists, for audit trail + idempotency
+        if (gateRows.length > 0) {
+          const affected = await withTenant(prisma, tenantId, (tx) =>
+            tx.$executeRaw`
+              UPDATE gate_events
+              SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
+              WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
+            `
+          ).catch(() => 0)
+          if (Number(affected) === 0) {
+            return reply.code(404).send({ error: 'gate not found or already decided' })
+          }
+        }
         await getMemoryGateSink().record(gateId, decision, userId)
       }
 
@@ -112,11 +130,11 @@ export async function gateDecideRoutes(app: FastifyInstance) {
     },
   )
 
-  // Create a gate (for seeding approvals in tests)
+  // Create a gate (admin/sre only — prevents unprivileged auto-approval forgery)
   app.post<{ Body: { action: string; target: string; requestedBy?: string; scope?: string; confidence?: number } }>(
     '/api/gate',
     {
-      preHandler: [app.authenticate],
+      preHandler: [app.authenticate, requireRole('admin', 'sre')],
       schema: {
         body: {
           type: 'object',
@@ -159,13 +177,21 @@ export async function gateDecideRoutes(app: FastifyInstance) {
         }
       }
 
+      const systemSentinel = '00000000-0000-0000-0000-000000000000'
       const row = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ id: string }>>`
-          INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
-          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
-                  ${action}, ${toolArgs}::jsonb, 'test', ${status}::text, NOW())
-          RETURNING id
-        `
+        autoApproved
+          ? tx.$queryRaw<Array<{ id: string }>>`
+              INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at, decided_by, decided_at)
+              VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
+                      ${action}, ${toolArgs}::jsonb, 'test', ${status}::text, NOW(), ${systemSentinel}::uuid, NOW())
+              RETURNING id
+            `
+          : tx.$queryRaw<Array<{ id: string }>>`
+              INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
+              VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
+                      ${action}, ${toolArgs}::jsonb, 'test', ${status}::text, NOW())
+              RETURNING id
+            `
       )
       return reply.code(201).send({ ok: true, id: (row as Array<{ id: string }>)[0]?.id, autoApproved })
     },

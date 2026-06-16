@@ -348,7 +348,8 @@ export async function chatRoutes(app: FastifyInstance) {
       return {
         connectorId: toolPrefix(c),
         read: raw.capabilities?.read ?? ['*'],
-        write: c.mode === 'write' || c.mode === 'read_write' ? (raw.capabilities?.write ?? ['*']) : [],
+        // Absent write manifest → deny (not ['*']); explicit list → use it
+        write: c.mode === 'write' || c.mode === 'read_write' ? (raw.capabilities?.write ?? []) : [],
       }
     })
 
@@ -363,11 +364,11 @@ export async function chatRoutes(app: FastifyInstance) {
       const scope = connectorScopes[i]!
       const row = userPerimeterRows.find(r => r.connector_name === scope.connectorId)
       if (!row) continue
-      // ConnectorScope.read/write are readonly — replace the element, don't mutate
+      // When a user perimeter row exists, use its scopes directly — empty = deny, don't fall back to connector default
       connectorScopes[i] = {
         connectorId: scope.connectorId,
-        read: row.read_scopes.length > 0 ? row.read_scopes : scope.read,
-        write: row.write_scopes.length > 0 ? row.write_scopes : scope.write,
+        read: row.read_scopes,
+        write: row.write_scopes,
       }
     }
 

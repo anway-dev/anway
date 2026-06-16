@@ -747,10 +747,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
               if (prevState) {
                 if (requireRollbackGate) {
                   // Insert rollback gate before executing
+                  const rollbackUserId = (request.user as { sub: string }).sub
                   await withTenant(prisma, tenantId, (tx) =>
                     tx.$executeRaw`
-                      INSERT INTO gate_events (id, tenant_id, tool_name, tool_args, status, created_at)
-                      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'monitor_failed' })}::jsonb, 'pending', now())
+                      INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
+                      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${rollbackUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'monitor_failed' })}::jsonb, 'pending', now())
                     `
                   ).catch(() => null)
                   // Emit gate event to SSE
@@ -786,10 +787,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
           }
 
           case 'gate': {
+            const gateUserId = (request.user as { sub: string }).sub
             await withTenant(prisma, tenantId, (tx) =>
               tx.$queryRaw`
-                INSERT INTO gate_events (id, tenant_id, tool_name, tool_args, status, created_at)
-                VALUES (gen_random_uuid(), ${tenantId}::uuid, ${'pipeline_promote'}, ${JSON.stringify({ pipelineId: id, stageId, runId })}::jsonb, 'pending', now())
+                INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
+                VALUES (gen_random_uuid(), ${tenantId}::uuid, ${gateUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_promote'}, ${JSON.stringify({ pipelineId: id, stageId, runId })}::jsonb, 'pending', now())
               `,
             ).catch(() => null)
 
@@ -926,6 +928,22 @@ export async function pipelineRoutes(app: FastifyInstance) {
         ).catch(() => null)
       }
 
+      // SoD: requester cannot approve their own gate
+      const gateRequestRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ user_id: string | null }>>`
+          SELECT user_id FROM gate_events
+          WHERE tenant_id = ${tenantId}::uuid AND status = 'pending'
+            AND tool_args->>'pipelineId' = ${id}
+            AND tool_args->>'stageId' = ${stageId}
+          ORDER BY created_at DESC LIMIT 1
+        `
+      ).catch(() => [] as Array<{ user_id: string | null }>)
+      const requesterId = gateRequestRows[0]?.user_id ?? null
+      const approverId = (request.user as { sub: string }).sub
+      if (requesterId && requesterId === approverId) {
+        return reply.code(403).send({ error: 'cannot approve your own gate request' })
+      }
+
       await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw`
           UPDATE pipeline_stage_runs
@@ -937,7 +955,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
       await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw`
-          UPDATE gate_events SET status = 'approved'
+          UPDATE gate_events SET status = 'approved', decided_by = ${approverId}::uuid, decided_at = now()
           WHERE tenant_id = ${tenantId}::uuid AND status = 'pending'
             AND tool_args->>'pipelineId' = ${id}
             AND tool_args->>'stageId' = ${stageId}

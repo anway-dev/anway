@@ -123,10 +123,28 @@ export function makeDeployTools(
         const gateId = args['gate_id'] as string
         const reason = (args['reason'] as string | undefined) ?? 'Approved via chat'
 
+        // SoD + cross-user check: read gate before updating
+        const pending = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ id: string; user_id: string }>>`
+            SELECT id, user_id FROM gate_events
+            WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
+            LIMIT 1
+          `
+        ).catch(() => [])
+
+        if (pending.length === 0) {
+          return { error: `Gate ${gateId} not found or already resolved.` }
+        }
+        if (pending[0]!.user_id === userId) {
+          return { error: 'Cannot approve your own gate request — requires a different approver.' }
+        }
+
         const rows = await withTenant(prisma, tenantId, (tx) =>
           tx.$queryRaw<Array<{ id: string; status: string }>>`
             UPDATE gate_events
             SET status = 'approved',
+                decided_by = ${userId}::uuid,
+                decided_at = NOW(),
                 tool_args = tool_args || ${JSON.stringify({ approvedBy: userId, reason, approvedAt: new Date().toISOString() })}::jsonb
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
             RETURNING id, status
@@ -134,19 +152,21 @@ export function makeDeployTools(
         ).catch(() => [])
 
         if (rows.length === 0) {
-          return { error: `Gate ${gateId} not found or already resolved.` }
+          return { error: `Gate ${gateId} could not be approved.` }
         }
 
         // Update Redis decision key so pollGate() unblocks the waiting orchestrator run
         const redisUrl = process.env['REDIS_URL']
         if (redisUrl) {
+          const { createClient } = await import('redis')
+          const redis = createClient({ url: redisUrl })
           try {
-            const { createClient } = await import('redis')
-            const redis = createClient({ url: redisUrl })
             await redis.connect()
             await redis.set(`gate:${gateId}:decision`, 'approved')
-            await redis.disconnect()
           } catch { /* Redis may be unavailable — pollGate will timeout */ }
+          finally {
+            try { await redis.disconnect() } catch { /* ignore */ }
+          }
         }
 
         return { ok: true, gateId, status: 'approved', reason, message: 'Gate approved. Next pipeline stage will run automatically.' }

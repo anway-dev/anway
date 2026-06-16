@@ -113,8 +113,20 @@ export async function k8sRoutes(app: FastifyInstance) {
     '/api/k8s/pods/:namespace/:name/restart',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
-      const user = request.user as { tenantId: string; sub: string }
+      const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
+      // Enforce namespace perimeter for non-admin sre users
+      if (user.role !== 'admin') {
+        const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
+          tx.$queryRaw<{ allowed_namespaces: string[] | null }[]>`
+            SELECT allowed_namespaces FROM user_perimeters WHERE user_id = ${user.sub}::uuid LIMIT 1
+          `
+        ).catch(() => [])
+        const allowed = perimeters[0]?.allowed_namespaces ?? null
+        if (allowed && !allowed.includes(namespace)) {
+          return reply.code(403).send({ error: 'namespace not in your perimeter' })
+        }
+      }
       const audit = new PostgresAuditSink(prisma, () => {})
       void audit.append({
         id: crypto.randomUUID(),
@@ -134,8 +146,19 @@ export async function k8sRoutes(app: FastifyInstance) {
     '/api/k8s/deployments/:namespace/:name/scale',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
-      const user = request.user as { tenantId: string; sub: string }
+      const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
+      if (user.role !== 'admin') {
+        const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
+          tx.$queryRaw<{ allowed_namespaces: string[] | null }[]>`
+            SELECT allowed_namespaces FROM user_perimeters WHERE user_id = ${user.sub}::uuid LIMIT 1
+          `
+        ).catch(() => [])
+        const allowed = perimeters[0]?.allowed_namespaces ?? null
+        if (allowed && !allowed.includes(namespace)) {
+          return reply.code(403).send({ error: 'namespace not in your perimeter' })
+        }
+      }
       const { replicas } = request.body
       if (typeof replicas !== 'number' || replicas < 0) {
         return reply.code(400).send({ error: 'replicas must be a non-negative number' })

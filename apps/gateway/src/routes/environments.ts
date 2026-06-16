@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
+import { UUID_RE } from '../utils/validators.js'
 
 interface EnvRow {
   id: string
@@ -113,6 +114,7 @@ export async function environmentRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id } = request.params
+      if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
       const { label, color, sortOrder } = request.body
 
       if (label !== undefined) {
@@ -151,6 +153,7 @@ export async function environmentRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { id } = request.params
+      if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
 
       // Don't delete last environment
       const count = await withTenant(prisma, tenantId, (tx) =>

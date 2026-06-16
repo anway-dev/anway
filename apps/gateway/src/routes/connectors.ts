@@ -4,6 +4,7 @@ import { withTenant } from '../db/prisma.js'
 import { createClient } from 'redis'
 import { UUID_RE } from '../utils/validators.js'
 import { effectiveCredentials } from '../utils/credentials.js'
+import { requireRole } from '../plugins/rbac.js'
 
 interface ConfigField { label: string; key: string; type: string }
 interface CatalogEntry { id: string; name: string; category: string; description: string; color: string; icon: string; capabilities: string[]; configFields: ConfigField[] }
@@ -120,7 +121,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
 
   // T9: Trigger bootstrap
   app.post<{ Params: { type: string } }>('/api/connectors/:type/bootstrap', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
@@ -158,13 +159,24 @@ export async function connectorsRoutes(app: FastifyInstance) {
       if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
       const { id } = request.params
       if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
-      const rows = await withTenant(prisma, tenantId, (tx) =>
+      // Try connector_config first (settings-based), then connectors table (MCP/CLI adapters)
+      let rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<{ connector_type: string }[]>`
           DELETE FROM connector_config
           WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
           RETURNING connector_type
         `
       ).catch(() => [])
+      if (rows.length === 0) {
+        const adapterRows = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<{ connector_type: string }[]>`
+            DELETE FROM connectors
+            WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+            RETURNING type AS connector_type
+          `
+        ).catch(() => [])
+        rows = adapterRows
+      }
       if (rows.length === 0) return reply.code(404).send({ error: 'not found' })
       const pub = await getBootstrapPub()
       if (pub) {
@@ -199,7 +211,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
 
   // POST /api/connectors/:type/reconnect — triggers re-bootstrap
   app.post<{ Params: { type: string } }>('/api/connectors/:type/reconnect', {
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params

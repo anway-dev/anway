@@ -55,21 +55,37 @@ export async function auditRoutes(app: FastifyInstance) {
     const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
-    // Cursor is ISO timestamp — ORDER BY created_at DESC for true chronological order
-    const cursorDate = cursor ? new Date(cursor) : null
+    // Composite cursor (created_at, id) — prevents row loss/duplication when
+    // multiple events share the same timestamp (common in a single session).
+    let cursorDate: Date | null = null
+    let cursorId: string | null = null
+    if (cursor) {
+      const sepIdx = cursor.lastIndexOf(',')
+      if (sepIdx > 0) {
+        cursorDate = new Date(cursor.slice(0, sepIdx))
+        cursorId = cursor.slice(sepIdx + 1)
+      } else {
+        cursorDate = new Date(cursor)
+      }
+    }
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
         FROM audit_events
-        ${cursorDate ? Prisma.sql`WHERE created_at < ${cursorDate}` : Prisma.sql``}
-        ORDER BY created_at DESC
+        ${cursorDate && cursorId
+          ? Prisma.sql`WHERE (created_at, id) < (${cursorDate}, ${cursorId}::uuid)`
+          : cursorDate
+            ? Prisma.sql`WHERE created_at < ${cursorDate}`
+            : Prisma.sql``}
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit + 1}
       `
     ).catch(() => [] as AuditRow[])
 
     const hasMore = rows.length > limit
     const data = hasMore ? rows.slice(0, limit) : rows
+    const last = data[data.length - 1]
 
     return {
       data: data.map(r => {
@@ -87,7 +103,7 @@ export async function auditRoutes(app: FastifyInstance) {
         durationMs: (p['durationMs'] as number) ?? 0,
       } as AuditEvent
     }),
-      nextCursor: hasMore ? data[data.length - 1]!.created_at.toISOString() : null,
+      nextCursor: hasMore && last ? `${last.created_at.toISOString()},${last.id}` : null,
     }
   })
 

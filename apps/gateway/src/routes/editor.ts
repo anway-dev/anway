@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { requireRole } from '../plugins/rbac.js'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -14,7 +15,10 @@ const ALLOWED_ROOTS: string[] = [
 
 function isAllowedPath(target: string): boolean {
   const resolved = path.resolve(target)
-  return ALLOWED_ROOTS.some((root) => resolved.startsWith(path.resolve(root)))
+  return ALLOWED_ROOTS.some((root) => {
+    const r = path.resolve(root)
+    return resolved === r || resolved.startsWith(r + path.sep)
+  })
 }
 
 function detectLanguage(filename: string): string {
@@ -104,7 +108,7 @@ export async function editorRoutes(app: FastifyInstance) {
   // GET /api/editor/files?path=<dir> — list directory tree
   app.get<{ Querystring: { path?: string } }>(
     '/api/editor/files',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const reqPath = request.query.path
 
@@ -129,7 +133,7 @@ export async function editorRoutes(app: FastifyInstance) {
   // GET /api/editor/file?path=<file> — read file content
   app.get<{ Querystring: { path?: string } }>(
     '/api/editor/file',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const reqPath = request.query.path
 
@@ -162,7 +166,7 @@ export async function editorRoutes(app: FastifyInstance) {
   // POST /api/editor/analyze — LLM analysis, returns SSE stream of findings + test plan
   app.post<{ Body: { content: string; filename: string; language?: string } }>(
     '/api/editor/analyze',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const { content, filename, language } = request.body
 
@@ -263,7 +267,7 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
   // POST /api/editor/run-tests — generate test code via LLM and run it
   app.post<{ Body: { content: string; filename: string; findings: object[]; testPlan: object[] } }>(
     '/api/editor/run-tests',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const { content, filename, findings, testPlan } = request.body
 

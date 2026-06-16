@@ -177,7 +177,15 @@ export async function oidcRoutes(app: FastifyInstance) {
       })
 
       reply.clearCookie('oidc_state', { path: '/auth/oidc' })
-      return reply.redirect(`/?token=${token}`)
+      // Set token as httpOnly cookie — never embed in URL (leaks to logs/history/Referer)
+      reply.setCookie('anvay_token', token, {
+        httpOnly: true,
+        secure: process.env['NODE_ENV'] === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: 24 * 60 * 60,
+      })
+      return reply.redirect('/')
     } catch (err) {
       request.log.error({ err }, 'OIDC callback failed')
       return reply.code(500).send({ error: 'OIDC callback failed' })

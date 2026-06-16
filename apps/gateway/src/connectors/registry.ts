@@ -28,15 +28,32 @@ function cacheKey(tenantId: string, connectorId: string): string {
   return `${tenantId}:${connectorId}`
 }
 
-function getCfg(row: ConnectorRow): Record<string, unknown> {
+// Allowlist of approved CLI connector binaries — prevents RCE via connector config
+const ALLOWED_CLI_BINARIES = new Set([
+  'gh', 'git', 'kubectl', 'argocd', 'aws', 'gcloud', 'az',
+  'pd', 'terraform', 'helm', 'docker', 'datadog-ci',
+])
+
+function isAllowedBinary(binary: unknown): boolean {
+  if (typeof binary !== 'string' || binary.length === 0) return false
+  // Reject paths, shell metacharacters, and relative traversal
+  if (/[/\\|;&`$<>]/.test(binary)) return false
+  return ALLOWED_CLI_BINARIES.has(binary)
+}
+
+function getCfg(row: ConnectorRow): Record<string, unknown> | null {
   if (row.config_enc) {
-    try { return decryptJson<Record<string, unknown>>(row.config_enc) } catch { return {} }
+    try { return decryptJson<Record<string, unknown>>(row.config_enc) } catch { return null }
   }
   return {}
 }
 
-function instantiateAdapter(row: ConnectorRow, tenantId: string): McpConnector | CliConnector {
+function instantiateAdapter(row: ConnectorRow, tenantId: string): McpConnector | CliConnector | null {
   const cfg = getCfg(row)
+  if (cfg === null) {
+    // Decrypt failed — skip rather than cache a broken adapter
+    return null
+  }
   const name = row.name || row.type
 
   if (row.type === 'mcp') {
@@ -46,10 +63,15 @@ function instantiateAdapter(row: ConnectorRow, tenantId: string): McpConnector |
     })
   }
 
-  // CLI type — binary from config, not from row.type
+  // CLI type — validate binary against allowlist before instantiating
+  const binary = cfg['binary']
+  if (!isAllowedBinary(binary)) {
+    return null
+  }
+
   return new CliConnector({
     name,
-    binary: cfg['binary'] as string,
+    binary: binary as string,
     allowedSubcommands: cfg['allowedSubcommands'] as string[] | undefined,
     env: cfg['env'] as Record<string, string> | undefined,
     onExec(entry: CliExecEntry) {
@@ -96,7 +118,9 @@ export async function getToolsForTenant(
     const key = cacheKey(tenantId, row.id)
     let adapter = adapterCache.get(key)
     if (!adapter) {
-      adapter = instantiateAdapter(row, tenantId)
+      const built = instantiateAdapter(row, tenantId)
+      if (!built) return []  // decrypt failed or binary not allowed — skip silently
+      adapter = built
       cacheSetAdapter(key, adapter)
     }
     const tools = await adapter.getTools()
@@ -142,6 +166,9 @@ export async function registerConnectorTool(
   )
 
   const adapter = instantiateAdapter({ id: row.id, type, name, mode: 'read', config_enc: encryptJson(config) }, tenantId)
+  if (!adapter) {
+    return { connectorId: row.id, toolCount: 0, tools: [] }
+  }
   const key = cacheKey(tenantId, row.id)
   cacheSetAdapter(key, adapter)
 

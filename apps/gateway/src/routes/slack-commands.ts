@@ -73,20 +73,24 @@ function verifySlackSignature(
 export async function slackCommandRoutes(app: FastifyInstance) {
   app.post<{ Body: Record<string, string> }>('/api/slack/commands', async (request, reply) => {
     const signingSecret = process.env['SLACK_SIGNING_SECRET']
-    if (signingSecret) {
-      const timestamp = request.headers['x-slack-request-timestamp'] as string | undefined
-      const signature = request.headers['x-slack-signature'] as string | undefined
-      if (!timestamp || !signature) {
-        return reply.code(401).send({ error: 'missing slack signature headers' })
-      }
-      // Reject requests older than 5 minutes (replay protection)
-      const now = Math.floor(Date.now() / 1000)
-      if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
-        return reply.code(401).send({ error: 'slack request expired' })
-      }
-      if (!verifySlackSignature(signingSecret, timestamp, JSON.stringify(request.body), signature)) {
-        return reply.code(401).send({ error: 'invalid slack signature' })
-      }
+    // Fail-closed: if SLACK_SIGNING_SECRET is not set, reject all commands
+    // rather than letting unauthenticated callers approve gates.
+    if (!signingSecret) {
+      return reply.code(503).send({ error: 'Slack integration not configured' })
+    }
+
+    const timestamp = request.headers['x-slack-request-timestamp'] as string | undefined
+    const signature = request.headers['x-slack-signature'] as string | undefined
+    if (!timestamp || !signature) {
+      return reply.code(401).send({ error: 'missing slack signature headers' })
+    }
+    // Reject requests older than 5 minutes (replay protection)
+    const now = Math.floor(Date.now() / 1000)
+    if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
+      return reply.code(401).send({ error: 'slack request expired' })
+    }
+    if (!verifySlackSignature(signingSecret, timestamp, JSON.stringify(request.body), signature)) {
+      return reply.code(401).send({ error: 'invalid slack signature' })
     }
 
     const { command, text, user_id } = request.body ?? {}
@@ -95,8 +99,10 @@ export async function slackCommandRoutes(app: FastifyInstance) {
     }
 
     const trimmed = (text ?? '').trim()
-    const tenantId = (request.headers['x-anvay-tenant'] as string)
-      ?? process.env['ANVAY_WEBHOOK_TENANT']
+    // Tenant resolved from server-side env only — never from an attacker-controlled header.
+    // The Slack team_id (verified by the HMAC above) should map to a tenant; for now
+    // ANVAY_WEBHOOK_TENANT is the admin-configured binding.
+    const tenantId = process.env['ANVAY_WEBHOOK_TENANT']
       ?? '00000000-0000-0000-0000-000000000001'
 
     try {

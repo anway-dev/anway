@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { UUID_RE } from '../utils/validators.js'
 
 interface SessionRow {
   id: string
@@ -41,6 +42,7 @@ export async function sessionRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
+    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<SessionRow[]>`
         SELECT id, user_id, created_at, expires_at, updated_at, turn_count

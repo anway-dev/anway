@@ -112,9 +112,12 @@ export async function terraformRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'invalid environment' })
       }
 
-      // Verify gate approval exists for this environment
+      // Verify gate approval exists — always required, never skippable
       const { gateId } = request.body
-      if (gateId) {
+      if (!gateId) {
+        return reply.code(403).send({ error: 'gate approval required before apply' })
+      }
+      {
         const { prisma } = await import('../db/client.js')
         const { withTenant } = await import('../db/prisma.js')
 

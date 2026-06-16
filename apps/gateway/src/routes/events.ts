@@ -157,7 +157,23 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Deploy event receiver
-  app.post('/api/events/deploy', { preHandler: [authenticateEvent] }, async (request, reply) => {
+  app.post('/api/events/deploy', {
+    preHandler: [authenticateEvent],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['service', 'sha'],
+        additionalProperties: true,
+        properties: {
+          service: { type: 'string', minLength: 1, maxLength: 200 },
+          sha: { type: 'string', minLength: 1, maxLength: 200 },
+          env: { type: 'string', maxLength: 100 },
+          version: { type: 'string', maxLength: 200 },
+          status: { type: 'string', maxLength: 50 },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
@@ -169,7 +185,23 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // PR merged webhook (Gitea/GitHub)
-  app.post('/api/events/pr-merged', { preHandler: [authenticateEvent] }, async (request, reply) => {
+  app.post('/api/events/pr-merged', {
+    preHandler: [authenticateEvent],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['repo'],
+        additionalProperties: true,
+        properties: {
+          repo: { type: 'string', minLength: 1, maxLength: 300 },
+          prNumber: { type: 'integer', minimum: 1 },
+          title: { type: 'string', maxLength: 500 },
+          author: { type: 'string', maxLength: 200 },
+          sha: { type: 'string', maxLength: 200 },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) { return reply.code(401).send({ error: 'invalid tenant' }) }
     const { tenantId } = user
@@ -181,7 +213,22 @@ export async function eventRoutes(app: FastifyInstance) {
   })
 
   // Internal incident event
-  app.post('/api/events/incident', { preHandler: [authenticateEvent] }, async (request, reply) => {
+  app.post('/api/events/incident', {
+    preHandler: [authenticateEvent],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['title'],
+        additionalProperties: true,
+        properties: {
+          title: { type: 'string', minLength: 1, maxLength: 500 },
+          severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
+          service: { type: 'string', maxLength: 200 },
+          description: { type: 'string', maxLength: 5000 },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const user = request.user as { tenantId?: string }
     if (!user.tenantId || !UUID_RE.test(user.tenantId)) return reply.code(401).send({ error: 'invalid tenant' })
     const payload = request.body as Record<string, unknown>

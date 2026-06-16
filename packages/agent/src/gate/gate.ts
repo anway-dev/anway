@@ -23,16 +23,24 @@ export interface IGateSink {
 export type GateDecision = { _tag: 'approved' } | { _tag: 'rejected'; reason: string } | { _tag: 'timeout' }
 
 /** Write-action tool name patterns that require gate approval in V1. */
-const WRITE_ACTION_PATTERNS = [
-  /^notify_/, /^create_/, /^delete_/, /^update_/, /^deploy/, /^restart/,
-  /^scale/, /^rollback/, /^merge/, /^comment/, /^run_runbook/, /^register_/,
-  /^trigger_/,  // trigger_pipeline etc.
+/** Read-only action prefixes — anything not in this list is treated as a write requiring gate approval. */
+const READ_ACTION_PATTERNS = [
+  /^get_/, /^list_/, /^fetch_/, /^read_/, /^search_/, /^query_/,
+  /^describe_/, /^show_/, /^check_/, /^inspect_/, /^status_/,
+  /^find_/, /^lookup_/, /^export_/,
 ]
 
+/** Known safe built-in tool names that never require gating. */
+const BUILTIN_READ_TOOLS = new Set([
+  'register_connector', 'trigger_pipeline', 'approve_gate',
+])
+
 export function isWriteAction(toolName: string): boolean {
+  if (BUILTIN_READ_TOOLS.has(toolName)) return false
   // Test action suffix only — tools are named `<connector>.<action>` (e.g. `github.create_pr`)
   const action = toolName.split('.').pop() ?? toolName
-  return WRITE_ACTION_PATTERNS.some((p) => p.test(action))
+  // Default-deny: anything that does NOT match a known read prefix is a write
+  return !READ_ACTION_PATTERNS.some((p) => p.test(action))
 }
 
 export async function pollGate(

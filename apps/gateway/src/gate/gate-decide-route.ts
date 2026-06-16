@@ -4,6 +4,7 @@ import { withTenant } from '../db/prisma.js'
 import { RedisGateSink } from './redis-gate-sink.js'
 import { getMemoryGateSink } from './memory-gate-fallback.js'
 import { UUID_RE } from '../utils/validators.js'
+import { gateDecisionsTotal } from '../metrics.js'
 
 const redisUrl = process.env['REDIS_URL']
 const gateSink = redisUrl ? new RedisGateSink(redisUrl) : null
@@ -92,6 +93,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
         await getMemoryGateSink().record(gateId, decision, userId)
       }
 
+      gateDecisionsTotal.inc({ decision })
       return { ok: true, gateId, decision }
     },
   )

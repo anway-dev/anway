@@ -55,12 +55,15 @@ export async function auditRoutes(app: FastifyInstance) {
     const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
 
+    // Cursor is ISO timestamp — ORDER BY created_at DESC for true chronological order
+    const cursorDate = cursor ? new Date(cursor) : null
+
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<AuditRow[]>`
         SELECT id, event_type, payload, created_at, user_id
         FROM audit_events
-        ${cursor ? Prisma.sql`WHERE id < ${cursor}::uuid` : Prisma.sql``}
-        ORDER BY id DESC
+        ${cursorDate ? Prisma.sql`WHERE created_at < ${cursorDate}` : Prisma.sql``}
+        ORDER BY created_at DESC
         LIMIT ${limit + 1}
       `
     ).catch(() => [] as AuditRow[])
@@ -84,7 +87,7 @@ export async function auditRoutes(app: FastifyInstance) {
         durationMs: (p['durationMs'] as number) ?? 0,
       } as AuditEvent
     }),
-      nextCursor: hasMore ? data[data.length - 1]!.id : null,
+      nextCursor: hasMore ? data[data.length - 1]!.created_at.toISOString() : null,
     }
   })
 

@@ -194,7 +194,9 @@ export async function pipelineRoutes(app: FastifyInstance) {
     { preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
-      const { name, description, stages, context, serviceName } = request.body
+      const { name: rawName, description: rawDesc, stages, context, serviceName } = request.body
+      const name = rawName?.replace(/<[^>]*>/g, '').trim()
+      const description = rawDesc ? rawDesc.replace(/<[^>]*>/g, '').trim() : ''
 
       if (!name) return reply.code(400).send({ error: 'name required' })
 
@@ -205,7 +207,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`
           INSERT INTO pipelines (id, tenant_id, name, description, stages, status, metadata, created_at, updated_at)
-          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${description ?? ''}, ${stagesJson}::jsonb, 'idle', ${meta}::jsonb, now(), now())
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${description}, ${stagesJson}::jsonb, 'idle', ${meta}::jsonb, now(), now())
           RETURNING id
         `,
       ).catch(() => [] as Array<{ id: string }>)

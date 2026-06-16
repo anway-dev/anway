@@ -158,7 +158,11 @@ export class AnthropicProvider implements IModelProvider {
   }
 
   formatToolResult(toolCallId: string, result: unknown): Message {
-    const content = typeof result === 'string' ? result : JSON.stringify(result)
+    const MAX_TOOL_RESULT_CHARS = 8_000
+    let content = typeof result === 'string' ? result : JSON.stringify(result)
+    if (content.length > MAX_TOOL_RESULT_CHARS) {
+      content = content.slice(0, MAX_TOOL_RESULT_CHARS) + `\n... [truncated ${content.length - MAX_TOOL_RESULT_CHARS} chars]`
+    }
     return {
       role: 'user',
       content: [{

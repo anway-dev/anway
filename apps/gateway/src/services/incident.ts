@@ -43,15 +43,22 @@ export class IncidentService {
 
   async list(tenantId: string, filters?: { status?: IncidentStatus; severity?: IncidentSeverity; cursor?: string; limit?: number }) {
     const { status, severity, cursor, limit = 50 } = filters ?? {}
+    // Cursor is ISO timestamp for chronological ordering
+    const cursorDate = cursor ? new Date(cursor) : undefined
     return withTenant(this.prisma, tenantId, async (tx) => {
       const rows = await tx.incident.findMany({
-        where: { tenant_id: tenantId, ...(status ? { status } : {}), ...(severity ? { severity } : {}), ...(cursor ? { id: { gt: cursor } } : {}) },
-        orderBy: { id: 'asc' },
+        where: {
+          tenant_id: tenantId,
+          ...(status ? { status } : {}),
+          ...(severity ? { severity } : {}),
+          ...(cursorDate ? { created_at: { lt: cursorDate } } : {}),
+        },
+        orderBy: { created_at: 'desc' },
         take: limit + 1,
       })
       const hasMore = rows.length > limit
       const data = hasMore ? rows.slice(0, limit) : rows
-      return { data, nextCursor: hasMore ? data[data.length - 1]!.id : null }
+      return { data, nextCursor: hasMore ? data[data.length - 1]!.created_at.toISOString() : null }
     })
   }
 

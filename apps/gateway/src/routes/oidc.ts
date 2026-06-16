@@ -66,7 +66,7 @@ export async function oidcRoutes(app: FastifyInstance) {
       reply.setCookie('oidc_state', stateToken, {
         path: '/auth/oidc',
         httpOnly: true,
-        secure: false,
+        secure: process.env['NODE_ENV'] === 'production',
         sameSite: 'lax',
         maxAge: 600, // 10 minutes
       })

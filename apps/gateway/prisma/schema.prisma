@@ -150,6 +150,8 @@ model ProviderConfig {
   provider      String   @db.VarChar(50)
   base_url      String?  @db.Text
   default_model String?  @db.VarChar(100)
+  cheap_model   String?  @db.VarChar(100)
+  api_key_enc   String?  @db.Text
   updated_at    DateTime @default(now()) @db.Timestamptz
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -162,7 +164,8 @@ model ConnectorConfig {
   id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id              String    @db.Uuid
   connector_type         String    @db.VarChar(50)
-  credentials            Json      @default("{}")
+  // credentials Json field dropped by migration 0024 — use credentials_enc instead
+  credentials_enc        String?   @db.Text
   enabled                Boolean   @default(false)
   bootstrapped_at        DateTime? @db.Timestamptz
   last_bootstrap_summary Json?     @default("{}")

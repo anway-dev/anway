@@ -23,6 +23,28 @@ export const activeConnections = new Gauge({
   registers: [registry],
 })
 
+export const llmCallDuration = new Histogram({
+  name: 'anvay_llm_call_duration_seconds',
+  help: 'LLM provider call duration in seconds',
+  labelNames: ['provider', 'model'] as const,
+  buckets: [0.5, 1, 2, 5, 10, 20, 30, 60, 120],
+  registers: [registry],
+})
+
+export const gateDecisionsTotal = new Counter({
+  name: 'anvay_gate_decisions_total',
+  help: 'Total gate decisions by outcome',
+  labelNames: ['decision'] as const,
+  registers: [registry],
+})
+
+export const connectorSyncLag = new Gauge({
+  name: 'anvay_connector_sync_lag_seconds',
+  help: 'Seconds since last connector sync per connector type',
+  labelNames: ['connector_type'] as const,
+  registers: [registry],
+})
+
 let metricsInitialized = false
 
 export function initMetrics(): void {

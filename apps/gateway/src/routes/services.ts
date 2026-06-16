@@ -24,6 +24,10 @@ interface IncidentRow {
   suggested_root_cause: string | null
 }
 
+function sanitizeText(s: string): string {
+  return s.replace(/<[^>]*>/g, '').trim()
+}
+
 export async function serviceRoutes(app: FastifyInstance) {
   app.post<{ Body: { repoUrl?: string; name?: string } }>(
     '/api/services',
@@ -32,8 +36,8 @@ export async function serviceRoutes(app: FastifyInstance) {
       const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
       const { repoUrl, name } = request.body
       if (!repoUrl && !name) return reply.code(400).send({ error: 'repoUrl or name required' })
-      const serviceName = name ??
-        (repoUrl!.split('/').pop() ?? 'unknown').replace(/\.git$/, '')
+      const serviceName = sanitizeText(name ??
+        (repoUrl!.split('/').pop() ?? 'unknown').replace(/\.git$/, ''))
       const meta = JSON.stringify({ repoUrl: repoUrl ?? null, source: 'manual' })
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string }>>`

@@ -49,11 +49,19 @@ fail_banner() {
 
 cd "$PROJECT_ROOT"
 
-# ── 1. Infra (postgres, redis, neo4j) ──
-log "Ensuring core infra is up (postgres/redis/neo4j)..."
-docker compose -f infra/docker-compose.yml up -d postgres redis neo4j 2>/dev/null \
+# ── 1. Infra (postgres, redis, neo4j, agent-service) ──
+log "Ensuring core infra is up (postgres/redis/neo4j/agent-service)..."
+docker compose -f infra/docker-compose.yml up -d postgres redis neo4j agent-service 2>/dev/null \
   || docker compose -f infra/docker-compose.yml up -d 2>/dev/null \
   || warn "infra compose start failed — assuming services already running"
+
+log "Waiting for agent-service (episodic layer) at http://localhost:8000 ..."
+if wait_for "http://localhost:8000/docs" 120; then
+  log "Agent-service healthy."
+else
+  warn "Agent-service not ready within 120s. CERT D.4 will fail."
+  warn "Check: docker compose -f infra/docker-compose.yml logs agent-service"
+fi
 
 # ── 2. Demo stack (prometheus, alertmanager, loki, demo services, chaos) ──
 log "Ensuring demo stack is up..."

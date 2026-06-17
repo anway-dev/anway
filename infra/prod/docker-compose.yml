@@ -46,6 +46,27 @@ services:
       retries: 12
     restart: unless-stopped
 
+  agent-service:
+    build:
+      context: ../..
+      dockerfile: apps/agent-service/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    restart: unless-stopped
+
   gateway:
     build:
       context: ../..
@@ -60,10 +81,13 @@ services:
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       NEO4J_URI: ${NEO4J_URI}
+      AGENT_SERVICE_URL: http://agent-service:8000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      agent-service:
         condition: service_healthy
     restart: unless-stopped
 

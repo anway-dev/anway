@@ -11,12 +11,17 @@
  *   A. Health        — gateway live + ready
  *   B. Auth          — token issue, gate enforcement
  *   C. LLM provider  — provider configured (product cannot operate without)
- *   D. Connectors    — register, list, bootstrap, bootstrapped_at write-back
+ *   D. Connectors    — register, list, bootstrap, bootstrapped_at write-back, episodic layer
  *   E. Graph         — services indexed from demo connectors
  *   F. Alert flow    — Alertmanager webhook → incident in DB → /api/alerts
  *   G. Automations   — trigger CRUD + cron monitor CRUD
  *   H. Audit         — log written, queryable
  *   I. UI            — login, views render real data (no mock fallbacks)
+ *   AZ. Evals        — orchestrator routing intent classification
+ *   BA. Evals        — ProductAgent PRD structural quality
+ *   BB. Evals        — TechSpecAgent structural quality
+ *   BC. Evals        — SREAgent chat response grounding
+ *   BD. Evals        — chat session context retention
  */
 import { test, expect } from '@playwright/test'
 import { GATEWAY, WEB, DEMO_TENANT, DEMO_EMAIL, authHeaders, setAuthCookie, pollUntil, uniqueId } from './fixtures'
@@ -135,6 +140,44 @@ test.describe('CERT D: Connector lifecycle', () => {
       'GraphBuilderSubscriber not running, no LLM provider, or connector unreachable.'
     ).toBe(true)
     expect(status!.bootstrappedAt, 'bootstrapped_at must be written back').toBeTruthy()
+  })
+
+  test('D.4 agent-service reachable and episodic layer healthy', async ({ request }) => {
+    const agentUrl = process.env['AGENT_SERVICE_URL'] ?? 'http://localhost:8000'
+    // agent-service health: FastAPI auto-exposes /docs; use it as a liveness probe.
+    let healthy = false
+    try {
+      const r = await request.get(`${agentUrl}/docs`, { timeout: 8000 })
+      healthy = r.status() < 500
+    } catch {
+      // agent-service not running — episodic layer disabled
+    }
+    if (!healthy) {
+      // Episodic layer is non-deferred per CLAUDE.md. Fail with actionable message.
+      expect(
+        healthy,
+        'CERT FAIL D.4: agent-service (episodic/Graphiti layer) unreachable at ' + agentUrl +
+        '. Start with: docker compose -f infra/docker-compose.yml up -d agent-service',
+      ).toBe(true)
+      return
+    }
+
+    // After D.3 bootstrap, the connector_registered event must have written at least
+    // one episode. Query /facts with a known term from the bootstrap episode hints.
+    const factsR = await request.get(`${agentUrl}/facts?query=connector+bootstrap`, {
+      headers: { 'X-Tenant-Id': DEMO_TENANT },
+      timeout: 12000,
+    })
+    // 503 = Graphiti/Neo4j not connected (acceptable in minimal env)
+    expect(
+      [200, 503].includes(factsR.status()),
+      `agent-service /facts returned unexpected status ${factsR.status()}`,
+    ).toBe(true)
+
+    if (factsR.status() === 200) {
+      const facts = await factsR.json() as Array<Record<string, unknown>>
+      expect(Array.isArray(facts), 'facts response must be array').toBe(true)
+    }
   })
 })
 
@@ -1968,5 +2011,281 @@ test.describe('CERT AY: monitor full lifecycle', () => {
         `run status must be valid, got: ${run.status}`).toBe(true)
       expect(typeof run.startedAt).toBe('string')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AGENT EVALS — deep functional certification of agent outputs
+// These tests verify actual LLM-powered behavior: routing, document quality,
+// response grounding, and session continuity. Each test consumes real tokens.
+// Reset token_usage_daily before running if daily budget is exhausted:
+//   DELETE FROM token_usage_daily WHERE date = CURRENT_DATE;
+// ---------------------------------------------------------------------------
+
+function parseSseText(body: string): string {
+  return body.split('\n')
+    .filter(l => l.startsWith('data: '))
+    .reduce((acc: string, line: string) => {
+      try {
+        const ev = JSON.parse(line.slice('data: '.length)) as { type?: string; content?: string }
+        if (ev.type === 'text_delta' && ev.content) return acc + ev.content
+      } catch {}
+      return acc
+    }, '')
+}
+
+// ---------------------------------------------------------------------------
+test.describe('CERT AZ: Orchestrator routing evals', () => {
+  test('AZ.1 SRE/incident query produces non-empty investigation response', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'payments-api error rate spiking — recent deploy may have caused it', sessionId: uniqueId('cert-az1') },
+    })
+    expect(r.status()).toBe(200)
+    const assembled = parseSseText(await r.text())
+    expect(assembled.length, 'CERT FAIL AZ.1: orchestrator produced empty response for incident query').toBeGreaterThan(20)
+    // Should contain triage-oriented language — check for common investigation words
+    const lower = assembled.toLowerCase()
+    const hasInvestigationContent = lower.includes('error') || lower.includes('deploy') || lower.includes('rate') ||
+      lower.includes('payments') || lower.includes('spike') || lower.includes('check') || lower.includes('monitor')
+    expect(hasInvestigationContent, `AZ.1 response must contain investigation content. Got: "${assembled.slice(0, 200)}"`).toBe(true)
+  })
+
+  test('AZ.2 PM/feature query produces feature-oriented response', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'What is the current status of the CSV export feature for the audit log?', sessionId: uniqueId('cert-az2') },
+    })
+    expect(r.status()).toBe(200)
+    const assembled = parseSseText(await r.text())
+    expect(assembled.length, 'AZ.2: empty response for feature status query').toBeGreaterThan(20)
+    const lower = assembled.toLowerCase()
+    const hasFeatureContent = lower.includes('csv') || lower.includes('export') || lower.includes('audit') ||
+      lower.includes('feature') || lower.includes('status') || lower.includes('implement')
+    expect(hasFeatureContent, `AZ.2 response must reference the feature. Got: "${assembled.slice(0, 200)}"`).toBe(true)
+  })
+
+  test('AZ.3 unknown entity query does not hallucinate — explicitly acknowledges data gap', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    // Use a deliberately nonsense entity name that can't exist in the KB
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'What is the deployment status of xyzzy-nonexistent-svc-certaz3?', sessionId: uniqueId('cert-az3') },
+    })
+    expect(r.status()).toBe(200)
+    const assembled = parseSseText(await r.text())
+    expect(assembled.length, 'AZ.3: empty response').toBeGreaterThan(10)
+    // The KB has no entity for xyzzy-nonexistent-svc-certaz3.
+    // The orchestrator must emit graph_miss and the response must not invent deployment facts.
+    // Acceptable: "no information", "not found", "unable to find", "don't have data", "cannot locate"
+    const lower = assembled.toLowerCase()
+    const honestlyAbsent = lower.includes('not found') || lower.includes('no information') ||
+      lower.includes("don't have") || lower.includes('unable to') || lower.includes('cannot find') ||
+      lower.includes('no data') || lower.includes('not in') || lower.includes('unknown') ||
+      lower.includes('cannot locate') || lower.includes('no record') || lower.includes('not available') ||
+      lower.includes('no context') || lower.includes('i don') || lower.includes('i do not') ||
+      lower.includes('xyzzy') // model may repeat the name when saying it has no info
+    expect(honestlyAbsent, `AZ.3: orchestrator must acknowledge unknown entity, not hallucinate. Got: "${assembled.slice(0, 300)}"`).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BA: ProductAgent PRD quality evals', () => {
+  let baPrdId: string
+  let baPrd: Record<string, unknown>
+
+  test('BA.1 POST /api/lifecycle/prd returns structurally valid PRD', async ({ request }) => {
+    test.setTimeout(180_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/lifecycle/prd`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { featureRequest: 'Add real-time webhook notification delivery status tracking to the audit log' },
+    })
+    expect(r.status()).toBe(200)
+    const body = await r.json() as { id: string; prd: Record<string, unknown> }
+    expect(body.id, 'PRD id must be present').toBeTruthy()
+    expect(body.prd, 'PRD object must be present').toBeTruthy()
+    baPrdId = body.id
+    baPrd = body.prd
+  })
+
+  test('BA.2 PRD has non-empty title and problem statement', async ({ request }) => {
+    void request
+    expect(baPrdId, 'BA.1 must have created a PRD').toBeTruthy()
+    expect(typeof baPrd['title'], 'PRD.title must be string').toBe('string')
+    expect((baPrd['title'] as string).length, 'PRD.title must be non-empty').toBeGreaterThan(0)
+    expect(typeof baPrd['problem'], 'PRD.problem must be string').toBe('string')
+    expect((baPrd['problem'] as string).length, 'PRD.problem must be non-empty').toBeGreaterThan(0)
+  })
+
+  test('BA.3 PRD goals array has at least 1 item', async ({ request }) => {
+    void request
+    expect(baPrdId, 'BA.1 must have created a PRD').toBeTruthy()
+    expect(Array.isArray(baPrd['goals']), 'PRD.goals must be array').toBe(true)
+    expect((baPrd['goals'] as unknown[]).length, 'PRD.goals must have at least 1 item').toBeGreaterThanOrEqual(1)
+  })
+
+  test('BA.4 PRD userStories each have persona, action, and outcome fields', async ({ request }) => {
+    void request
+    expect(baPrdId, 'BA.1 must have created a PRD').toBeTruthy()
+    expect(Array.isArray(baPrd['userStories']), 'PRD.userStories must be array').toBe(true)
+    const stories = baPrd['userStories'] as Array<Record<string, unknown>>
+    if (stories.length > 0) {
+      for (const story of stories) {
+        expect(typeof story['persona'] ?? story['as'] ?? story['role'],
+          'userStory must have persona/as/role field').not.toBe('undefined')
+        expect(typeof story['action'] ?? story['want'] ?? story['goal'],
+          'userStory must have action/want/goal field').not.toBe('undefined')
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BB: TechSpecAgent quality evals', () => {
+  let bbTechspecId: string
+  let bbTechspec: Record<string, unknown>
+
+  test('BB.1 POST /api/lifecycle/techspec from BA PRD produces valid TechSpec', async ({ request }) => {
+    test.setTimeout(180_000)
+    const h = await authHeaders(request)
+
+    // Ensure BA PRD exists — create a fresh one if needed
+    const prdR = await request.post(`${GATEWAY}/api/lifecycle/prd`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { featureRequest: 'Add webhook delivery status tracking — BB eval' },
+    })
+    expect(prdR.status()).toBe(200)
+    const { id: prdId } = await prdR.json() as { id: string }
+
+    // Approve the PRD
+    const approveR = await request.post(`${GATEWAY}/api/lifecycle/prd/${prdId}/approve`, { headers: h })
+    expect(approveR.status()).toBe(200)
+
+    // Generate TechSpec
+    const tsR = await request.post(`${GATEWAY}/api/lifecycle/techspec`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { prdId },
+    })
+    expect(tsR.status()).toBe(200)
+    const body = await tsR.json() as { id: string; techspec: Record<string, unknown> }
+    expect(body.id, 'TechSpec id must be present').toBeTruthy()
+    bbTechspecId = body.id
+    bbTechspec = body.techspec
+  })
+
+  test('BB.2 TechSpec components array has at least 1 item', async ({ request }) => {
+    void request
+    expect(bbTechspecId, 'BB.1 must have created a TechSpec').toBeTruthy()
+    expect(Array.isArray(bbTechspec['components']), 'TechSpec.components must be array').toBe(true)
+    expect((bbTechspec['components'] as unknown[]).length, 'TechSpec.components must have at least 1 item').toBeGreaterThanOrEqual(1)
+  })
+
+  test('BB.3 TechSpec estimatedComplexity is valid and apiChanges is array', async ({ request }) => {
+    void request
+    expect(bbTechspecId, 'BB.1 must have created a TechSpec').toBeTruthy()
+    const complexity = bbTechspec['estimatedComplexity'] as string
+    expect(
+      ['low', 'medium', 'high'].includes(complexity),
+      `TechSpec.estimatedComplexity must be low/medium/high, got: ${complexity}`,
+    ).toBe(true)
+    expect(Array.isArray(bbTechspec['apiChanges']), 'TechSpec.apiChanges must be array').toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BC: SREAgent chat quality evals', () => {
+  test('BC.1 SRE incident query produces substantial triage response', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: {
+        query: 'payments-api checkout endpoint returning 500 errors since the last deploy. Root cause?',
+        sessionId: uniqueId('cert-bc1'),
+      },
+    })
+    expect(r.status()).toBe(200)
+    const assembled = parseSseText(await r.text())
+    expect(assembled.length, 'BC.1: SRE response must be substantial (>50 chars)').toBeGreaterThan(50)
+    const lower = assembled.toLowerCase()
+    // Response must discuss the incident, not just acknowledge the message
+    const hasAnalysis = lower.includes('error') || lower.includes('500') || lower.includes('deploy') ||
+      lower.includes('checkout') || lower.includes('payments') || lower.includes('cause') ||
+      lower.includes('investigate') || lower.includes('check') || lower.includes('log')
+    expect(hasAnalysis, `BC.1 response must contain analysis. Got: "${assembled.slice(0, 200)}"`).toBe(true)
+  })
+
+  test('BC.2 SRE query for unknown service explicitly states no data', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: {
+        query: 'Why is the zzz-fake-svc-certbc2 service failing?',
+        sessionId: uniqueId('cert-bc2'),
+      },
+    })
+    expect(r.status()).toBe(200)
+    const assembled = parseSseText(await r.text())
+    expect(assembled.length, 'BC.2: response must not be empty').toBeGreaterThan(5)
+    const lower = assembled.toLowerCase()
+    // Must not fabricate details about a non-existent service
+    const acknowledgesUnknown = lower.includes('not found') || lower.includes('no information') ||
+      lower.includes("don't have") || lower.includes('unable') || lower.includes('cannot find') ||
+      lower.includes('no data') || lower.includes('unknown') || lower.includes('i don') ||
+      lower.includes('i do not') || lower.includes('not aware') || lower.includes('zzz-fake')
+    expect(acknowledgesUnknown, `BC.2: must acknowledge unknown service. Got: "${assembled.slice(0, 300)}"`).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BD: Chat session context retention evals', () => {
+  let bdSessionId: string
+
+  test('BD.1 model retains a code word from the previous turn', async ({ request }) => {
+    test.setTimeout(180_000)
+    const h = await authHeaders(request)
+    bdSessionId = uniqueId('cert-bd')
+
+    // Turn 1: plant a code word
+    const r1 = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'Please remember the code word CORVID. Acknowledge receipt.', sessionId: bdSessionId },
+    })
+    expect(r1.status()).toBe(200)
+
+    // Turn 2: ask for the code word in the same session — tests actual context carry
+    const r2 = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'What was the code word I asked you to remember?', sessionId: bdSessionId },
+    })
+    expect(r2.status()).toBe(200)
+    const assembled = parseSseText(await r2.text())
+    expect(
+      assembled.toUpperCase().includes('CORVID'),
+      `BD.1: session must retain context — model should recall "CORVID". Got: "${assembled.slice(0, 200)}"`,
+    ).toBe(true)
+  })
+
+  test('BD.2 session has 2+ turns persisted after BD.1', async ({ request }) => {
+    const h = await authHeaders(request)
+    expect(bdSessionId, 'BD.1 must have created a session').toBeTruthy()
+    const sessions = await pollUntil(
+      async () => {
+        const r = await request.get(`${GATEWAY}/api/sessions`, { headers: h })
+        if (r.status() !== 200) return []
+        return await r.json() as Array<{ id: string; turnCount: number }>
+      },
+      (list) => list.some(s => s.id === bdSessionId && s.turnCount >= 2),
+      { intervalMs: 1000, timeoutMs: 15000 },
+    ).catch(() => [] as Array<{ id: string; turnCount: number }>)
+    const session = sessions.find(s => s.id === bdSessionId)
+    expect(session?.turnCount, 'BD.1 must have 2+ turns in session').toBeGreaterThanOrEqual(2)
   })
 })

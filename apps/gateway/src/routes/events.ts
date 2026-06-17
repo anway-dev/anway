@@ -45,18 +45,14 @@ function verifyWebhookSignatures(request: FastifyRequest): boolean {
   const hubSig = request.headers['x-hub-signature-256'] as string | undefined
   const ddSig = request.headers['dd-request-signature'] as string | undefined
 
-  // If ANVAY_WEBHOOK_TOKEN is set but no webhook secret is configured,
-  // require at least one signature to be verified — refuse auto-allow
-  if (!ghSecret && !ddSecret) {
-    if (process.env['ANVAY_WEBHOOK_TOKEN']) return false
-    return true
-  }
+  // No secrets configured — nothing to verify (caller authenticated via other means)
+  if (!ghSecret && !ddSecret) return true
 
-  if (ghSecret) {
-    if (!hubSig || !verifyGitHubSignature(body, hubSig, ghSecret)) return false
+  if (ghSecret && hubSig) {
+    if (!verifyGitHubSignature(body, hubSig, ghSecret)) return false
   }
-  if (ddSecret) {
-    if (!ddSig || !verifyDatadogSignature(body, ddSig, ddSecret)) return false
+  if (ddSecret && ddSig) {
+    if (!verifyDatadogSignature(body, ddSig, ddSecret)) return false
   }
   return true
 }
@@ -102,16 +98,20 @@ export async function eventRoutes(app: FastifyInstance) {
     }
   })
 
-  // Accept either the static webhook token or a tenant JWT
+  // Authenticate: static webhook token first, then HMAC, then JWT
   const authenticateEvent = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!verifyWebhookSignatures(request)) {
-      return reply.code(401).send({ error: 'invalid signature' })
-    }
+    // Static webhook token is authentication — no HMAC required on top.
+    // Alertmanager, internal connectors use ANVAY_WEBHOOK_TOKEN bearer auth.
     const webhookTenant = webhookTenantFor(request)
     if (webhookTenant) {
       request.user = { sub: 'webhook', tenantId: webhookTenant, role: 'system' } as typeof request.user
       return
     }
+    // No static token — verify HMAC for connector webhooks (GitHub/Datadog)
+    if (!verifyWebhookSignatures(request)) {
+      return reply.code(401).send({ error: 'invalid signature' })
+    }
+    // Fall through to JWT auth for standard user requests
     return app.authenticate(request, reply)
   }
 

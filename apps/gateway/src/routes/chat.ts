@@ -586,7 +586,12 @@ export async function chatRoutes(app: FastifyInstance) {
       } finally {
         clearTimeout(llmTimeout)
         if (totalTokens > 0) recordSessionUsed(sessionId, totalTokens)
-        stream.push(null)
+        if (chatPub) {
+          await new Promise(r => setTimeout(r, 150))
+          reply.raw.end()
+        } else {
+          stream.push(null)
+        }
         // Trigger session summarisation if turns exceed threshold
         void (async () => {
           try {

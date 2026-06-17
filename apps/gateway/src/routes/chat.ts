@@ -542,6 +542,7 @@ export async function chatRoutes(app: FastifyInstance) {
                   INSERT INTO session_turns (tenant_id, session_id, role, content)
                   VALUES (${tenantId}::uuid, ${sessionId}, 'user', ${query}),
                          (${tenantId}::uuid, ${sessionId}, 'assistant', ${accumulatedAssistantText})
+                  ON CONFLICT (tenant_id, session_id, role, content, created_at) DO NOTHING
                 `
               ).catch(() => { /* best-effort */ })
             }

@@ -3,14 +3,19 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { UUID_RE } from '../utils/validators.js'
 
-interface SessionRow {
+interface SessionSummaryRow {
   id: string
-  user_id: string | null
   created_at: Date
-  expires_at: Date
   updated_at: Date
-  turn_count: number
-  preview?: string | null
+  turn_count: bigint
+  preview: string | null
+}
+
+interface SessionDetailRow {
+  id: string
+  created_at: Date
+  updated_at: Date
+  turn_count: bigint
 }
 
 interface TurnRow {
@@ -21,60 +26,72 @@ interface TurnRow {
 }
 
 export async function sessionRoutes(app: FastifyInstance) {
-  // List recent sessions for current tenant
+  // List recent sessions for current tenant — derived from session_turns (no sessions table dependency).
+  // session_turns.session_id stores client-generated text IDs (session-{ts}-{random}).
+  // The sessions table uses UUIDs — incompatible with the client-generated IDs, so we derive
+  // session metadata directly from the turns table.
   app.get('/api/sessions', {
     preHandler: [app.authenticate],
   }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<SessionRow[]>`
-        SELECT s.id, s.user_id, s.created_at, s.expires_at, s.updated_at, s.turn_count,
-               t.content AS preview
-        FROM sessions s
-        LEFT JOIN LATERAL (
-          SELECT content FROM session_turns
-          WHERE session_id = s.id AND tenant_id = ${tenantId}::uuid AND role = 'user'
-          ORDER BY created_at ASC LIMIT 1
-        ) t ON true
-        WHERE s.tenant_id = ${tenantId}::uuid
-        ORDER BY s.updated_at DESC LIMIT 50
+      tx.$queryRaw<SessionSummaryRow[]>`
+        SELECT
+          session_id AS id,
+          MIN(created_at) AS created_at,
+          MAX(created_at) AS updated_at,
+          COUNT(*) FILTER (WHERE role = 'user') AS turn_count,
+          (ARRAY_AGG(content ORDER BY created_at) FILTER (WHERE role = 'user'))[1] AS preview
+        FROM session_turns
+        WHERE tenant_id = ${tenantId}::uuid
+        GROUP BY session_id
+        ORDER BY MAX(created_at) DESC
+        LIMIT 50
       `
-    ).catch(() => [] as SessionRow[])
+    ).catch(() => [] as SessionSummaryRow[])
     return rows.map(r => ({
       id: r.id,
-      userId: r.user_id,
       createdAt: r.created_at.toISOString(),
-      expiresAt: r.expires_at.toISOString(),
       updatedAt: r.updated_at.toISOString(),
-      turnCount: r.turn_count,
+      turnCount: Number(r.turn_count),
       preview: r.preview ?? undefined,
     }))
   })
 
-  // Get single session
+  // Get single session metadata — derived from session_turns (supports both UUID and text session IDs)
   app.get<{ Params: { id: string } }>('/api/sessions/:id', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { id } = request.params
-    if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
+    // Try sessions table first (UUID path), fall back to session_turns (text ID path)
+    const isUuid = UUID_RE.test(id)
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<SessionRow[]>`
-        SELECT id, user_id, created_at, expires_at, updated_at, turn_count
-        FROM sessions
-        WHERE tenant_id = ${tenantId}::uuid AND id = ${id}::uuid
-        LIMIT 1
-      `
-    ).catch(() => [] as SessionRow[])
+      isUuid
+        ? tx.$queryRaw<SessionDetailRow[]>`
+            SELECT id, created_at, updated_at, turn_count
+            FROM sessions
+            WHERE tenant_id = ${tenantId}::uuid AND id = ${id}::uuid
+            LIMIT 1
+          `
+        : tx.$queryRaw<SessionDetailRow[]>`
+            SELECT
+              session_id AS id,
+              MIN(created_at) AS created_at,
+              MAX(created_at) AS updated_at,
+              COUNT(*) FILTER (WHERE role = 'user') AS turn_count
+            FROM session_turns
+            WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id}
+            GROUP BY session_id
+          `
+    ).catch(() => [] as SessionDetailRow[])
     if (rows.length === 0) return reply.code(404).send({ error: 'session not found' })
     const r = rows[0]!
     return {
       id: r.id,
-      userId: r.user_id,
       createdAt: r.created_at.toISOString(),
-      expiresAt: r.expires_at.toISOString(),
       updatedAt: r.updated_at.toISOString(),
-      turnCount: r.turn_count,
+      turnCount: Number(r.turn_count),
     }
   })
 

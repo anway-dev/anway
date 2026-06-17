@@ -357,6 +357,7 @@ interface SessionSummary {
   createdAt: string;
   updatedAt: string;
   turnCount: number;
+  preview?: string;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -438,10 +439,11 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
     setNoProvider(false);
   }
 
-  function loadSession(sessionId: string) {
+  async function loadSession(sessionId: string) {
     if (isThinking || sessionId === sessionIdRef.current) return;
     sessionIdRef.current = sessionId;
     setActiveSessionId(sessionId);
+    // Clear UI for loading state
     setMessages([]);
     setLogLines([]);
     setAgentStates([]);
@@ -450,6 +452,16 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
     setContextSource(null);
     setGateRequired(null);
     setNoProvider(false);
+    // Restore turns from DB
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/turns`);
+      if (res.ok) {
+        const body = await res.json() as { data?: Array<{ id: string; role: string; content: string; createdAt: string }> };
+        if (Array.isArray(body.data) && body.data.length > 0) {
+          setMessages(body.data.map(t => ({ id: t.id, role: t.role as 'user' | 'assistant', content: t.content })));
+        }
+      }
+    } catch { /* turns may be unavailable if session is fresh */ }
   }
 
   useEffect(() => {
@@ -921,7 +933,7 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
                       <span style={{ fontSize: "9px", color: isCurrent ? "#10b981" : "#333", fontFamily: "monospace" }}>{formatRelativeTime(s.updatedAt)}</span>
                       <span style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace" }}>{s.turnCount}t</span>
                     </div>
-                    <div style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id.slice(0, 28)}&hellip;</div>
+                    <div style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.preview ? s.preview.slice(0, 60) : s.id.slice(0, 28)}&hellip;</div>
                   </button>
                 );
               })}

@@ -12,7 +12,7 @@ async function main() {
   await prisma.$executeRaw`
     INSERT INTO tenants (id, name, slug, plan, token_budget_monthly, connector_limit)
     VALUES (${DEMO_TENANT_ID}::uuid, 'Acme Corp (Demo)', 'demo', 'tier2', 10000000, 10)
-    ON CONFLICT (slug) DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   const tenant = { id: DEMO_TENANT_ID, slug: 'demo' }
   log(`Tenant: ${tenant.slug} (${tenant.id})`)
@@ -36,7 +36,7 @@ async function main() {
   await prisma.$executeRaw`
     INSERT INTO sessions (id, user_id, tenant_id, created_at, expires_at, updated_at, turn_count)
     VALUES (gen_random_uuid(), ${user.id}::uuid, ${tenant.id}::uuid, now(), now() + interval '24 hours', now(), 0)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   log('Session seeded.')
 
@@ -58,7 +58,7 @@ async function main() {
       ('00000000-0000-0000-0001-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid, 'staging', 'Staging', '#3b82f6', 0),
       ('00000000-0000-0000-0001-000000000002'::uuid, ${DEMO_TENANT_ID}::uuid, 'preprod', 'Pre-production', '#f59e0b', 1),
       ('00000000-0000-0000-0001-000000000003'::uuid, ${DEMO_TENANT_ID}::uuid, 'prod', 'Production', '#10b981', 2)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   log('Environments seeded.')
 
@@ -281,7 +281,7 @@ async function main() {
         'running',
         '{"sha":"a4f21bc9","triggered_by":"pr_merged","service":"anvay"}'::jsonb
       )
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   await prisma.$executeRaw`
     INSERT INTO pipelines (id, tenant_id, name, description, stages, status, metadata)
@@ -295,7 +295,7 @@ async function main() {
         'idle',
         '{"service":"checkout-service","triggered_by":"manual"}'::jsonb
       )
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   log('5 Pipelines seeded.')
 
@@ -442,7 +442,7 @@ async function main() {
        '{"alertName":"AnvaySloBurnRateCritical"}'::jsonb,
        '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"SLO budget burning fast — root cause analysis running"},{"type":"escalate"}]'::jsonb,
        true)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   log('5 Trigger rules seeded.')
 
@@ -462,7 +462,7 @@ async function main() {
       NULL,
       NULL
     )
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   // approved gate
   await prisma.$executeRaw`
@@ -479,7 +479,7 @@ async function main() {
       ${user.id}::uuid,
       now() - interval '30 minutes'
     )
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   // rejected gate
   await prisma.$executeRaw`
@@ -496,7 +496,7 @@ async function main() {
       ${user.id}::uuid,
       now() - interval '2 hours'
     )
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (id) DO NOTHING
   `
   log('3 Gate events seeded.')
 

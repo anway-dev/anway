@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-const GATEWAY = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:4000'
+const GATEWAY = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:6900'
 
 export async function POST(request: Request) {
   const cookie = request.headers.get('cookie') ?? ''

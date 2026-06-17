@@ -1,4 +1,4 @@
-const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
+const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:6900'
 
 export async function GET() {
   try {

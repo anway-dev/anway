@@ -6,5 +6,5 @@ data:
   NODE_ENV: {{ .Values.gateway.env.NODE_ENV | default "production" | quote }}
   LOG_LEVEL: {{ .Values.gateway.env.LOG_LEVEL | default "info" | quote }}
   HOST: {{ .Values.gateway.env.HOST | default "0.0.0.0" | quote }}
-  PORT: {{ .Values.gateway.env.PORT | default "4000" | quote }}
+  PORT: {{ .Values.gateway.env.PORT | default "6900" | quote }}
   CORS_ORIGIN: {{ .Values.gateway.env.CORS_ORIGIN | default "*" | quote }}

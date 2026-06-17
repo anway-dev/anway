@@ -11,7 +11,7 @@ web:
 staticClients:
   - id: anvay-demo
     redirectURIs:
-      - http://localhost:4000/auth/oidc/callback
+      - http://localhost:6900/auth/oidc/callback
     name: Anvay Demo
     secret: anvay-demo-secret
     public: false

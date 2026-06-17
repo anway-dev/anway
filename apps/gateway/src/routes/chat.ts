@@ -516,6 +516,19 @@ export async function chatRoutes(app: FastifyInstance) {
       let totalTokens = 0
       let accumulatedAssistantText = ''
       try {
+        await auditSink.append({
+          id: crypto.randomUUID(),
+          tenantId: TenantId(tenantId),
+          userId: UserId(userId),
+          sessionId: SessionId(sessionId),
+          eventType: 'query_started' as any,
+          payload: {
+            query,
+            authRole: role,
+            inferredRole: role,
+          },
+          createdAt: new Date(),
+        }).catch(() => {})
         for await (const event of runSession(orchestrator, query, sessionCtx, abortController.signal)) {
           if (event.type === 'text_delta') {
             accumulatedAssistantText += event.content

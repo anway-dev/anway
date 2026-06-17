@@ -72,10 +72,10 @@ services:
       context: ../..
       dockerfile: apps/gateway/Dockerfile
     ports:
-      - "4000:4000"
+      - "6900:4000"
     environment:
       NODE_ENV: production
-      PORT: 4000
+      PORT: 6900
       HOST: 0.0.0.0
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
@@ -96,10 +96,10 @@ services:
       context: ../..
       dockerfile: apps/web/Dockerfile
     ports:
-      - "3000:3000"
+      - "7000:3000"
     environment:
       NODE_ENV: production
-      GATEWAY_URL: http://gateway:4000
+      GATEWAY_URL: http://gateway:6900
       DEMO_EMAIL: admin@anvay.local
       DEMO_TENANT_ID: 00000000-0000-0000-0000-000000000001
     depends_on:

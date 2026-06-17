@@ -3,7 +3,7 @@
 // Run:     npx playwright test apps/web/e2e/anvay.spec.ts --reporter=list
 //
 // Requires running stack: docker compose -f infra/docker-compose.yml up -d
-// Target: GATEWAY=http://localhost:4000, WEB=http://localhost:3000
+// Target: GATEWAY=http://localhost:6900, WEB=http://localhost:7000
 
 import { test, expect } from '@playwright/test'
 import { GATEWAY, DEMO_TENANT, DEMO_EMAIL, authHeaders, getToken } from './fixtures'
@@ -190,14 +190,14 @@ test.describe('H: Chat', () => {
 // ---------------------------------------------------------------------------
 test.describe('I: Web UI', () => {
   test('I.1 homepage loads at /', async ({ page }) => {
-    await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 60_000 })
+    await page.goto('http://localhost:7000', { waitUntil: 'networkidle', timeout: 60_000 })
     await expect(page.locator('body')).toBeVisible()
   })
 
   test('I.2 no page errors on load', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
-    await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 60_000 })
+    await page.goto('http://localhost:7000', { waitUntil: 'networkidle', timeout: 60_000 })
     expect(errors).toHaveLength(0)
   })
 })
@@ -397,7 +397,7 @@ test.describe('I extended: Web UI navigation', () => {
     test(`I.nav ${view.label} loads without JS errors`, async ({ page }) => {
       const errors: string[] = []
       page.on('pageerror', e => errors.push(e.message))
-      await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.goto('http://localhost:7000', { waitUntil: 'networkidle', timeout: 60_000 })
       await page.locator(`text=${view.text}`).first().click({ timeout: 15_000 })
       await page.waitForTimeout(1000)
       expect(errors).toHaveLength(0)

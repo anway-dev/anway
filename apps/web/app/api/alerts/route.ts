@@ -1,5 +1,5 @@
 
-const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:4000"
+const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:6900"
 
 
 async function getToken(): Promise<string | null> {

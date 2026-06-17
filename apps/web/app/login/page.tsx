@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-const GATEWAY = process.env['NEXT_PUBLIC_GATEWAY_URL'] ?? 'http://127.0.0.1:4000'
+const GATEWAY = process.env['NEXT_PUBLIC_GATEWAY_URL'] ?? 'http://127.0.0.1:6900'
 
 export default function LoginPage() {
   return (

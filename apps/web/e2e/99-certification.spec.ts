@@ -2513,3 +2513,87 @@ test.describe('CERT BI: Deploy via orchestrator (trigger_pipeline tool)', () => 
     expect(fatalErrors.length, `BI.2: must have no fatal errors in SSE stream. Got: ${JSON.stringify(fatalErrors)}`).toBe(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BJ: K8s route coverage', () => {
+  test('BJ.1 GET /api/k8s/overview unauthenticated returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/k8s/overview`)
+    expect(r.status(), 'BJ.1: k8s overview must require auth').toBe(401)
+  })
+
+  test('BJ.2 GET /api/k8s/overview authenticated returns valid shape (connected:false without connector)', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/k8s/overview`, { headers: h })
+    expect(r.status(), 'BJ.2: k8s overview must return 200').toBe(200)
+    const body = await r.json() as { connected: boolean; namespaces: unknown[]; workloads: unknown[] }
+    expect(typeof body.connected, 'BJ.2: connected must be boolean').toBe('boolean')
+    expect(Array.isArray(body.namespaces), 'BJ.2: namespaces must be array').toBe(true)
+    expect(Array.isArray(body.workloads), 'BJ.2: workloads must be array').toBe(true)
+  })
+
+  test('BJ.3 POST /api/k8s/pods/:namespace/:name/restart unauthenticated returns 401', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/k8s/pods/default/payments-api-abc/restart`)
+    expect(r.status(), 'BJ.3: pod restart must require auth').toBe(401)
+  })
+
+  test('BJ.4 POST /api/k8s/pods/:namespace/:name/restart returns 501 (connector not wired) or 403 (perimeter)', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/k8s/pods/default/payments-api-abc/restart`, { headers: h })
+    // Without a real K8s connector wired: 501. With perimeter restriction: 403.
+    expect([403, 501], 'BJ.4: pod restart without connector must return 403 or 501').toContain(r.status())
+  })
+
+  test('BJ.5 POST /api/k8s/deployments/:namespace/:name/scale missing replicas returns 400 or 403/501', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/k8s/deployments/default/payments-api/scale`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { replicas: -1 },
+    })
+    // replicas must be non-negative — 400. Or 403/501 if perimeter/connector check fires first.
+    expect([400, 403, 501], 'BJ.5: invalid replicas must return 400, 403, or 501').toContain(r.status())
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BK: Terraform route coverage', () => {
+  test('BK.1 GET /api/terraform/environments unauthenticated returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/terraform/environments`)
+    expect(r.status(), 'BK.1: terraform environments must require auth').toBe(401)
+  })
+
+  test('BK.2 GET /api/terraform/environments authenticated returns array', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/terraform/environments`, { headers: h })
+    expect(r.status(), 'BK.2: terraform environments must return 200').toBe(200)
+    const body = await r.json() as unknown[]
+    expect(Array.isArray(body), 'BK.2: must return an array').toBe(true)
+  })
+
+  test('BK.3 GET /api/terraform/detect unauthenticated returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/terraform/detect`)
+    expect(r.status(), 'BK.3: terraform detect must require auth').toBe(401)
+  })
+
+  test('BK.4 GET /api/terraform/:env/plan with invalid env returns 400', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/terraform/not-a-valid-env-xyz/plan`, { headers: h })
+    expect(r.status(), 'BK.4: invalid env must return 400').toBe(400)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BL: Cloud resources route', () => {
+  test('BL.1 GET /api/cloud/resources unauthenticated returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/cloud/resources`)
+    expect(r.status(), 'BL.1: cloud resources must require auth').toBe(401)
+  })
+
+  test('BL.2 GET /api/cloud/resources authenticated returns valid shape', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.get(`${GATEWAY}/api/cloud/resources`, { headers: h })
+    expect(r.status(), 'BL.2: cloud resources must return 200').toBe(200)
+    const body = await r.json() as { providers: unknown; resources: unknown[] }
+    expect(body.providers !== undefined, 'BL.2: providers must be present').toBe(true)
+    expect(Array.isArray(body.resources), 'BL.2: resources must be array').toBe(true)
+  })
+})

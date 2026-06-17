@@ -351,6 +351,24 @@ function EmptyState({ onScenario }: { onScenario: (s: ScenarioSuggestion) => voi
   );
 }
 
+
+interface SessionSummary {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+}
+
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }: { initialContext?: OrchestratorContext; onNavigate?: (view: string) => void; onFirstMessage?: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [logLines, setLogLines] = useState<LogLine[]>([]);
@@ -367,16 +385,28 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
   const [noProvider, setNoProvider] = useState(false);
   const [userEmail, setUserEmail] = useState("—");
   const [workspaceName, setWorkspaceName] = useState("—");
+  const [rightTab, setRightTab] = useState<'trace' | 'sessions'>('trace');
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const firedInitialContext = useRef(false);
+  const lastFiredContextRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string>(`session-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const toolNamesRef = useRef(new Map<string, string>());
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logLines]);
   useEffect(() => () => timeoutsRef.current.forEach(clearTimeout), []);
+
+  useEffect(() => { setActiveSessionId(sessionIdRef.current); }, []);
+
+  const refreshSessions = useCallback(() => {
+    fetch('/api/sessions')
+      .then(r => r.ok ? r.json() as Promise<SessionSummary[]> : [])
+      .then(data => { if (Array.isArray(data)) setSessions(data); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -390,11 +420,41 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
       .then(r => r.ok ? r.json() as Promise<{ name: string }> : null)
       .then(d => { if (d?.name) setWorkspaceName(d.name) })
       .catch(() => {})
-  }, [])
+    refreshSessions();
+  }, [refreshSessions])
+
+  function startNewSession() {
+    if (isThinking) return;
+    const newId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sessionIdRef.current = newId;
+    setActiveSessionId(newId);
+    setMessages([]);
+    setLogLines([]);
+    setAgentStates([]);
+    setFollowUps([]);
+    setConfidence(null);
+    setContextSource(null);
+    setGateRequired(null);
+    setNoProvider(false);
+  }
+
+  function loadSession(sessionId: string) {
+    if (isThinking || sessionId === sessionIdRef.current) return;
+    sessionIdRef.current = sessionId;
+    setActiveSessionId(sessionId);
+    setMessages([]);
+    setLogLines([]);
+    setAgentStates([]);
+    setFollowUps([]);
+    setConfidence(null);
+    setContextSource(null);
+    setGateRequired(null);
+    setNoProvider(false);
+  }
 
   useEffect(() => {
-    if (initialContext && !firedInitialContext.current) {
-      firedInitialContext.current = true;
+    if (initialContext && initialContext.query !== lastFiredContextRef.current) {
+      lastFiredContextRef.current = initialContext.query;
       setContextSource({ title: initialContext.title, source: initialContext.source });
       sendRealForm(initialContext.query);
     }
@@ -564,6 +624,7 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
       ));
     } finally {
       setIsThinking(false);
+      refreshSessions();
     }
   }
 
@@ -802,13 +863,75 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
         </div>
       </div>
 
-      {/* Right: execution trace */}
+      {/* Right: sessions + trace */}
       <div style={{ width: "310px", flexShrink: 0, display: "flex", flexDirection: "column", background: "#030303", borderLeft: "1px solid #0e0e0e" }}>
-        <div style={{ padding: "11px 14px", borderBottom: "1px solid #0e0e0e" }}>
-          <span style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.12em" }}>
-            Execution Trace
-          </span>
+        {/* Tab bar */}
+        <div style={{ display: "flex", borderBottom: "1px solid #0e0e0e", flexShrink: 0 }}>
+          {(['sessions', 'trace'] as const).map(tab => (
+            <button key={tab} onClick={() => setRightTab(tab)} style={{
+              flex: 1, padding: "9px 0", background: "transparent", border: "none",
+              borderBottom: rightTab === tab ? "1px solid #10b981" : "1px solid transparent",
+              color: rightTab === tab ? "#10b981" : "#222",
+              fontSize: "9px", fontFamily: "monospace", textTransform: "uppercase",
+              letterSpacing: "0.1em", cursor: "pointer",
+            }}>{tab}</button>
+          ))}
         </div>
+
+        {rightTab === 'sessions' && (
+          <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid #080808", flexShrink: 0 }}>
+              <button onClick={startNewSession} disabled={isThinking}
+                style={{
+                  width: "100%", padding: "7px 0", background: "rgba(16,185,129,0.07)",
+                  border: "1px solid rgba(16,185,129,0.15)", borderRadius: "4px",
+                  color: "#10b981", fontSize: "10px", fontFamily: "monospace",
+                  cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.4 : 1,
+                }}
+                onMouseEnter={e => { if (!isThinking) e.currentTarget.style.background = "rgba(16,185,129,0.12)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(16,185,129,0.07)"; }}
+              >+ new session</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+              <div style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>active</div>
+              <div style={{ padding: "8px 10px", background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.12)", borderRadius: "3px", marginBottom: "14px" }}>
+                <div style={{ fontSize: "10px", color: "#10b981", fontFamily: "monospace", marginBottom: "2px" }}>current</div>
+                <div style={{ fontSize: "9px", color: "#333", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeSessionId.slice(0, 28)}&hellip;</div>
+                <div style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace", marginTop: "2px" }}>{messages.filter(m => m.role === "user").length} turns</div>
+              </div>
+              <div style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>history</div>
+              {sessions.length === 0 ? (
+                <div style={{ fontSize: "10px", color: "#111", fontFamily: "monospace" }}>no sessions yet_</div>
+              ) : sessions.map(s => {
+                const isCurrent = s.id === activeSessionId;
+                return (
+                  <button key={s.id} onClick={() => { loadSession(s.id); setRightTab("trace"); }}
+                    disabled={isThinking}
+                    style={{
+                      display: "block", width: "100%", textAlign: "left",
+                      padding: "8px 10px", marginBottom: "4px",
+                      background: isCurrent ? "rgba(16,185,129,0.05)" : "transparent",
+                      border: isCurrent ? "1px solid rgba(16,185,129,0.12)" : "1px solid #0e0e0e",
+                      borderRadius: "3px", cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.5 : 1,
+                    }}
+                    onMouseEnter={e => { if (!isThinking && !isCurrent) e.currentTarget.style.borderColor = "#1a1a1a"; }}
+                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.borderColor = "#0e0e0e"; }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "2px" }}>
+                      <span style={{ fontSize: "9px", color: isCurrent ? "#10b981" : "#333", fontFamily: "monospace" }}>{formatRelativeTime(s.updatedAt)}</span>
+                      <span style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace" }}>{s.turnCount}t</span>
+                    </div>
+                    <div style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id.slice(0, 28)}&hellip;</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {rightTab === "trace" && (
+          <>
+
 
         {/* Context */}
         <div style={{ padding: "10px 14px", borderBottom: "1px solid #080808" }}>
@@ -934,6 +1057,8 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
               </button>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

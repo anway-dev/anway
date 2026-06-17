@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, DEMO_TENANT, uniqueId, pollUntil } from './fixtures'
+import { GATEWAY, authHeaders, DEMO_TENANT, uniqueId, pollUntil, setAuthCookie } from './fixtures'
 
 test.describe('Signals — API', () => {
   let headers: Record<string, string>
@@ -33,7 +33,8 @@ test.describe('Signals — API', () => {
       async () => {
         const resp = await request.get(`${GATEWAY}/api/alerts`, { headers })
         if (resp.status() !== 200) return []
-        return resp.json() as Promise<Array<{ title?: string; name?: string; severity?: string; labels?: { alertname?: string } }>>
+        const body = await resp.json() as { data?: Array<{ title?: string; name?: string; severity?: string; labels?: { alertname?: string } }> }
+        return body.data ?? (Array.isArray(body) ? body : [])
       },
       (alerts) => alerts.some(a =>
         a.title === alertName ||
@@ -54,6 +55,10 @@ test.describe('Signals — API', () => {
 })
 
 test.describe('Signals — UI', () => {
+  test.beforeEach(async ({ page }) => {
+    await setAuthCookie(page.context())
+  })
+
   test('P0: navigate to Signals, tabs All / Alerts / Errors / CI-CD visible', async ({ page }) => {
     await page.goto('/')
     await page.locator('text=Signals').first().click()

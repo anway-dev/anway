@@ -3,6 +3,7 @@ export async function GET() {
     const providers = [
       { id: "anthropic", configured: Boolean(process.env.ANTHROPIC_API_KEY) },
       { id: "openai", configured: Boolean(process.env.OPENAI_API_KEY) },
+      { id: "deepseek", configured: Boolean(process.env.DEEPSEEK_API_KEY) },
       { id: "groq", configured: Boolean(process.env.GROQ_API_KEY) },
       { id: "mistral", configured: Boolean(process.env.MISTRAL_API_KEY) },
       { id: "ollama", configured: Boolean(process.env.OLLAMA_ENDPOINT) },

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, uniqueId, pollUntil } from './fixtures'
+import { GATEWAY, authHeaders, uniqueId, pollUntil, setAuthCookie } from './fixtures'
 
 test.describe('Audit — API', () => {
   let headers: Record<string, string>
@@ -20,11 +20,12 @@ test.describe('Audit — API', () => {
     createdIncidentIds = []
   })
 
-  test('P0: GET /api/audit returns 200 and an array', async ({ request }) => {
+  test('P0: GET /api/audit returns 200 and a data array', async ({ request }) => {
     const resp = await request.get(`${GATEWAY}/api/audit`, { headers })
     expect(resp.status(), 'GET /api/audit must return 200').toBe(200)
-    const body = await resp.json()
-    expect(Array.isArray(body), 'audit response must be an array').toBe(true)
+    const body = await resp.json() as { data?: unknown[] }
+    const arr = body.data ?? (Array.isArray(body) ? body : null)
+    expect(Array.isArray(arr), 'audit response must contain a data array').toBe(true)
   })
 
   test('P0: create incident then GET /api/audit?search={title} — event exists', async ({ request }) => {
@@ -46,7 +47,8 @@ test.describe('Audit — API', () => {
           { headers }
         )
         if (auditResp.status() !== 200) return []
-        return auditResp.json() as Promise<Array<{ action?: string; query?: string; id?: string }>>
+        const b = await auditResp.json() as { data?: Array<{ action?: string; query?: string; id?: string }> }
+        return b.data ?? (Array.isArray(b) ? b : [])
       },
       (results) => results.length > 0,
       { intervalMs: 400, timeoutMs: 6000 }
@@ -61,8 +63,9 @@ test.describe('Audit — API', () => {
   test('P0: GET /api/audit?limit=3 returns at most 3 events', async ({ request }) => {
     const resp = await request.get(`${GATEWAY}/api/audit?limit=3`, { headers })
     expect(resp.status()).toBe(200)
-    const body = await resp.json() as unknown[]
-    expect(body.length, 'limit=3 must return at most 3 events').toBeLessThanOrEqual(3)
+    const body = await resp.json() as { data?: unknown[] }
+    const arr = body.data ?? (Array.isArray(body) ? body : [])
+    expect(arr.length, 'limit=3 must return at most 3 events').toBeLessThanOrEqual(3)
   })
 
   test('P0: GET /api/audit?limit=3&offset=0 vs offset=3 returns different events', async ({ request }) => {
@@ -72,8 +75,10 @@ test.describe('Audit — API', () => {
     expect(page1Resp.status()).toBe(200)
     expect(page2Resp.status()).toBe(200)
 
-    const page1 = await page1Resp.json() as Array<{ id: string }>
-    const page2 = await page2Resp.json() as Array<{ id: string }>
+    const page1Body = await page1Resp.json() as { data?: Array<{ id: string }> }
+    const page2Body = await page2Resp.json() as { data?: Array<{ id: string }> }
+    const page1 = page1Body.data ?? (Array.isArray(page1Body) ? page1Body : [])
+    const page2 = page2Body.data ?? (Array.isArray(page2Body) ? page2Body : [])
 
     // If there are enough events, the pages must differ
     if (page1.length > 0 && page2.length > 0) {
@@ -85,6 +90,10 @@ test.describe('Audit — API', () => {
 })
 
 test.describe('Audit — UI', () => {
+  test.beforeEach(async ({ page }) => {
+    await setAuthCookie(page.context())
+  })
+
   test('P1: navigate to Audit, table visible with Time, User, Query columns', async ({ page }) => {
     await page.goto('/')
     await page.locator('text=Audit').first().click()

@@ -96,8 +96,8 @@ export default function App() {
 
     // Fetch recent audit events for sidebar
     fetch("/api/audit")
-      .then(r => r.json() as Promise<{ id: string; query: string }[]>)
-      .then(list => setRecentQueries(list.slice(0, 3)))
+      .then(r => r.json() as Promise<{ data?: { id: string; query: string }[] }>)
+      .then(resp => setRecentQueries((resp.data ?? []).slice(0, 3)))
       .catch(() => setRecentQueries([]))
 
     // Fetch workspace name

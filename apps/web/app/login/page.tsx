@@ -19,6 +19,7 @@ function LoginForm() {
   const redirect = searchParams.get('redirect') ?? '/'
 
   const [email, setEmail] = useState('dev@anvay.local')
+  const [tenantId, setTenantId] = useState('00000000-0000-0000-0000-000000000001')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [devLoading, setDevLoading] = useState(false)
@@ -68,7 +69,7 @@ function LoginForm() {
       const resp = await fetch(`${GATEWAY}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, ...(tenantId ? { tenantId } : {}) }),
       })
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ error: 'Login failed' }))
@@ -146,6 +147,21 @@ function LoginForm() {
                 borderRadius: '6px', color: '#e5e5e5', fontSize: '13px', outline: 'none',
               }}
               placeholder="you@yourorg.com"
+            />
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Tenant ID</label>
+            <input
+              type="text"
+              value={tenantId}
+              onChange={e => setTenantId(e.target.value)}
+              pattern="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              style={{
+                width: '100%', padding: '8px 12px', background: '#111', border: '1px solid #2a2a2a',
+                borderRadius: '6px', color: '#e5e5e5', fontSize: '13px', outline: 'none', fontFamily: 'monospace',
+              }}
+              placeholder="00000000-0000-0000-0000-000000000001"
             />
           </div>
 

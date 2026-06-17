@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, uniqueId, pollUntil } from './fixtures'
+import { GATEWAY, authHeaders, uniqueId, pollUntil, setAuthCookie } from './fixtures'
 
 test.describe('Incidents — full lifecycle', () => {
   let headers: Record<string, string>
@@ -37,7 +37,8 @@ test.describe('Incidents — full lifecycle', () => {
     // Step 2: GET list — title must appear
     const listResp = await request.get(`${GATEWAY}/api/incidents`, { headers })
     expect(listResp.status()).toBe(200)
-    const list = await listResp.json() as Array<{ id: string; title: string }>
+    const listBody = await listResp.json() as { data?: Array<{ id: string; title: string }> }
+    const list = listBody.data ?? (Array.isArray(listBody) ? listBody : [])
     expect(list.some(i => i.id === created.id), `incident ${created.id} should appear in list`).toBe(true)
 
     // Step 3: GET by id — status active
@@ -62,7 +63,8 @@ test.describe('Incidents — full lifecycle', () => {
     // Step 6: must NOT appear in active filter
     const activeListResp = await request.get(`${GATEWAY}/api/incidents?status=active`, { headers })
     if (activeListResp.status() === 200) {
-      const activeList = await activeListResp.json() as Array<{ id: string }>
+      const activeBody = await activeListResp.json() as { data?: Array<{ id: string }> }
+      const activeList = activeBody.data ?? (Array.isArray(activeBody) ? activeBody : [])
       expect(
         activeList.some(i => i.id === created.id),
         'resolved incident must not appear in active filter'
@@ -106,7 +108,8 @@ test.describe('Incidents — full lifecycle', () => {
 
     const listResp = await request.get(`${GATEWAY}/api/incidents?status=active`, { headers })
     if (listResp.status() === 200) {
-      const list = await listResp.json() as Array<{ id: string; status: string }>
+      const listBody = await listResp.json() as { data?: Array<{ id: string; status: string }> }
+      const list = listBody.data ?? (Array.isArray(listBody) ? listBody : [])
       for (const inc of list) {
         expect(
           ['active', 'investigating'],
@@ -130,7 +133,8 @@ test.describe('Incidents — full lifecycle', () => {
 
     const listResp = await request.get(`${GATEWAY}/api/incidents?status=resolved`, { headers })
     if (listResp.status() === 200) {
-      const list = await listResp.json() as Array<{ id: string; status: string }>
+      const listBody = await listResp.json() as { data?: Array<{ id: string; status: string }> }
+      const list = listBody.data ?? (Array.isArray(listBody) ? listBody : [])
       for (const inc of list) {
         expect(
           inc.status,
@@ -141,6 +145,7 @@ test.describe('Incidents — full lifecycle', () => {
   })
 
   test('P1: severity badge colors visible in War Room UI', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=War Room').first().click()
     // Verify incident severity labels are visible — critical/high/medium/low

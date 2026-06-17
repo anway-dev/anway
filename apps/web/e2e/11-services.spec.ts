@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders } from './fixtures'
+import { GATEWAY, authHeaders, setAuthCookie } from './fixtures'
 
 test.describe('Services — API', () => {
   let headers: Record<string, string>
@@ -11,8 +11,9 @@ test.describe('Services — API', () => {
   test('P0: GET /api/services returns 200, array, each item has id/name/health', async ({ request }) => {
     const resp = await request.get(`${GATEWAY}/api/services`, { headers })
     expect(resp.status(), 'GET /api/services must return 200').toBe(200)
-    const body = await resp.json() as Array<{ id?: string; name?: string; health?: string }>
-    expect(Array.isArray(body), 'services response must be an array').toBe(true)
+    const respBody = await resp.json() as { data?: Array<{ id?: string; name?: string; health?: string }> }
+    const body = respBody.data ?? (Array.isArray(respBody) ? respBody : [])
+    expect(Array.isArray(body), 'services response must contain a data array').toBe(true)
 
     // If there are services, each must have id, name, health
     for (const svc of body) {
@@ -24,6 +25,10 @@ test.describe('Services — API', () => {
 })
 
 test.describe('Services — UI', () => {
+  test.beforeEach(async ({ page }) => {
+    await setAuthCookie(page.context())
+  })
+
   test('P0: navigate to Services, content area visible', async ({ page }) => {
     await page.goto('/')
     await page.locator('text=Services').first().click()

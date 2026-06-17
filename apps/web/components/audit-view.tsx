@@ -195,8 +195,8 @@ export function AuditView() {
 
   useEffect(() => {
     fetch("/api/audit")
-      .then(r => r.json() as Promise<AuditEvent[]>)
-      .then(setEvents)
+      .then(r => r.json() as Promise<{ data?: AuditEvent[] }>)
+      .then(resp => setEvents(resp.data ?? []))
       .catch(() => setEvents([]))
       .finally(() => setLoading(false))
   }, [])

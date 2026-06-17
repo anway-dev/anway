@@ -32,14 +32,21 @@ test.beforeAll(async ({ request }) => {
 
 // ---------------------------------------------------------------------------
 test.describe('CERT A: Health', () => {
-  test('A.1 gateway /health returns 200', async ({ request }) => {
+  test('A.1 gateway /health returns ok with version + uptime', async ({ request }) => {
     const r = await request.get(`${GATEWAY}/health`)
     expect(r.status()).toBe(200)
+    const body = await r.json() as Record<string, unknown>
+    expect(body['status'], 'health must report status ok').toBe('ok')
+    expect(typeof body['version'], 'health must include a version string').toBe('string')
+    expect(typeof body['uptime'], 'health must include numeric uptime').toBe('number')
   })
 
   test('A.2 gateway /health/ready returns 200 — DB + Redis reachable', async ({ request }) => {
     const r = await request.get(`${GATEWAY}/health/ready`)
     expect(r.status(), 'gateway must report ready (Postgres + Redis up)').toBe(200)
+    const body = await r.json() as Record<string, unknown>
+    expect(body['status'], 'ready response must carry status:ok').toBe('ok')
+    expect(body['db'], 'ready response must confirm DB connected').toBe('connected')
   })
 })
 
@@ -60,9 +67,18 @@ test.describe('CERT B: Auth', () => {
     expect(r.status()).toBe(401)
   })
 
-  test('B.3 protected endpoint with token returns 200', async ({ request }) => {
+  test('B.3 authenticated connectors list returns connector objects', async ({ request }) => {
     const r = await request.get(`${GATEWAY}/api/connectors`, { headers })
     expect(r.status()).toBe(200)
+    const body = await r.json() as unknown
+    expect(Array.isArray(body), 'connectors must return an array').toBe(true)
+    const list = body as Array<Record<string, unknown>>
+    if (list.length > 0) {
+      const first = list[0]!
+      expect(typeof first['id'], 'each connector must have id').toBe('string')
+      expect(typeof first['type'], 'each connector must have type').toBe('string')
+      expect(typeof first['mode'], 'each connector must have mode').toBe('string')
+    }
   })
 })
 
@@ -290,13 +306,22 @@ test.describe('CERT G: Automations', () => {
 
 // ---------------------------------------------------------------------------
 test.describe('CERT H: Audit', () => {
-  test('H.1 audit log queryable and contains entries', async ({ request }) => {
+  test('H.1 audit log queryable — entries have correct shape and event types', async ({ request }) => {
     const r = await request.get(`${GATEWAY}/api/audit`, { headers })
     expect(r.status()).toBe(200)
-    const body = await r.json() as Array<unknown> | { data?: Array<unknown>; events?: Array<unknown> }
-    const events = Array.isArray(body) ? body : ((body as { data?: Array<unknown>; events?: Array<unknown> }).data ?? (body as { events?: Array<unknown> }).events ?? [])
+    const body = await r.json() as { data?: Array<Record<string, unknown>>; events?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>
+    const events = Array.isArray(body)
+      ? body
+      : ((body as { data?: Array<Record<string, unknown>> }).data ?? (body as { events?: Array<Record<string, unknown>> }).events ?? [])
     // Actions above (connector register, triggers, webhook) must have produced audit entries
     expect(events.length, 'audit log must contain entries after certified actions').toBeGreaterThan(0)
+    // Each entry must carry the required fields
+    const first = events[0]!
+    expect(typeof first['id'], 'audit entry must have id').toBe('string')
+    expect(typeof first['timestamp'], 'audit entry must have timestamp').toBe('string')
+    expect(new Date(first['timestamp'] as string).getTime(), 'timestamp must be a valid ISO date').not.toBeNaN()
+    expect(typeof first['query'], 'audit entry must have query/event_type').toBe('string')
+    expect(typeof first['outcome'], 'audit entry must have outcome').toBe('string')
   })
 })
 
@@ -534,12 +559,24 @@ test.describe('CERT P: additional monitor types (P2)', () => {
       'created monitor must be listed with its jobType').toBe(true)
   })
 
-  test('P.2 cloud_security_scan creatable (returns unconfigured without cloud connector)', async ({ request }) => {
+  test('P.2 cloud_security_scan creatable and appears in monitors list', async ({ request }) => {
+    const monitorName = uniqueId('cert-cloudsec')
     const create = await request.post(`${GATEWAY}/api/automations/monitors`, {
       headers: { ...headers, 'Content-Type': 'application/json' },
-      data: { name: uniqueId('cert-cloudsec'), schedule: '0 * * * *', jobType: 'cloud_security_scan' },
+      data: { name: monitorName, schedule: '0 * * * *', jobType: 'cloud_security_scan' },
     })
     expect(create.status(), 'cloud_security_scan monitor must be creatable').toBeLessThan(300)
+    const created = await create.json() as { id?: string }
+    expect(created.id, 'created monitor must have id').toBeTruthy()
+
+    // Verify it appears in the list with correct jobType — proves it's persisted, not ephemeral
+    const list = await request.get(`${GATEWAY}/api/automations/monitors`, { headers })
+    expect(list.status()).toBe(200)
+    const monitors = await list.json() as Array<{ name?: string; jobType?: string }>
+    expect(
+      monitors.some(m => m.name === monitorName && m.jobType === 'cloud_security_scan'),
+      'cloud_security_scan monitor must be listed with its jobType',
+    ).toBe(true)
   })
 })
 
@@ -606,7 +643,7 @@ test.describe('CERT R: lifecycle', () => {
 })
 
 test.describe('CERT S: LLM round-trip', () => {
-  test('S.1 POST /api/chat returns tokens from LLM', async ({ request }) => {
+  test('S.1 POST /api/chat returns tokens from LLM containing the reply', async ({ request }) => {
     test.setTimeout(90_000)
     const h = await authHeaders(request)
     const resp = await request.post(`${GATEWAY}/api/chat`, {
@@ -615,7 +652,12 @@ test.describe('CERT S: LLM round-trip', () => {
     })
     expect(resp.status()).toBe(200)
     const body = await resp.text()
-    expect(body.length).toBeGreaterThan(10)
+    expect(body.length, 'chat response body must not be empty').toBeGreaterThan(10)
+    // The LLM was told to reply with "PONG" — verify its token output arrived
+    expect(
+      body.toLowerCase().includes('pong'),
+      'CERT FAIL: chat response did not contain "PONG" — LLM round-trip broken or SSE flush not working'
+    ).toBe(true)
   })
 })
 
@@ -882,12 +924,44 @@ test.describe('CERT AB: graph triage response shape', () => {
 
 
 test.describe('CERT AC: session API', () => {
-  test('AC.1 GET /api/sessions returns 200 with array', async ({ request }) => {
+  test('AC.1 GET /api/sessions returns sessions with correct shape — populated after S.1 chat', async ({ request }) => {
     const h = await authHeaders(request)
     const r = await request.get(`${GATEWAY}/api/sessions`, { headers: h })
     expect(r.status()).toBe(200)
     const body = await r.json() as unknown
-    expect(Array.isArray(body)).toBe(true)
+    expect(Array.isArray(body), 'sessions must return an array').toBe(true)
+    const sessions = body as Array<Record<string, unknown>>
+    // S.1 ran a chat — sessions must not be empty (turns are persisted to DB)
+    expect(
+      sessions.length,
+      'CERT FAIL: sessions list empty after S.1 chat — session_turns not being written to DB'
+    ).toBeGreaterThan(0)
+    const first = sessions[0]!
+    expect(typeof first['id'], 'session must have id').toBe('string')
+    expect(typeof first['createdAt'], 'session must have createdAt').toBe('string')
+    expect(typeof first['updatedAt'], 'session must have updatedAt').toBe('string')
+    expect(typeof first['turnCount'], 'session must have turnCount').toBe('number')
+    expect(first['turnCount'] as number, 'session must have at least one turn').toBeGreaterThan(0)
+  })
+
+  test('AC.2 GET /api/sessions/:id/turns returns individual turns with role + content', async ({ request }) => {
+    const h = await authHeaders(request)
+    const listR = await request.get(`${GATEWAY}/api/sessions`, { headers: h })
+    expect(listR.status()).toBe(200)
+    const sessions = await listR.json() as Array<{ id: string; turnCount: number }>
+    // Pick the first session that has turns
+    const session = sessions.find(s => s.turnCount > 0)
+    expect(session, 'CERT FAIL: no sessions with turns found (AC.1 must pass first)').toBeTruthy()
+
+    const turnsR = await request.get(`${GATEWAY}/api/sessions/${session!.id}/turns`, { headers: h })
+    expect(turnsR.status()).toBe(200)
+    const body = await turnsR.json() as { data?: Array<{ id: string; role: string; content: string; createdAt: string }> }
+    expect(Array.isArray(body.data), 'turns response must have data array').toBe(true)
+    expect(body.data!.length, 'turns must not be empty').toBeGreaterThan(0)
+    const turn = body.data![0]!
+    expect(['user', 'assistant', 'system'].includes(turn.role), 'turn must have valid role').toBe(true)
+    expect(turn.content.length, 'turn must have non-empty content').toBeGreaterThan(0)
+    expect(typeof turn.createdAt, 'turn must have createdAt').toBe('string')
   })
 })
 

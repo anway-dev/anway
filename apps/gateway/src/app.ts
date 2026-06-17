@@ -67,7 +67,7 @@ export async function buildApp() {
   // ingestion (/api/events/*) bursts higher (Alertmanager/CI fan out) → 600/min.
   const rlMax = Number(process.env['RATE_LIMIT_MAX'] ?? 300)
   await app.register(import('@fastify/rate-limit'), {
-    allowList: (req) =>
+    skip: (req: { url: string }) =>
       req.url.startsWith('/api/chat') || req.url.startsWith('/api/pipelines/'),
     max: (req: { url: string }) =>
       req.url.startsWith('/api/events/') ? rlMax * 2 : rlMax,

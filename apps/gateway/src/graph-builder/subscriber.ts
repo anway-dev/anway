@@ -188,6 +188,16 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         }
       }
 
+      // Distributed lock — only one container bootstraps per connector per tenant
+      let lockKey: string | null = null
+      if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
+        lockKey = `graph:bootstrap:lock:${tid}:${event.connectorType}`
+        const acquired = await graphPub.set(lockKey, '1', { NX: true, EX: 300 })
+        if (!acquired) {
+          log.info({ lockKey }, 'GraphBuilderSubscriber: bootstrap lock held by another instance — skipping')
+          return
+        }
+      }
       try {
         await agent.handle(event)
         if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
@@ -217,6 +227,8 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
             ).catch(() => {})
           }
         }
+      } finally {
+        if (lockKey) await graphPub.del(lockKey).catch(() => {})
       }
     })
   }

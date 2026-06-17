@@ -88,6 +88,12 @@ export class GraphBuilderAgent {
             `GraphBuilder: bootstrapped ${result.entitiesUpserted} entities from ${event.connectorType}`,
           )
         }
+        // Write bootstrap episode hints to episodic layer (same pattern as onConnectorReconnected)
+        await this.kg.addEpisode({
+          text: `Connector registered and bootstrapped: ${event.connectorType}. ${result.episodeHints.join('. ')}`,
+          source: 'graph-builder',
+          timestamp: new Date(),
+        }).catch(() => {})
       } catch (err) {
         this.logger?.error({ err, connectorType: event.connectorType }, 'GraphBuilder: bootstrap failed')
         throw err

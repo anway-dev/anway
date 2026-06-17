@@ -21,6 +21,7 @@ import pino from 'pino'
 import { startTriggerSubscriber } from './triggers/subscriber.js'
 import { createCronJobs } from './jobs/scheduler.js'
 import { startGraphBuilderSubscriber, startGraphBuilderWorker } from './graph-builder/subscriber.js'
+import { bootstrapUnindexedConnectors } from './graph-builder/boot-scan.js'
 import { startTriggerExecutor } from './triggers/executor.js'
 import { startIncidentSubscriber } from './events/incident-subscriber.js'
 import { startAlertSubscriber } from './events/alert-subscriber.js'
@@ -115,6 +116,12 @@ async function main() {
       )
     } catch (err) {
       app.log.warn({ err }, 'Graph builder worker not started — Redis may be unavailable')
+    }
+    // Boot-time scan — publish connector_registered for connectors with no bootstrapped_at
+    try {
+      await bootstrapUnindexedConnectors(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL, app.log)
+    } catch (err) {
+      app.log.warn({ err }, 'boot-time connector scan failed — skipping')
     }
     try {
       await startTriggerExecutor(process.env['REDIS_URL'] ?? DEFAULT_REDIS_URL)

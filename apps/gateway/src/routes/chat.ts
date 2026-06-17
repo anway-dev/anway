@@ -32,6 +32,7 @@ import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
 import { makeRegistrationTools } from '../connectors/registration-tools.js'
 import { makeDeployTools } from '../tools/deploy-tools.js'
+import { getNativeConnectorTools } from '../tools/native-connector-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
 import { getMemoryGateSink } from '../gate/memory-gate-fallback.js'
 import { isValidUUID } from '../utils/validators.js'
@@ -329,6 +330,14 @@ export async function chatRoutes(app: FastifyInstance) {
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
+    // Load native connector config for perimeter + system prompt connector list
+    const nativeConnectorRows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ connector_type: string; mode: string }>>`
+        SELECT connector_type, 'read' AS mode FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND enabled = true
+      `
+    ).catch(() => [] as Array<{ connector_type: string; mode: string }>)
+
     // Token budget enforcement — Postgres authoritative check (not Redis-only)
     const usage = await loadTokenUsage(tenantId)
     const monthly = usage.monthly ?? 0
@@ -377,6 +386,11 @@ export async function chatRoutes(app: FastifyInstance) {
       }
     }
 
+    // Add native connector scopes so perimeter allows their tools
+    for (const nc of nativeConnectorRows) {
+      connectorScopes.push({ connectorId: nc.connector_type, read: ['*'], write: [] })
+    }
+
     const userPerimeter: UserPerimeter = {
       userId: UserId(userId),
       connectors: connectorScopes,
@@ -395,6 +409,14 @@ export async function chatRoutes(app: FastifyInstance) {
         },
       }
     })
+
+    for (const nc of nativeConnectorRows) {
+      manifests.push({
+        connectorId: nc.connector_type,
+        mode: 'read' as const,
+        capabilities: { read: ['*'], write: [] },
+      })
+    }
 
     // Harness built-in tools (bare names, no connector prefix) — explicit
     // allowlist in the perimeter. register_connector is a write action and
@@ -450,8 +472,9 @@ export async function chatRoutes(app: FastifyInstance) {
         withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
+    const nativeConnectorTools = await getNativeConnectorTools(prisma, tenantId)
     const deployTools = makeDeployTools(tenantId, userId, provider, knowledgeGraph)
-    const allTools = [...connectorTools, ...registrationTools, ...deployTools]
+    const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
     const gateSink = redisUrl ? new RedisGateSink(redisUrl, tenantId) : getMemoryGateSink()
@@ -468,11 +491,18 @@ export async function chatRoutes(app: FastifyInstance) {
       knowledgeGraph,
       budget,
       gateSink,
-      connectors: dbConnectors.map((c) => ({
-        name: c.name || c.type,
-        type: c.type,
-        mode: c.mode,
-      })),
+      connectors: [
+        ...dbConnectors.map((c) => ({
+          name: c.name || c.type,
+          type: c.type,
+          mode: c.mode,
+        })),
+        ...nativeConnectorRows.map((nc) => ({
+          name: nc.connector_type,
+          type: nc.connector_type,
+          mode: 'read' as const,
+        })),
+      ],
     })
 
     // SSE response setup — Redis fan-out for multi-pod, direct stream for single-pod

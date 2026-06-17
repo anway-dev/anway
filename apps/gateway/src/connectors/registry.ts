@@ -180,11 +180,13 @@ export async function registerConnectorTool(
 
 /** List connectors tool: returns connector list for tenant */
 export async function listConnectorsTool(tenantId: string): Promise<{ connectors: unknown[] }> {
+  // Query connector_config (native connectors) — the `connectors` table is for MCP/CLI only
   const rows = await withTenant(prisma, tenantId, (tx) =>
-    tx.connector.findMany({
-      where: { tenant_id: tenantId },
-      select: { id: true, name: true, type: true, mode: true, created_at: true },
-    })
-  )
-  return { connectors: rows }
+    tx.$queryRaw<Array<{ id: string; connector_type: string; enabled: boolean; bootstrapped_at: Date | null }>>`
+      SELECT id::text, connector_type, enabled, bootstrapped_at
+      FROM connector_config
+      WHERE tenant_id = ${tenantId}::uuid
+    `
+  ).catch(() => [])
+  return { connectors: rows.map(r => ({ id: r.id, name: r.connector_type, type: r.connector_type, mode: 'read', enabled: r.enabled, bootstrappedAt: r.bootstrapped_at })) }
 }

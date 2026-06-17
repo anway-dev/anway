@@ -6,8 +6,8 @@
 
 set -uo pipefail
 
-GATEWAY_URL:-http://127.0.0.1:6900}}"
-WEB_URL="${WEB_URL:-http://localhost:7000}"
+GATEWAY_URL:-http://127.0.0.1:8510}}"
+WEB_URL="${WEB_URL:-http://localhost:8500}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 TIMEOUT="${SMOKE_TIMEOUT:-300}"
 

@@ -48,7 +48,7 @@ services:
       context: ..
       dockerfile: apps/agent-service/Dockerfile
     ports:
-      - "6600:8000"
+      - "8540:8000"
     environment:
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j

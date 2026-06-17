@@ -1,7 +1,7 @@
 import type { APIRequestContext, BrowserContext } from '@playwright/test'
 
-export const GATEWAY = 'http://127.0.0.1:6900'
-export const WEB = 'http://localhost:7000'
+export const GATEWAY = 'http://127.0.0.1:8510'
+export const WEB = 'http://localhost:8500'
 export const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 export const DEMO_EMAIL = 'dev@anvay.local'
 

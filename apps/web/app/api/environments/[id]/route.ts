@@ -1,6 +1,6 @@
 import { resolveAuthHeader } from '@/lib/server-auth'
 
-const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:6900"
+const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:8510"
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

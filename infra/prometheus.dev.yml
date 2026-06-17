@@ -13,7 +13,7 @@ scrape_configs:
   # In dev compose, gateway runs as a Docker service — use service name
   - job_name: 'anvay-gateway'
     static_configs:
-      - targets: ['gateway:6900']
+      - targets: ['gateway:8510']
     metrics_path: /metrics
 
   - job_name: 'prometheus'

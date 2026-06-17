@@ -5,8 +5,8 @@
 #   export MINIKUBE_IP=$(minikube ip)
 #   docker compose -f infra/demo/docker-compose.observability.yml up -d
 #
-# Then open Grafana at http://localhost:6800 (admin / anvay)
-# Prometheus at http://localhost:6700
+# Then open Grafana at http://localhost:8520 (admin / anvay)
+# Prometheus at http://localhost:8530
 
 services:
   prometheus:
@@ -16,12 +16,10 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
     ports:
-      - "6700:9090"
+      - "8530:9090"
     volumes:
       - ./prometheus-k8s.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    extra_hosts:
-      - "minikube:${MINIKUBE_IP:-192.168.49.2}"
     networks:
       - observability
     restart: unless-stopped
@@ -31,10 +29,10 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: anvay
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_SERVER_ROOT_URL: http://localhost:6800
+      GF_SERVER_ROOT_URL: http://localhost:8520
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/demo.json
     ports:
-      - "6800:3000"
+      - "8520:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-const GATEWAY = process.env['NEXT_PUBLIC_GATEWAY_URL'] ?? 'http://127.0.0.1:6900'
+const GATEWAY = process.env['NEXT_PUBLIC_GATEWAY_URL'] ?? 'http://127.0.0.1:8510'
 
 export default function SetupPage() {
   const router = useRouter()

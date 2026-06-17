@@ -1971,13 +1971,13 @@ export const INCIDENTS: Incident[] = [
     duration: "2h 14m",
     oncall: "eve@acme.dev",
     confidence: 0.98,
-    hypothesis: "Request tracing middleware accumulated spans in-memory with no flush interval set. Heap grew until OOMKill at 1.5GB. Fixed by setting TRACE_FLUSH_INTERVAL_MS=5000 and capping in-flight span buffer to 500.",
+    hypothesis: "Request tracing middleware accumulated spans in-memory with no flush interval set. Heap grew until OOMKill at 1.5GB. Fixed by setting TRACE_FLUSH_INTERVAL_MS=8500 and capping in-flight span buffer to 500.",
     timeline: [
       { at: "02:14:00", type: "alert",    label: "api-gateway OOMKilled — pod restarted",   actor: "k8s"       },
       { at: "02:15:10", type: "ack",      label: "Eve acknowledged",                        actor: "eve"       },
       { at: "02:50:00", type: "spike",    label: "Second OOMKill — heap 1.5GB",            actor: "k8s"       },
       { at: "03:10:00", type: "note",     label: "Tracer flush interval identified as root cause", actor: "eve"},
-      { at: "04:28:00", type: "rollback", label: "TRACE_FLUSH_INTERVAL_MS=5000 applied",   actor: "eve"       },
+      { at: "04:28:00", type: "rollback", label: "TRACE_FLUSH_INTERVAL_MS=8500 applied",   actor: "eve"       },
     ],
     metrics: [
       { name: "Heap Usage",    value: "42",  unit: "%", status: "ok", spark: [100, 100, 98, 80, 60, 50, 45, 42] },
@@ -1994,7 +1994,7 @@ export const INCIDENTS: Incident[] = [
     runbook: [
       "Check pod memory: `kubectl top pods -n prod -l app=api-gateway`",
       "If OOMKilled: restart pod and set memory limit to 2GB",
-      "Set TRACE_FLUSH_INTERVAL_MS=5000 + TRACE_BUFFER_MAX=500 in prod env",
+      "Set TRACE_FLUSH_INTERVAL_MS=8500 + TRACE_BUFFER_MAX=500 in prod env",
       "Confirm heap stabilises < 60% after 15 min",
     ],
   },

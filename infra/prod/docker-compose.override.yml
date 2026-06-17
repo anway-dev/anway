@@ -12,7 +12,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6900/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:8510/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -20,9 +20,9 @@ services:
   web:
     image: anvay-web:latest
     ports:
-      - "7000:3000"
+      - "8500:3000"
     environment:
-      - GATEWAY_URL=http://gateway:6900
+      - GATEWAY_URL=http://gateway:8510
     depends_on:
       - gateway
     restart: unless-stopped

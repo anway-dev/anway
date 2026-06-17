@@ -51,12 +51,12 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
     ports:
-      - "6700:9090"
+      - "8530:9090"
     volumes:
       - ./prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6700/-/healthy || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8530/-/healthy || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -69,10 +69,10 @@ services:
     volumes:
       - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
-      - "6500:4317"
-      - "6501:4318"
-      - "6502:8888"
-      - "6503:8889"
+      - "8550:4317"
+      - "8560:4318"
+      - "8570:8888"
+      - "8580:8889"
     depends_on:
       prometheus:
         condition: service_healthy
@@ -90,9 +90,9 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: anvay_grafana_dev
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_SERVER_ROOT_URL: http://localhost:6800
+      GF_SERVER_ROOT_URL: http://localhost:8520
     ports:
-      - "6800:3000"
+      - "8520:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -118,14 +118,14 @@ services:
              pnpm --filter anvay-gateway dev"
     environment:
       NODE_ENV: development
-      PORT: "6900"
+      PORT: "8510"
       HOST: "0.0.0.0"
       DATABASE_URL: postgresql://anvay:anvay_dev_secret@postgres:5432/anvay_dev
       REDIS_URL: redis://redis:6379
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       LOG_LEVEL: info
     ports:
-      - "6900:4000"
+      - "8510:4000"
     volumes:
       - ../:/app:delegated
       # Named volumes shadow host node_modules so container packages don't leak to host
@@ -139,7 +139,7 @@ services:
       otel-collector:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6900/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8510/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 16
@@ -156,11 +156,11 @@ services:
              cd /app/apps/web && pnpm dev"
     environment:
       NODE_ENV: development
-      PORT: "7000"
+      PORT: "8500"
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
     ports:
-      - "7000:3000"
+      - "8500:3000"
     volumes:
       - ../:/app:delegated
       - web_nm:/app/apps/web/node_modules

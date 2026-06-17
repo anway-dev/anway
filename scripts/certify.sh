@@ -12,8 +12,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WEB_DIR="$PROJECT_ROOT/apps/web"
-GATEWAY_URL:-http://127.0.0.1:6900}}"
-WEB_URL="${WEB_URL:-http://localhost:7000}"
+GATEWAY_URL:-http://127.0.0.1:8510}}"
+WEB_URL="${WEB_URL:-http://localhost:8500}"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[certify]${NC} $*"; }

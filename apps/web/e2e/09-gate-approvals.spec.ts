@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, uniqueId, setAuthCookie } from './fixtures'
+import { GATEWAY, authHeaders, authHeaders2, uniqueId, setAuthCookie } from './fixtures'
 
 test.describe('Gate approvals — full lifecycle', () => {
   let headers: Record<string, string>
+  let headers2: Record<string, string>
 
   test.beforeAll(async ({ request }) => {
     headers = await authHeaders(request)
+    headers2 = await authHeaders2(request)
   })
 
   test('P0: create gate → decide approved → returns ok:true, decision:approved', async ({ request }) => {
@@ -18,9 +20,9 @@ test.describe('Gate approvals — full lifecycle', () => {
     const created = await createResp.json() as { ok: boolean; id: string }
     expect(created.id, 'gate must return an id').toBeDefined()
 
-    // Decide approved
+    // Decide approved — use dev2 user (SoD: cannot approve own gate)
     const decideResp = await request.post(`${GATEWAY}/api/gate/${created.id}/decide`, {
-      headers,
+      headers: headers2,
       data: { decision: 'approved' },
     })
     expect(decideResp.status(), 'decide must return 200').toBe(200)

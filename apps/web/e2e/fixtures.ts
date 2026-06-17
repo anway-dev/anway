@@ -11,8 +11,19 @@ export async function getToken(request: APIRequestContext): Promise<string> {
   return body.token ?? ''
 }
 
+export async function getToken2(request: APIRequestContext): Promise<string> {
+  const r = await request.get(`${GATEWAY}/api/auth/dev-token2`)
+  const body = await r.json() as { token?: string }
+  return body.token ?? ''
+}
+
 export async function authHeaders(request: APIRequestContext): Promise<Record<string, string>> {
   const token = await getToken(request)
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export async function authHeaders2(request: APIRequestContext): Promise<Record<string, string>> {
+  const token = await getToken2(request)
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 

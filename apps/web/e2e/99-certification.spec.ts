@@ -22,6 +22,9 @@
  *   BB. Evals        — TechSpecAgent structural quality
  *   BC. Evals        — SREAgent chat response grounding
  *   BD. Evals        — chat session context retention
+ *   BE. Graph Builder — event API security + entity shape
+ *   BF. Immutability  — audit log has no delete/patch routes
+ *   BG. Graph triage  — entity coverage post-bootstrap
  */
 import { test, expect } from '@playwright/test'
 import { GATEWAY, WEB, DEMO_TENANT, DEMO_EMAIL, authHeaders, setAuthCookie, pollUntil, uniqueId } from './fixtures'
@@ -2287,5 +2290,114 @@ test.describe('CERT BD: Chat session context retention evals', () => {
     ).catch(() => [] as Array<{ id: string; turnCount: number }>)
     const session = sessions.find(s => s.id === bdSessionId)
     expect(session?.turnCount, 'BD.1 must have 2+ turns in session').toBeGreaterThanOrEqual(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BE: Graph Builder event API', () => {
+  // Connector API key format from .env.example: e2e-key:<DEMO_TENANT>
+  // These tests do NOT require an LLM provider — they only test auth/security paths.
+  const E2E_CONNECTOR_KEY = 'e2e-key'
+  const WRONG_CONNECTOR_KEY = 'not-a-valid-key'
+  const OTHER_TENANT = '00000000-0000-0000-0000-000000000099'
+
+  test('BE.1 POST /api/graph/events without x-connector-key returns 401', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/graph/events`, {
+      data: { type: 'pr_merged', tenantId: DEMO_TENANT, repo: 'org/test', sha: 'abc123', branch: 'main', author: 'ci', message: 'test' },
+    })
+    expect(r.status(), 'CERT FAIL BE.1: missing connector key must return 401').toBe(401)
+  })
+
+  test('BE.2 POST /api/graph/events with invalid connector key returns 401', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/graph/events`, {
+      headers: { 'x-connector-key': WRONG_CONNECTOR_KEY },
+      data: { type: 'pr_merged', tenantId: DEMO_TENANT, repo: 'org/test', sha: 'abc123', branch: 'main', author: 'ci', message: 'test' },
+    })
+    expect(r.status(), 'CERT FAIL BE.2: invalid connector key must return 401').toBe(401)
+  })
+
+  test('BE.3 POST /api/graph/events with valid key but wrong tenantId returns 403', async ({ request }) => {
+    // e2e-key is bound to DEMO_TENANT — sending a different tenantId in body must be rejected
+    const r = await request.post(`${GATEWAY}/api/graph/events`, {
+      headers: { 'x-connector-key': E2E_CONNECTOR_KEY },
+      data: { type: 'pr_merged', tenantId: OTHER_TENANT, repo: 'org/test', sha: 'abc123', branch: 'main', author: 'ci', message: 'test' },
+    })
+    expect(r.status(), 'CERT FAIL BE.3: cross-tenant write must be rejected with 403').toBe(403)
+  })
+
+  test('BE.4 GET /api/graph/entities returns array with correct shape', async ({ request }) => {
+    // CERT D bootstrapped a prometheus connector — at minimum a Connector entity must exist
+    const r = await request.get(`${GATEWAY}/api/graph/entities`, { headers })
+    expect(r.status(), 'CERT FAIL BE.4: /api/graph/entities must return 200').toBe(200)
+    const body = await r.json() as { data: Array<{ id: string; name: string; type: string }>; relationships: unknown[] }
+    expect(Array.isArray(body.data), 'CERT FAIL BE.4: response.data must be array').toBe(true)
+    expect(Array.isArray(body.relationships), 'CERT FAIL BE.4: response.relationships must be array').toBe(true)
+    if (body.data.length > 0) {
+      const e = body.data[0]!
+      expect(typeof e.id, 'CERT FAIL BE.4: entity.id must be string').toBe('string')
+      expect(typeof e.name, 'CERT FAIL BE.4: entity.name must be string').toBe('string')
+      expect(typeof e.type, 'CERT FAIL BE.4: entity.type must be string').toBe('string')
+    }
+  })
+
+  test('BE.5 GET /api/graph/entities unauthenticated returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/graph/entities`)
+    expect(r.status(), 'CERT FAIL BE.5: unauthenticated graph entities must return 401').toBe(401)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BF: Audit immutability', () => {
+  // Audit log has no DELETE or PATCH endpoints — immutable by architecture.
+  // These tests confirm those routes do not exist (404/405 = immutable).
+
+  test('BF.1 DELETE /api/audit returns 404 — audit log has no delete endpoint', async ({ request }) => {
+    const r = await request.delete(`${GATEWAY}/api/audit`, { headers })
+    expect([404, 405], 'CERT FAIL BF.1: audit DELETE must return 404 or 405 (route does not exist)').toContain(r.status())
+  })
+
+  test('BF.2 PATCH /api/audit returns 404 — audit entries cannot be modified', async ({ request }) => {
+    const r = await request.patch(`${GATEWAY}/api/audit`, {
+      headers,
+      data: { event_type: 'tampered' },
+    })
+    expect([404, 405], 'CERT FAIL BF.2: audit PATCH must return 404 or 405 (route does not exist)').toContain(r.status())
+  })
+
+  test('BF.3 GET /api/audit entries are read-only — response contains no mutation links', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/audit`, { headers })
+    expect(r.status(), 'CERT FAIL BF.3: audit list must return 200').toBe(200)
+    const body = await r.json() as { data: unknown[] }
+    expect(Array.isArray(body.data), 'CERT FAIL BF.3: audit response must have data array').toBe(true)
+    // Entries must not expose mutable links (delete_url, edit_url)
+    for (const entry of (body.data as Array<Record<string, unknown>>).slice(0, 5)) {
+      expect(entry['delete_url'], 'CERT FAIL BF.3: audit entry must not expose delete_url').toBeUndefined()
+      expect(entry['edit_url'], 'CERT FAIL BF.3: audit entry must not expose edit_url').toBeUndefined()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BG: Graph triage + entity coverage', () => {
+  test('BG.1 GET /api/graph/triage/:entityName for unknown entity returns 404', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/graph/triage/nonexistent-entity-xyzzy-99999`, { headers })
+    expect(r.status(), 'CERT FAIL BG.1: unknown entity triage must return 404').toBe(404)
+  })
+
+  test('BG.2 GET /api/graph/triage/:entityName unauthenticated returns 401', async ({ request }) => {
+    const r = await request.get(`${GATEWAY}/api/graph/triage/prometheus`)
+    expect(r.status(), 'CERT FAIL BG.2: unauthenticated triage must return 401').toBe(401)
+  })
+
+  test('BG.3 GET /api/graph/entities has at least 1 entity after CERT D bootstrap', async ({ request }) => {
+    // CERT D.1 registered a prometheus connector which creates a Connector entity via bootstrap.
+    // If this is 0, the Graph Builder bootstrap pipeline is broken.
+    const r = await request.get(`${GATEWAY}/api/graph/entities?limit=10`, { headers })
+    expect(r.status(), 'CERT FAIL BG.3: graph entities must return 200').toBe(200)
+    const body = await r.json() as { data: unknown[] }
+    expect(
+      body.data.length,
+      'CERT FAIL BG.3: at least 1 entity must exist after CERT D connector bootstrap — Graph Builder pipeline is broken if 0',
+    ).toBeGreaterThan(0)
   })
 })

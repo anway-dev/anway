@@ -41,7 +41,7 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'create_issue', description: 'Create an issue', parameters: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string', optional: true }, teamId: { type: 'string', optional: true } }, required: ['title'] } },
+    definition: { name: 'create_issue', description: 'Create an issue', parameters: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string', optional: true }, teamId: { type: 'string' } }, required: ['title', 'teamId'] } },
     execute: async (params, creds) => {
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('Linear API key not configured')
@@ -49,7 +49,7 @@ const TOOLS: ConnectorTool[] = [
       const res = await fetch(LINEAR_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ query: mutation, variables: { title: params.title || 'Untitled', teamId: params.teamId || '' } }),
+        body: JSON.stringify({ query: mutation, variables: { title: String(params.title), teamId: String(params.teamId) } }),
       })
       if (!res.ok) throw new Error(`Linear create_issue failed: HTTP ${res.status}`)
       const json = await res.json() as { data?: { issueCreate?: { success: boolean; issue?: { id: string } } } }

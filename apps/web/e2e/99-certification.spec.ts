@@ -2401,3 +2401,115 @@ test.describe('CERT BG: Graph triage + entity coverage', () => {
     ).toBeGreaterThan(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Helper: parse SSE stream from /api/editor/analyze — collects typed event objects
+function parseSseEditorEvents(body: string): Array<{ type: string; [k: string]: unknown }> {
+  return body.split('\n')
+    .filter(l => l.startsWith('data: '))
+    .flatMap(l => {
+      try { return [JSON.parse(l.slice('data: '.length)) as { type: string }] } catch { return [] }
+    })
+}
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BH: Editor analyze (ReviewAgent / code review)', () => {
+  // /api/editor/analyze has a static-analysis fallback when no LLM is configured,
+  // so these tests pass in both LLM and no-LLM environments.
+
+  test('BH.1 POST /api/editor/analyze with valid code returns 200 + findings + done events', async ({ request }) => {
+    test.setTimeout(60_000)
+    const h = await authHeaders(request)
+    const sampleCode = `function divide(a, b) {\n  return a / b;\n}\nmodule.exports = { divide };\n`
+    const r = await request.post(`${GATEWAY}/api/editor/analyze`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { content: sampleCode, filename: 'math.js', language: 'javascript' },
+    })
+    expect(r.status(), 'BH.1: analyze must return 200').toBe(200)
+    const events = parseSseEditorEvents(await r.text())
+    const types = events.map(e => e.type)
+    expect(types.includes('findings'), 'BH.1: SSE stream must contain a findings event').toBe(true)
+    expect(types.includes('done'), 'BH.1: SSE stream must contain a done event').toBe(true)
+  })
+
+  test('BH.2 findings event contains an array', async ({ request }) => {
+    test.setTimeout(60_000)
+    const h = await authHeaders(request)
+    const sampleCode = `const x = eval(userInput);\nconst pass = "hardcoded123";\n`
+    const r = await request.post(`${GATEWAY}/api/editor/analyze`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { content: sampleCode, filename: 'danger.js' },
+    })
+    expect(r.status()).toBe(200)
+    const events = parseSseEditorEvents(await r.text())
+    const findingsEvent = events.find(e => e.type === 'findings')
+    expect(findingsEvent, 'BH.2: findings event must be present').toBeTruthy()
+    expect(Array.isArray(findingsEvent!['findings']), 'BH.2: findings must be an array').toBe(true)
+  })
+
+  test('BH.3 POST /api/editor/analyze without auth returns 401', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/editor/analyze`, {
+      data: { content: 'const x = 1;', filename: 'test.js' },
+    })
+    expect(r.status(), 'BH.3: unauthenticated analyze must return 401').toBe(401)
+  })
+
+  test('BH.4 POST /api/editor/analyze missing content returns 400', async ({ request }) => {
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/editor/analyze`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { filename: 'test.js' },
+    })
+    expect(r.status(), 'BH.4: missing content must return 400').toBe(400)
+  })
+})
+
+// ---------------------------------------------------------------------------
+test.describe('CERT BI: Deploy via orchestrator (trigger_pipeline tool)', () => {
+  // Requires LLM. If no LLM is configured the chat endpoint returns 503 and these tests skip.
+  test('BI.1 "deploy X to staging" query routes through orchestrator and produces a deploy-oriented response', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'Please deploy payments-api to staging environment', sessionId: uniqueId('cert-bi1') },
+    })
+    if (r.status() === 503) {
+      test.skip()
+      return
+    }
+    expect(r.status(), 'BI.1: deploy query must return 200').toBe(200)
+    const assembled = parseSseText(await r.text())
+    expect(assembled.length, 'BI.1: response must be non-empty').toBeGreaterThan(10)
+    const lower = assembled.toLowerCase()
+    // Orchestrator must acknowledge the deploy intent, not silently ignore it
+    const hasDeployContent = lower.includes('deploy') || lower.includes('pipeline') ||
+      lower.includes('staging') || lower.includes('payments') || lower.includes('release') ||
+      lower.includes('trigger') || lower.includes('ship')
+    expect(hasDeployContent, `BI.1: response must reference deploy context. Got: "${assembled.slice(0, 200)}"`).toBe(true)
+  })
+
+  test('BI.2 orchestrator response to deploy query contains no fatal error event', async ({ request }) => {
+    test.setTimeout(120_000)
+    const h = await authHeaders(request)
+    const r = await request.post(`${GATEWAY}/api/chat`, {
+      headers: { ...h, 'Content-Type': 'application/json' },
+      data: { query: 'Ship the latest build of auth-service to production', sessionId: uniqueId('cert-bi2') },
+    })
+    if (r.status() === 503) {
+      test.skip()
+      return
+    }
+    expect(r.status()).toBe(200)
+    const body = await r.text()
+    const events = body.split('\n')
+      .filter(l => l.startsWith('data: '))
+      .flatMap(l => { try { return [JSON.parse(l.slice('data: '.length)) as { type: string; message?: string }] } catch { return [] } })
+    // An error event with type PERIMETER_BLOCK means deploy is blocked — that's acceptable (correct behavior)
+    // An error with a non-perimeter reason indicates a real crash
+    const fatalErrors = events.filter(e =>
+      e.type === 'error' && e.message && !e.message.includes('PERIMETER') && !e.message.includes('perimeter')
+    )
+    expect(fatalErrors.length, `BI.2: must have no fatal errors in SSE stream. Got: ${JSON.stringify(fatalErrors)}`).toBe(0)
+  })
+})

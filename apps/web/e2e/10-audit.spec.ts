@@ -68,23 +68,31 @@ test.describe('Audit — API', () => {
     expect(arr.length, 'limit=3 must return at most 3 events').toBeLessThanOrEqual(3)
   })
 
-  test('P0: GET /api/audit?limit=3&offset=0 vs offset=3 returns different events', async ({ request }) => {
-    const page1Resp = await request.get(`${GATEWAY}/api/audit?limit=3&offset=0`, { headers })
-    const page2Resp = await request.get(`${GATEWAY}/api/audit?limit=3&offset=3`, { headers })
-
+  test('P0: GET /api/audit?limit=3 cursor pagination returns different pages', async ({ request }) => {
+    // Audit uses cursor-based pagination — get first page then follow nextCursor
+    const page1Resp = await request.get(`${GATEWAY}/api/audit?limit=3`, { headers })
     expect(page1Resp.status()).toBe(200)
+    const page1Body = await page1Resp.json() as { data?: Array<{ id: string }>; nextCursor?: string | null }
+    const page1 = page1Body.data ?? (Array.isArray(page1Body) ? page1Body as Array<{ id: string }> : [])
+
+    if (page1.length < 3 || !page1Body.nextCursor) {
+      // Not enough data to test pagination — just confirm the response shape is correct
+      expect(Array.isArray(page1), 'audit data must be an array').toBe(true)
+      return
+    }
+
+    const page2Resp = await request.get(
+      `${GATEWAY}/api/audit?limit=3&cursor=${encodeURIComponent(page1Body.nextCursor)}`,
+      { headers }
+    )
     expect(page2Resp.status()).toBe(200)
-
-    const page1Body = await page1Resp.json() as { data?: Array<{ id: string }> }
     const page2Body = await page2Resp.json() as { data?: Array<{ id: string }> }
-    const page1 = page1Body.data ?? (Array.isArray(page1Body) ? page1Body : [])
-    const page2 = page2Body.data ?? (Array.isArray(page2Body) ? page2Body : [])
+    const page2 = page2Body.data ?? (Array.isArray(page2Body) ? page2Body as Array<{ id: string }> : [])
 
-    // If there are enough events, the pages must differ
-    if (page1.length > 0 && page2.length > 0) {
+    if (page2.length > 0) {
       const page1Ids = new Set(page1.map(e => e.id))
       const overlap = page2.filter(e => page1Ids.has(e.id))
-      expect(overlap.length, 'pages with offset must not overlap').toBe(0)
+      expect(overlap.length, 'cursor-paginated pages must not overlap').toBe(0)
     }
   })
 })

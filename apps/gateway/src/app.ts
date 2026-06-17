@@ -22,6 +22,8 @@ import { alertRoutes } from './routes/alerts.js'
 import { auditRoutes } from './routes/audit.js'
 import { accessRoutes } from './routes/access.js'
 import { lifecycleRoutes } from './routes/lifecycle.js'
+import { reviewRoutes } from './routes/review.js'
+import { oncallRoutes } from './routes/oncall.js'
 import { cloudRoutes } from './routes/cloud.js'
 import { k8sRoutes } from './routes/k8s.js'
 import { oidcRoutes } from './routes/oidc.js'
@@ -91,6 +93,8 @@ export async function buildApp() {
   await app.register(auditRoutes)
   await app.register(accessRoutes)
   await app.register(lifecycleRoutes)
+  await app.register(reviewRoutes)
+  await app.register(oncallRoutes)
   await app.register(cloudRoutes)
   await app.register(k8sRoutes)
   await app.register(oidcRoutes)

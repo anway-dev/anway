@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import { ProviderFactory, ProductAgent, TechSpecAgent, StructuralGraph } from '@anvay/agent'
+import { ProviderFactory, ProductAgent, TechSpecAgent, BootstrapAgent, TestAgent, StructuralGraph } from '@anvay/agent'
 import type { ProviderConfig, IKnowledgeGraph } from '@anvay/agent'
-import type { PRD } from '@anvay/agent'
+import type { PRD, TechSpec, BootstrapPlan, TestPlan, TestFile } from '@anvay/agent'
 import { TenantId } from '@anvay/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
@@ -158,6 +158,115 @@ export async function lifecycleRoutes(app: FastifyInstance) {
         metadata: { artifactId: id, role, kind: 'techspec' },
       }).catch(() => {})
       return { ok: true }
+    },
+  )
+
+  // AW-T1 — BootstrapAgent.planBootstrap
+  app.post<{ Body: { techspecId: string } }>(
+    '/api/lifecycle/bootstrap',
+    { preHandler: [app.authenticate, requireRole('dev', 'admin')] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { techspecId } = request.body
+      if (!techspecId) return reply.code(400).send({ error: 'techspecId required' })
+
+      const tsRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ content: Record<string, unknown> }>>`
+          SELECT content FROM artifacts
+          WHERE id = ${techspecId}::uuid AND kind = 'techspec' AND status = 'approved'
+            AND tenant_id = ${tenantId}::uuid
+        `
+      ).catch(() => [])
+      if (tsRows.length === 0) return reply.code(404).send({ error: 'Approved TechSpec not found' })
+
+      const provider = await getProvider(tenantId)
+      if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
+
+      const spec = tsRows[0]!.content as unknown as TechSpec
+      const kg = new StructuralGraph((sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))))
+      const agent = new BootstrapAgent(provider, provider, kg)
+      let plan: BootstrapPlan
+      try {
+        plan = await agent.planBootstrap(spec, TenantId(tenantId))
+      } catch (err) {
+        request.log.error({ err }, 'planBootstrap failed')
+        return reply.code(502).send({ error: 'LLM provider returned an error' })
+      }
+
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          INSERT INTO artifacts (tenant_id, kind, title, content, status, parent_id)
+          VALUES (${tenantId}::uuid, 'bootstrap_plan', ${plan.service}, ${JSON.stringify(plan)}::jsonb, 'draft', ${techspecId}::uuid)
+          RETURNING id
+        `
+      ).catch(() => [])
+      return { id: rows[0]?.id, plan }
+    },
+  )
+
+  // AW-T3 — TestAgent.writeTestPlan
+  app.post<{ Body: { techspecId: string } }>(
+    '/api/lifecycle/testplan',
+    { preHandler: [app.authenticate, requireRole('dev', 'admin')] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { techspecId } = request.body
+      if (!techspecId) return reply.code(400).send({ error: 'techspecId required' })
+
+      const tsRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ content: Record<string, unknown> }>>`
+          SELECT content FROM artifacts WHERE id = ${techspecId}::uuid AND kind = 'techspec' AND tenant_id = ${tenantId}::uuid
+        `
+      ).catch(() => [])
+      if (tsRows.length === 0) return reply.code(404).send({ error: 'TechSpec not found' })
+
+      const provider = await getProvider(tenantId)
+      if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
+
+      const spec = tsRows[0]!.content as unknown as TechSpec
+      const kg = new StructuralGraph((sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))))
+      const agent = new TestAgent(provider, provider, kg)
+      let plan: TestPlan
+      try {
+        plan = await agent.writeTestPlan(spec, TenantId(tenantId))
+      } catch (err) {
+        request.log.error({ err }, 'writeTestPlan failed')
+        return reply.code(502).send({ error: 'LLM provider returned an error' })
+      }
+
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string }>>`
+          INSERT INTO artifacts (tenant_id, kind, title, content, status, parent_id)
+          VALUES (${tenantId}::uuid, 'test_plan', ${'Test plan for ' + spec.title}, ${JSON.stringify(plan)}::jsonb, 'draft', ${techspecId}::uuid)
+          RETURNING id
+        `
+      ).catch(() => [])
+      return { id: rows[0]?.id, plan }
+    },
+  )
+
+  // AW-T3 — TestAgent.writeRegressionTest
+  app.post<{ Body: { incident: string } }>(
+    '/api/lifecycle/regression-test',
+    { preHandler: [app.authenticate, requireRole('dev', 'admin')] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { incident } = request.body
+      if (!incident) return reply.code(400).send({ error: 'incident required' })
+
+      const provider = await getProvider(tenantId)
+      if (!provider) return reply.code(503).send({ error: 'No LLM provider configured' })
+
+      const kg = new StructuralGraph((sql, params) => withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))))
+      const agent = new TestAgent(provider, provider, kg)
+      let testFile: TestFile
+      try {
+        testFile = await agent.writeRegressionTest(incident, TenantId(tenantId))
+      } catch (err) {
+        request.log.error({ err }, 'writeRegressionTest failed')
+        return reply.code(502).send({ error: 'LLM provider returned an error' })
+      }
+      return testFile
     },
   )
 

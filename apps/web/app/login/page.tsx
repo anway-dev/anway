@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 const GATEWAY = process.env['NEXT_PUBLIC_GATEWAY_URL'] ?? 'http://127.0.0.1:4000'
@@ -19,43 +19,82 @@ function LoginForm() {
   const redirect = searchParams.get('redirect') ?? '/'
 
   const [email, setEmail] = useState('dev@anvay.local')
-  const [tenantId, setTenantId] = useState('00000000-0000-0000-0000-000000000001')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [devLoading, setDevLoading] = useState(false)
+  const [setupChecked, setSetupChecked] = useState(false)
+
+  // Check if first-run setup is needed
+  useEffect(() => {
+    fetch(`${GATEWAY}/api/setup/status`)
+      .then(r => r.ok ? r.json() as Promise<{ initialized: boolean }> : { initialized: true })
+      .then(s => {
+        if (!s.initialized) router.replace('/setup')
+        else setSetupChecked(true)
+      })
+      .catch(() => setSetupChecked(true))
+  }, [router])
+
+  async function handleDevLogin() {
+    setError('')
+    setDevLoading(true)
+    try {
+      const resp = await fetch(`${GATEWAY}/api/auth/dev-token`)
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({ error: 'Dev token not available' }))
+        setError((body as { error?: string }).error ?? `Dev login failed (${resp.status})`)
+        setDevLoading(false)
+        return
+      }
+      const { token } = await resp.json() as { token: string }
+      await fetch('/api/auth/set-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+      router.push(redirect)
+    } catch {
+      setError('Gateway unreachable. Is the server running?')
+      setDevLoading(false)
+    }
+  }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setLoading(true)
-
     try {
-      const resp = await fetch(`${GATEWAY}/auth/token`, {
+      // Look up tenant by email via setup-seeded admin account
+      const resp = await fetch(`${GATEWAY}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, tenantId }),
+        body: JSON.stringify({ email }),
       })
-
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ error: 'Login failed' }))
         setError((body as { error?: string }).error ?? `Login failed (${resp.status})`)
         setLoading(false)
         return
       }
-
       const { token } = await resp.json() as { token: string }
-
-      // Store token in httpOnly cookie via server route
       await fetch('/api/auth/set-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
       })
-
       router.push(redirect)
     } catch {
       setError('Gateway unreachable. Is the server running?')
       setLoading(false)
     }
+  }
+
+  if (!setupChecked) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#080808' }}>
+        <div style={{ fontSize: '12px', color: '#555', fontFamily: 'monospace' }}>checking...</div>
+      </div>
+    )
   }
 
   return (
@@ -72,6 +111,28 @@ function LoginForm() {
           <div style={{ fontSize: '12px', color: '#555' }}>Sign in to continue</div>
         </div>
 
+        {/* Dev quick-login */}
+        <button
+          onClick={handleDevLogin}
+          disabled={devLoading}
+          style={{
+            width: '100%', padding: '10px', marginBottom: '24px',
+            background: devLoading ? '#0a0a0a' : 'rgba(16,185,129,0.08)',
+            border: '1px solid rgba(16,185,129,0.3)', borderRadius: '6px',
+            color: devLoading ? '#444' : '#10b981',
+            fontSize: '13px', fontWeight: 600, cursor: devLoading ? 'not-allowed' : 'pointer',
+            fontFamily: 'monospace',
+          }}
+        >
+          {devLoading ? 'Signing in…' : '⚡ Dev Login (auto-seed)'}
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
+          <div style={{ flex: 1, height: '1px', background: '#1a1a1a' }} />
+          <span style={{ fontSize: '11px', color: '#444' }}>or sign in with email</span>
+          <div style={{ flex: 1, height: '1px', background: '#1a1a1a' }} />
+        </div>
+
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom: '16px' }}>
             <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Email</label>
@@ -84,24 +145,7 @@ function LoginForm() {
                 width: '100%', padding: '8px 12px', background: '#111', border: '1px solid #2a2a2a',
                 borderRadius: '6px', color: '#e5e5e5', fontSize: '13px', outline: 'none',
               }}
-              placeholder="dev@anvay.local"
-            />
-          </div>
-
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Tenant ID</label>
-            <input
-              type="text"
-              value={tenantId}
-              onChange={e => setTenantId(e.target.value)}
-              required
-              pattern="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-              style={{
-                width: '100%', padding: '8px 12px', background: '#111', border: '1px solid #2a2a2a',
-                borderRadius: '6px', color: '#e5e5e5', fontSize: '13px', outline: 'none',
-                fontFamily: 'monospace',
-              }}
-              placeholder="00000000-0000-0000-0000-000000000001"
+              placeholder="you@yourorg.com"
             />
           </div>
 
@@ -126,10 +170,6 @@ function LoginForm() {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
-
-        <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '10px', color: '#444' }}>
-          Dev mode: any email + valid tenant UUID works
-        </div>
       </div>
     </div>
   )

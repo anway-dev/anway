@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 // Paths that don't require authentication
-const PUBLIC_PATHS = ['/login', '/api/auth', '/_next', '/favicon.ico']
+const PUBLIC_PATHS = ['/login', '/setup', '/api/auth', '/api/setup', '/_next', '/favicon.ico']
 
 // Dev mode: bypass auth for localhost when SKIP_AUTH=true (E2E tests)
 const SKIP_AUTH = process.env['SKIP_AUTH'] === 'true'

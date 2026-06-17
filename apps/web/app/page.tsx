@@ -10,7 +10,6 @@ import { WorkflowView } from "@/components/workflow-view";
 import { AuditView } from "@/components/audit-view";
 import { AccessView } from "@/components/access-view";
 import { EditorView } from "@/components/editor-view";
-import { ModelConfig } from "@/components/model-config";
 import { AlertsView } from "@/components/alerts-view";
 import { IntakeView } from "@/components/intake-view";
 import { KbView } from "@/components/kb-view";
@@ -30,7 +29,7 @@ import type { StageNode } from "@/components/lifecycle";
 import { ErrorBoundary } from "@/components/error-boundary";
 
 
-type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "models" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings" | "projects" | "pipeline" | "environments";
+type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings" | "projects" | "pipeline" | "environments";
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "chat",        label: "Anvay",        icon: "✦" },
@@ -52,7 +51,6 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "audit",       label: "Audit",        icon: "⊡" },
   { id: "access",      label: "Access",       icon: "⊞" },
   { id: "settings", label: "Settings", icon: "⚙" },
-  { id: "models",      label: "Models",       icon: "◈" },
   { id: "cloud",       label: "Cloud",        icon: "☁" },
   { id: "k8s",         label: "K8s",          icon: "☸" },
 ];
@@ -75,6 +73,13 @@ export default function App() {
   const [cloudIssues, setCloudIssues] = useState(0);
   const [workspaceName, setWorkspaceName] = useState("Anvay");
   const [connectorCount, setConnectorCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Initialize view from ?view= URL param
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get('view');
+    if (v && NAV.some(n => n.id === v)) setView(v as View);
+  }, []);
 
   useEffect(() => {
     // Fetch critical alerts count
@@ -279,7 +284,6 @@ export default function App() {
           {view === "connectors" && <ErrorBoundary viewName="Connectors"><ConnectorsView /></ErrorBoundary>}
           {view === "audit" && <ErrorBoundary viewName="Audit"><AuditView /></ErrorBoundary>}
           {view === "access" && <ErrorBoundary viewName="Access"><AccessView /></ErrorBoundary>}
-          {view === "models" && <ErrorBoundary viewName="Models"><ModelConfig /></ErrorBoundary>}
           {view === "cloud" && <ErrorBoundary viewName="Cloud"><CloudView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
           {view === "incident" && <ErrorBoundary viewName="War Room"><IncidentView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
           {view === "catalog" && <ErrorBoundary viewName="Services"><ServiceCatalog onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}

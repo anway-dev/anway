@@ -22,7 +22,6 @@ const SCENARIO_SUGGESTIONS: ScenarioSuggestion[] = [
   { id: 'scenario-alert',  label: 'Alert Triage',  color: '#ef4444', query: 'What alerts are firing right now?' },
   { id: 'scenario-pr',     label: 'PR Summary',    color: '#3b82f6', query: 'Review recent PRs for potential issues' },
 ];
-import { ProviderConfig } from "@/components/provider-config";
 
 export interface OrchestratorContext {
   query: string;
@@ -667,7 +666,6 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
 
   return (
     <div style={{ display: "flex", height: "100%", background: "#050505", overflow: "hidden", position: "relative" }}>
-      <ProviderConfig />
       <style>{`
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         @keyframes pulse-dot { 0%,100%{box-shadow:0 0 4px #10b981} 50%{box-shadow:0 0 12px #10b981} }

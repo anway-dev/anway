@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface ProviderInfo { configured: boolean; provider?: string; defaultModel?: string }
 interface ModelList { models: string[] }
@@ -18,6 +18,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
   const [selectedModel, setSelectedModel] = useState("");
   const [cheapModel, setCheapModel] = useState("");
   const [saving, setSaving] = useState(false);
+  const initialModelRef = useRef<string>('');
 
   // Effect 1: fetch manifests on mount
   useEffect(() => {
@@ -33,6 +34,10 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
       .then(r => r.ok ? r.json() : { configured: false })
       .then((prov: ProviderInfo) => {
         setProviderInfo(prov);
+        if (prov.configured && prov.provider) {
+          setSelectedProvider(prov.provider);
+          if (prov.defaultModel) initialModelRef.current = prov.defaultModel;
+        }
         if (!prov.configured) setShowPanel(true);
       })
       .catch(() => setProviderInfo({ configured: false }))
@@ -43,12 +48,20 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
 
   useEffect(() => {
     setSelectedModel("");
-    // For API-key providers, wait until key looks complete (≥10 chars)
+    // For API-key providers actively being typed, skip until key is long enough
     const needsKey = selectedManifest?.fields.some(f => f.key === 'apiKey' && f.required)
-    if (needsKey && apiKey.length < 10) { setModels([]); return }
+    if (needsKey && apiKey.length > 0 && apiKey.length < 10) { setModels([]); return }
     fetch(`/api/settings/models?${new URLSearchParams({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) })}`)
       .then(r => r.ok ? r.json() : { models: [] })
-      .then((data: ModelList) => setModels(data.models ?? []))
+      .then((data: ModelList) => {
+        const list = data.models ?? [];
+        setModels(list);
+        // Restore the previously-configured model when loading an existing config
+        if (initialModelRef.current && list.includes(initialModelRef.current)) {
+          setSelectedModel(initialModelRef.current);
+          initialModelRef.current = '';
+        }
+      })
       .catch(() => setModels([]));
   }, [selectedProvider, baseUrl, apiKey, selectedManifest]);
 

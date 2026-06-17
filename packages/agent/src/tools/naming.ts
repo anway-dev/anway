@@ -1,12 +1,14 @@
 /**
  * Extracts connector identifier from a tool name.
- * Tool naming convention: `<connector>.<action>` (e.g. `github.list_prs`).
+ * Supports both `<connector>.<action>` (legacy) and `<connector>__<action>` (LLM-API-safe).
  *
- * Returns `"github"` for `"github.list_prs"`, `"unknown"` for bare names.
+ * Returns `"github"` for `"github.list_prs"` and `"github__list_prs"`.
  *
  * This is the single source of truth for connector-id-from-tool-name
  * extraction. Use in perimeter, gate, and audit.
  */
 export function connectorIdFromTool(toolName: string): string {
-  return toolName.split('.')[0] ?? toolName
+  if (toolName.includes('.')) return toolName.split('.')[0] ?? toolName
+  if (toolName.includes('__')) return toolName.split('__')[0] ?? toolName
+  return toolName
 }

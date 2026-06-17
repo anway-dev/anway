@@ -418,6 +418,11 @@ export async function chatRoutes(app: FastifyInstance) {
       })
     }
 
+    // Load native connector tools early so we can add them to the perimeter
+    // builtins list as a safety fallback (engine.ts also handles them via
+    // the connector__action scope check).
+    const nativeConnectorTools = await getNativeConnectorTools(prisma, tenantId)
+
     // Harness built-in tools (bare names, no connector prefix) — explicit
     // allowlist in the perimeter. register_connector is a write action and
     // still goes through the L2 gate; its admin-role check lives in the tool.
@@ -425,7 +430,12 @@ export async function chatRoutes(app: FastifyInstance) {
     const perimeter = AgentPerimeter.resolveCapabilities(
       userPerimeter,
       manifests,
-      registrationTools.map((t) => t.name),
+      [
+        ...registrationTools.map((t) => t.name),
+        // Native connector tool names are registered here as safety fallback
+        // in addition to the connector__action scope check in engine.ts
+        ...nativeConnectorTools.map((t) => t.name),
+      ],
     )
 
     // Ownership check: reject if sessionId is claimed by a different tenant OR user.
@@ -472,7 +482,6 @@ export async function chatRoutes(app: FastifyInstance) {
         withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
     )
     const connectorTools = await getToolsForTenant(prisma, tenantId)
-    const nativeConnectorTools = await getNativeConnectorTools(prisma, tenantId)
     const deployTools = makeDeployTools(tenantId, userId, provider, knowledgeGraph)
     const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools]
 

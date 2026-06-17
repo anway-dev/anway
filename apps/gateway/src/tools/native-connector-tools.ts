@@ -25,7 +25,7 @@ function makePrometheusTools(creds: Record<string, unknown>): ExecutableTool[] {
   const baseUrl = String(creds['baseUrl'] ?? creds['url'] ?? 'http://localhost:9090')
   return [
     {
-      name: 'prometheus.query',
+      name: 'prometheus__query',
       description: 'Execute a PromQL instant query. Returns metric values at current time.',
       parameters: {
         type: 'object' as const,
@@ -40,7 +40,7 @@ function makePrometheusTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
     },
     {
-      name: 'prometheus.alerts',
+      name: 'prometheus__alerts',
       description: 'List currently firing alerts from Prometheus.',
       parameters: { type: 'object' as const, properties: {}, required: [] },
       run: async () => {
@@ -51,7 +51,7 @@ function makePrometheusTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
     },
     {
-      name: 'prometheus.targets',
+      name: 'prometheus__targets',
       description: 'List Prometheus scrape targets and their health.',
       parameters: { type: 'object' as const, properties: {}, required: [] },
       run: async () => {
@@ -68,7 +68,7 @@ function makeAlertmanagerTools(creds: Record<string, unknown>): ExecutableTool[]
   const baseUrl = String(creds['baseUrl'] ?? creds['url'] ?? 'http://localhost:9093')
   return [
     {
-      name: 'alertmanager.alerts',
+      name: 'alertmanager__alerts',
       description: 'List active alerts from Alertmanager. Filter by active/inhibited/silenced.',
       parameters: {
         type: 'object' as const,
@@ -92,7 +92,7 @@ function makeAlertmanagerTools(creds: Record<string, unknown>): ExecutableTool[]
       },
     },
     {
-      name: 'alertmanager.silences',
+      name: 'alertmanager__silences',
       description: 'List active silences in Alertmanager.',
       parameters: { type: 'object' as const, properties: {}, required: [] },
       run: async () => {
@@ -111,7 +111,7 @@ function makeLokiTools(creds: Record<string, unknown>): ExecutableTool[] {
   const headers: Record<string, string> = { 'X-Scope-OrgID': String(orgId) }
   return [
     {
-      name: 'loki.query',
+      name: 'loki__query',
       description: 'Execute a LogQL range query against Loki. Returns log lines.',
       parameters: {
         type: 'object' as const,
@@ -139,7 +139,7 @@ function makeLokiTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
     },
     {
-      name: 'loki.labels',
+      name: 'loki__labels',
       description: 'List available label names in Loki.',
       parameters: { type: 'object' as const, properties: {}, required: [] },
       run: async () => {
@@ -159,7 +159,7 @@ function makeGrafanaTools(creds: Record<string, unknown>): ExecutableTool[] {
   const authHeader = token ? `Bearer ${token}` : `Basic ${Buffer.from(`admin:${password}`).toString('base64')}`
   return [
     {
-      name: 'grafana.dashboards',
+      name: 'grafana__dashboards',
       description: 'Search Grafana dashboards. Returns list of matching dashboards with URLs.',
       parameters: {
         type: 'object' as const,
@@ -179,7 +179,7 @@ function makeGrafanaTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
     },
     {
-      name: 'grafana.health',
+      name: 'grafana__health',
       description: 'Check Grafana health status.',
       parameters: { type: 'object' as const, properties: {}, required: [] },
       run: async () => {
@@ -201,7 +201,7 @@ function makeGitHubTools(creds: Record<string, unknown>): ExecutableTool[] {
   const authHeader = `Bearer ${token}`
   return [
     {
-      name: 'github.list_repos',
+      name: 'github__list_repos',
       description: 'List repositories for the configured GitHub/Gitea organization.',
       parameters: {
         type: 'object' as const,
@@ -220,7 +220,7 @@ function makeGitHubTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
     },
     {
-      name: 'github.list_prs',
+      name: 'github__list_prs',
       description: 'List open pull requests for a repository.',
       parameters: {
         type: 'object' as const,
@@ -241,7 +241,7 @@ function makeGitHubTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
     },
     {
-      name: 'github.search_issues',
+      name: 'github__search_issues',
       description: 'Search issues and PRs in GitHub/Gitea.',
       parameters: {
         type: 'object' as const,

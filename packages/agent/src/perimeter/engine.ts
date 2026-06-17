@@ -90,8 +90,10 @@ export class AgentPerimeter {
 
   /** Deterministic rule evaluation — no LLM involved. */
   allows(toolCall: ToolCall): boolean {
-    // Bare-named harness tools: allowed only via the explicit builtin allowlist
-    if (!toolCall.name.includes('.')) {
+    // Bare-named harness tools: allowed only via the explicit builtin allowlist.
+    // A tool with neither `.` nor `__` is a bare name; `connector__action` format
+    // falls through to the connector-scope check below (LLM-API-safe naming).
+    if (!toolCall.name.includes('.') && !toolCall.name.includes('__')) {
       return this.builtins.has(toolCall.name)
     }
 

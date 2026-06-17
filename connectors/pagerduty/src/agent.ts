@@ -33,8 +33,40 @@ const TOOLS: ConnectorTool[] = [
     },
     write: false,
   },
-  { definition: { name: 'create_incident', description: 'Create a new incident', parameters: { type: 'object', properties: { title: { type: 'string' }, severity: { type: 'string' }, serviceId: { type: 'string' } }, required: ['title', 'severity'] } }, execute: () => Promise.resolve({ id: 'inc-new' }), write: true },
-  { definition: { name: 'acknowledge_alert', description: 'Acknowledge an alert', parameters: { type: 'object', properties: { alertId: { type: 'string' } }, required: ['alertId'] } }, execute: () => Promise.resolve({ ok: true }), write: true },
+  {
+    definition: { name: 'create_incident', description: 'Create a new incident', parameters: { type: 'object', properties: { title: { type: 'string' }, severity: { type: 'string' }, serviceId: { type: 'string' } }, required: ['title', 'severity'] } },
+    execute: async (params, creds) => {
+      const token = (creds as ConnectorCreds).apiKey
+      if (!token) throw new Error('PagerDuty API key not configured')
+      const res = await fetch(`${PD_API}/incidents`, {
+        method: 'POST',
+        headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anvay-bot@anvay.io' },
+        body: JSON.stringify({ incident: { type: 'incident', title: String(params.title ?? ''), service: { id: String(params.serviceId ?? ''), type: 'service_reference' }, urgency: params.severity || 'high' } }),
+      })
+      if (!res.ok) throw new Error(`PagerDuty create_incident failed: HTTP ${res.status}`)
+      const json = await res.json() as { incident?: { id: string } }
+      if (!json.incident?.id) throw new Error('PagerDuty create_incident failed: no incident id in response')
+      return { id: json.incident.id }
+    },
+    write: true,
+  },
+  {
+    definition: { name: 'acknowledge_alert', description: 'Acknowledge an alert', parameters: { type: 'object', properties: { alertId: { type: 'string' } }, required: ['alertId'] } },
+    execute: async (params, creds) => {
+      const token = (creds as ConnectorCreds).apiKey
+      if (!token) throw new Error('PagerDuty API key not configured')
+      const alertId = String(params.alertId ?? '')
+      if (!alertId) throw new Error('alertId is required')
+      const res = await fetch(`${PD_API}/alerts/${alertId}`, {
+        method: 'PUT',
+        headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anvay-bot@anvay.io' },
+        body: JSON.stringify({ alerts: [{ id: alertId, status: 'acknowledged' }] }),
+      })
+      if (!res.ok) throw new Error(`PagerDuty acknowledge_alert failed: HTTP ${res.status}`)
+      return { ok: true }
+    },
+    write: true,
+  },
 ]
 
 export class PagerdutyAgent implements IConnectorAgent {

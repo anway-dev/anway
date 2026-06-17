@@ -42,7 +42,20 @@ const TOOLS: ConnectorTool[] = [
   },
   {
     definition: { name: 'create_issue', description: 'Create an issue', parameters: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string', optional: true }, teamId: { type: 'string', optional: true } }, required: ['title'] } },
-    execute: () => Promise.resolve({ id: 'new-issue-mock' }),
+    execute: async (params, creds) => {
+      const token = (creds as ConnectorCreds).apiKey
+      if (!token) throw new Error('Linear API key not configured')
+      const mutation = `mutation CreateIssue($title: String!, $teamId: String!) { issueCreate(input: { title: $title, teamId: $teamId }) { success issue { id identifier title url } } }`
+      const res = await fetch(LINEAR_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ query: mutation, variables: { title: params.title || 'Untitled', teamId: params.teamId || '' } }),
+      })
+      if (!res.ok) throw new Error(`Linear create_issue failed: HTTP ${res.status}`)
+      const json = await res.json() as { data?: { issueCreate?: { success: boolean; issue?: { id: string } } } }
+      if (!json.data?.issueCreate?.success || !json.data.issueCreate.issue) throw new Error('Linear create_issue failed: API returned unsuccessful')
+      return { id: json.data.issueCreate.issue.id }
+    },
     write: true,
   },
 ]

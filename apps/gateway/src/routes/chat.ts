@@ -514,8 +514,12 @@ export async function chatRoutes(app: FastifyInstance) {
     const stream = new Readable({ read() {} })
     void (async () => {
       let totalTokens = 0
+      let accumulatedAssistantText = ''
       try {
         for await (const event of runSession(orchestrator, query, sessionCtx, abortController.signal)) {
+          if (event.type === 'text_delta') {
+            accumulatedAssistantText += event.content
+          }
           if (event.type === 'done') {
             totalTokens = event.inputTokens + event.outputTokens
             await auditSink.append({
@@ -531,6 +535,16 @@ export async function chatRoutes(app: FastifyInstance) {
               },
               createdAt: new Date(),
             })
+            // Persist conversation turns to DB for session restore
+            if (accumulatedAssistantText) {
+              void withTenant(prisma, tenantId, (tx) =>
+                tx.$executeRaw`
+                  INSERT INTO session_turns (tenant_id, session_id, role, content)
+                  VALUES (${tenantId}::uuid, ${sessionId}, 'user', ${query}),
+                         (${tenantId}::uuid, ${sessionId}, 'assistant', ${accumulatedAssistantText})
+                `
+              ).catch(() => { /* best-effort */ })
+            }
             // Persist token usage to DB
             if (totalTokens > 0) {
               // Redis token counter (real-time budget tracking)

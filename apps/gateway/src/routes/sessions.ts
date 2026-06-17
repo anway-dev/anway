@@ -10,6 +10,14 @@ interface SessionRow {
   expires_at: Date
   updated_at: Date
   turn_count: number
+  preview?: string | null
+}
+
+interface TurnRow {
+  id: string
+  role: string
+  content: string
+  created_at: Date
 }
 
 export async function sessionRoutes(app: FastifyInstance) {
@@ -20,10 +28,16 @@ export async function sessionRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<SessionRow[]>`
-        SELECT id, user_id, created_at, expires_at, updated_at, turn_count
-        FROM sessions
-        WHERE tenant_id = ${tenantId}::uuid
-        ORDER BY updated_at DESC LIMIT 50
+        SELECT s.id, s.user_id, s.created_at, s.expires_at, s.updated_at, s.turn_count,
+               t.content AS preview
+        FROM sessions s
+        LEFT JOIN LATERAL (
+          SELECT content FROM session_turns
+          WHERE session_id = s.id AND tenant_id = ${tenantId}::uuid AND role = 'user'
+          ORDER BY created_at ASC LIMIT 1
+        ) t ON true
+        WHERE s.tenant_id = ${tenantId}::uuid
+        ORDER BY s.updated_at DESC LIMIT 50
       `
     ).catch(() => [] as SessionRow[])
     return rows.map(r => ({
@@ -33,6 +47,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       expiresAt: r.expires_at.toISOString(),
       updatedAt: r.updated_at.toISOString(),
       turnCount: r.turn_count,
+      preview: r.preview ?? undefined,
     }))
   })
 
@@ -61,5 +76,29 @@ export async function sessionRoutes(app: FastifyInstance) {
       updatedAt: r.updated_at.toISOString(),
       turnCount: r.turn_count,
     }
+  })
+
+  // Get turns for a session — supports both UUID and text session IDs
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/turns', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    // id is session_id (text, not UUID) — handles both UUID and text session ids
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<TurnRow[]>`
+        SELECT id, role, content, created_at FROM session_turns
+        WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id}
+        ORDER BY created_at ASC LIMIT 200
+      `
+    ).catch(() => [] as TurnRow[])
+    return reply.send({
+      data: rows.map(r => ({
+        id: r.id,
+        role: r.role,
+        content: r.content,
+        createdAt: r.created_at.toISOString(),
+      })),
+    })
   })
 }

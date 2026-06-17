@@ -139,6 +139,35 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ token, tenantId: DEV_TENANT })
   })
 
+  // Second dev user — needed for gate e2e tests (SoD blocks same-user approve)
+  // Only available when ALLOW_DEV_TOKEN=true (same guard as dev-token)
+  app.get('/api/auth/dev-token2', async (request, reply) => {
+    if (process.env.NODE_ENV !== 'development' || process.env['ALLOW_DEV_TOKEN'] !== 'true') {
+      return reply.code(404).send({ error: 'not found' })
+    }
+
+    const DEV_TENANT2 = '00000000-0000-0000-0000-000000000001'
+    const DEV_USER2 = '00000000-0000-0000-0000-000000000003'
+    const DEV_EMAIL2 = 'dev2@anvay.local'
+
+    // Upsert second dev user
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO users (id, tenant_id, email, role) VALUES (${DEV_USER2}::uuid, ${DEV_TENANT2}::uuid, ${DEV_EMAIL2}, 'dev')
+        ON CONFLICT (id) DO NOTHING
+      `
+    } catch { /* table may not exist yet — still return token */ }
+
+    const token = await reply.jwtSign({
+      sub: DEV_USER2,
+      email: DEV_EMAIL2,
+      tenantId: DEV_TENANT2,
+      role: 'dev',
+    })
+
+    return reply.send({ token, tenantId: DEV_TENANT2 })
+  })
+
   // GET /api/auth/me — return authenticated user info from JWT
   app.get('/api/auth/me', { preHandler: [app.authenticate] }, async (request) => {
     const user = request.user as { sub: string; email: string; tenantId: string; role: string }

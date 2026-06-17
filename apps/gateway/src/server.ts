@@ -46,6 +46,12 @@ async function main() {
   const env = validateEnv()
   assertSecureJwtSecret()
   assertEncryptionKey()
+
+  // M4: DEMO_MODE=true must not reach production
+  if (process.env['DEMO_MODE'] === 'true' && process.env['NODE_ENV'] === 'production') {
+    console.error('FATAL: DEMO_MODE=true is not allowed in NODE_ENV=production. Unset DEMO_MODE before deploying.')
+    process.exit(1)
+  }
   const port = env.PORT
   const host = env.HOST
 

@@ -2,12 +2,14 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Cloud — UI', () => {
   test('P0: navigate to Cloud — Cloud Health heading visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Cloud').first().click()
     await expect(page.locator('text=Cloud Health').first()).toBeVisible({ timeout: 8000 })
   })
 
   test('P0: AWS provider tab visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Cloud').first().click()
     await page.locator('text=Cloud Health').first().waitFor({ timeout: 8000 })
@@ -17,6 +19,7 @@ test.describe('Cloud — UI', () => {
   })
 
   test('P1: Overview / Security / Capacity tabs visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Cloud').first().click()
     await page.locator('text=Cloud Health').first().waitFor({ timeout: 8000 })
@@ -25,6 +28,7 @@ test.describe('Cloud — UI', () => {
   })
 
   test('P1: click Security tab — security content visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Cloud').first().click()
     await page.locator('text=Cloud Health').first().waitFor({ timeout: 8000 })

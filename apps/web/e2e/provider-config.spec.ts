@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders } from './fixtures'
+import { GATEWAY, authHeaders, setAuthCookie } from './fixtures'
 
 test.describe('Provider Config — API', () => {
   let headers: Record<string, string>
@@ -67,6 +67,7 @@ test.describe('Provider Config — API', () => {
 
 test.describe('Provider Config — UI', () => {
   test('P1: Settings — Configuration heading + AI Provider tab visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Settings').first().click()
     await expect(page.locator('text=Configuration').first()).toBeVisible({ timeout: 8000 })

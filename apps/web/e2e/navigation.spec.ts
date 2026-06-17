@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Navigation', () => {
   test('P0: all key sidebar nav items visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     const items = ['Signals', 'War Room', 'Services', 'Lifecycle', 'Editor',
       'Knowledge', 'Workflows', 'Automations', 'API Client', 'Connectors',
@@ -12,6 +13,7 @@ test.describe('Navigation', () => {
   })
 
   test('P0: each nav view loads distinct content', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
 
     await page.locator('text=Audit').first().click()
@@ -35,6 +37,7 @@ test.describe('Navigation', () => {
   test('P1: view switches produce no JS errors', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
+    await setAuthCookie(page.context())
     await page.goto('/')
     for (const view of ['Signals', 'War Room', 'Access', 'Audit']) {
       await page.locator(`text=${view}`).first().click()

@@ -6,7 +6,7 @@
 // Target: GATEWAY=http://localhost:8510, WEB=http://localhost:8500
 
 import { test, expect } from '@playwright/test'
-import { GATEWAY, DEMO_TENANT, DEMO_EMAIL, authHeaders, getToken } from './fixtures'
+import { GATEWAY, DEMO_TENANT, DEMO_EMAIL, authHeaders, getToken, setAuthCookie } from './fixtures'
 
 // ---------------------------------------------------------------------------
 // Suite A — Health + Metrics
@@ -190,6 +190,7 @@ test.describe('H: Chat', () => {
 // ---------------------------------------------------------------------------
 test.describe('I: Web UI', () => {
   test('I.1 homepage loads at /', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('http://localhost:8500', { waitUntil: 'networkidle', timeout: 60_000 })
     await expect(page.locator('body')).toBeVisible()
   })
@@ -197,6 +198,7 @@ test.describe('I: Web UI', () => {
   test('I.2 no page errors on load', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
+    await setAuthCookie(page.context())
     await page.goto('http://localhost:8500', { waitUntil: 'networkidle', timeout: 60_000 })
     expect(errors).toHaveLength(0)
   })
@@ -397,6 +399,7 @@ test.describe('I extended: Web UI navigation', () => {
     test(`I.nav ${view.label} loads without JS errors`, async ({ page }) => {
       const errors: string[] = []
       page.on('pageerror', e => errors.push(e.message))
+      await setAuthCookie(page.context())
       await page.goto('http://localhost:8500', { waitUntil: 'networkidle', timeout: 60_000 })
       await page.locator(`text=${view.text}`).first().click({ timeout: 15_000 })
       await page.waitForTimeout(1000)

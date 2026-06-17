@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders } from './fixtures'
+import { GATEWAY, authHeaders, setAuthCookie } from './fixtures'
 
 test.describe('Audit view', () => {
   test('renders audit trail table', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Audit').first().click()
     await expect(page.locator('text=Audit Trail')).toBeVisible()
@@ -12,6 +13,7 @@ test.describe('Audit view', () => {
   })
 
   test('search filters audit events', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Audit').first().click()
     const searchInput = page.locator('input[placeholder="Search queries..."]')

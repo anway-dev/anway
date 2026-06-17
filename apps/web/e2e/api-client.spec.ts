@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('API Client — UI', () => {
   test('P0: navigate to API Client — Collections and Send button visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=API Client').first().click()
     await expect(page.locator('text=Collections').first()).toBeVisible({ timeout: 8000 })
@@ -9,6 +10,7 @@ test.describe('API Client — UI', () => {
   })
 
   test('P0: HTTP method options visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=API Client').first().click()
     await page.locator('text=Collections').first().waitFor({ timeout: 8000 })
@@ -18,6 +20,7 @@ test.describe('API Client — UI', () => {
   })
 
   test('P1: click collection request — URL area updates', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=API Client').first().click()
     await page.locator('text=Collections').first().waitFor({ timeout: 8000 })
@@ -31,6 +34,7 @@ test.describe('API Client — UI', () => {
   })
 
   test('P1: click Send — response area shows', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=API Client').first().click()
     await page.locator('button:has-text("Send")').first().waitFor({ timeout: 8000 })

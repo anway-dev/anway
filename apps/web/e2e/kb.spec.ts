@@ -2,12 +2,14 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Knowledge Base — UI', () => {
   test('P0: navigate to Knowledge — Project selector visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Knowledge').first().click()
     await expect(page.locator('text=Project').first()).toBeVisible({ timeout: 8000 })
   })
 
   test('P0: project buttons visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Knowledge').first().click()
     await page.locator('text=Project').first().waitFor({ timeout: 8000 })
@@ -20,6 +22,7 @@ test.describe('Knowledge Base — UI', () => {
   })
 
   test('P1: kind filter tabs visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Knowledge').first().click()
     await page.locator('text=Project').first().waitFor({ timeout: 8000 })
@@ -28,6 +31,7 @@ test.describe('Knowledge Base — UI', () => {
   })
 
   test('P1: metrics cards visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Knowledge').first().click()
     await page.locator('text=Project').first().waitFor({ timeout: 8000 })

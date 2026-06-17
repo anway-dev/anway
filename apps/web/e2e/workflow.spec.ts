@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Workflows — UI', () => {
   test('P0: navigate to Workflows — Autonomy Level heading visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Workflows').first().click()
     await expect(
@@ -10,6 +11,7 @@ test.describe('Workflows — UI', () => {
   })
 
   test('P0: L1/L2/L3/L4 autonomy buttons all visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Workflows').first().click()
     await page.locator('text=Autonomy').first().waitFor({ timeout: 8000 })
@@ -20,6 +22,7 @@ test.describe('Workflows — UI', () => {
   })
 
   test('P1: Gate Configuration section visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Workflows').first().click()
     await page.locator('text=Autonomy').first().waitFor({ timeout: 8000 })
@@ -29,6 +32,7 @@ test.describe('Workflows — UI', () => {
   })
 
   test('P1: click L2 — Approve description visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Workflows').first().click()
     await page.locator('button:has-text("L2")').first().waitFor({ timeout: 8000 })

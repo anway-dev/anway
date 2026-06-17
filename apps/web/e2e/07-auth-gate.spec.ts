@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY } from './fixtures'
+import { GATEWAY, setAuthCookie } from './fixtures'
 
 test.describe('Auth gate', () => {
   test('P0: navigating to / without auth cookie redirects to /login (when SKIP_AUTH is off)', async ({ page }) => {
     // Clear all cookies to simulate unauthenticated user
     await page.context().clearCookies()
+    await setAuthCookie(page.context())
     await page.goto('/')
 
     // When SKIP_AUTH is set (E2E mode), redirect is bypassed — both behaviors valid
@@ -23,6 +24,7 @@ test.describe('Auth gate', () => {
 
   test('P0: login page has email, tenantId, and sign-in button', async ({ page }) => {
     await page.context().clearCookies()
+    await setAuthCookie(page.context())
     await page.goto('/login')
 
     // Login form visible
@@ -40,6 +42,7 @@ test.describe('Auth gate', () => {
 
   test('P0: login with valid credentials redirects to app', async ({ page }) => {
     await page.context().clearCookies()
+    await setAuthCookie(page.context())
     await page.goto('/login')
 
     // Fill and submit

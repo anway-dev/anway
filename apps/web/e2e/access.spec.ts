@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Access — UI', () => {
   test('P0: navigate to Access — user list with role visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
     await expect(
@@ -13,6 +14,7 @@ test.describe('Access — UI', () => {
   })
 
   test('P1: Access view content sections visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
     await page.locator('text=Role').or(page.locator('text=Perimeter')).or(page.locator('text=User')).first().waitFor({ timeout: 8000 })
@@ -27,6 +29,7 @@ test.describe('Access — UI', () => {
   })
 
   test('P1: User list or permission table visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
     await page.locator('text=Role').or(page.locator('text=Perimeter')).or(page.locator('text=User')).first().waitFor({ timeout: 8000 })
@@ -44,6 +47,7 @@ test.describe('Access — UI', () => {
   })
 
   test('P1: click user — detail panel shows perimeter', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
     await page.locator('text=admin').or(page.locator('text=Role')).first().waitFor({ timeout: 8000 })

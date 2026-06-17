@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, uniqueId } from './fixtures'
+import { GATEWAY, authHeaders, uniqueId, setAuthCookie } from './fixtures'
 
 test.describe('Gate approvals — full lifecycle', () => {
   let headers: Record<string, string>
@@ -97,6 +97,7 @@ test.describe('Gate approvals — full lifecycle', () => {
     const created = await createResp.json() as { id: string }
 
     // Navigate to Approvals
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Approvals').first().click()
 
@@ -120,6 +121,7 @@ test.describe('Gate approvals — full lifecycle', () => {
   })
 
   test('P1: UI — click Approve button, gate disappears from pending list', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Approvals').first().click()
 
@@ -149,6 +151,7 @@ test.describe('Gate approvals — full lifecycle', () => {
   })
 
   test('P2: empty state — no pending gates shows informative message', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Approvals').first().click()
 

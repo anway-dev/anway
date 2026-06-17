@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders } from './fixtures'
+import { GATEWAY, authHeaders, setAuthCookie } from './fixtures'
 
 test.describe('Connectors — API', () => {
   let headers: Record<string, string>
@@ -67,6 +67,7 @@ test.describe('Connectors — API', () => {
 
 test.describe('Connectors — UI', () => {
   test('P0: navigate to Connectors — GitHub and Datadog cards visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Connectors').first().click()
     await expect(page.locator('text=GitHub').first()).toBeVisible({ timeout: 8000 })
@@ -74,6 +75,7 @@ test.describe('Connectors — UI', () => {
   })
 
   test('P1: Observability category filter shows monitoring connectors', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Connectors').first().click()
     await page.locator('text=GitHub').first().waitFor({ timeout: 8000 })

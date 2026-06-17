@@ -2,12 +2,14 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Settings — UI', () => {
   test('P0: navigate to Settings — Configuration heading visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Settings').first().click()
     await expect(page.locator('text=Configuration').first()).toBeVisible({ timeout: 8000 })
   })
 
   test('P0: AI Provider tab visible by default', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Settings').first().click()
     await page.locator('text=Configuration').first().waitFor({ timeout: 8000 })
@@ -17,6 +19,7 @@ test.describe('Settings — UI', () => {
   })
 
   test('P0: Connectors tab switch loads connector grid', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Settings').first().click()
     await page.locator('text=Configuration').first().waitFor({ timeout: 8000 })
@@ -27,6 +30,7 @@ test.describe('Settings — UI', () => {
   test('P1: no JS errors on Settings load', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', e => errors.push(e.message))
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Settings').first().click()
     await page.locator('text=Configuration').first().waitFor({ timeout: 8000 })

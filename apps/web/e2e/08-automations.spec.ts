@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, uniqueId } from './fixtures'
+import { GATEWAY, authHeaders, uniqueId, setAuthCookie } from './fixtures'
 
 test.describe('Automations — trigger lifecycle', () => {
   let headers: Record<string, string>
@@ -110,6 +110,7 @@ test.describe('Automations — trigger lifecycle', () => {
   })
 
   test('P1: UI — Automations view has Triggers and Monitors tabs', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Automations').first().click()
 

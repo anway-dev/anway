@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, uniqueId } from './fixtures'
+import { GATEWAY, authHeaders, uniqueId, setAuthCookie } from './fixtures'
 
 test.describe('Orchestrator Chat — API', () => {
   let headers: Record<string, string>
@@ -39,18 +39,21 @@ test.describe('Orchestrator Chat — API', () => {
 
 test.describe('Orchestrator Chat — UI', () => {
   test('P0: default view is chat — input visible', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     const input = page.locator('input[placeholder*="nvay"]').or(page.locator('textarea[placeholder*="nvay"]')).first()
     await expect(input).toBeVisible({ timeout: 5000 })
   })
 
   test('P0: scenario shortcut chips visible on load', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     const chips = page.locator('button').filter({ hasText: /alert|deploy|why|incident/i })
     expect(await chips.count()).toBeGreaterThanOrEqual(2)
   })
 
   test('P1: type in chat input and submit', async ({ page }) => {
+    await setAuthCookie(page.context())
     await page.goto('/')
     const input = page.locator('input[placeholder*="nvay"]').or(page.locator('textarea[placeholder*="nvay"]')).first()
     await expect(input).toBeVisible({ timeout: 5000 })

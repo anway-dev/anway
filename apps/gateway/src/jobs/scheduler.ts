@@ -186,7 +186,7 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
 
   // User-created monitors (POST /api/automations/monitors) — schedule from DB
   try {
-    const rows = await prisma.$queryRaw<Array<{ id: string; tenant_id: string; name: string; schedule: string; job_type: string }>>`
+    const rows = await servicePrisma.$queryRaw<Array<{ id: string; tenant_id: string; name: string; schedule: string; job_type: string }>>`
       SELECT id, tenant_id, name, schedule, job_type FROM cron_jobs WHERE enabled = true
     `
     for (const row of rows) await registerUserMonitor(scheduler, row)

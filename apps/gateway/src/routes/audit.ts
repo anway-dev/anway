@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { redactSecrets } from '../utils/redact.js'
+import { UUID_RE } from '../utils/validators.js'
 
 interface AuditEvent {
   id: string
@@ -68,7 +69,7 @@ export async function auditRoutes(app: FastifyInstance) {
       } else {
         cursorDate = new Date(cursor)
       }
-      if (isNaN(cursorDate.getTime()) || (cursorId !== null && !/^[0-9a-f-]{36}$/.test(cursorId))) {
+      if (isNaN(cursorDate.getTime()) || (cursorId !== null && !UUID_RE.test(cursorId))) {
         return reply.code(400).send({ error: 'invalid cursor' })
       }
     }

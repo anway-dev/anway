@@ -1,3 +1,9 @@
+export interface TriggerPerimeter {
+  connectorId: string
+  read: string[]
+  write: string[]
+}
+
 export interface TriggerRule {
   id: string
   tenantId: string
@@ -5,7 +11,7 @@ export interface TriggerRule {
   condition: Record<string, unknown>
   actions: TriggerAction[]
   enabled: boolean
-  perimeter?: Array<{ connectorId: string; read: string[]; write: string[] }> | null
+  perimeter?: TriggerPerimeter[] | null
 }
 
 export interface TriggerAction {
@@ -22,16 +28,18 @@ export class TriggerEngine {
     this.rules = rules
   }
 
-  async evaluate(eventType: string, payload: Record<string, unknown>): Promise<TriggerAction[]> {
+  async evaluate(eventType: string, payload: Record<string, unknown>): Promise<{ actions: TriggerAction[]; perimeters: TriggerPerimeter[] }> {
     const matched: TriggerAction[] = []
+    const perimeters: TriggerPerimeter[] = []
     for (const rule of this.rules) {
       if (!rule.enabled) continue
       if (rule.eventType !== eventType) continue
       if (this.matchesCondition(rule.condition, payload)) {
         matched.push(...rule.actions)
+        if (rule.perimeter) perimeters.push(...rule.perimeter)
       }
     }
-    return matched
+    return { actions: matched, perimeters }
   }
 
   private matchesCondition(condition: Record<string, unknown>, payload: Record<string, unknown>): boolean {

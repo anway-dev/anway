@@ -13,7 +13,7 @@ describe('TriggerEngine', () => {
       const engine = new TriggerEngine()
       engine.loadRules(rules)
       const result = await engine.evaluate('alert_fired', { severity: 'critical' })
-      expect(result).toHaveLength(1)
+      expect(result.actions).toHaveLength(1)
     })
 
     it('returns empty when no condition matches', async () => {
@@ -25,7 +25,7 @@ describe('TriggerEngine', () => {
       const engine = new TriggerEngine()
       engine.loadRules(rules)
       const result = await engine.evaluate('alert_fired', { severity: 'critical' })
-      expect(result).toHaveLength(0)
+      expect(result.actions).toHaveLength(0)
     })
 
     it('ignores disabled rules', async () => {
@@ -37,7 +37,7 @@ describe('TriggerEngine', () => {
       const engine = new TriggerEngine()
       engine.loadRules(rules)
       const result = await engine.evaluate('alert_fired', {})
-      expect(result).toHaveLength(0)
+      expect(result.actions).toHaveLength(0)
     })
   })
 })

@@ -35,17 +35,17 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
       const rules = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<TriggerRule[]>`
           SELECT id, tenant_id AS "tenantId", event_type AS "eventType",
-                 condition, actions, enabled
+                 condition, actions, enabled, perimeter
           FROM trigger_rules
           WHERE tenant_id = ${tenantId}::uuid AND enabled = true
         `
       )
       const engine = new TriggerEngine()
       engine.loadRules(rules)
-      const actions = await engine.evaluate(channel, rest)
+      const { actions, perimeters } = await engine.evaluate(channel, rest)
 
       if (actions.length > 0) {
-        await pub.publish('trigger_matched', JSON.stringify({ tenantId, channel, actions }))
+        await pub.publish('trigger_matched', JSON.stringify({ tenantId, channel, actions, perimeters }))
         // Write audit event so CERT V can verify trigger actually fired
         await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`

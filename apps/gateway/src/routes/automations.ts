@@ -110,7 +110,7 @@ export async function automationsRoutes(app: FastifyInstance) {
     )
     const engine = new TriggerEngine()
     engine.loadRules(rules)
-    const actions = await engine.evaluate(eventType, payload)
+    const { actions } = await engine.evaluate(eventType, payload)
     return { matched: actions.length, actions }
   })
 

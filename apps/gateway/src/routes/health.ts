@@ -33,13 +33,22 @@ export async function healthRoutes(app: FastifyInstance) {
       })
     }
     if (process.env['REDIS_URL']) {
+      let redisOk = false
       try {
         const { createClient } = await import('redis')
         const redis = createClient({ url: process.env['REDIS_URL'] })
-        await redis.connect()
-        await redis.ping()
-        await redis.disconnect()
+        redis.on('error', () => {}) // prevent unhandled error event crash
+        try {
+          await redis.connect()
+          await redis.ping()
+          redisOk = true
+        } finally {
+          redis.destroy()
+        }
       } catch {
+        // import('redis') itself can throw if module not installed
+      }
+      if (!redisOk) {
         return reply.status(503).send({ status: 'not_ready', redis: 'unreachable' })
       }
     }

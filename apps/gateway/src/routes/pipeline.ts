@@ -5,6 +5,7 @@ import type { RedisClientType } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
+import { UUID_RE } from '../utils/validators.js'
 import { requireRole } from '../plugins/rbac.js'
 import type { FastifyLoggerInstance } from 'fastify'
 
@@ -195,6 +196,10 @@ export async function pipelineRoutes(app: FastifyInstance) {
     const { tenantId } = request.user as { tenantId: string }
     const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
+
+    if (cursor && !UUID_RE.test(cursor)) {
+      return reply.code(400).send({ error: 'invalid cursor' })
+    }
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<PipelineRow[]>`
@@ -912,6 +917,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
         await finishRun('failed', { error: String(err) })
         sse({ type: 'error', message: String(err) })
       } finally {
+        // Flush terminal frame directly before Redis teardown to prevent drop
+        reply.raw.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
         await cleanRedis()
         releaseSlot()
         if (runId) activeRunChildren.delete(runId)

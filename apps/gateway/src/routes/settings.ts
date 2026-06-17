@@ -257,5 +257,20 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     } catch { /* use default */ }
     return { used, budget, month }
   })
+
+  // TB-T1: Admin reset daily token usage
+  app.delete('/api/admin/token-usage/reset', {
+    preHandler: [app.authenticate, requireRole('admin')],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const today = new Date().toISOString().slice(0, 10)
+    const result = await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`
+        DELETE FROM token_usage_daily
+        WHERE tenant_id = ${tenantId}::uuid AND date = ${today}::date
+      `
+    ).catch(() => 0)
+    return reply.send({ deleted: result, date: today })
+  })
 }
 

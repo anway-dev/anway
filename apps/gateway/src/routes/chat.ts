@@ -468,6 +468,11 @@ export async function chatRoutes(app: FastifyInstance) {
       knowledgeGraph,
       budget,
       gateSink,
+      connectors: dbConnectors.map((c) => ({
+        name: c.name || c.type,
+        type: c.type,
+        mode: c.mode,
+      })),
     })
 
     // SSE response setup — Redis fan-out for multi-pod, direct stream for single-pod

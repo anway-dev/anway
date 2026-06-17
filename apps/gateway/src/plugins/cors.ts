@@ -3,10 +3,10 @@ import cors from '@fastify/cors'
 import type { FastifyInstance } from 'fastify'
 
 export default fp(async function corsPlugin(app: FastifyInstance) {
-  const raw = process.env.CORS_ORIGIN ?? 'http://localhost:3000'
+  const raw = process.env.CORS_ORIGIN ?? 'http://localhost:8500'
   // Reject wildcard when credentials: true — browsers reject this combination
   // and it is almost certainly a misconfiguration
-  const origin = raw === '*' ? 'http://localhost:3000' : raw
+  const origin = raw === '*' ? 'http://localhost:8500' : raw
   const originList = origin.includes(',') ? origin.split(',').map(o => o.trim()) : origin
 
   await app.register(cors, {

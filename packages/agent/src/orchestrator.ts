@@ -38,6 +38,8 @@ export interface OrchestratorConfig {
   gateSink?: IGateSink
   /** Gate poll timeout in ms (default: 30000) */
   gateTimeoutMs?: number
+  /** Registered connector names — injected into system prompt so LLM knows available data sources */
+  connectors?: Array<{ name: string; type: string; mode: string }>
 }
 
 /** Opaque handle returned by createOrchestrator. Contains no Mastra types. */
@@ -250,8 +252,15 @@ export async function* runSession(
     parameters,
   }))
 
+  // Inject registered connector list so LLM knows available data sources
+  let connectorContext = ''
+  if (config.connectors && config.connectors.length > 0) {
+    const lines = config.connectors.map(c => `  - ${c.name} (${c.type}, ${c.mode})`)
+    connectorContext = `\n\nRegistered data sources (use these tools to answer queries):\n${lines.join('\n')}`
+  }
+
   // Build message list from history + current turn
-  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${graphContext ? '\n\n' + graphContext : ''}`
+  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${connectorContext}${graphContext ? '\n\n' + graphContext : ''}`
   const messages: Message[] = [
     { role: 'system', content: systemPrompt },
     ...history.map(

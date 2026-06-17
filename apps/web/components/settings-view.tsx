@@ -19,13 +19,36 @@ interface TokenUsage { used: number; budget: number; month: string }
 export function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>("provider");
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadUsage = () => {
     fetch('/api/settings/token-usage')
       .then(r => r.json() as Promise<TokenUsage>)
       .then(setTokenUsage)
       .catch(() => {})
-  }, [])
+  }
+
+  useEffect(() => { loadUsage() }, [])
+
+  const resetDailyUsage = async () => {
+    setResetting(true)
+    setResetMsg(null)
+    try {
+      const resp = await fetch('/api/admin/token-usage/reset', { method: 'DELETE' })
+      if (resp.ok) {
+        setResetMsg('Daily usage reset.')
+        loadUsage()
+      } else {
+        const body = await resp.json().catch(() => ({})) as { error?: string }
+        setResetMsg(body.error ?? 'Reset failed.')
+      }
+    } catch {
+      setResetMsg('Gateway unreachable.')
+    } finally {
+      setResetting(false)
+    }
+  }
 
   return (
     <div style={{ padding: "24px", height: "100%", overflowY: "auto" }}>
@@ -73,6 +96,21 @@ export function SettingsView() {
               {tokenUsage.used >= tokenUsage.budget && (
                 <div style={{ marginTop: "8px", fontSize: "11px", color: "#ef4444", fontFamily: "monospace" }}>Budget exceeded — further queries blocked until next billing period.</div>
               )}
+              <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
+                <button
+                  onClick={resetDailyUsage}
+                  disabled={resetting}
+                  style={{
+                    padding: "4px 10px", fontSize: "11px", fontFamily: "monospace",
+                    background: "transparent", border: "1px solid #2a2a2a",
+                    color: resetting ? "#444" : "#888", borderRadius: "4px",
+                    cursor: resetting ? "default" : "pointer",
+                  }}
+                >
+                  {resetting ? "Resetting…" : "Reset daily usage"}
+                </button>
+                {resetMsg && <span style={{ fontSize: "11px", color: resetMsg === "Daily usage reset." ? "#10b981" : "#ef4444", fontFamily: "monospace" }}>{resetMsg}</span>}
+              </div>
             </div>
           )}
         </div>

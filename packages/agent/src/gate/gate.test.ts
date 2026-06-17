@@ -22,7 +22,7 @@ describe('isWriteAction', () => {
     expect(isWriteAction('get_metrics')).toBe(false)
     expect(isWriteAction('search_logs')).toBe(false)
     expect(isWriteAction('read_config')).toBe(false)
-    expect(isWriteAction('unknown_tool')).toBe(false)
+    expect(isWriteAction('unknown_tool')).toBe(true) // default-deny: unknown tools are writes
   })
 })
 

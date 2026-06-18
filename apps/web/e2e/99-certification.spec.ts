@@ -1480,7 +1480,8 @@ test.describe('CERT AL: session multi-turn', () => {
 // ---------------------------------------------------------------------------
 test.describe('CERT AM: environments CRUD', () => {
   let envId: string
-  const envName = 'cert-am-env'
+  // Timestamp suffix prevents conflicts when cert suite runs concurrently (e.g. background + explicit)
+  const envName = `cert-am-env-${Date.now()}`
 
   test('AM.1 GET /api/environments returns seeded defaults', async ({ request }) => {
     const h = await authHeaders(request)

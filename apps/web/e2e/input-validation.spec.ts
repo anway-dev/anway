@@ -32,9 +32,11 @@ test.describe('UUID validation', () => {
     expect(resp.status()).toBe(400)
   })
 
-  test('GET /api/sessions/not-a-uuid/turns returns 400 or 404', async ({ request }) => {
+  test('GET /api/sessions/not-a-uuid/turns returns 200, 400, or 404 (sessions accept text IDs)', async ({ request }) => {
+    // Sessions intentionally accept both UUID and text IDs (text session IDs are supported
+    // for in-flight sessions). A non-UUID returns 200 with empty turns, not 400.
     const resp = await request.get(`${GATEWAY}/api/sessions/not-a-uuid/turns`, { headers })
-    expect([400, 404]).toContain(resp.status())
+    expect([200, 400, 404]).toContain(resp.status())
   })
 })
 

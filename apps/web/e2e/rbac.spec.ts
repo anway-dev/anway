@@ -2,13 +2,12 @@
  * RBAC enforcement — every role-restricted route tested with an insufficient role.
  * dev-token  = admin
  * dev-token2 = sre
+ * dev-token3 = dev
  *
- * Tests use the sre token against admin-only and pm-only routes.
- * A BRIDGE task (GA-T5) is open to add dev-token3 (dev role) so
- * dev-vs-sre/admin restrictions can also be verified.
+ * Tests cover sre vs admin-only routes, and dev vs sre/admin-only routes.
  */
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, authHeaders2 } from './fixtures'
+import { GATEWAY, authHeaders, authHeaders2, authHeaders3 } from './fixtures'
 
 test.describe('RBAC — admin-only routes reject sre', () => {
   let sreHeaders: Record<string, string>
@@ -161,5 +160,61 @@ test.describe('RBAC — gate SoD (creator cannot approve own gate)', () => {
       data: { decision: 'approved' },
     })
     expect(decideResp.status()).toBe(200)
+  })
+})
+
+test.describe('RBAC — dev-role routes reject sre/admin-only endpoints', () => {
+  let devHeaders: Record<string, string>
+  test.beforeAll(async ({ request }) => { devHeaders = await authHeaders3(request) })
+
+  test('POST /api/automations/triggers — dev returns 403', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/automations/triggers`, {
+      headers: { ...devHeaders, 'Content-Type': 'application/json' },
+      data: { name: 'rbac-dev-test', eventType: 'alert_fired', condition: { threshold: 0 }, actions: [] },
+    })
+    expect(resp.status()).toBe(403)
+  })
+
+  test('POST /api/gate/:id/decide — dev returns 403', async ({ request }) => {
+    const resp = await request.post(
+      `${GATEWAY}/api/gate/00000000-0000-0000-0000-000000000099/decide`,
+      {
+        headers: { ...devHeaders, 'Content-Type': 'application/json' },
+        data: { decision: 'approved' },
+      },
+    )
+    // 403 = dev not allowed; 404 = gate not found (but auth check first for most routes)
+    expect([403, 404]).toContain(resp.status())
+  })
+
+  test('POST /api/k8s/nodes/:name/cordon — dev returns 403', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/k8s/nodes/worker-1/cordon`, {
+      headers: { ...devHeaders, 'Content-Type': 'application/json' },
+      data: {},
+    })
+    expect(resp.status()).toBe(403)
+  })
+
+  test('POST /api/oncall/shift-brief — dev returns 403', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/oncall/shift-brief`, {
+      headers: { ...devHeaders, 'Content-Type': 'application/json' },
+      data: { teamName: 'platform' },
+    })
+    expect(resp.status()).toBe(403)
+  })
+
+  test('POST /api/connectors/prometheus/bootstrap — dev returns 403', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/connectors/prometheus/bootstrap`, {
+      headers: devHeaders,
+    })
+    expect(resp.status()).toBe(403)
+  })
+
+  test('PUT /api/gate/policies — dev returns 403', async ({ request }) => {
+    const resp = await request.put(`${GATEWAY}/api/gate/policies`, {
+      headers: { ...devHeaders, 'Content-Type': 'application/json' },
+      data: { scope: '*', approversRequired: 1, autoApproveThreshold: 0.95 },
+    })
+    expect(resp.status()).toBe(403)
   })
 })

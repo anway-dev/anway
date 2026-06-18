@@ -182,9 +182,9 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       const credsEnc = encryptJson(credentials)
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO connector_config (tenant_id, connector_type, credentials_enc, enabled)
-          VALUES (${tenantId}::uuid, ${type}, ${credsEnc}, true)
-          ON CONFLICT (tenant_id, connector_type)
+          INSERT INTO connector_config (tenant_id, connector_type, credentials_enc, enabled, env_id)
+          VALUES (${tenantId}::uuid, ${type}, ${credsEnc}, true, NULL)
+          ON CONFLICT (tenant_id, connector_type, COALESCE(env_id, '00000000-0000-0000-0000-000000000000'::uuid))
           DO UPDATE SET credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
         `
       )

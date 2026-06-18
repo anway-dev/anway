@@ -27,25 +27,27 @@ test.describe('Approvals', () => {
 
 test.describe('Approvals UI', () => {
   test('approve action removes item from pending list', async ({ page, request }) => {
-    // Seed gate with dev2 so that the UI user (dev/admin) can approve it (SoD requirement)
+    // Use unique target so we can identify this specific gate in the UI
+    const uniqueTarget = `e2e-${Date.now()}`
     const h2 = await authHeaders2(request)
     const seedResp = await request.post(`${GATEWAY}/api/gate`, {
       headers: { ...h2, 'Content-Type': 'application/json' },
-      data: { action: 'deploy', target: 'payments-api', requestedBy: 'e2e-test' },
+      data: { action: 'deploy', target: uniqueTarget, requestedBy: 'e2e-test' },
     })
     expect([200, 201]).toContain(seedResp.status())
 
     await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Approvals').first().click()
-    // After seeding, at least one pending approval should exist
-    const approveBtn = page.locator('button:has-text("Approve"), button:has-text("Confirm")').first()
-    await expect(approveBtn).toBeVisible({ timeout: 8000 })
-    await approveBtn.click()
-    // Button count should decrease after approval
-    await page.waitForTimeout(500)
+    // Find the specific gate row by its unique description
+    const gateDesc = `deploy — ${uniqueTarget}`
+    await expect(page.locator(`text=${gateDesc}`).first()).toBeVisible({ timeout: 8000 })
+    const beforeCount = await page.locator('button:has-text("Approve")').count()
+    // Click the Approve button in the row for our specific gate
+    await page.locator(`text=${gateDesc}`).first().locator('..').locator('..').locator('button:has-text("Approve")').click()
+    // Count should decrease after approval
+    await page.waitForTimeout(1000)
     const afterCount = await page.locator('button:has-text("Approve")').count()
-    const initialCount = await seedResp.json().then(() => 1).catch(() => 1)
-    expect(afterCount).toBeLessThanOrEqual(initialCount)
+    expect(afterCount).toBeLessThan(beforeCount)
   })
 })

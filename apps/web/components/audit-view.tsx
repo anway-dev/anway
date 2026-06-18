@@ -46,7 +46,7 @@ function EventRow({ event, expanded, onToggle }: {
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const oc = OUTCOME_CONFIG[event.outcome];
+  const oc = OUTCOME_CONFIG[event.outcome] ?? { label: event.outcome, color: "#888", bg: "rgba(136,136,136,0.08)" };
 
   return (
     <>

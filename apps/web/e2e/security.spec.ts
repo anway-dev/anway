@@ -69,6 +69,29 @@ test.describe('Cross-tenant', () => {
   })
 })
 
+test.describe('P0 auth — write endpoints require JWT', () => {
+  const WRITE_ENDPOINTS: Array<{ method: 'POST' | 'PATCH' | 'DELETE'; url: string; body?: Record<string, unknown> }> = [
+    { method: 'POST', url: '/api/terraform/prod/apply',                        body: { gateId: '00000000-0000-0000-0000-000000000099' } },
+    { method: 'POST', url: '/api/pipelines/00000000-0000-0000-0000-000000000001/stages/s1/approve', body: { decision: 'approved' } },
+    { method: 'POST', url: '/api/pipelines/runs/00000000-0000-0000-0000-000000000001/cancel',       body: {} },
+    { method: 'POST', url: '/api/k8s/nodes/node-1/cordon',                     body: {} },
+    { method: 'POST', url: '/api/automations/evaluate',                        body: { eventType: 'test', payload: {} } },
+    { method: 'POST', url: '/api/lifecycle/bootstrap',                         body: { name: 'test', language: 'ts' } },
+    { method: 'POST', url: '/api/editor/run-tests',                            body: {} },
+    { method: 'POST', url: '/api/oncall/shift-brief',                          body: {} },
+    { method: 'POST', url: '/api/oncall/investigate',                          body: { alertId: 'x' } },
+  ]
+
+  for (const ep of WRITE_ENDPOINTS) {
+    test(`${ep.method} ${ep.url} without JWT → 401`, async ({ request }) => {
+      const resp = ep.method === 'POST'
+        ? await request.post(`${GATEWAY}${ep.url}`, { data: ep.body ?? {} })
+        : await request.fetch(`${GATEWAY}${ep.url}`, { method: ep.method, data: ep.body ?? {} })
+      expect(resp.status()).toBe(401)
+    })
+  }
+})
+
 test.describe('Injection — incident API', () => {
   let headers: Record<string, string>
   const createdIds: string[] = []

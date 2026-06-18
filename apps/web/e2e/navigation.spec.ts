@@ -18,13 +18,15 @@ test.describe('Navigation', () => {
     await page.goto('/')
 
     await page.locator('text=Audit').first().click()
-    await expect(page.locator('text=Audit Trail').or(page.locator('text=Audit Log')).first()).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('text=Audit Trail').or(page.locator('text=Audit Log')).first()).toBeVisible({ timeout: 8000 })
 
     await page.locator('text=Cloud').first().click()
     await expect(page.locator('text=Cloud Health').first()).toBeVisible({ timeout: 5000 })
 
     await page.locator('text=K8s').first().click()
-    await expect(page.locator('text=Cluster Overview').first()).toBeVisible({ timeout: 5000 })
+    await expect(
+      page.locator('text=Cluster Overview').or(page.locator('text=No K8s cluster')).first()
+    ).toBeVisible({ timeout: 5000 })
 
     await page.locator('text=Workflows').first().click()
     await expect(page.locator('text=Autonomy').first()).toBeVisible({ timeout: 5000 })

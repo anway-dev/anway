@@ -31,13 +31,13 @@ test.describe('Knowledge Base — UI', () => {
     expect(await filterBtns.count()).toBeGreaterThanOrEqual(2)
   })
 
-  test('P1: metrics cards visible', async ({ page }) => {
+  test('P1: entity graph header and count visible', async ({ page }) => {
     await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Knowledge').first().click()
-    await page.locator('text=Project').first().waitFor({ timeout: 8000 })
+    await page.locator('text=Software Intelligence Graph').first().waitFor({ timeout: 8000 })
     await expect(
-      page.locator('text=Error Rate').or(page.locator('text=P99')).or(page.locator('text=RPS')).first()
+      page.locator('text=entities').or(page.locator('text=Knowledge graph is empty')).first()
     ).toBeVisible({ timeout: 5000 })
   })
 })

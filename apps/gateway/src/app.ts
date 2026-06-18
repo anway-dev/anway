@@ -63,7 +63,6 @@ export async function buildApp() {
   await app.register(jwtPlugin)
   await app.register(requestLoggerPlugin)
   await app.register(cookie)
-  await app.register(import('@fastify/formbody'))
 
   // Global rate limit per IP. 300/min for normal API — a single dashboard load
   // legitimately fires dozens of requests, so 100 was too tight. Webhook

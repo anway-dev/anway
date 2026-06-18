@@ -62,12 +62,11 @@ test.describe('B: Auth', () => {
   })
 
   test('B.2 JWT grants access to protected routes', async ({ request }) => {
-    const authResp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT },
-    })
-    const { token: t } = await authResp.json()
+    // Reuse B.1's token — /auth/token has a 5/min rate limit and the full suite
+    // exhausts it before this test runs.
+    expect(token, 'B.1 must have produced a valid token').toBeTruthy()
     const resp = await request.get(`${GATEWAY}/api/connectors`, {
-      headers: { Authorization: `Bearer ${t}` },
+      headers: { Authorization: `Bearer ${token}` },
     })
     expect(resp.status()).toBe(200)
   })

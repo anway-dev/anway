@@ -168,9 +168,15 @@ test.describe('RBAC — dev-role routes reject sre/admin-only endpoints', () => 
   test.beforeAll(async ({ request }) => { devHeaders = await authHeaders3(request) })
 
   test('POST /api/automations/triggers — dev returns 403', async ({ request }) => {
+    // actions must have ≥1 item so schema passes before RBAC preHandler runs
     const resp = await request.post(`${GATEWAY}/api/automations/triggers`, {
       headers: { ...devHeaders, 'Content-Type': 'application/json' },
-      data: { name: 'rbac-dev-test', eventType: 'alert_fired', condition: { threshold: 0 }, actions: [] },
+      data: {
+        name: 'rbac-dev-test',
+        eventType: 'alert_fired',
+        condition: { threshold: 0 },
+        actions: [{ type: 'create_incident' }],
+      },
     })
     expect(resp.status()).toBe(403)
   })

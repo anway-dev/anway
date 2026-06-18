@@ -113,11 +113,12 @@ export async function environmentRoutes(app: FastifyInstance) {
           VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${label}, ${color ?? '#888888'}, ${sortOrder}, now(), now())
           RETURNING id
         `,
-      ).catch((err: Error & { code?: string }) => {
-        if ((err as { code?: string }).code === '23505') throw Object.assign(new Error('env name already exists'), { statusCode: 409 })
+      ).catch((err: unknown) => {
+        if ((err as { code?: string }).code === '23505') return null
         return [] as Array<{ id: string }>
       })
 
+      if (rows === null) return reply.code(409).send({ error: 'env name already exists' })
       if (rows.length === 0) return reply.code(500).send({ error: 'create failed' })
 
       return reply.code(201).send({ id: rows[0]!.id, name, label, color: color ?? '#888888', sortOrder })

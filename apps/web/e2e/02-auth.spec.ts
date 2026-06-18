@@ -39,3 +39,34 @@ test.describe('Auth — API', () => {
     expect(resp.status()).toBe(404)
   })
 })
+
+test.describe('Auth session lifecycle', () => {
+  test('POST /api/auth/refresh returns new token', async ({ request }) => {
+    const h = await authHeaders(request)
+    const resp = await request.post(`${GATEWAY}/api/auth/refresh`, { headers: h })
+    expect(resp.status()).toBe(200)
+    const body = await resp.json() as { token: string; expiresIn: string }
+    expect(body.token).toBeTruthy()
+    expect(body.expiresIn).toBe('24h')
+    // New token must be a valid JWT (3 parts)
+    expect(body.token.split('.').length).toBe(3)
+  })
+
+  test('POST /api/auth/refresh without JWT returns 401', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/auth/refresh`)
+    expect(resp.status()).toBe(401)
+  })
+
+  test('POST /api/auth/logout returns ok', async ({ request }) => {
+    const h = await authHeaders(request)
+    const resp = await request.post(`${GATEWAY}/api/auth/logout`, { headers: h })
+    expect(resp.status()).toBe(200)
+    const body = await resp.json() as { ok: boolean }
+    expect(body.ok).toBe(true)
+  })
+
+  test('POST /api/auth/logout without JWT returns 401', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/auth/logout`)
+    expect(resp.status()).toBe(401)
+  })
+})

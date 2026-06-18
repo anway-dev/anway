@@ -1,4 +1,4 @@
-import { setAuthCookie } from './fixtures'
+import { setAuthCookie, authHeaders, GATEWAY } from './fixtures'
 import { test, expect } from '@playwright/test'
 
 test.describe('K8s — UI', () => {
@@ -49,5 +49,45 @@ test.describe('K8s — UI', () => {
     await expect(
       page.locator('text=Workloads').or(page.locator('text=Connect a connector')).first()
     ).toBeVisible({ timeout: 5000 })
+  })
+})
+
+test.describe('K8s write ops — API', () => {
+  let headers: Record<string, string>
+  test.beforeAll(async ({ request }) => { headers = await authHeaders(request) })
+
+  test('POST /api/k8s/pods/:ns/:name/restart — admin skips perimeter, hits cluster', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/k8s/pods/default/nonexistent-pod-e2e/restart`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: {},
+    })
+    // 500/501/503 = no k8s cluster in test env; 404 = pod not found; 403 = perimeter denied
+    expect([404, 500, 501, 503]).toContain(resp.status())
+  })
+
+  test('POST /api/k8s/deployments/:ns/:name/scale — admin skips perimeter, hits cluster', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/k8s/deployments/default/nonexistent-deploy-e2e/scale`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { replicas: 2 },
+    })
+    expect([404, 500, 501, 503]).toContain(resp.status())
+  })
+
+  test('POST /api/k8s/nodes/:name/cordon — admin skips perimeter, hits cluster', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/k8s/nodes/nonexistent-node-e2e/cordon`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: {},
+    })
+    expect([404, 500, 501, 503]).toContain(resp.status())
+  })
+
+  test('POST /api/k8s/pods/:ns/:name/restart — without auth returns 401', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/k8s/pods/default/anything/restart`, { data: {} })
+    expect(resp.status()).toBe(401)
+  })
+
+  test('POST /api/k8s/deployments/:ns/:name/scale — without auth returns 401', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/k8s/deployments/default/anything/scale`, { data: {} })
+    expect(resp.status()).toBe(401)
   })
 })

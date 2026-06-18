@@ -28,6 +28,8 @@ const READ_ACTION_PATTERNS = [
   /^get_/, /^list_/, /^fetch_/, /^read_/, /^search_/, /^query_/,
   /^describe_/, /^show_/, /^check_/, /^inspect_/, /^status_/,
   /^find_/, /^lookup_/, /^export_/,
+  // Bare action names used by native connector tools (prometheus, alertmanager, loki, grafana)
+  /^alerts$/, /^silences$/, /^targets$/, /^labels$/, /^dashboards$/, /^health$/, /^query$/,
 ]
 
 /** Known safe built-in tool names that never require gating.
@@ -41,8 +43,10 @@ const BUILTIN_READ_TOOLS = new Set([
 
 export function isWriteAction(toolName: string): boolean {
   if (BUILTIN_READ_TOOLS.has(toolName)) return false
-  // Test action suffix only — tools are named `<connector>.<action>` (e.g. `github.create_pr`)
-  const action = toolName.split('.').pop() ?? toolName
+  // Extract action suffix: support both `connector.action` and `connector__action` formats
+  let action = toolName
+  if (toolName.includes('.')) action = toolName.split('.').pop() ?? toolName
+  else if (toolName.includes('__')) action = toolName.split('__').pop() ?? toolName
   // Default-deny: anything that does NOT match a known read prefix is a write
   return !READ_ACTION_PATTERNS.some((p) => p.test(action))
 }

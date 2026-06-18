@@ -24,6 +24,18 @@ describe('isWriteAction', () => {
     expect(isWriteAction('read_config')).toBe(false)
     expect(isWriteAction('unknown_tool')).toBe(true) // default-deny: unknown tools are writes
   })
+
+  it('handles native connector __ separator for read tools', () => {
+    expect(isWriteAction('prometheus__alerts')).toBe(false)
+    expect(isWriteAction('prometheus__query')).toBe(false)
+    expect(isWriteAction('prometheus__targets')).toBe(false)
+    expect(isWriteAction('alertmanager__alerts')).toBe(false)
+    expect(isWriteAction('alertmanager__silences')).toBe(false)
+    expect(isWriteAction('loki__query')).toBe(false)
+    expect(isWriteAction('loki__labels')).toBe(false)
+    expect(isWriteAction('grafana__dashboards')).toBe(false)
+    expect(isWriteAction('grafana__health')).toBe(false)
+  })
 })
 
 describe('pollGate', () => {

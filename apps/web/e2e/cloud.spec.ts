@@ -1,3 +1,4 @@
+import { setAuthCookie } from './fixtures'
 import { test, expect } from '@playwright/test'
 
 test.describe('Cloud — UI', () => {

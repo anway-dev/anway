@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Readable } from 'node:stream'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
@@ -72,6 +73,18 @@ function verifySlackSignature(
 }
 
 export async function slackCommandRoutes(app: FastifyInstance) {
+  app.addHook('preParsing', async (request, _reply, payload) => {
+    if (request.url === '/api/slack/commands' && request.method === 'POST') {
+      const chunks: Buffer[] = []
+      for await (const chunk of payload) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string))
+      }
+      const rawBody = Buffer.concat(chunks).toString()
+      ;(request.raw as Record<string, unknown>).__rawBody = rawBody
+      return Readable.from([rawBody])
+    }
+  })
+
   app.post<{ Body: Record<string, string> }>('/api/slack/commands', async (request, reply) => {
     const signingSecret = process.env['SLACK_SIGNING_SECRET']
     // Fail-closed: if SLACK_SIGNING_SECRET is not set, reject all commands
@@ -90,7 +103,8 @@ export async function slackCommandRoutes(app: FastifyInstance) {
     if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
       return reply.code(401).send({ error: 'slack request expired' })
     }
-    if (!verifySlackSignature(signingSecret, timestamp, JSON.stringify(request.body), signature)) {
+    const rawBody = ((request.raw as Record<string, unknown>).__rawBody as string) ?? ''
+    if (!verifySlackSignature(signingSecret, timestamp, rawBody, signature)) {
       return reply.code(401).send({ error: 'invalid slack signature' })
     }
 

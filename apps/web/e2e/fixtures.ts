@@ -27,6 +27,17 @@ export async function authHeaders2(request: APIRequestContext): Promise<Record<s
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+export async function getToken3(request: APIRequestContext): Promise<string> {
+  const r = await request.get(`${GATEWAY}/api/auth/dev-token3`)
+  const body = await r.json() as { token?: string }
+  return body.token ?? ''
+}
+
+export async function authHeaders3(request: APIRequestContext): Promise<Record<string, string>> {
+  const token = await getToken3(request)
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 /** Set auth cookie on browser context — bypasses login redirect for UI tests. */
 export async function setAuthCookie(context: BrowserContext): Promise<void> {
   const token = await getToken(context.request)

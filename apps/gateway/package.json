@@ -48,6 +48,7 @@
     "@anvay/types": "workspace:*",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.0.0",
+    "@fastify/formbody": "^8.0.2",
     "@fastify/jwt": "^9.0.0",
     "@fastify/rate-limit": "^11.0.0",
     "@fastify/sensible": "^6.0.4",

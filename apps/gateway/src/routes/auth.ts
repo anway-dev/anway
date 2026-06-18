@@ -168,6 +168,35 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ token, tenantId: DEV_TENANT2 })
   })
 
+  // Third dev user — dev role for RBAC e2e tests
+  // Only available when ALLOW_DEV_TOKEN=true (same guard as dev-token)
+  app.get('/api/auth/dev-token3', async (request, reply) => {
+    if (process.env.NODE_ENV !== 'development' || process.env['ALLOW_DEV_TOKEN'] !== 'true') {
+      return reply.code(404).send({ error: 'not found' })
+    }
+
+    const DEV_TENANT = '00000000-0000-0000-0000-000000000001'
+    const DEV_USER3 = '00000000-0000-0000-0000-000000000004'
+    const DEV_EMAIL3 = 'dev3@anvay.local'
+
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO users (id, tenant_id, email, role)
+        VALUES (${DEV_USER3}::uuid, ${DEV_TENANT}::uuid, ${DEV_EMAIL3}, 'dev')
+        ON CONFLICT (id) DO UPDATE SET role = 'dev'
+      `
+    } catch { /* ignore */ }
+
+    const token = await reply.jwtSign({
+      sub: DEV_USER3,
+      email: DEV_EMAIL3,
+      tenantId: DEV_TENANT,
+      role: 'dev',
+    })
+
+    return reply.send({ token, tenantId: DEV_TENANT })
+  })
+
   // GET /api/auth/me — return authenticated user info from JWT
   app.get('/api/auth/me', { preHandler: [app.authenticate] }, async (request) => {
     const user = request.user as { sub: string; email: string; tenantId: string; role: string }

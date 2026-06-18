@@ -41,7 +41,7 @@ test.describe('Gate approvals — full lifecycle', () => {
     expect(created.id).toBeDefined()
 
     const decideResp = await request.post(`${GATEWAY}/api/gate/${created.id}/decide`, {
-      headers,
+      headers: headers2,
       data: { decision: 'rejected' },
     })
     expect(decideResp.status()).toBe(200)
@@ -58,15 +58,15 @@ test.describe('Gate approvals — full lifecycle', () => {
     expect([200, 201]).toContain(createResp.status())
     const created = await createResp.json() as { id: string }
 
-    // First decision
+    // First decision — use dev2 (SoD: cannot approve own gate)
     await request.post(`${GATEWAY}/api/gate/${created.id}/decide`, {
-      headers,
+      headers: headers2,
       data: { decision: 'approved' },
     })
 
     // Second decision — must 404 (gate already decided)
     const secondResp = await request.post(`${GATEWAY}/api/gate/${created.id}/decide`, {
-      headers,
+      headers: headers2,
       data: { decision: 'approved' },
     })
     expect(secondResp.status(), 'second decide on same gate must return 404').toBe(404)
@@ -111,10 +111,10 @@ test.describe('Gate approvals — full lifecycle', () => {
       .first()
     await expect(pendingItem, 'Approvals view must show pending items').toBeVisible({ timeout: 8000 })
 
-    // Cleanup — try to resolve via API
+    // Cleanup — try to resolve via API (use dev2: SoD prevents same-user approval)
     try {
       await request.post(`${GATEWAY}/api/gate/${created.id}/decide`, {
-        headers,
+        headers: headers2,
         data: { decision: 'rejected' },
       })
     } catch {

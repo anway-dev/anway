@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, DEMO_TENANT, authHeaders } from './fixtures'
+import { GATEWAY, DEMO_TENANT, authHeaders, authHeaders2 } from './fixtures'
 
 const CONNECTOR_KEY = 'e2e-key'
 
@@ -41,9 +41,11 @@ test.describe('Graph Events — tenant binding', () => {
 
 test.describe('Gate — full REST roundtrip', () => {
   let headers: Record<string, string>
+  let headers2: Record<string, string>
 
   test.beforeAll(async ({ request }) => {
     headers = await authHeaders(request)
+    headers2 = await authHeaders2(request)
   })
 
   test('create gate then decide via REST → ok: true', async ({ request }) => {
@@ -55,8 +57,9 @@ test.describe('Gate — full REST roundtrip', () => {
     const { id } = await createResp.json() as { id: string }
     expect(id).toBeTruthy()
 
+    // Decide with dev2 — SoD: cannot approve own gate request
     const decideResp = await request.post(`${GATEWAY}/api/gate/${id}/decide`, {
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { ...headers2, 'Content-Type': 'application/json' },
       data: { decision: 'approved' },
     })
     expect(decideResp.status()).toBe(200)
@@ -73,11 +76,11 @@ test.describe('Gate — full REST roundtrip', () => {
     })
     const { id } = await createResp.json() as { id: string }
     await request.post(`${GATEWAY}/api/gate/${id}/decide`, {
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { ...headers2, 'Content-Type': 'application/json' },
       data: { decision: 'approved' },
     })
     const secondResp = await request.post(`${GATEWAY}/api/gate/${id}/decide`, {
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { ...headers2, 'Content-Type': 'application/json' },
       data: { decision: 'rejected' },
     })
     expect(secondResp.status()).toBe(404)

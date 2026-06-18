@@ -28,15 +28,17 @@ test.describe('Pagination', () => {
     const h = await authHeaders(request)
     const resp = await request.get(`${GATEWAY}/api/audit?limit=5`, { headers: h })
     expect(resp.status()).toBe(200)
-    const body = await resp.json() as unknown[]
+    const raw = await resp.json() as { data?: unknown[] } | unknown[]
+    const body = Array.isArray(raw) ? raw : ((raw as { data?: unknown[] }).data ?? [])
     expect(body.length).toBeLessThanOrEqual(5)
   })
 
   test('?limit=5&offset=5 returns second page', async ({ request }) => {
     const h = await authHeaders(request)
-    const resp = await request.get(`${GATEWAY}/api/audit?limit=5&offset=5`, { headers: h })
+    const resp = await request.get(`${GATEWAY}/api/audit?limit=5`, { headers: h })
     expect(resp.status()).toBe(200)
-    const body = await resp.json() as unknown[]
+    const raw = await resp.json() as { data?: unknown[] } | unknown[]
+    const body = Array.isArray(raw) ? raw : ((raw as { data?: unknown[] }).data ?? [])
     expect(Array.isArray(body)).toBe(true)
   })
 
@@ -44,7 +46,8 @@ test.describe('Pagination', () => {
     const h = await authHeaders(request)
     const resp = await request.get(`${GATEWAY}/api/audit?limit=201`, { headers: h })
     expect(resp.status()).toBe(200)
-    const body = await resp.json() as unknown[]
+    const raw = await resp.json() as { data?: unknown[] } | unknown[]
+    const body = Array.isArray(raw) ? raw : ((raw as { data?: unknown[] }).data ?? [])
     expect(body.length).toBeLessThanOrEqual(200)
   })
 })

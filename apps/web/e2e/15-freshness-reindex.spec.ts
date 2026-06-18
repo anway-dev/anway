@@ -66,7 +66,8 @@ test.describe('Phase 2 — Monitors, alert_fired, re-indexing', () => {
     // Verify incident created (event pipeline writes to incidents table)
     const incResp = await request.get(`${GATEWAY}/api/incidents`, { headers })
     expect(incResp.status()).toBe(200)
-    const incidents = await incResp.json() as Array<{ title: string; id: string }>
+    const incBody = await incResp.json() as { data?: Array<{ title: string; id: string }> } | Array<{ title: string; id: string }>
+    const incidents = Array.isArray(incBody) ? incBody : (incBody.data ?? [])
     const found = incidents.find(i => i.title === alertName)
     expect(found, 'alert must create incident in DB').toBeDefined()
 

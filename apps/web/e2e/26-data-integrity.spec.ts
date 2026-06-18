@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { GATEWAY, authHeaders, DEMO_TENANT, uniqueId, pollUntil } from './fixtures'
+import { GATEWAY, authHeaders, uniqueId, pollUntil } from './fixtures'
+
+type Paginated<T> = { data?: T[] } | T[]
+
+function extractArray<T>(raw: Paginated<T>): T[] {
+  return Array.isArray(raw) ? raw : ((raw as { data?: T[] }).data ?? [])
+}
 
 test.describe('Data Integrity — cross-entity chains', () => {
   let headers: Record<string, string>
@@ -27,7 +33,9 @@ test.describe('Data Integrity — cross-entity chains', () => {
     createdIncidentIds.push(id)
 
     const audit = await pollUntil(
-      () => request.get(`${GATEWAY}/api/audit?search=${encodeURIComponent(title)}`, { headers }).then(r => r.json() as Promise<unknown[]>),
+      () => request.get(`${GATEWAY}/api/audit?search=${encodeURIComponent(title)}`, { headers })
+        .then(r => r.json() as Promise<Paginated<unknown>>)
+        .then(b => extractArray(b)),
       (events) => events.length > 0,
       { intervalMs: 400, timeoutMs: 6000 },
     )
@@ -43,7 +51,9 @@ test.describe('Data Integrity — cross-entity chains', () => {
     expect([200, 201, 202, 204]).toContain(postResp.status())
 
     const alerts = await pollUntil(
-      () => request.get(`${GATEWAY}/api/alerts`, { headers }).then(r => r.json() as Promise<Array<{ title: string; severity?: string }>>),
+      () => request.get(`${GATEWAY}/api/alerts`, { headers })
+        .then(r => r.json() as Promise<Paginated<{ title: string; severity?: string }>>)
+        .then(b => extractArray(b)),
       (list) => list.some(a => a.title === alertName),
       { intervalMs: 400, timeoutMs: 8000 },
     )

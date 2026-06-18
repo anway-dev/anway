@@ -85,7 +85,8 @@ test.describe('Connectors API — POST /api/connectors/:type/reconnect', () => {
 
   test('returns 200 for valid connector type', async ({ request }) => {
     const h = await authHeaders(request)
-    const resp = await request.post(`${GATEWAY}/api/connectors/k8s/reconnect`, { headers: h })
+    // prometheus is registered in connector_config; k8s is not (would return 404)
+    const resp = await request.post(`${GATEWAY}/api/connectors/prometheus/reconnect`, { headers: h })
     expect(resp.status()).toBe(200)
     const body = await resp.json() as { ok: boolean }
     expect(body.ok).toBe(true)

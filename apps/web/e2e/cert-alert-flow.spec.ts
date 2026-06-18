@@ -2,21 +2,19 @@ import { test, expect } from '@playwright/test'
 import { GATEWAY, DEMO_TENANT, authHeaders } from './fixtures'
 
 test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () => {
-  let token: string
+  let headers: Record<string, string>
 
   test.beforeAll(async ({ request }) => {
-    const r = await request.get(`${GATEWAY}/api/auth/dev-token`)
-    const body = await r.json() as { token?: string }
-    token = body.token ?? ''
+    headers = await authHeaders(request)
   })
 
   test('POST /api/events/alert (Alertmanager format) creates incident', async ({ request }) => {
     const alertName = `E2E-Cert3-${Date.now()}`
 
-    // Send Alertmanager-format webhook (no auth — public endpoint)
+    // events/alert requires auth (JWT or webhook token); use JWT in e2e
     const alertResp = await request.post(`${GATEWAY}/api/events/alert`, {
+      headers,
       data: {
-        tenantId: DEMO_TENANT,
         version: '4',
         alerts: [{
           status: 'firing',
@@ -31,37 +29,52 @@ test.describe('Cert check 3 — Alert flow: webhook → Redis → incident', () 
     await new Promise(r => setTimeout(r, 800))
 
     // Verify incident created
-    const incResp = await request.get(`${GATEWAY}/api/incidents`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    const incResp = await request.get(`${GATEWAY}/api/incidents`, { headers })
     expect(incResp.status()).toBe(200)
-    const incidents = await incResp.json() as Array<{ title: string }>
+    const incBody = await incResp.json() as { data?: Array<{ title: string }> } | Array<{ title: string }>
+    const incidents = Array.isArray(incBody) ? incBody : (incBody.data ?? [])
     const found = incidents.some(i => i.title === alertName)
     expect(found).toBe(true)
   })
 })
 
 test.describe('Cert check extended — event receivers', () => {
-  test('POST /api/events/deploy without tenantId returns 400', async ({ request }) => {
-    const resp = await request.post(`${GATEWAY}/api/events/deploy`, { data: {} })
+  let headers: Record<string, string>
+
+  test.beforeAll(async ({ request }) => {
+    headers = await authHeaders(request)
+  })
+
+  test('POST /api/events/deploy without required fields returns 400', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/events/deploy`, {
+      headers,
+      data: {},
+    })
     expect(resp.status()).toBe(400)
   })
 
-  test('POST /api/events/deploy with valid tenantId returns 200', async ({ request }) => {
+  test('POST /api/events/deploy with valid fields returns 200', async ({ request }) => {
+    // Schema requires 'service' and 'sha' (not 'app')
     const resp = await request.post(`${GATEWAY}/api/events/deploy`, {
-      data: { tenantId: DEMO_TENANT, app: 'payments-api', sha: 'abc123' },
+      headers,
+      data: { service: 'payments-api', sha: 'abc123' },
     })
     expect(resp.status()).toBe(200)
   })
 
-  test('POST /api/events/pr-merged without tenantId returns 400', async ({ request }) => {
-    const resp = await request.post(`${GATEWAY}/api/events/pr-merged`, { data: {} })
+  test('POST /api/events/pr-merged without required fields returns 400', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/events/pr-merged`, {
+      headers,
+      data: {},
+    })
     expect(resp.status()).toBe(400)
   })
 
-  test('POST /api/events/pr-merged with valid tenantId returns 200', async ({ request }) => {
+  test('POST /api/events/pr-merged with valid fields returns 200', async ({ request }) => {
+    // Schema requires 'repo'; prNumber (not pr) is optional
     const resp = await request.post(`${GATEWAY}/api/events/pr-merged`, {
-      data: { tenantId: DEMO_TENANT, repo: 'test', pr: 1 },
+      headers,
+      data: { repo: 'test', prNumber: 1 },
     })
     expect(resp.status()).toBe(200)
   })

@@ -150,11 +150,11 @@ export async function authRoutes(app: FastifyInstance) {
     const DEV_USER2 = '00000000-0000-0000-0000-000000000003'
     const DEV_EMAIL2 = 'dev2@anvay.local'
 
-    // Upsert second dev user
+    // Upsert second dev user (sre role — required for gate decide endpoint)
     try {
       await prisma.$executeRaw`
-        INSERT INTO users (id, tenant_id, email, role) VALUES (${DEV_USER2}::uuid, ${DEV_TENANT2}::uuid, ${DEV_EMAIL2}, 'dev')
-        ON CONFLICT (id) DO NOTHING
+        INSERT INTO users (id, tenant_id, email, role) VALUES (${DEV_USER2}::uuid, ${DEV_TENANT2}::uuid, ${DEV_EMAIL2}, 'sre')
+        ON CONFLICT (id) DO UPDATE SET role = 'sre'
       `
     } catch { /* table may not exist yet — still return token */ }
 
@@ -162,7 +162,7 @@ export async function authRoutes(app: FastifyInstance) {
       sub: DEV_USER2,
       email: DEV_EMAIL2,
       tenantId: DEV_TENANT2,
-      role: 'dev',
+      role: 'sre',
     })
 
     return reply.send({ token, tenantId: DEV_TENANT2 })

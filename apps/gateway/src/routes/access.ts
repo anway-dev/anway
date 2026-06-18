@@ -151,4 +151,69 @@ export async function accessRoutes(app: FastifyInstance) {
       return { ok: true, count }
     },
   )
+
+  // POST /api/access/users — provision new user (admin only)
+  app.post<{ Body: { email: string; role: string } }>(
+    '/api/access/users',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['email', 'role'],
+          properties: {
+            email: { type: 'string', format: 'email' },
+            role: { type: 'string', enum: ['admin', 'sre', 'dev', 'pm', 'ba'] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const user = request.user as { tenantId: string; role?: string }
+      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      const { email, role } = request.body
+      const newId = crypto.randomUUID()
+      const rows = await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$queryRaw<Array<{ id: string; email: string; role: string }>>`
+          INSERT INTO users (id, tenant_id, email, role)
+          VALUES (${newId}::uuid, ${user.tenantId}::uuid, ${email}, ${role})
+          ON CONFLICT (tenant_id, email) DO UPDATE SET role = EXCLUDED.role
+          RETURNING id, email, role
+        `
+      ).catch(() => [])
+      if (rows.length === 0) return reply.code(500).send({ error: 'failed to provision user' })
+      return reply.code(201).send(rows[0])
+    },
+  )
+
+  // PATCH /api/access/users/:userId/role — update user role (admin only)
+  app.patch<{ Params: { userId: string }; Body: { role: string } }>(
+    '/api/access/users/:userId/role',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['role'],
+          properties: {
+            role: { type: 'string', enum: ['admin', 'sre', 'dev', 'pm', 'ba'] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const user = request.user as { tenantId: string; role?: string }
+      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      const { userId } = request.params
+      if (!UUID_RE.test(userId)) return reply.code(400).send({ error: 'invalid userId' })
+      const { role } = request.body
+      const affected = await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE users SET role = ${role} WHERE id = ${userId}::uuid AND tenant_id = ${user.tenantId}::uuid
+        `
+      ).catch(() => 0)
+      if (Number(affected) === 0) return reply.code(404).send({ error: 'user not found' })
+      return { ok: true }
+    },
+  )
 }

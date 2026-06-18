@@ -39,7 +39,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
         SELECT id, tool_name, tool_args, created_at
         FROM gate_events
         WHERE tenant_id = ${tenantId}::uuid AND status = 'pending'
-        ORDER BY created_at ASC
+        ORDER BY created_at DESC
         LIMIT 50
       `
     ).catch(() => [])

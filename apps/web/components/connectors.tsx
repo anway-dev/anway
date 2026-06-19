@@ -22,6 +22,7 @@ export function ConnectorsView() {
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [catalog, setCatalog] = useState<Connector[]>([]);
   const [bootstrapInfo, setBootstrapInfo] = useState<Record<string, { bootstrapped: boolean; bootstrappedAt?: string }>>({});
+  const [healthInfo, setHealthInfo] = useState<Record<string, { status: string }>>({});
   const [bootstrapping, setBootstrapping] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -60,6 +61,14 @@ export function ConnectorsView() {
                 if (data.bootstrapped) setBootstrapInfo(prev => ({ ...prev, [c.id]: data }))
               })
               .catch(() => {});
+            fetch(`/api/connectors/${c.id}/status`)
+              .then(r => r.json())
+              .then((data: { status: string }) => {
+                setHealthInfo(prev => ({ ...prev, [c.id]: { status: data.status } }))
+              })
+              .catch(() => {
+                setHealthInfo(prev => ({ ...prev, [c.id]: { status: 'unreachable' } }))
+              });
           }
         }
       })
@@ -136,7 +145,7 @@ export function ConnectorsView() {
       ) : (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
         {visible.map((conn) => (
-          <ConnectorCard key={conn.id} connector={conn} configured={conn.connected} bootstrap={bootstrapInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST' }).catch(() => {}); startBootstrapPoll(conn.id); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
+          <ConnectorCard key={conn.id} connector={conn} configured={conn.connected} bootstrap={bootstrapInfo[conn.id]} health={healthInfo[conn.id]} bootstrapping={bootstrapping === conn.id} onBootstrap={() => { setBootstrapping(conn.id); fetch(`/api/connectors/${conn.id}/bootstrap`, { method: 'POST' }).catch(() => {}); startBootstrapPoll(conn.id); }} onConnect={() => { setSaveError(null); setModal(conn); setFormValues({}); }} />
         ))}
       </div>
       )}
@@ -207,7 +216,25 @@ export function ConnectorsView() {
   );
 }
 
-function ConnectorCard({ connector: c, configured, bootstrap, bootstrapping, onBootstrap, onConnect }: { connector: Connector; configured: boolean; bootstrap?: { bootstrapped: boolean; bootstrappedAt?: string }; bootstrapping?: boolean; onBootstrap?: () => void; onConnect: () => void }) {
+function ConnectorCard({ connector: c, configured, bootstrap, health, bootstrapping, onBootstrap, onConnect }: { connector: Connector; configured: boolean; bootstrap?: { bootstrapped: boolean; bootstrappedAt?: string }; health?: { status: string }; bootstrapping?: boolean; onBootstrap?: () => void; onConnect: () => void }) {
+  const healthStatus = health?.status;
+  const renderStatus = () => {
+    if (!configured) return null;
+    if (bootstrapping) return <span style={{ color: "#888", fontSize: "10px", fontFamily: "monospace" }}>&#8635; Bootstrapping&hellip;</span>;
+    if (healthStatus === 'bootstrapped' || bootstrap?.bootstrapped) {
+      return (
+        <span style={{ color: "#10b981", fontSize: "10px", fontFamily: "monospace" }}>
+          &#10003; Live{bootstrap?.bootstrappedAt ? ` · synced ${(() => {
+            const ms = Date.now() - new Date(bootstrap.bootstrappedAt).getTime();
+            const mins = Math.floor(ms / 60000);
+            return mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+          })()}` : ''}
+        </span>
+      );
+    }
+    if (healthStatus === 'pending') return <span style={{ color: "#f59e0b", fontSize: "10px", fontFamily: "monospace" }}>&#9679; Pending sync</span>;
+    return <span style={{ color: "#ef4444", fontSize: "10px", fontFamily: "monospace" }}>&#9679; Unreachable</span>;
+  };
   return (
     <div style={{
       background: "#111", border: `1px solid ${configured ? "#1f2f1f" : "#1f1f1f"}`,
@@ -237,31 +264,17 @@ function ConnectorCard({ connector: c, configured, bootstrap, bootstrapping, onB
 
       <div style={{ fontSize: "11px", color: "#888" }}>{c.description}</div>
       {configured && (
-        <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace" }}>
-          {bootstrapping ? (
-            <span style={{ color: "#888" }}>&#8635; Bootstrapping&hellip;</span>
-          ) : bootstrap?.bootstrapped ? (
-            <span style={{ color: "#10b981" }}>
-              &#10003; Last synced {bootstrap.bootstrappedAt ? (() => {
-                const ms = Date.now() - new Date(bootstrap.bootstrappedAt).getTime()
-                const mins = Math.floor(ms / 60000)
-                return mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`
-              })() : ''}
-            </span>
-          ) : (
-            <span>
-              <span style={{ color: "#f59e0b" }}>&#9888; Not synced</span>
-              <button onClick={onBootstrap}
-                style={{
-                  marginLeft: "8px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
-                  color: "#10b981", padding: "2px 8px", borderRadius: "3px",
-                  cursor: "pointer", fontSize: "9px", fontFamily: "monospace",
-                }}
-              >
-                Retry
-              </button>
-            </span>
-          )}
+        <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {renderStatus()}
+          <button onClick={onBootstrap}
+            style={{
+              background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
+              color: "#10b981", padding: "2px 8px", borderRadius: "3px",
+              cursor: "pointer", fontSize: "9px", fontFamily: "monospace",
+            }}
+          >
+            {bootstrapping ? "Syncing…" : "Force Resync"}
+          </button>
         </div>
       )}
 

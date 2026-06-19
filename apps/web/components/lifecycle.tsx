@@ -46,6 +46,25 @@ const STAGE_ICONS: Record<string, string> = {
   prd: "📄", spec: "📐", tests: "🧪", collection: "⚡", deploy: "🚀", metrics: "📊",
 };
 
+const DEMO_ARTIFACTS: ArtifactRow[] = [
+  {
+    id: 'demo-prd-1',
+    kind: 'prd',
+    status: 'approved',
+    title: 'CSV export for audit log',
+    parentId: null,
+    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'demo-techspec-1',
+    kind: 'techspec',
+    status: 'review',
+    title: 'CSV export — TechSpec',
+    parentId: 'demo-prd-1',
+    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+];
+
 interface Props {
   onNodeClick: (node: StageNode, action?: string) => void;
   activeNodeId: string | null;
@@ -89,7 +108,18 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
     fetch("/api/lifecycle/artifacts")
       .then((r) => r.ok ? r.json() as Promise<ArtifactRow[]> : [])
       .then((rows) => {
-        if (!Array.isArray(rows)) return;
+        if (!Array.isArray(rows) || rows.length === 0) {
+          // Fallback — use demo data when API returns empty
+          const prds = DEMO_ARTIFACTS.filter((r) => r.kind === "prd");
+          const techSpecs = DEMO_ARTIFACTS.filter((r) => r.kind === "techspec");
+          const built = prds.map((prd) => {
+            const ts = techSpecs.find((s) => s.parentId === prd.id) ?? null;
+            return buildFeatureFromArtifacts(prd, ts);
+          });
+          setFeatures(built);
+          if (built.length > 0) setSelectedFeature(built[0]);
+          return;
+        }
         const prds = rows.filter((r) => r.kind === "prd");
         const techSpecs = rows.filter((r) => r.kind === "techspec");
         const built = prds.map((prd) => {
@@ -122,7 +152,12 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
         setFeatures(built);
         if (built.length > 0) setSelectedFeature(built[built.length - 1]);
       }
-    } catch { /* ignore */ } finally {
+    } catch {
+      // Fallback — append demo PRD when LLM not configured
+      const newFeature = buildFeatureFromArtifacts(DEMO_ARTIFACTS[0]!, null);
+      setFeatures(prev => [...prev, newFeature]);
+      setNewFeatureInput("");
+    } finally {
       setCreating(false);
     }
   }

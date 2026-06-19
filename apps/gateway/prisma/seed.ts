@@ -446,7 +446,24 @@ async function main() {
   `
   log('5 Trigger rules seeded.')
 
-  // ── 8. Gate Events ────────────────────────────────────────────────────────────
+  // ── 8. System monitors (cron_jobs) — so monitors UI shows entries ──────────────
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL row_security = off`
+    await tx.$executeRaw`
+      INSERT INTO cron_jobs (id, tenant_id, name, schedule, job_type, enabled, last_run_at, last_result)
+      VALUES
+        (gen_random_uuid(), ${DEMO_TENANT_ID}::uuid, 'Service Health Sweep', '*/5 * * * *', 'service_health_sweep', true, NOW() - INTERVAL '3 minutes', '{"status":"ok","findings":0}'::jsonb),
+        (gen_random_uuid(), ${DEMO_TENANT_ID}::uuid, 'SLO Burn Check',       '*/5 * * * *', 'slo_burn_check',       true, NOW() - INTERVAL '4 minutes', '{"status":"ok","services":3}'::jsonb),
+        (gen_random_uuid(), ${DEMO_TENANT_ID}::uuid, 'Deploy Health Report', '0 * * * *',   'deploy_health_report', true, NOW() - INTERVAL '1 hour',    '{"status":"ok","deploys":7}'::jsonb),
+        (gen_random_uuid(), ${DEMO_TENANT_ID}::uuid, 'Oncall Morning Brief', '0 8 * * *',   'oncall_morning_brief', true, NOW() - INTERVAL '4 hours',   '{"status":"ok","brief":"All services nominal"}'::jsonb),
+        (gen_random_uuid(), ${DEMO_TENANT_ID}::uuid, 'Cloud Security Scan',  '0 */6 * * *', 'cloud_security_scan',  true, NOW() - INTERVAL '2 hours',   '{"status":"ok","findings":0}'::jsonb),
+        (gen_random_uuid(), ${DEMO_TENANT_ID}::uuid, 'Cost Anomaly Detection','0 1 * * *',  'cost_anomaly_detection',true, NOW() - INTERVAL '8 hours',  '{"status":"ok","anomalies":0}'::jsonb)
+      ON CONFLICT DO NOTHING
+    `
+  })
+  log('6 System monitors seeded.')
+
+  // ── 9. Gate Events ────────────────────────────────────────────────────────────
   // pending gate
   await prisma.$executeRaw`
     INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, decided_by, decided_at)

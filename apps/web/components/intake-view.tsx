@@ -122,9 +122,35 @@ function SourceCard({ source, selected, onClick }: { source: IntakeSource; selec
 }
 
 function ConfigPanel({ source }: { source: IntakeSource }) {
-  const [mode, setMode] = useState<IntakeMode>(source.mode);
+  const [mode, setMode] = useState<IntakeMode>(() => {
+    try { return (localStorage.getItem('anvay-routing-mode') ?? source.mode) as IntakeMode; }
+    catch { return source.mode; }
+  });
   const [threshold, setThreshold] = useState(source.confidenceThreshold);
   const [escalationPolicy, setEscalationPolicy] = useState(source.escalationPolicy);
+  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleModeChange = (m: IntakeMode) => {
+    setMode(m);
+    try { localStorage.setItem('anvay-routing-mode', m); } catch { /* ignore */ }
+  };
+
+  const handleCopyWebhook = () => {
+    const webhookUrl = `https://app.anvay.io${source.webhookPath}`;
+    navigator.clipboard.writeText(webhookUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  };
+
+  const handleSave = () => {
+    try {
+      localStorage.setItem('anvay-routing-config', JSON.stringify({ mode, threshold, escalationPolicy }));
+    } catch { /* ignore */ }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
@@ -156,7 +182,7 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
           {(["bypass", "monitor", "handle"] as IntakeMode[]).map(m => (
             <button
               key={m}
-              onClick={() => setMode(m)}
+              onClick={() => handleModeChange(m)}
               style={{
                 flex: 1, padding: "8px", borderRadius: "6px", cursor: "pointer",
                 border: mode === m ? `1px solid ${MODE_COLOR[m]}66` : "1px solid #1a1a1a",
@@ -214,8 +240,8 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
           <code style={{ flex: 1, fontSize: "11px", fontFamily: "monospace", color: source.webhookConfigured ? "#d1d5db" : "#555" }}>
             https://app.anvay.io{source.webhookPath}
           </code>
-          <button style={{ background: "none", border: "1px solid #2a2a2a", color: "#888", padding: "2px 8px", borderRadius: "4px", fontSize: "10px", cursor: "pointer" }}>
-            Copy
+          <button onClick={handleCopyWebhook} style={{ background: "none", border: "1px solid #2a2a2a", color: copied ? "#10b981" : "#888", padding: "2px 8px", borderRadius: "4px", fontSize: "10px", cursor: "pointer" }}>
+            {copied ? "Copied!" : "Copy"}
           </button>
         </div>
         {!source.webhookConfigured && (
@@ -225,8 +251,8 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
         )}
       </div>
 
-      <button style={{ background: "#10b981", border: "none", color: "#000", padding: "8px 20px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>
-        Save configuration
+      <button onClick={handleSave} style={{ background: saved ? "#1a2a1a" : "#10b981", border: "none", color: saved ? "#10b981" : "#000", padding: "8px 20px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>
+        {saved ? "Saved ✓" : "Save configuration"}
       </button>
     </div>
   );

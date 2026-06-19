@@ -11,6 +11,7 @@ import type { AgentPerimeter } from './perimeter/engine.js'
 import { isWriteAction, pollGate } from './gate/gate.js'
 import type { IGateSink } from './gate/gate.js'
 import { connectorIdFromTool } from './tools/naming.js'
+import { SREAgent, type IncidentContext } from './agents/sre.js'
 
 export interface ExecutableTool extends ToolDefinition {
   run(args: Record<string, unknown>): Promise<unknown>
@@ -187,6 +188,37 @@ export async function* runSession(
     createdAt: new Date(),
   })
 
+  // SREAgent context assembly — live triage context for sre-classified queries
+  let sreContext: string | null = null
+  if (classifiedIntent === 'sre' || classifiedIntent === 'incident_triage') {
+    try {
+      const sreAgent = new SREAgent(config.model, config.model, config.knowledgeGraph)
+      const sreResult: IncidentContext = await sreAgent.assembleContext(input, '', ctx.tenantId)
+      const lines = [
+        `## Live Triage Context (SREAgent)`,
+        `Hypothesis: ${sreResult.hypothesis.slice(0, 500)}`,
+      ]
+      if (sreResult.relatedDeploys.length > 0) {
+        lines.push(`Recent deploys: ${sreResult.relatedDeploys.slice(0, 5).join(', ')}`)
+      }
+      if (sreResult.relatedPRs.length > 0) {
+        lines.push(`Recent PRs: ${sreResult.relatedPRs.slice(0, 5).join(', ')}`)
+      }
+      if (sreResult.suggestedRunbook.length > 0) {
+        lines.push(`Suggested runbook: ${sreResult.suggestedRunbook.slice(0, 4).join('; ')}`)
+      }
+      sreContext = lines.join('\n')
+      await config.auditSink.append({
+        id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
+        sessionId: ctx.sessionId, eventType: 'agent_spawned',
+        payload: { agentType: 'SREAgent', classifiedIntent, contextLength: sreContext.length },
+        createdAt: new Date(),
+      })
+    } catch {
+      // non-blocking — SRE context best-effort, orchestrator continues without it
+    }
+  }
+
   // Knowledge Graph context injection — mandatory first step per CLAUDE.md
   let graphContext = ''
   let groundingSources: GroundingSource[] = []
@@ -260,7 +292,8 @@ export async function* runSession(
   }
 
   // Build message list from history + current turn
-  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${connectorContext}${graphContext ? '\n\n' + graphContext : ''}`
+  const sreBlock = sreContext ? `\n\n${sreContext}\n\nGround your response in this context. Cite specific services, incidents, and metrics above. If the context shows services are healthy, say so explicitly — do not speculate about outages.` : ''
+  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${connectorContext}${graphContext ? '\n\n' + graphContext : ''}${sreBlock}`
   const messages: Message[] = [
     { role: 'system', content: systemPrompt },
     ...history.map(

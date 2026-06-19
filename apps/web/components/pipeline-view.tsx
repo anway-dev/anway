@@ -1,6 +1,7 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useEnv } from "@/lib/env-context";
 
 interface PipelineStage {
   id: string;
@@ -115,10 +116,11 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
   const [changeTicketUrl, setChangeTicketUrl] = useState("");
   const [approving, setApproving] = useState(false);
   const logsRef = useRef<HTMLDivElement>(null);
+  const { env, apiFetch } = useEnv();
 
   const fetchPipelines = useCallback(async () => {
     try {
-      const r = await fetch("/api/pipelines");
+      const r = await apiFetch("/api/pipelines");
       if (r.ok) {
         const { data } = await r.json() as { data: Pipeline[]; nextCursor: string | null };
         setPipelines(data ?? []);
@@ -133,7 +135,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
 
   const fetchPipeline = useCallback(async (id: string) => {
     try {
-      const r = await fetch(`/api/pipelines/${id}`);
+      const r = await apiFetch(`/api/pipelines/${id}`);
       if (r.ok) {
         const pipeline = await r.json() as Pipeline;
         setSelected(pipeline);
@@ -142,7 +144,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { void fetchPipelines(); }, [fetchPipelines]);
+  useEffect(() => { void fetchPipelines(); }, [fetchPipelines, env]);
 
   useEffect(() => {
     if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
@@ -163,7 +165,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
     appendLog(stageId, `▶ Starting ${stageId}…`);
 
     try {
-      const resp = await fetch(`/api/pipelines/${pipelineId}/stages/${stageId}/run`, {
+      const resp = await apiFetch(`/api/pipelines/${pipelineId}/stages/${stageId}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",
@@ -202,7 +204,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
     setApproving(true);
     try {
       const body = changeTicketUrl ? JSON.stringify({ changeTicketUrl }) : "{}";
-      const resp = await fetch(`/api/pipelines/${pipelineId}/stages/${stageId}/approve`, {
+      const resp = await apiFetch(`/api/pipelines/${pipelineId}/stages/${stageId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
@@ -225,7 +227,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
   const initiateApprove = async (pipelineId: string, stageId: string) => {
     // Fetch gate policy to check if change ticket is required
     try {
-      const resp = await fetch(`/api/gate-policies?pipelineId=${pipelineId}&stageId=${stageId}`);
+      const resp = await apiFetch(`/api/gate-policies?pipelineId=${pipelineId}&stageId=${stageId}`);
       if (resp.ok) {
         const policies = await resp.json() as Array<{ requireChangeTicket?: boolean; require_change_ticket?: boolean }>;
         const policy = policies[0];
@@ -258,7 +260,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
 
   const createPipeline = async () => {
     if (!newName.trim()) return;
-    const r = await fetch("/api/pipelines", {
+    const r = await apiFetch("/api/pipelines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName.trim(), description: newDesc.trim() }),
@@ -274,7 +276,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
   };
 
   const deletePipeline = async (id: string) => {
-    await fetch(`/api/pipelines/${id}`, { method: "DELETE" });
+    await apiFetch(`/api/pipelines/${id}`, { method: "DELETE" });
     setPipelines(prev => prev.filter(p => p.id !== id));
     if (selected?.id === id) setSelected(null);
   };

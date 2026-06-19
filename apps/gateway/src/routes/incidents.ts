@@ -195,4 +195,25 @@ export async function incidentRoutes(app: FastifyInstance) {
       return reply.send({ deleted: true, id })
     },
   )
+
+  app.delete<{ Body: { pattern: string } }>(
+    '/api/incidents/bulk',
+    { preHandler: [app.authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { pattern } = (request.body ?? {}) as { pattern?: string }
+      if (!pattern) return reply.code(400).send({ error: 'pattern required' })
+      const deleted = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`DELETE FROM incidents WHERE tenant_id = ${tenantId}::uuid AND title ILIKE ${`%${pattern}%`}`
+      )
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'incident.bulk_delete',
+        resource: `incident:bulk:${pattern}`,
+        outcome: 'action_executed',
+        metadata: { pattern, deleted: Number(deleted) },
+      }).catch(() => {})
+      return reply.send({ deleted: Number(deleted), pattern })
+    },
+  )
 }

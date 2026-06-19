@@ -49,6 +49,7 @@ export function KbView() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(['Service', 'Team']));
 
   useEffect(() => {
     fetch("/api/graph/entities")
@@ -79,6 +80,13 @@ export function KbView() {
     }
     return list;
   }, [entities, typeFilter, search]);
+
+  const grouped = useMemo(() => {
+    const acc: Record<string, GraphEntity[]> = {};
+    for (const e of entities) (acc[e.type] ??= []).push(e);
+    return acc;
+  }, [entities]);
+  const sortedTypes = useMemo(() => Object.keys(grouped).sort(), [grouped]);
 
   const selected = selectedId ? entityById.get(selectedId) : null;
   const outgoing = useMemo(() => selectedId ? relationships.filter(r => r.fromEntityId === selectedId) : [], [relationships, selectedId]);
@@ -155,38 +163,101 @@ export function KbView() {
           <div style={{ width: selected ? "50%" : "100%", overflowY: "auto", padding: "12px 16px", borderRight: selected ? "1px solid #1a1a1a" : "none" }}>
             {visible.length === 0 ? (
               <div style={{ fontSize: "12px", color: "#444", padding: "20px" }}>No entities match this filter.</div>
-            ) : visible.map(e => {
-              const c = typeColor(e.type);
-              const isSel = e.id === selectedId;
-              const relCount = relationships.filter(r => r.fromEntityId === e.id || r.toEntityId === e.id).length;
-              return (
-                <div
-                  key={e.id}
-                  onClick={() => setSelectedId(isSel ? null : e.id)}
-                  style={{
-                    background: isSel ? "#0e1a0e" : "#0e0e0e",
-                    border: isSel ? "1px solid #2a3a2a" : "1px solid #1a1a1a",
-                    borderLeft: `3px solid ${c}`,
-                    borderRadius: "6px", padding: "10px 14px", marginBottom: "6px", cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: "10px",
-                  }}
-                >
-                  <span style={{ fontSize: "12px", color: c, flexShrink: 0 }}>{typeIcon(e.type)}</span>
-                  <span style={{ fontSize: "12px", color: "#d1d5db", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {e.name}
-                  </span>
-                  <span style={{ fontSize: "10px", color: c, background: `${c}15`, border: `1px solid ${c}30`, borderRadius: "3px", padding: "1px 6px", flexShrink: 0 }}>
-                    {e.type}
-                  </span>
-                  {relCount > 0 && (
-                    <span style={{ fontSize: "10px", color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
-                      {relCount} link{relCount !== 1 ? "s" : ""}
+            ) : search.trim() ? (
+              // Flat filtered list — when search is active
+              visible.map(e => {
+                const c = typeColor(e.type);
+                const isSel = e.id === selectedId;
+                const relCount = relationships.filter(r => r.fromEntityId === e.id || r.toEntityId === e.id).length;
+                return (
+                  <div
+                    key={e.id}
+                    onClick={() => setSelectedId(isSel ? null : e.id)}
+                    style={{
+                      background: isSel ? "#0e1a0e" : "#0e0e0e",
+                      border: isSel ? "1px solid #2a3a2a" : "1px solid #1a1a1a",
+                      borderLeft: `3px solid ${c}`,
+                      borderRadius: "6px", padding: "10px 14px", marginBottom: "6px", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: "10px",
+                    }}
+                  >
+                    <span style={{ fontSize: "12px", color: c, flexShrink: 0 }}>{typeIcon(e.type)}</span>
+                    <span style={{ fontSize: "12px", color: "#d1d5db", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {e.name}
                     </span>
-                  )}
-                  <span style={{ fontSize: "10px", color: "#444", flexShrink: 0 }}>{timeAgo(e.updatedAt)}</span>
-                </div>
-              );
-            })}
+                    <span style={{ fontSize: "10px", color: c, background: `${c}15`, border: `1px solid ${c}30`, borderRadius: "3px", padding: "1px 6px", flexShrink: 0 }}>
+                      {e.type}
+                    </span>
+                    {relCount > 0 && (
+                      <span style={{ fontSize: "10px", color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
+                        {relCount} link{relCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    <span style={{ fontSize: "10px", color: "#444", flexShrink: 0 }}>{timeAgo(e.updatedAt)}</span>
+                  </div>
+                );
+              })
+            ) : (
+              // Tree layout grouped by entity type — when no search
+              sortedTypes.map(type => {
+                const items = grouped[type] ?? [];
+                const expanded = expandedTypes.has(type);
+                const c = typeColor(type);
+                return (
+                  <div key={type} style={{ marginBottom: "4px" }}>
+                    <div
+                      onClick={() => {
+                        setExpandedTypes(prev => {
+                          const next = new Set(prev);
+                          if (next.has(type)) next.delete(type); else next.add(type);
+                          return next;
+                        });
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "6px",
+                        padding: "6px 8px", background: "#0e0e0e", border: "1px solid #1a1a1a",
+                        borderRadius: "4px", cursor: "pointer", marginBottom: "2px",
+                      }}
+                    >
+                      <span style={{ fontSize: "10px", color: "#555", width: "14px" }}>
+                        {expanded ? "▼" : "▶"}
+                      </span>
+                      <span style={{ fontSize: "12px", color: c }}>{typeIcon(type)}</span>
+                      <span style={{ fontSize: "12px", color: "#d1d5db", fontWeight: 500 }}>{type}</span>
+                      <span style={{ fontSize: "10px", color: "#555", marginLeft: "4px" }}>({items.length})</span>
+                    </div>
+                    {expanded && items.map(e => {
+                      const isSel = e.id === selectedId;
+                      const relCount = relationships.filter(r => r.fromEntityId === e.id || r.toEntityId === e.id).length;
+                      return (
+                        <div
+                          key={e.id}
+                          onClick={() => setSelectedId(isSel ? null : e.id)}
+                          style={{
+                            background: isSel ? "#0e1a0e" : "#0e0e0e",
+                            border: isSel ? "1px solid #2a3a2a" : "1px solid #1a1a1a",
+                            borderLeft: `3px solid ${c}`,
+                            borderRadius: "6px", padding: "8px 14px", marginBottom: "4px", cursor: "pointer",
+                            display: "flex", alignItems: "center", gap: "10px",
+                            paddingLeft: "24px",
+                          }}
+                        >
+                          <span style={{ fontSize: "12px", color: "#d1d5db", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {e.name}
+                          </span>
+                          {relCount > 0 && (
+                            <span style={{ fontSize: "10px", color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
+                              {relCount} link{relCount !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          <span style={{ fontSize: "10px", color: "#444", flexShrink: 0 }}>{timeAgo(e.updatedAt)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })
+            )}
           </div>
 
           {/* Detail panel */}

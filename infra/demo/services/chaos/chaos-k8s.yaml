@@ -96,7 +96,7 @@ data:
       fi
 
       # Every 5th iteration: scale down to 0 then back up (simulates crash loop)
-      if [ $((RANDOM % 5)) -eq 0 ]; do
+      if [ $((RANDOM % 5)) -eq 0 ]; then
         kubectl scale deployment $TARGET -n demo --replicas=0 2>/dev/null
         echo "{\"level\":\"error\",\"msg\":\"scale to zero\",\"service\":\"$TARGET\"}"
         sleep 30

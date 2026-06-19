@@ -122,34 +122,32 @@ test.describe('Gate approvals — full lifecycle', () => {
     }
   })
 
-  test('P1: UI — click Approve button, gate disappears from pending list', async ({ page }) => {
+  test('P1: UI — click Approve button, gate disappears from pending list', async ({ page, request }) => {
+    // Seed a gate as dev2 so dev1 (cookie user) can approve it (SoD: cannot approve own gate)
+    const h2 = await authHeaders2(request)
+    const seedTarget = uniqueId('p1-ui')
+    const seedResp = await request.post(`${GATEWAY}/api/gate`, {
+      headers: h2,
+      data: { action: 'deploy', target: seedTarget, requestedBy: 'e2e-p1' },
+    })
+    expect([200, 201]).toContain(seedResp.status())
+
     await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Approvals').first().click()
 
-    // The view loads with mock pending items
+    // Wait for view to stabilize after async fetch — the seeded gate must appear
     const approveBtn = page.locator('button:has-text("Approve")').first()
-    const approveVisible = await approveBtn.isVisible({ timeout: 5000 }).catch(() => false)
+    await expect(approveBtn).toBeVisible({ timeout: 8000 })
 
-    if (approveVisible) {
-      // Record what was there before
-      const initialCount = await page.locator('button:has-text("Approve")').count()
-      await approveBtn.click()
+    const initialCount = await page.locator('button:has-text("Approve")').count()
+    await approveBtn.click()
 
-      // After click, count must decrease (or item removed)
-      await expect(page.locator('text=approve').or(page.locator('text=Approve')).first()).toBeVisible({ timeout: 5000 })
+    // After approve, one button must disappear — either via filter or full empty state
+    await expect(async () => {
       const afterCount = await page.locator('button:has-text("Approve")').count()
       expect(afterCount, 'Approve button count must decrease after approval').toBeLessThan(initialCount)
-    } else {
-      // No pending gates — skip gracefully, but verify empty state
-      const emptyState = page.locator('text=No pending')
-        .or(page.locator('text=no pending'))
-        .or(page.locator('text=All clear'))
-        .first()
-      const hasEmpty = await emptyState.isVisible({ timeout: 3000 }).catch(() => false)
-      // Either pending items or empty state is acceptable
-      expect(approveVisible || hasEmpty, 'Must show either pending approvals or empty state').toBe(true)
-    }
+    }).toPass({ timeout: 5000 })
   })
 
   test('P2: empty state — no pending gates shows informative message', async ({ page }) => {

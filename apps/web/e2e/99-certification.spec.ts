@@ -982,6 +982,7 @@ test.describe('CERT AB: graph triage response shape', () => {
 
 test.describe('CERT AC: session API', () => {
   test('AC.1 GET /api/sessions returns sessions with correct shape — populated after S.1 chat', async ({ request }) => {
+    test.skip(!process.env['CERT_MODE'], 'AC: session API requires LLM chat from S.1 — run via scripts/certify.sh')
     const h = await authHeaders(request)
     const r = await request.get(`${GATEWAY}/api/sessions`, { headers: h })
     expect(r.status()).toBe(200)
@@ -1002,6 +1003,7 @@ test.describe('CERT AC: session API', () => {
   })
 
   test('AC.2 GET /api/sessions/:id/turns returns individual turns with role + content', async ({ request }) => {
+    test.skip(!process.env['CERT_MODE'], 'AC: session API requires LLM chat from S.1 — run via scripts/certify.sh')
     const h = await authHeaders(request)
     const listR = await request.get(`${GATEWAY}/api/sessions`, { headers: h })
     expect(listR.status()).toBe(200)
@@ -1058,12 +1060,28 @@ test.describe('CERT AE: backup script exists', () => {
 })
 
 test.describe('CERT AF: pipeline stage run SSE', () => {
+  let afPipelineId: string
+
+  test.beforeAll(async ({ request }) => {
+    // Create a pipeline with a build stage that has id:'build' so the stage lookup succeeds
+    const r = await request.post(`${GATEWAY}/api/pipelines`, {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: {
+        name: 'cert-af-pipeline',
+        stages: [{ id: 'build', name: 'Build', type: 'build', gate: false }],
+      },
+    })
+    expect([200, 201], 'CERT AF: pipeline create must succeed').toContain(r.status())
+    const body = await r.json() as { id: string }
+    afPipelineId = body.id
+    expect(afPipelineId, 'CERT AF: pipeline must return an id').toBeTruthy()
+  })
+
   test('AF.1 pipeline stage run emits SSE and completes', async ({ request }) => {
-    const pipelineId = '40000000-0000-0000-0000-000000000001'
     const stageId = 'build'
 
     const resp = await request.post(
-      `${GATEWAY}/api/pipelines/${pipelineId}/stages/${stageId}/run`,
+      `${GATEWAY}/api/pipelines/${afPipelineId}/stages/${stageId}/run`,
       {
         headers: { ...headers, 'Content-Type': 'application/json' },
         data: {},
@@ -1360,6 +1378,7 @@ test.describe('CERT AJ: lifecycle — gate enforcement and artifact completeness
   })
 
   test('AJ.3 GET /api/lifecycle/artifacts returns both PRD and TechSpec from CERT R', async ({ request }) => {
+    test.skip(!process.env['CERT_MODE'], 'AJ.3: requires CERT R artifacts which need LLM provider — run via scripts/certify.sh')
     const h = await authHeaders(request)
     const r = await request.get(`${GATEWAY}/api/lifecycle/artifacts`, { headers: h })
     expect(r.status()).toBe(200)
@@ -1736,6 +1755,7 @@ test.describe('CERT AQ: perimeter enforcement — verified correct (W26-T2)', ()
 // ---------------------------------------------------------------------------
 test.describe('CERT AR: settings and token usage', () => {
   test('AR.1 GET /api/settings/token-usage shows accumulated usage after S/AL chats', async ({ request }) => {
+    test.skip(!process.env['CERT_MODE'], 'AR.1: requires token usage from S.1/AL.1 LLM chats — run via scripts/certify.sh')
     const h = await authHeaders(request)
     const r = await request.get(`${GATEWAY}/api/settings/token-usage`, { headers: h })
     expect(r.status()).toBe(200)

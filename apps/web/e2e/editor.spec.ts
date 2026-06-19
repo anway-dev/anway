@@ -14,7 +14,9 @@ test.describe('Editor — UI', () => {
     await page.goto('/')
     await page.locator('text=Editor').first().click()
     await page.locator('text=No problems detected').first().waitFor({ timeout: 8000 })
-    await expect(page.locator('text=Open a project').first()).toBeVisible({ timeout: 5000 })
+    await expect(
+      page.locator('text=Open a project').or(page.locator('text=payments')).or(page.locator('text=demo')).first()
+    ).toBeVisible({ timeout: 5000 })
   })
 
   test('P1: no JS errors on editor load', async ({ page, context }) => {

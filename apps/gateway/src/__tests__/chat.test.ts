@@ -106,6 +106,7 @@ function makeMockKG() {
     upsertEntity: async () => 'e1',
     upsertRelationship: async () => 'r1',
     markConnectorEntitiesStale: async () => 0,
+    deleteEntitiesByOrgPrefix: async () => 0,
   }
 }
 

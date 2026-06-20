@@ -6,7 +6,21 @@ import { useState, useEffect, useRef, useCallback } from "react";
 type EditorState = "idle" | "loading" | "writing" | "analyzing" | "gate" | "running" | "done";
 type BottomTab = "problems" | "tests" | "terminal";
 type ActivityTab = "explorer" | "search" | "git";
-type ProjectSource = "demo" | "disk" | "github";
+type ProjectSource = "demo" | "disk" | "github" | "service";
+
+interface ConnectedService {
+  id: string;
+  name: string;
+  namespace: string | null;
+  connectorCoordinates: Record<string, unknown>;
+}
+
+interface GitCred {
+  provider: string;
+  username: string | null;
+  email: string | null;
+  configured: boolean;
+}
 
 interface FileEntry {
   name: string;
@@ -109,6 +123,16 @@ export function EditorView() {
   const [source, setSource] = useState<ProjectSource>("demo");
   const [diskPath, setDiskPath]     = useState("");
   const [githubUrl, setGithubUrl]   = useState("");
+  const [connectedServices, setConnectedServices] = useState<ConnectedService[]>([]);
+  const [selectedService, setSelectedService] = useState<ConnectedService | null>(null);
+
+  // Git credentials
+  const [gitCreds, setGitCreds] = useState<GitCred[]>([]);
+  const [showGitCredForm, setShowGitCredForm] = useState(false);
+  const [gitCredProvider, setGitCredProvider] = useState("github");
+  const [gitCredToken, setGitCredToken] = useState("");
+  const [gitCredUsername, setGitCredUsername] = useState("");
+  const [gitCredEmail, setGitCredEmail] = useState("");
   const [showSourcePicker, setShowSourcePicker] = useState(false);
 
   // File tree
@@ -188,10 +212,12 @@ export function EditorView() {
     }
   }, []);
 
-  // ── Load demo on mount ──────────────────────────────────────────────────────
+  // ── Load demo + connected services + git creds on mount ────────────────────
 
   useEffect(() => {
     loadDemoProject();
+    fetch("/api/editor/services").then(r => r.ok ? r.json() : []).then((s: ConnectedService[]) => setConnectedServices(s)).catch(() => {});
+    fetch("/api/user/git-credentials").then(r => r.ok ? r.json() : []).then((c: GitCred[]) => setGitCreds(c)).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -247,6 +273,32 @@ export function EditorView() {
       }
       setState("writing");
       return;
+    }
+
+    if (source === "service" && selectedService) {
+      // Try conventional paths: services/{name}/, apps/{name}/
+      const candidates = [
+        `/services/${selectedService.name}`,
+        `/apps/${selectedService.name}`,
+        `/apps/${selectedService.name.replace(/-service$/, '')}`,
+      ];
+      const editorRoot = process.env.NEXT_PUBLIC_EDITOR_ROOT ?? "";
+      for (const rel of candidates) {
+        const tryPath = `${editorRoot}${rel}`;
+        const resp = await fetch(`/api/editor/files?path=${encodeURIComponent(tryPath)}`).catch(() => null);
+        if (resp?.ok) {
+          await loadTree(tryPath);
+          // Load entry point
+          const entryResp = await fetch(`/api/editor/file?path=${encodeURIComponent(`${tryPath}/index.ts`)}`).catch(() => null)
+            ?? await fetch(`/api/editor/file?path=${encodeURIComponent(`${tryPath}/src/index.ts`)}`).catch(() => null);
+          if (entryResp?.ok) {
+            const d = await entryResp.json();
+            setFileContent(d.content ?? ""); setFilename(d.filename ?? "index.ts"); setLanguage(d.language ?? "typescript");
+          }
+          setState("writing"); return;
+        }
+      }
+      setState("writing"); return;
     }
 
     if (source === "github" && githubUrl) {
@@ -476,20 +528,20 @@ export function EditorView() {
           onClick={() => setShowSourcePicker(v => !v)}
           style={{ marginLeft: "auto", background: "rgba(255,255,255,0.05)", border: "none", borderLeft: "1px solid #1a1a1a", color: "#888", padding: "0 12px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "5px" }}
         >
-          <span>{source === "demo" ? "🔴 Demo" : source === "disk" ? "💾 Disk" : "🐙 GitHub"}</span>
+          <span>{source === "demo" ? "🔴 Demo" : source === "disk" ? "💾 Disk" : source === "service" ? `⎈ ${selectedService?.name ?? "Service"}` : "🐙 GitHub"}</span>
           <span>▾</span>
         </button>
 
         {/* Source picker dropdown */}
         {showSourcePicker && (
-          <div style={{ position: "absolute", top: "35px", right: 0, width: "360px", background: "#252526", border: "1px solid #2a2a2a", borderRadius: "4px", zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", padding: "12px" }}>
+          <div style={{ position: "absolute", top: "35px", right: 0, width: "380px", background: "#252526", border: "1px solid #2a2a2a", borderRadius: "4px", zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", padding: "12px" }}>
             <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "10px", fontWeight: 600 }}>Open project</div>
 
             {/* Source type tabs */}
             <div style={{ display: "flex", gap: "4px", marginBottom: "10px" }}>
-              {(["demo","disk","github"] as ProjectSource[]).map(s => (
-                <button key={s} onClick={() => setSource(s)} style={{ flex: 1, background: source === s ? "#0e639c" : "rgba(255,255,255,0.06)", border: "none", color: source === s ? "#fff" : "#888", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", textTransform: "capitalize" }}>
-                  {s === "demo" ? "🔴 Demo" : s === "disk" ? "💾 Disk" : "🐙 GitHub"}
+              {(["demo","disk","service","github"] as ProjectSource[]).map(s => (
+                <button key={s} onClick={() => setSource(s)} style={{ flex: 1, background: source === s ? "#0e639c" : "rgba(255,255,255,0.06)", border: "none", color: source === s ? "#fff" : "#888", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}>
+                  {s === "demo" ? "🔴 Demo" : s === "disk" ? "💾 Disk" : s === "service" ? "⎈ Service" : "🐙 GitHub"}
                 </button>
               ))}
             </div>
@@ -509,6 +561,29 @@ export function EditorView() {
                   placeholder="/path/to/your/project"
                   style={{ width: "100%", background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "11px", padding: "6px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box", fontFamily: "monospace" }}
                 />
+              </div>
+            )}
+
+            {source === "service" && (
+              <div>
+                <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "6px" }}>
+                  {connectedServices.length === 0 ? "No services found — bootstrap K8s connector first" : `${connectedServices.length} service${connectedServices.length !== 1 ? "s" : ""} connected`}
+                </div>
+                {connectedServices.length > 0 && (
+                  <div style={{ maxHeight: "160px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "2px" }}>
+                    {connectedServices.map(svc => (
+                      <button
+                        key={svc.id}
+                        onClick={() => setSelectedService(svc)}
+                        style={{ textAlign: "left", background: selectedService?.id === svc.id ? "rgba(14,99,156,0.4)" : "rgba(255,255,255,0.04)", border: selectedService?.id === svc.id ? "1px solid #0e639c" : "1px solid transparent", borderRadius: "3px", color: "#d4d4d4", padding: "5px 8px", cursor: "pointer", fontSize: "11px", fontFamily: "monospace" }}
+                      >
+                        <span style={{ color: "#10b981", marginRight: "6px" }}>⎈</span>
+                        {svc.name}
+                        {svc.namespace && <span style={{ color: "#555", marginLeft: "6px", fontSize: "10px" }}>{svc.namespace}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -625,8 +700,63 @@ export function EditorView() {
               <>
                 <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>Source Control</div>
                 <div style={{ padding: "10px 12px" }}>
-                  <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "8px" }}>main</div>
-                  <div style={{ fontSize: "11px", color: "#666", fontFamily: "sans-serif" }}>No staged changes</div>
+                  <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "8px" }}>Git Credentials</div>
+                  <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif", marginBottom: "8px", lineHeight: "1.5" }}>
+                    Store a personal access token so Anvay can push code changes on your behalf.
+                  </div>
+                  {gitCreds.length === 0 ? (
+                    <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif", marginBottom: "8px" }}>No credentials configured</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "8px" }}>
+                      {gitCreds.map(c => (
+                        <div key={c.provider} style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: "3px", padding: "5px 8px", fontSize: "10px", fontFamily: "sans-serif", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span>
+                            <span style={{ color: "#10b981", marginRight: "5px" }}>✓</span>
+                            <span style={{ color: "#d4d4d4" }}>{c.provider}</span>
+                            {c.username && <span style={{ color: "#555", marginLeft: "5px" }}>{c.username}</span>}
+                          </span>
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/user/git-credentials/${c.provider}`, { method: "DELETE" });
+                              setGitCreds(prev => prev.filter(x => x.provider !== c.provider));
+                            }}
+                            style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "10px" }}
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!showGitCredForm ? (
+                    <button
+                      onClick={() => setShowGitCredForm(true)}
+                      style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid #2a2a2a", color: "#888", padding: "5px 8px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}
+                    >+ Add credentials</button>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                      <select value={gitCredProvider} onChange={e => setGitCredProvider(e.target.value)} style={{ background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "10px", padding: "5px 6px", borderRadius: "3px", outline: "none" }}>
+                        <option value="github">GitHub</option>
+                        <option value="gitlab">GitLab</option>
+                        <option value="bitbucket">Bitbucket</option>
+                      </select>
+                      <input value={gitCredToken} onChange={e => setGitCredToken(e.target.value)} placeholder="Personal Access Token" type="password" style={{ background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "10px", padding: "5px 6px", borderRadius: "3px", outline: "none" }} />
+                      <input value={gitCredUsername} onChange={e => setGitCredUsername(e.target.value)} placeholder="Username (optional)" style={{ background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "10px", padding: "5px 6px", borderRadius: "3px", outline: "none" }} />
+                      <input value={gitCredEmail} onChange={e => setGitCredEmail(e.target.value)} placeholder="Email (optional)" style={{ background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "10px", padding: "5px 6px", borderRadius: "3px", outline: "none" }} />
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        <button
+                          onClick={async () => {
+                            if (!gitCredToken) return;
+                            const res = await fetch("/api/user/git-credentials", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: gitCredProvider, token: gitCredToken, username: gitCredUsername || undefined, email: gitCredEmail || undefined }) });
+                            if (res.ok) {
+                              setGitCreds(prev => [...prev.filter(c => c.provider !== gitCredProvider), { provider: gitCredProvider, username: gitCredUsername || null, email: gitCredEmail || null, configured: true }]);
+                              setGitCredToken(""); setGitCredUsername(""); setGitCredEmail(""); setShowGitCredForm(false);
+                            }
+                          }}
+                          style={{ flex: 1, background: "#0e639c", border: "none", color: "#fff", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}
+                        >Save</button>
+                        <button onClick={() => setShowGitCredForm(false)} style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#888", padding: "5px 8px", borderRadius: "3px", cursor: "pointer", fontSize: "10px" }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}

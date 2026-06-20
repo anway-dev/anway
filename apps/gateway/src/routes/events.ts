@@ -4,23 +4,53 @@ import { timingSafeEqual, createHmac } from 'node:crypto'
 import pino from 'pino'
 import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
+import { decryptJson } from '../utils/crypto.js'
 import { IncidentService } from '../services/incident.js'
 
 const log = pino({ name: 'event-routes' })
 
-// Webhook senders (Alertmanager, CI, Gitea) cannot sign tenant JWTs. They
-// authenticate with a static bearer token (ANVAY_WEBHOOK_TOKEN) which maps to
-// ANVAY_WEBHOOK_TENANT. JWT auth still works on the same routes.
-function webhookTenantFor(request: FastifyRequest): string | null {
-  const expected = process.env['ANVAY_WEBHOOK_TOKEN']
-  if (!expected) return null
+/**
+ * Resolve the tenant for an inbound webhook alert.
+ * Priority:
+ *   1. Static ANVAY_WEBHOOK_TOKEN env var (backward compat, maps to ANVAY_WEBHOOK_TENANT)
+ *   2. Per-tenant alertmanager connector_config.credentials_enc.webhookToken
+ */
+async function webhookTenantFor(request: FastifyRequest): Promise<string | null> {
   const header = request.headers.authorization
   if (!header?.startsWith('Bearer ')) return null
   const presented = header.slice('Bearer '.length)
-  const a = Buffer.from(presented)
-  const b = Buffer.from(expected)
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
-  return process.env['ANVAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
+
+  // 1. Static env var (backward compat)
+  const expected = process.env['ANVAY_WEBHOOK_TOKEN']
+  if (expected) {
+    const a = Buffer.from(presented)
+    const b = Buffer.from(expected)
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      return process.env['ANVAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
+    }
+  }
+
+  // 2. Per-tenant alertmanager connector config
+  try {
+    const rows = await prisma.$queryRaw<Array<{ tenant_id: string; credentials_enc: string }>>`
+      SELECT tenant_id::text, credentials_enc FROM connector_config
+      WHERE connector_type = 'alertmanager' AND enabled = true AND credentials_enc IS NOT NULL
+    `
+    for (const row of rows) {
+      try {
+        const creds = decryptJson<Record<string, unknown>>(row.credentials_enc)
+        const token = creds['webhookToken'] as string | undefined
+        if (!token) continue
+        const a = Buffer.from(presented)
+        const b = Buffer.from(token)
+        if (a.length === b.length && timingSafeEqual(a, b)) {
+          return row.tenant_id
+        }
+      } catch { continue }
+    }
+  } catch { /* ignore DB errors */ }
+
+  return null
 }
 
 function verifyGitHubSignature(body: Buffer, signature: string, secret: string): boolean {
@@ -100,9 +130,8 @@ export async function eventRoutes(app: FastifyInstance) {
 
   // Authenticate: static webhook token first, then HMAC, then JWT
   const authenticateEvent = async (request: FastifyRequest, reply: FastifyReply) => {
-    // Static webhook token is authentication — no HMAC required on top.
-    // Alertmanager, internal connectors use ANVAY_WEBHOOK_TOKEN bearer auth.
-    const webhookTenant = webhookTenantFor(request)
+    // Static webhook token / per-tenant alertmanager token — no HMAC required on top.
+    const webhookTenant = await webhookTenantFor(request)
     if (webhookTenant) {
       request.user = { sub: 'webhook', tenantId: webhookTenant, role: 'system' } as typeof request.user
       return

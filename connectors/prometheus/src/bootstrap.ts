@@ -6,7 +6,7 @@ export class PrometheusBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'http://localhost:9090'
+    const baseUrl = (payload['url'] as string | undefined) ?? (payload['baseUrl'] as string | undefined) ?? 'http://localhost:9090'
     let jobs: string[]
     try {
       // Active targets only — label-values API includes stale jobs from TSDB history

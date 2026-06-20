@@ -18,15 +18,11 @@ export async function GET() {
   if (!token) return new Response(EMPTY, { status: 200, headers: { 'Content-Type': 'application/json' } })
 
   try {
-    const [entResp, relResp] = await Promise.all([
-      fetch(`${GATEWAY_URL}/api/graph/entities`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`${GATEWAY_URL}/api/graph/relationships`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null),
-    ])
+    const entResp = await fetch(`${GATEWAY_URL}/api/graph/entities?limit=500&exclude_types=Incident,Commit,Deploy`, { headers: { Authorization: `Bearer ${token}` } })
     const entJson = await entResp.json().catch(() => ({}))
-    const relJson = relResp ? await relResp.json().catch(() => ({})) : {}
-    // Gateway wraps in { data: [...] } — normalize to { entities, relationships }
+    // Gateway returns { data: [...], relationships: [...], nextCursor }
     const entities = entJson.entities ?? entJson.data ?? []
-    const relationships = relJson.relationships ?? relJson.data ?? []
+    const relationships = entJson.relationships ?? []
     return Response.json({ entities, relationships }, { status: 200 })
   } catch {
     return new Response(EMPTY, { status: 200, headers: { 'Content-Type': 'application/json' } })

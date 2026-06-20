@@ -6,6 +6,7 @@ import { UUID_RE } from '../utils/validators.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
+import { decryptJson } from '../utils/crypto.js'
 
 interface ConfigField { label: string; key: string; type: string }
 interface CatalogEntry { id: string; name: string; category: string; description: string; color: string; icon: string; capabilities: string[]; configFields: ConfigField[] }
@@ -25,6 +26,7 @@ const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "jira", name: "Jira", category: "Issue Tracking", description: "Issues, sprints, epics", color: "#0052cc", icon: "JR", capabilities: ["issues", "roadmap"], configFields: [{ label: "Site URL", key: "site", type: "text" }, { label: "API Token", key: "token", type: "password" }, { label: "Email", key: "email", type: "text" }] },
   { id: "loki", name: "Loki", category: "Logging", description: "Log aggregation (Grafana stack)", color: "#f9a825", icon: "LK", capabilities: ["logs"], configFields: [{ label: "Endpoint URL", key: "url", type: "text" }, { label: "Org ID", key: "org_id", type: "text" }] },
   { id: "terraform", name: "Terraform Cloud", category: "Infrastructure", description: "IaC runs, state, workspaces", color: "#7b42bc", icon: "TF", capabilities: ["infrastructure"], configFields: [{ label: "API Token", key: "token", type: "password" }, { label: "Organization", key: "org", type: "text" }] },
+  { id: "alertmanager", name: "Alertmanager", category: "Alerting", description: "Prometheus Alertmanager — active alerts, silences, inhibitions", color: "#e55b2e", icon: "AM", capabilities: ["alerts"], configFields: [{ label: "Endpoint URL", key: "baseUrl", type: "text" }, { label: "Webhook Token (Anvay receives alerts from Alertmanager with this bearer token)", key: "webhookToken", type: "password" }] },
   { id: "pagerduty", name: "PagerDuty", category: "Alerting", description: "Incidents, on-call schedules", color: "#06a94d", icon: "PD", capabilities: ["alerts", "incidents"], configFields: [{ label: "API Key", key: "api_key", type: "password" }, { label: "Service ID", key: "service_id", type: "text" }] },
   { id: "gke", name: "Google GKE", category: "Kubernetes", description: "GCP managed Kubernetes", color: "#4285f4", icon: "GK", capabilities: ["k8s", "infrastructure"], configFields: [{ label: "Project ID", key: "project_id", type: "text" }, { label: "Cluster Name", key: "cluster", type: "text" }, { label: "Service Account JSON", key: "sa_json", type: "textarea" }] },
   { id: "aws-cloudwatch", name: "AWS CloudWatch", category: "Cloud Health", description: "Metrics, alarms, logs, health events", color: "#ff9900", icon: "CW", capabilities: ["metrics", "logs", "alerts", "infrastructure"], configFields: [{ label: "Access Key ID", key: "access_key_id", type: "text" }, { label: "Secret Access Key", key: "secret_access_key", type: "password" }, { label: "Region", key: "region", type: "text" }] },
@@ -40,7 +42,7 @@ const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "jenkins", name: "Jenkins", category: "CI/CD", description: "Build pipelines, test results, deployments", color: "#d24939", icon: "JK", capabilities: ["ci", "deployments"], configFields: [{ label: "Jenkins URL", key: "url", type: "text" }, { label: "Username", key: "user", type: "text" }, { label: "API Token", key: "token", type: "password" }] },
   { id: "circleci", name: "CircleCI", category: "CI/CD", description: "Pipelines, workflows, test insights", color: "#343434", icon: "CC", capabilities: ["ci", "deployments"], configFields: [{ label: "API Token", key: "token", type: "password" }, { label: "Organization Slug", key: "org", type: "text" }] },
   { id: "vercel", name: "Vercel", category: "Deployment", description: "Frontend deployments, previews, edge functions", color: "#000000", icon: "VL", capabilities: ["deployments"], configFields: [{ label: "API Token", key: "token", type: "password" }, { label: "Team ID", key: "team_id", type: "text" }] },
-  { id: "k8s", name: "Kubernetes", category: "Kubernetes", description: "Self-hosted cluster — pods, services, events", color: "#326ce5", icon: "K8", capabilities: ["k8s", "infrastructure"], configFields: [{ label: "API Server URL", key: "server", type: "text" }, { label: "Bearer Token", key: "token", type: "password" }, { label: "Namespace", key: "namespace", type: "text" }] },
+  { id: "k8s", name: "Kubernetes", category: "Kubernetes", description: "Self-hosted cluster — pods, services, events", color: "#326ce5", icon: "K8", capabilities: ["k8s", "infrastructure"], configFields: [{ label: "API Server URL", key: "server", type: "text" }, { label: "Bearer Token", key: "token", type: "password" }, { label: "Namespace", key: "namespace", type: "text" }, { label: "Kubeconfig (YAML content or file path)", key: "kubeconfig", type: "textarea" }] },
   { id: "vault", name: "HashiCorp Vault", category: "Security", description: "Secrets, policies, audit leases", color: "#ffcf25", icon: "VT", capabilities: ["secrets", "infrastructure"], configFields: [{ label: "Vault URL", key: "url", type: "text" }, { label: "Token", key: "token", type: "password" }, { label: "Namespace", key: "namespace", type: "text" }] },
   { id: "snyk", name: "Snyk", category: "Security", description: "Dependency vulns, SAST, container scanning", color: "#4c4a73", icon: "SK", capabilities: ["security", "code"], configFields: [{ label: "API Token", key: "token", type: "password" }, { label: "Org ID", key: "org_id", type: "text" }] },
   { id: "sonarqube", name: "SonarQube", category: "Code Quality", description: "Code smell, coverage, technical debt, security hotspots", color: "#4e9bcd", icon: "SQ", capabilities: ["code", "security"], configFields: [{ label: "Server URL", key: "url", type: "text" }, { label: "Token", key: "token", type: "password" }, { label: "Project Key", key: "project", type: "text" }] },
@@ -135,7 +137,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
     })
   })
 
-  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','pagerduty','k8s','aws-cloudwatch'])
+  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','alertmanager','pagerduty','k8s','aws-cloudwatch'])
 const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
 
   // T9: Trigger bootstrap
@@ -232,6 +234,108 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
       connected: statusMap.get(c.id)?.enabled ?? false,
       bootstrappedAt: statusMap.get(c.id)?.bootstrappedAt ?? null,
     }))
+  })
+
+  // POST /api/connectors/grafana/provision-dashboards
+  // For each Service entity in the graph: if no Grafana dashboard exists with that title,
+  // create a basic one with error-rate, latency, and request-rate panels (Prometheus datasource).
+  app.post('/api/connectors/grafana/provision-dashboards', {
+    preHandler: [app.authenticate, requireRole('admin', 'sre')],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+
+    // Load Grafana connector credentials
+    const grafanaRows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ credentials_enc: string }>>`
+        SELECT credentials_enc FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = 'grafana' AND enabled = true LIMIT 1
+      `
+    ).catch(() => [])
+    if (grafanaRows.length === 0) return reply.code(404).send({ error: 'grafana connector not configured' })
+
+    const grafanaCreds = decryptJson<Record<string, unknown>>(grafanaRows[0]!.credentials_enc)
+    const grafanaBase = (grafanaCreds['url'] as string | undefined) ?? 'http://localhost:3001'
+    const grafanaToken = grafanaCreds['token'] as string | undefined
+    const grafanaAuth = grafanaToken ? `Bearer ${grafanaToken}` : `Basic ${Buffer.from(`admin:${grafanaCreds['password'] ?? 'admin'}`).toString('base64')}`
+
+    // Resolve Prometheus datasource UID
+    let promDsUid = 'prometheus'
+    try {
+      const dsRes = await fetch(`${grafanaBase}/api/datasources`, { headers: { Authorization: grafanaAuth } })
+      if (dsRes.ok) {
+        const ds = await dsRes.json() as Array<{ uid: string; type: string }>
+        const prom = ds.find(d => d.type === 'prometheus')
+        if (prom) promDsUid = prom.uid
+      }
+    } catch { /* use default */ }
+
+    // Existing dashboards
+    const existingTitles = new Set<string>()
+    try {
+      const searchRes = await fetch(`${grafanaBase}/api/search?type=dash-db`, { headers: { Authorization: grafanaAuth } })
+      if (searchRes.ok) {
+        const boards = await searchRes.json() as Array<{ title: string }>
+        boards.forEach(b => existingTitles.add(b.title))
+      }
+    } catch { /* ignore */ }
+
+    // Service entities from graph
+    const services = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ name: string; metadata: Record<string, unknown> }>>`
+        SELECT name, metadata FROM entities
+        WHERE tenant_id = ${tenantId}::uuid AND type = 'Service'
+        ORDER BY name ASC LIMIT 100
+      `
+    ).catch(() => [])
+
+    const created: string[] = []
+    const skipped: string[] = []
+
+    for (const svc of services) {
+      const title = `${svc.name} — Service Overview`
+      if (existingTitles.has(title)) { skipped.push(svc.name); continue }
+
+      const job = ((svc.metadata?.['connectorCoordinates'] as Record<string, unknown> | undefined)?.['prometheus'] as { resourceIds?: { job?: string } } | undefined)?.resourceIds?.job ?? svc.name
+
+      const panels = [
+        {
+          id: 1, type: 'timeseries', title: 'Request Rate',
+          gridPos: { h: 8, w: 12, x: 0, y: 0 },
+          datasource: { type: 'prometheus', uid: promDsUid },
+          targets: [{ expr: `sum(rate(http_requests_total{job="${job}"}[2m]))`, legendFormat: 'req/s' }],
+        },
+        {
+          id: 2, type: 'timeseries', title: 'Error Rate',
+          gridPos: { h: 8, w: 12, x: 12, y: 0 },
+          datasource: { type: 'prometheus', uid: promDsUid },
+          targets: [{ expr: `sum(rate(http_requests_total{job="${job}",status=~"5.."}[2m])) / sum(rate(http_requests_total{job="${job}"}[2m]))`, legendFormat: 'error %' }],
+          fieldConfig: { defaults: { unit: 'percentunit', thresholds: { steps: [{ value: 0, color: 'green' }, { value: 0.05, color: 'red' }] } } },
+        },
+        {
+          id: 3, type: 'timeseries', title: 'P95 Latency',
+          gridPos: { h: 8, w: 24, x: 0, y: 8 },
+          datasource: { type: 'prometheus', uid: promDsUid },
+          targets: [{ expr: `histogram_quantile(0.95, sum by(le)(rate(http_request_duration_seconds_bucket{job="${job}"}[5m])))`, legendFormat: 'p95' }],
+          fieldConfig: { defaults: { unit: 's' } },
+        },
+      ]
+
+      try {
+        const res = await fetch(`${grafanaBase}/api/dashboards/db`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: grafanaAuth },
+          body: JSON.stringify({
+            dashboard: { id: null, title, panels, schemaVersion: 36, version: 0, refresh: '30s', time: { from: 'now-1h', to: 'now' } },
+            overwrite: false,
+            folderId: 0,
+          }),
+        })
+        if (res.ok) created.push(svc.name)
+        else skipped.push(svc.name)
+      } catch { skipped.push(svc.name) }
+    }
+
+    return { ok: true, created, skipped, total: services.length }
   })
 
   // POST /api/connectors/:type/reconnect — triggers re-bootstrap

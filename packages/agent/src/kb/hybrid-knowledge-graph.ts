@@ -51,6 +51,9 @@ export class HybridKnowledgeGraph implements IKnowledgeGraph {
   getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null> {
     return this.structural.getEntityByExternalRef(externalId, tenantId)
   }
+  deleteEntitiesByOrgPrefix(type: string, orgPrefix: string, keepNames: string[], tenantId: TenantId): Promise<number> {
+    return this.structural.deleteEntitiesByOrgPrefix(type, orgPrefix, keepNames, tenantId)
+  }
 
   async search(query: string, tenantId: TenantId, topK: number): Promise<KBEntry[]> {
     if (this.graphiti) {

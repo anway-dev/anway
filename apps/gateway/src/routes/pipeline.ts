@@ -13,6 +13,38 @@ import type { FastifyLoggerInstance } from 'fastify'
 import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+/**
+ * Resolve a kubeconfig path for the tenant's K8s or EKS connector.
+ * Returns `{ path, cleanup }` — caller MUST call cleanup() when done.
+ * Falls back to KUBECONFIG env var if no connector configured.
+ */
+async function resolveKubeconfigPath(tenantId: string): Promise<{ path: string; cleanup: () => void }> {
+  const noop = () => {}
+  try {
+    const rows = await prisma.$queryRaw<Array<{ credentials_enc: string | null }>>`
+      SELECT credentials_enc FROM connector_config
+      WHERE tenant_id = ${tenantId}::uuid AND connector_type IN ('k8s', 'eks') AND enabled = true
+      ORDER BY bootstrapped_at DESC NULLS LAST LIMIT 1
+    `
+    if (rows.length > 0 && rows[0]!.credentials_enc) {
+      const creds = decryptJson<Record<string, unknown>>(rows[0]!.credentials_enc)
+      const kubeconfig = creds['kubeconfig'] as string | undefined
+      if (kubeconfig && kubeconfig.trimStart().startsWith('apiVersion')) {
+        const tmp = join(tmpdir(), `anvay-k8s-${tenantId}-${Date.now()}.yaml`)
+        writeFileSync(tmp, kubeconfig, { mode: 0o600 })
+        return { path: tmp, cleanup: () => { try { unlinkSync(tmp) } catch {} } }
+      }
+      if (kubeconfig) {
+        return { path: kubeconfig, cleanup: noop }
+      }
+    }
+  } catch { /* fall back to env */ }
+  return { path: process.env['KUBECONFIG'] ?? '', cleanup: noop }
+}
 const stageRunEvents = new EventEmitter()
 stageRunEvents.setMaxListeners(200)
 
@@ -647,11 +679,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const helmRelease = process.env['HELM_RELEASE'] ?? 'anvay'
             const helmChart = process.env['HELM_CHART'] ?? 'infra/helm/anvay'
             const registry = process.env['DOCKER_REGISTRY'] ?? ''
-            const kubeconfig = process.env['KUBECONFIG'] ?? ''
+            const { path: kubeconfig, cleanup: kubeconfigCleanup } = await resolveKubeconfigPath(tenantId)
 
             if (!kubeconfig) {
-              // DEMO: no KUBECONFIG — emit simulation output
-              sse({ type: 'status', message: `[DEMO] Deploying to ${helmNamespace} (set KUBECONFIG to enable real deploy)` })
+              // DEMO: no KUBECONFIG / K8s connector — emit simulation output
+              sse({ type: 'status', message: `[DEMO] Deploying to ${helmNamespace} (register K8s connector to enable real deploy)` })
               await new Promise(r => setTimeout(r, 400))
               for (const line of [
                 `[DEMO] helm upgrade --install ${helmRelease} ${helmChart} --namespace ${helmNamespace}`,
@@ -728,12 +760,13 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const deploySummary = `Deployed ${imageTag} to ${helmNamespace}`
             await finishRun('done', { summary: deploySummary, imageTag, namespace: helmNamespace })
             sse({ type: 'done', output: { summary: deploySummary } })
+            kubeconfigCleanup()
             break
           }
 
           case 'monitor': {
-            // Real health check if KUBECONFIG available, else use metrics from DB
-            const kubeconfig = process.env['KUBECONFIG'] ?? ''
+            // Real health check if K8s connector configured, else use metrics from DB
+            const { path: kubeconfig, cleanup: kubeconfigCleanup2 } = await resolveKubeconfigPath(tenantId)
             const pipelineMeta2 = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
             const monitorNamespace = (pipelineMeta2?.['namespace'] as string | undefined)
               ?? (stageId.includes('prod') ? (process.env['HELM_NAMESPACE_PROD'] ?? 'anvay') : (process.env['HELM_NAMESPACE_STAGING'] ?? 'anvay-staging'))
@@ -831,6 +864,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
               await finishRun('done', { summary: monitorSummary })
               sse({ type: 'done', output: { summary: monitorSummary } })
             }
+            kubeconfigCleanup2()
             break
           }
 

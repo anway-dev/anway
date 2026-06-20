@@ -51,6 +51,7 @@ export class FakeKnowledgeGraph implements IKnowledgeGraph {
   async resolveContextByName(_n: string, _t: TenantId, _d?: number): Promise<AgentContext | null> { throw new Error('conformance: resolveContextByName not expected') }
   async markConnectorEntitiesStale(_c: string, _t: TenantId): Promise<number> { throw new Error('conformance: markConnectorEntitiesStale not expected') }
   async getEntityByExternalRef(_e: string, _t: TenantId): Promise<string | null> { throw new Error('conformance: getEntityByExternalRef not expected') }
+  async deleteEntitiesByOrgPrefix(_type: string, _org: string, _keep: string[], _t: TenantId): Promise<number> { return 0 }
 }
 
 export interface ConformanceConfig {

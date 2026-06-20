@@ -265,6 +265,16 @@ export class StructuralGraph implements IKnowledgeGraph {
     return rows[0]!.id
   }
 
+  async deleteEntitiesByOrgPrefix(type: string, orgPrefix: string, keepNames: string[], tenantId: TenantId): Promise<number> {
+    if (keepNames.length === 0) return 0
+    const placeholders = keepNames.map((_, i) => `$${i + 4}`).join(', ')
+    const rows = await this.query<{ id: string }>(
+      `DELETE FROM entities WHERE tenant_id = $1::uuid AND type = $2 AND name LIKE $3 AND name != ALL(ARRAY[${placeholders}]) RETURNING id`,
+      [tenantId, type, `${orgPrefix}/%`, ...keepNames],
+    ).catch(() => [])
+    return rows.length
+  }
+
   async markConnectorEntitiesStale(connectorType: string, tenantId: TenantId): Promise<number> {
     const now = new Date().toISOString()
     const rows = await this.query<{ id: string }>(

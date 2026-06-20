@@ -6,6 +6,9 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
 import { writeFile, rm } from 'node:fs/promises'
+import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
+import { encryptJson, decryptJson } from '../utils/crypto.js'
 
 // Restrict file access to these root directories
 const ALLOWED_ROOTS: string[] = [
@@ -261,6 +264,79 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
       }
 
       reply.raw.end()
+    },
+  )
+
+  // GET /api/editor/services — list Service entities from the knowledge graph for the service picker
+  app.get('/api/editor/services', { preHandler: [app.authenticate, requireRole('admin', 'dev', 'sre')] }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ id: string; name: string; metadata: Record<string, unknown>; updated_at: string }>>`
+        SELECT id, name, metadata, updated_at FROM entities
+        WHERE tenant_id = ${tenantId}::uuid AND type = 'Service'
+        ORDER BY name ASC LIMIT 200
+      `
+    ).catch(() => [])
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      namespace: (r.metadata?.['namespace'] as string | undefined) ?? null,
+      connectorCoordinates: (r.metadata?.['connectorCoordinates'] as Record<string, unknown> | undefined) ?? {},
+      updatedAt: r.updated_at,
+    }))
+  })
+
+  // GET /api/user/git-credentials — return configured providers (no token values)
+  app.get('/api/user/git-credentials', { preHandler: [app.authenticate] }, async (request) => {
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ provider: string; username: string | null; email: string | null; updated_at: string }>>`
+        SELECT provider, username, email, updated_at FROM user_git_credentials
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
+        ORDER BY provider ASC
+      `
+    ).catch(() => [])
+    return rows.map(r => ({ provider: r.provider, username: r.username, email: r.email, updatedAt: r.updated_at, configured: true }))
+  })
+
+  // PUT /api/user/git-credentials — store encrypted git token
+  app.put<{ Body: { provider: string; token: string; username?: string; email?: string } }>(
+    '/api/user/git-credentials',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { provider, token, username, email } = request.body
+      if (!provider || !token) return reply.code(400).send({ error: 'provider and token required' })
+      const VALID_PROVIDERS = new Set(['github', 'gitlab', 'bitbucket'])
+      if (!VALID_PROVIDERS.has(provider)) return reply.code(400).send({ error: `provider must be one of: ${[...VALID_PROVIDERS].join(', ')}` })
+      const tokenEnc = encryptJson(token)
+      await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          INSERT INTO user_git_credentials (id, tenant_id, user_id, provider, username, email, token_enc, created_at, updated_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, ${provider}, ${username ?? null}, ${email ?? null}, ${tokenEnc}, now(), now())
+          ON CONFLICT ON CONSTRAINT uq_user_git_cred
+          DO UPDATE SET token_enc = ${tokenEnc}, username = ${username ?? null}, email = ${email ?? null}, updated_at = now()
+        `
+      )
+      return { ok: true }
+    },
+  )
+
+  // DELETE /api/user/git-credentials/:provider — remove stored git token
+  app.delete<{ Params: { provider: string } }>(
+    '/api/user/git-credentials/:provider',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { provider } = request.params
+      const deleted = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          DELETE FROM user_git_credentials
+          WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND provider = ${provider}
+        `
+      ).catch(() => 0)
+      if (Number(deleted) === 0) return reply.code(404).send({ error: 'not found' })
+      return reply.code(204).send()
     },
   )
 

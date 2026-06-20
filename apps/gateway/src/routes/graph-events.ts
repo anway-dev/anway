@@ -115,14 +115,16 @@ export async function graphEventRoutes(app: FastifyInstance) {
   // Knowledge graph explorer — entities + relationships for the tenant
   app.get('/api/graph/entities', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
-    const { cursor, limit: limitStr } = request.query as { cursor?: string; limit?: string }
+    const { cursor, limit: limitStr, exclude_types } = request.query as { cursor?: string; limit?: string; exclude_types?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
+    const excludedTypes = exclude_types ? exclude_types.split(',').map(t => t.trim()).filter(Boolean) : []
     return withTenant(prisma, tenantId, async (tx) => {
       const entities = await tx.$queryRaw<GraphEntityRow[]>`
         SELECT id, name, type, metadata, updated_at AS "updatedAt"
         FROM entities
         WHERE tenant_id = ${tenantId}::uuid
         ${cursor ? Prisma.sql`AND id > ${cursor}::uuid` : Prisma.sql``}
+        ${excludedTypes.length > 0 ? Prisma.sql`AND type != ALL(${excludedTypes}::text[])` : Prisma.sql``}
         ORDER BY id ASC
         LIMIT ${limit + 1}
       `
@@ -253,6 +255,61 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
     try {
       await agent.handle(event)
+
+      // For deploy_trigger: create a pipeline + pending gate so the UI surfaces the approval
+      if (event.type === 'deploy_trigger') {
+        const dt = event as import('@anvay/agent').DeployTrigger
+        const pipelineName = `Deploy ${dt.service}:${dt.sha.slice(0, 7)} → ${dt.environment}`
+        const stages = [
+          { id: 'gate.deploy', name: '→ Deploy', icon: '⊡', color: '#f59e0b', type: 'gate', gate: true, env: null },
+          { id: 'deploy', name: 'Deploy', icon: '▶', color: '#ef4444', type: 'deploy', gate: false, env: dt.environment, envLabel: dt.environment },
+          { id: 'monitor', name: 'Monitor', icon: '◎', color: '#ef4444', type: 'monitor', gate: false, env: dt.environment, envLabel: dt.environment },
+        ]
+        const meta = JSON.stringify({
+          service: dt.service,
+          sha: dt.sha,
+          imageUri: dt.imageUri,
+          environment: dt.environment,
+          triggeredBy: dt.triggeredBy,
+          workflowRun: dt.workflowRun ?? null,
+          commitMessage: dt.commitMessage ?? null,
+          namespace: dt.environment === 'prod' ? 'demo' : `demo-${dt.environment}`,
+          imageTag: dt.sha.slice(0, 7),
+        })
+
+        const pipelineRows = await withTenant(prisma, event.tenantId as TenantId, (tx) =>
+          tx.$queryRaw<Array<{ id: string }>>`
+            INSERT INTO pipelines (id, tenant_id, name, description, stages, status, metadata, created_at, updated_at)
+            VALUES (gen_random_uuid(), ${event.tenantId}::uuid, ${pipelineName}, ${'Triggered by GitHub Actions'}, ${JSON.stringify(stages)}::jsonb, 'waiting', ${meta}::jsonb, now(), now())
+            RETURNING id
+          `
+        ).catch(() => [] as Array<{ id: string }>)
+
+        if (pipelineRows.length > 0) {
+          const pipelineId = pipelineRows[0]!.id
+          // Create waiting gate_run so the UI shows it as pending approval
+          await withTenant(prisma, event.tenantId as TenantId, (tx) =>
+            tx.$executeRaw`
+              INSERT INTO pipeline_stage_runs (id, pipeline_id, tenant_id, stage_id, status, output, started_at)
+              VALUES (gen_random_uuid(), ${pipelineId}::uuid, ${event.tenantId}::uuid, 'gate.deploy', 'waiting',
+                ${JSON.stringify({ message: 'Awaiting approval to deploy', service: dt.service, sha: dt.sha, imageUri: dt.imageUri, triggeredBy: dt.triggeredBy })}::jsonb, now())
+            `
+          ).catch(() => null)
+
+          await withTenant(prisma, event.tenantId as TenantId, (tx) =>
+            tx.$executeRaw`
+              INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
+              VALUES (gen_random_uuid(), ${event.tenantId}::uuid, '00000000-0000-0000-0000-000000000002'::uuid,
+                '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_deploy_gate'},
+                ${JSON.stringify({ pipelineId, stageId: 'gate.deploy', service: dt.service, sha: dt.sha, triggeredBy: dt.triggeredBy })}::jsonb,
+                'pending', now())
+            `
+          ).catch(() => null)
+
+          return { ok: true, pipelineId }
+        }
+      }
+
       return { ok: true }
     } catch (err) {
       request.log.error({ err, eventType: event.type }, 'GraphBuilderAgent event handling failed')

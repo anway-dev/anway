@@ -2,6 +2,11 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 rule_files:
   - 'rules/anvay.yml'
 
@@ -10,10 +15,10 @@ scrape_configs:
     static_configs:
       - targets: ['otel-collector:8889']
 
-  # In dev compose, gateway runs as a Docker service — use service name
+  # Gateway runs on host in dev — use host.docker.internal so Prometheus container can reach it
   - job_name: 'anvay-gateway'
     static_configs:
-      - targets: ['gateway:8510']
+      - targets: ['host.docker.internal:4000']
     metrics_path: /metrics
 
   - job_name: 'prometheus'

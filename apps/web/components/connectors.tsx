@@ -14,7 +14,7 @@ interface Connector {
   connected: boolean;
 }
 
-const CATEGORIES = ["All", "Code & CI", "CI/CD", "Observability", "Logging", "Issue Tracking", "Error Tracking", "Alerting", "Deployment", "Kubernetes", "Infrastructure", "Security", "Code Quality", "Collaboration", "Docs", "Cloud Health", "Feature Flags"];
+const CATEGORIES = ["All", "Connected", "Code & CI", "CI/CD", "Observability", "Logging", "Issue Tracking", "Error Tracking", "Alerting", "Deployment", "Kubernetes", "Infrastructure", "Security", "Code Quality", "Collaboration", "Docs", "Cloud Health", "Feature Flags"];
 
 export function ConnectorsView() {
   const [filter, setFilter] = useState("All");
@@ -75,7 +75,7 @@ export function ConnectorsView() {
       .catch(() => {});
   }, []);
 
-  const visible = filter === "All" ? catalog : catalog.filter((c) => c.category === filter);
+  const visible = filter === "All" ? catalog : filter === "Connected" ? catalog.filter(c => c.connected) : catalog.filter((c) => c.category === filter);
   const connected = catalog.filter(c => c.connected).length;
 
   async function handleConnect() {
@@ -111,7 +111,10 @@ export function ConnectorsView() {
         <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Integrations</div>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
           <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", margin: 0 }}>Connect Your Stack</h2>
-          <span style={{ fontSize: "12px", color: "#10b981" }}>{connected} / {catalog.length} connected</span>
+          <span
+            onClick={() => setFilter("Connected")}
+            style={{ fontSize: "12px", color: "#10b981", cursor: "pointer", textDecoration: filter === "Connected" ? "underline" : "none" }}
+          >{connected} / {catalog.length} connected</span>
         </div>
         <p style={{ fontSize: "12px", color: "#888", marginTop: "6px", maxWidth: "520px" }}>
           Anvay reads from your existing tools — no data migration, no rip-and-replace. Connect once, get unified lifecycle visibility.

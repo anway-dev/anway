@@ -40,12 +40,17 @@ export class GitHubBootstrap implements IConnectorBootstrap {
     const org = payload['org'] as string | undefined
     if (!org) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
 
-    const repos = await this.runGh<Array<{ name: string; defaultBranchRef?: { name: string }; languages: { node: { name: string } }[] }>>([
+    const repos = await this.runGh<Array<{ name: string; isFork: boolean; defaultBranchRef?: { name: string }; languages: { node: { name: string } }[] }>>([
       'repo', 'list', org,
-      '--json', 'name,defaultBranchRef,languages',
+      '--json', 'name,isFork,defaultBranchRef,languages',
+      '--source',
       '--limit', '100',
     ])
     if (!repos) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
+
+    // Prune Repo entities seeded from this org that are no longer in the source repo list
+    const validRepoNames = repos.map(r => `${org}/${r.name}`)
+    await this.kg.deleteEntitiesByOrgPrefix('Repo', org, validRepoNames, tenantId).catch(() => 0)
 
     let entitiesUpserted = 0
     let relationshipsUpserted = 0

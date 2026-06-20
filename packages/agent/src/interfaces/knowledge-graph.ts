@@ -98,4 +98,6 @@ export interface IKnowledgeGraph {
   getEntityByExternalRef(externalId: string, tenantId: TenantId): Promise<string | null>
   upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string>
   upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<string>
+  /** Delete Repo entities whose names start with `org/` but are NOT in `keepNames`. Returns deleted count. */
+  deleteEntitiesByOrgPrefix(type: string, orgPrefix: string, keepNames: string[], tenantId: TenantId): Promise<number>
 }

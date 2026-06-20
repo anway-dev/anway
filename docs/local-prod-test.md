@@ -1,61 +1,126 @@
-# Local Prod-Like Test — End-to-End Lifecycle
+# Anvay — Setup Guide
 
-> **Goal:** Bring up a real 15-service Kubernetes demo cloud, connect it to Anvay from scratch (no pre-seeded data), and verify every major flow: K8s bootstrap, Prometheus metrics, Alertmanager → incident, deploy gate approval, editor service picker, and Grafana dashboards.
+> Two paths: **Path A** runs Anvay locally via docker-compose against a minikube demo cloud. **Path B** deploys Anvay to a real Kubernetes cluster.
 
 ---
 
-## Prerequisites
-
-Install on the host:
+## Step 0 — Clone
 
 ```bash
+git clone git@github.com:rgplvr/restol.git
+cd restol
+```
+
+No `pnpm install` on the host — containers manage their own dependencies.
+
+---
+
+---
+
+# Path A — Local (docker-compose + minikube)
+
+---
+
+## A1 — Prerequisites
+
+```bash
+# Docker Desktop (includes docker + docker compose)
+brew install --cask docker
+# Open Docker Desktop, wait for engine to start
+
+# Demo K8s cloud + tooling
 brew install minikube kubectl helm
-# Docker Desktop must already be running
 ```
 
 Verify:
 
 ```bash
-minikube version    # v1.32+
-kubectl version     # v1.29+
-helm version        # v3.14+
-docker info         # Engine running
+docker info              # Engine running
+docker compose version   # v2+
+minikube version         # v1.32+
+kubectl version          # v1.29+
+helm version             # v3.14+
 ```
 
-Anvay repo:
+---
+
+## A2 — Start Anvay (docker-compose)
+
+### A2a. Create gateway env file
+
+Create `apps/gateway/.env` in the repo:
 
 ```bash
-cd /path/to/restol
-pnpm install
+# Demo mode — enables one-click login
+DEMO_MODE=true
+
+# JWT signing key
+JWT_SECRET=local-dev-secret-change-me
+
+# At-rest encryption key for connector credentials (64 hex chars)
+ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000001
+
+# Alertmanager webhook — must match ANVAY_WEBHOOK_TOKEN in test-cloud-setup/.env.local
+ANVAY_WEBHOOK_TOKEN=anvay-demo-webhook-token
+ANVAY_WEBHOOK_TENANT=00000000-0000-0000-0000-000000000001
+
+# CD connector key (used by deploy_trigger events from GitHub Actions / CI)
+CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
+
+# LLM — pick one
+ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# OLLAMA_ENDPOINT=http://localhost:11434/v1
 ```
 
+> Do not set `KUBECONFIG` — Anvay reads credentials from the K8s connector config after you register it.
+
+### A2b. Start core services
+
+From the repo root:
+
+```bash
+docker compose -f infra/docker-compose.dev.yml up -d postgres redis gateway web
+```
+
+First run pulls images and installs packages inside containers (~3 min). Watch progress:
+
+```bash
+docker compose -f infra/docker-compose.dev.yml logs -f gateway
+# Wait for: Gateway listening at http://0.0.0.0:8510
+```
+
+### A2c. Run migrations + seed
+
+```bash
+docker compose -f infra/docker-compose.dev.yml exec gateway \
+  pnpm --filter anvay-gateway prisma migrate deploy
+
+docker compose -f infra/docker-compose.dev.yml exec gateway \
+  pnpm --filter anvay-gateway db:seed
+```
+
+### A2d. Verify
+
+```bash
+curl -s http://localhost:8510/health | python3 -m json.tool
+# { "status": "ok", "db": "ok" }
+```
+
+Open `http://localhost:8500` — Anvay login page appears.
+
 ---
 
-## Accounts
+## A3 — Start the Demo Cloud (minikube)
 
-| URL | Credentials |
-|-----|-------------|
-| Anvay web | `http://localhost:3000` |
-| Grafana | `http://localhost:3001` — admin / admin |
-| Prometheus | `http://localhost:9090` |
-| Alertmanager | `http://localhost:9093` |
-
-Anvay login: `admin@demo.anvay.dev` — any password (dev token mode).
-
----
-
-## Phase 1 — Start the Demo Cloud (minikube)
-
-This brings up all 15 demo services plus the full observability stack.
+This brings up 15 demo services + full observability stack (Prometheus, Grafana, Alertmanager).
 
 ```bash
 cd test-cloud-setup
-
-# Create local env
 cp .env.example .env.local
 ```
 
-Edit `.env.local` — set exactly these two values:
+Edit `.env.local`:
 
 ```bash
 JWT_SECRET=local-dev-secret-change-me
@@ -67,274 +132,147 @@ source .env.local
 ./scripts/local-k8s.sh
 ```
 
-This takes 8–12 minutes. When it finishes you will see a summary with the minikube IP and all 15 pods in `demo` namespace.
-
-Verify:
+Takes 8–12 minutes. When done, verify:
 
 ```bash
-kubectl get pods -n demo
-# All 15 pods: Running
-kubectl get pods -n observability
-# kube-prometheus-stack-*, loki-*: Running
+kubectl get pods -n demo          # all 15: Running
+kubectl get pods -n observability # kube-prometheus-stack-*, loki-*: Running
 ```
 
-**Open four port-forwards** (keep each in its own terminal tab):
+**Open three port-forwards** (one terminal tab each):
 
 ```bash
-# Prometheus
 kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 -n observability
-
-# Grafana
 kubectl port-forward svc/kube-prometheus-stack-grafana 3001:80 -n observability
-
-# Alertmanager
 kubectl port-forward svc/kube-prometheus-stack-alertmanager 9093:9093 -n observability
-
-# Demo API (optional — verifies services are live)
-kubectl port-forward svc/api-gateway 8080:3000 -n demo
 ```
 
-Verify Prometheus is scraping demo services:
+Verify Prometheus scraping demo services:
 
 ```bash
 curl -s 'http://localhost:9090/api/v1/targets?state=active' | \
   python3 -m json.tool | grep '"job"' | sort -u
-# Should show: demo-services
+# demo-services
 ```
 
 ---
 
-## Phase 2 — Configure and Start Anvay
+## A4 — Log In
 
-### 2a. Gateway env
+Open `http://localhost:8500`.
 
-`apps/gateway/.env` — add/confirm these lines:
+Click **Demo Login** — signs a JWT for `admin@demo.anvay.dev`, no password needed.
 
-```bash
-# Webhook — Alertmanager sends alerts with this token
-# Must match ANVAY_WEBHOOK_TOKEN in .env.local
-ANVAY_WEBHOOK_TOKEN=anvay-demo-webhook-token
-ANVAY_WEBHOOK_TENANT=00000000-0000-0000-0000-000000000001
-
-# Connector API key for CD deploy_trigger events (format: key:tenantId)
-CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
-
-# LLM — pick one
-ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
-# OLLAMA_ENDPOINT=http://localhost:11434/v1
-```
-
-> **Do not set KUBECONFIG** — Anvay reads it from the K8s connector config after you register it.
-
-### 2b. Run migrations
-
-```bash
-cd apps/gateway
-pnpm prisma migrate deploy
-```
-
-Expected last line: `All migrations have been successfully applied.`
-
-### 2c. Start services
-
-Open three terminal tabs:
-
-**Tab 1 — Gateway:**
-
-```bash
-cd apps/gateway
-pnpm dev
-```
-
-Wait for: `Gateway listening at http://0.0.0.0:8510`
-
-**Tab 2 — Web:**
-
-```bash
-cd apps/web
-pnpm dev
-```
-
-Wait for: `Ready — started server on http://localhost:3000`
-
-**Tab 3 — Verify both up:**
-
-```bash
-curl -s http://localhost:8510/health | python3 -m json.tool
-# { "status": "ok", "db": "ok", "redis": "ok" }
-```
+KB graph is empty. All counts zero. Correct.
 
 ---
 
-## Phase 3 — Log In
+## Accounts
 
-Open `http://localhost:3000`.
-
-Login: `admin@demo.anvay.dev` — any password.
-
-You land on the **Chat** view. The KB graph is empty. All counts are zero. That is correct.
-
----
-
-## Phase 4 — Register Connectors
-
-Go to **Connectors** (left nav). Register each connector in order.
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Anvay web | `http://localhost:8500` | Demo Login |
+| Anvay gateway | `http://localhost:8510` | — |
+| Grafana (minikube) | `http://localhost:3001` | admin / admin |
+| Prometheus | `http://localhost:9090` | — |
+| Alertmanager | `http://localhost:9093` | — |
 
 ---
 
-### 4a. Kubernetes Connector
+## A5 — Register Connectors
 
-Click the **Kubernetes** card → Configure.
+Go to **Connectors** in the left nav. Register in order.
+
+### A5a. Kubernetes Connector
+
+Click **Kubernetes** → Configure.
 
 | Field | Value |
 |-------|-------|
-| API Server URL | _(leave blank)_ |
-| Bearer Token | _(leave blank)_ |
+| API Server URL | _(blank)_ |
+| Bearer Token | _(blank)_ |
 | Namespace | `demo` |
-| Kubeconfig (YAML content or file path) | Paste output of: `cat ~/.kube/config` |
+| Kubeconfig | Paste: `cat ~/.kube/config` |
 
-Click **Save**.
+Save → Bootstrap. Wait ~30 sec.
 
-Click **Bootstrap**.
+Verify — **Knowledge** page shows 15+ Service nodes, 3 Namespace nodes.
 
-**Verify** (wait ~30 sec):
+### A5b. Prometheus Connector
 
-```bash
-curl -s http://localhost:8510/api/connectors/k8s/bootstrap-status \
-  -H "Authorization: Bearer $(cat /tmp/anvay-token 2>/dev/null || echo DEV_TOKEN)" | python3 -m json.tool
-# { "bootstrapped": true, "bootstrappedAt": "...", "summary": { "status": "success" } }
-```
-
-Go to **Knowledge** page → should see **Service** and **Namespace** entities populated — one Service node per pod app label across all namespaces, plus `demo`, `observability`, `kube-system` Namespace nodes.
-
-Expected minimum: 15 Service nodes, 3 Namespace nodes.
-
----
-
-### 4b. Prometheus Connector
-
-Click **Prometheus** card → Configure.
+Click **Prometheus** → Configure.
 
 | Field | Value |
 |-------|-------|
 | Endpoint URL | `http://localhost:9090` |
-| Basic Auth User | _(leave blank)_ |
-| Basic Auth Password | _(leave blank)_ |
 
-Click **Save**.
+Save → Bootstrap.
 
-Click **Bootstrap**.
+Verify — Service entities gain `connectorCoordinates.prometheus.job` metadata.
 
-**Verify** — KB now has additional Service entries and existing ones gain `connectorCoordinates.prometheus.job` metadata. Check in Knowledge → click any service entity → metadata panel shows:
+### A5c. Alertmanager Connector
 
-```json
-{
-  "connectorCoordinates": {
-    "k8s":        { "resourceIds": { "namespace": "demo", "selector": "app=api-gateway" } },
-    "prometheus": { "resourceIds": { "job": "demo-services" } }
-  }
-}
-```
-
----
-
-### 4c. Alertmanager Connector
-
-Click **Alertmanager** card → Configure.
+Click **Alertmanager** → Configure.
 
 | Field | Value |
 |-------|-------|
 | Endpoint URL | `http://localhost:9093` |
 | Webhook Token | `anvay-demo-webhook-token` |
 
-Click **Save**. No bootstrap needed — this is receive-only.
+Save. No bootstrap needed — receive-only.
 
-This registers the per-tenant webhook token in the DB. Alertmanager in minikube already sends alerts to `http://host.docker.internal:4000/api/events/alert` — Anvay now matches the bearer token against this connector config to identify the tenant.
+Alertmanager in minikube sends alerts to `http://host.docker.internal:8510/api/events/alert`.
 
----
+### A5d. Grafana Connector
 
-### 4d. Grafana Connector
-
-Click **Grafana** card → Configure.
+Click **Grafana** → Configure.
 
 | Field | Value |
 |-------|-------|
 | Grafana URL | `http://localhost:3001` |
-| Service Account Token | _(leave blank — uses admin/admin basic auth for local dev)_ |
-| Org ID | _(leave blank)_ |
 
-Click **Save**.
-
-Click **Bootstrap** — this discovers existing dashboards and registers them in the graph.
+Save → Bootstrap (discovers existing dashboards).
 
 ---
 
-## Phase 5 — Provision Grafana Dashboards
+## A6 — Provision Grafana Dashboards
 
-After K8s + Prometheus are bootstrapped, create a service overview dashboard for every discovered service:
+Get your session token:
+> Browser DevTools → Application → Cookies → `localhost:8500` → `token` value
 
 ```bash
-# Get session token from browser:
-# DevTools → Application → Cookies → localhost:3000 → find "token" cookie value
-
 TOKEN=<paste-token-here>
 
 curl -s -X POST http://localhost:8510/api/connectors/grafana/provision-dashboards \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+# { "ok": true, "created": [...], "total": 15 }
 ```
 
-Expected:
-
-```json
-{
-  "ok": true,
-  "created": ["api-gateway", "auth-service", "cart-service", ...],
-  "skipped": [],
-  "total": 15
-}
-```
-
-Open `http://localhost:3001` → Dashboards → you should see 15 dashboards named `{service} — Service Overview` with error rate, request rate, and P95 latency panels.
+Open `http://localhost:3001` → Dashboards — 15 dashboards named `{service} — Service Overview`.
 
 ---
 
-## Phase 6 — Test the Alert Webhook
+## A7 — Test Alert Webhook
 
-The demo services have intentional chaos injection (random 500s, latency spikes). The `HighErrorRate` alert fires when error rate > 5% for 30 seconds.
-
-**Wait for organic alert** (~3–5 min with traffic simulator running), **or fire manually:**
+Fire a test alert manually:
 
 ```bash
 curl -X POST http://localhost:9093/api/v1/alerts \
   -H "Content-Type: application/json" \
   -d '[{
-    "labels": {
-      "alertname": "HighErrorRate",
-      "severity": "critical",
-      "service": "order-service",
-      "job": "demo-services"
-    },
-    "annotations": {
-      "summary": "High error rate on order-service",
-      "description": "Error rate 12% (threshold 5%)"
-    },
+    "labels": { "alertname": "HighErrorRate", "severity": "critical", "service": "order-service", "job": "demo-services" },
+    "annotations": { "summary": "High error rate on order-service", "description": "Error rate 12%" },
     "startsAt": "2024-01-01T00:00:00Z"
   }]'
 ```
 
-Alertmanager routes this to `http://host.docker.internal:4000/api/events/alert` with `Bearer anvay-demo-webhook-token`.
-
-**Verify in Anvay:**
-
-- **Signals** page → new alert appears, severity critical
-- **War Room** page → incident created, timeline shows the alert, `order-service` entity linked
+Verify in Anvay:
+- **Signals** page → alert appears
+- **War Room** page → incident created, `order-service` linked
 
 ---
 
-## Phase 7 — Test the Deploy Trigger
-
-This simulates a GitHub Actions workflow sending a CD event after a successful build.
+## A8 — Test Deploy Trigger
 
 ```bash
 curl -X POST http://localhost:8510/api/graph/events \
@@ -351,94 +289,42 @@ curl -X POST http://localhost:8510/api/graph/events \
     "triggeredBy": "raj@company.com",
     "commitMessage": "fix: reduce connection timeout"
   }'
+# { "ok": true, "pipelineId": "..." }
 ```
 
-Expected:
-
-```json
-{ "ok": true, "pipelineId": "<uuid>" }
-```
-
-Go to **Pipelines** page → should see:
-
-```
-Deploy api-gateway:abc1234 → prod
-  [⊡ → Deploy] WAITING APPROVAL   [▶ Deploy] pending   [◎ Monitor] pending
-```
-
-Click **Approve** on the gate.
-
-The deploy stage starts. If the K8s connector kubeconfig is correctly configured it runs:
-
-```
-→ helm upgrade --install ... --namespace demo
-→ Running database migrations…
-→ Deployed abc1234 to demo
-```
-
-If helm / kubeconfig has issues, it falls back to `[DEMO]` simulation mode showing what it would have run.
+Go to **Pipelines** → gate appears → click **Approve** → deploy runs.
 
 ---
 
-## Phase 8 — Editor with Live Services
+## A9 — Editor with Live Services
 
-Go to **Editor** → top-right **▾** button → click **⎈ Service** tab.
+Go to **Editor** → **▾** (top right) → **⎈ Service** tab.
 
-The dropdown should show all Service entities from the K8s bootstrap:
+All K8s-bootstrapped services appear. Select one — Anvay loads the source tree.
 
-```
-⎈ api-gateway         demo
-⎈ auth-service        demo
-⎈ cart-service        demo
-...
-```
-
-Select a service → Anvay tries to load the source tree from `services/{name}/` or `apps/{name}/` relative to `EDITOR_ROOT` (defaults to repo root two levels up from gateway). If source files exist there, the file tree loads.
-
-**Git credentials** — click **⬡** (git icon) in the left activity bar:
-
-- Click **+ Add credentials**
+**Add git credentials** — click **⬡** (git icon):
 - Provider: GitHub
-- Token: paste your GitHub PAT (`ghp_...`)
+- Token: your PAT (`ghp_...`)
 - Username: your GitHub username
-- Click **Save**
-
-Stored encrypted in DB. Anvay uses this when pushing AI-generated code changes on your behalf.
+- Save
 
 ---
 
-## Phase 9 — Verify Full Graph
-
-Go to **Knowledge** page → confirm:
-
-| Entity type | Expected minimum |
-|-------------|-----------------|
-| Service | 15 (one per K8s pod app label) |
-| Namespace | 3 (demo, observability, kube-system) |
-| Incident | 1+ (from alert webhook) |
-| Deploy | 1+ (from approved pipeline) |
-
-Click any Service entity → one-hop graph shows:
-- `HOSTED_IN` → Namespace
-- Metadata includes both `k8s` and `prometheus` connector coordinates
-
----
-
-## Verify Checklist
+## A10 — Verify Checklist
 
 ```
 [ ] kubectl get pods -n demo        — 15/15 Running
-[ ] kubectl get pods -n observability — prometheus, grafana, alertmanager Running
-[ ] http://localhost:9090 targets   — demo-services job active
-[ ] Anvay health: curl localhost:8510/health — db:ok, redis:ok
-[ ] K8s bootstrap                   — 15+ Service entities in KB
-[ ] Prometheus bootstrap            — entities gain prometheus connectorCoordinates
-[ ] Alert webhook                   — incident appears in War Room
-[ ] deploy_trigger                  — pipeline gate appears in Pipelines
+[ ] kubectl get pods -n observability — all Running
+[ ] http://localhost:9090 targets   — demo-services active
+[ ] curl localhost:8510/health      — ok
+[ ] K8s bootstrap                   — 15+ Services in KB
+[ ] Prometheus bootstrap            — connectorCoordinates on entities
+[ ] Alert webhook                   — incident in War Room
+[ ] deploy_trigger                  — pipeline gate in Pipelines
 [ ] Gate approve                    — deploy stage runs
 [ ] Grafana provision               — 15 dashboards created
 [ ] Editor service picker           — lists K8s services
-[ ] Git credentials                 — saved in git tab
+[ ] Git credentials                 — saved
 ```
 
 ---
@@ -446,63 +332,123 @@ Click any Service entity → one-hop graph shows:
 ## Teardown
 
 ```bash
-# Stop Anvay
-# Ctrl-C the gateway and web terminals
+# Stop Anvay + infra
+docker compose -f infra/docker-compose.dev.yml down
 
 # Stop minikube
 minikube stop     # pause (keeps state)
 minikube delete   # full wipe
+```
 
-# Stop Docker infra (Postgres + Redis)
-docker compose -f infra/docker-compose.dev.yml down
+Wipe DB volumes:
 
-# To wipe Anvay DB completely
+```bash
 docker compose -f infra/docker-compose.dev.yml down -v
 ```
 
-To restart clean later:
+**Restart clean:**
 
 ```bash
-# 1. Start infra
-docker compose -f infra/docker-compose.dev.yml up -d db redis
-
-# 2. Run migrations + seed
-cd apps/gateway
-pnpm prisma migrate deploy
-pnpm prisma db seed
-
-# 3. Remove seeded mock data (keep auth + environments)
-PGPASSWORD=anvay_dev_secret psql -h 127.0.0.1 -U anvay -d anvay -c "
-  SET session_replication_role = replica;
-  TRUNCATE TABLE user_git_credentials, user_perimeters, token_usage_daily,
-    pipeline_stage_runs, gate_events, gate_policies, pipelines, automation_runs,
-    incidents, trigger_rules, cron_jobs, kb_episodes, kb_entries, artifacts,
-    session_turns, entities, relationships, connector_config CASCADE;
-  SET session_replication_role = DEFAULT;
-"
-
-# 4. Start Anvay
-cd apps/gateway && pnpm dev &
-cd apps/web && pnpm dev &
-
-# 5. Follow Phase 4 onwards in this doc
+docker compose -f infra/docker-compose.dev.yml up -d postgres redis gateway web
+docker compose -f infra/docker-compose.dev.yml exec gateway \
+  pnpm --filter anvay-gateway prisma migrate deploy
+docker compose -f infra/docker-compose.dev.yml exec gateway \
+  pnpm --filter anvay-gateway db:seed
+# Then follow A5 onwards
 ```
 
 ---
 
 ## Troubleshooting
 
-**Alert not reaching Anvay:**  
-`host.docker.internal` only resolves on Mac with Docker Desktop. On Linux: replace with host IP (`ip route | grep default | awk '{print $3}'`) in `test-cloud-setup/k8s/observability/prometheus/values-local.yaml`.
+**Demo Login missing / 404:**
+`DEMO_MODE=true` missing from `apps/gateway/.env`. Add it and restart:
+```bash
+docker compose -f infra/docker-compose.dev.yml restart gateway
+```
 
-**K8s bootstrap fails:**  
-The kubeconfig in the connector config must contain the exact content from `~/.kube/config`. If minikube was restarted the certs change — re-register the connector with fresh `cat ~/.kube/config` output.
+**Alert not reaching Anvay:**
+`host.docker.internal` only resolves on Mac + Docker Desktop. On Linux use host IP from `ip route | grep default | awk '{print $3}'` in `test-cloud-setup/k8s/observability/prometheus/values-local.yaml`.
 
-**deploy_trigger returns 503:**  
-No LLM provider configured. Set `ANTHROPIC_API_KEY` or `OLLAMA_ENDPOINT` in `apps/gateway/.env` and restart the gateway.
+**K8s bootstrap fails:**
+Kubeconfig certs change on every minikube restart. Re-paste `cat ~/.kube/config` into the K8s connector config.
 
-**helm deploy falls back to [DEMO]:**  
-The kubeconfig path in connector config is wrong or the cluster is unreachable. Check: `kubectl cluster-info` — should show the minikube API server URL. Re-paste `~/.kube/config` content into the K8s connector.
+**deploy_trigger returns 503:**
+No LLM key set. Add `ANTHROPIC_API_KEY` to `apps/gateway/.env` and restart gateway.
 
-**Grafana provision returns 404:**  
-Grafana connector not registered. Complete step 4d first.
+**Grafana provision returns 404:**
+Register Grafana connector first (A5d).
+
+**Gateway won't start:**
+Check logs: `docker compose -f infra/docker-compose.dev.yml logs gateway`
+Most common: missing `JWT_SECRET` or `ENCRYPTION_KEY` in `apps/gateway/.env`.
+
+---
+
+---
+
+# Path B — Kubernetes (staging / production)
+
+---
+
+## B1 — Prerequisites
+
+```bash
+brew install --cask docker
+brew install kubectl helm
+# Configure kubeconfig for your cluster (EKS/GKE/AKS)
+```
+
+## B2 — Configure Secrets
+
+```bash
+kubectl create namespace anvay
+
+kubectl create secret generic anvay-secrets \
+  --from-literal=JWT_SECRET=<strong-random-64-chars> \
+  --from-literal=ENCRYPTION_KEY=<64-char-hex> \
+  --from-literal=DATABASE_URL=postgresql://user:pass@host:5432/anvay \
+  --from-literal=REDIS_URL=redis://host:6379 \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
+  --from-literal=CONNECTOR_API_KEYS=<key>:<tenantId> \
+  --from-literal=ANVAY_WEBHOOK_TOKEN=<random-token> \
+  --from-literal=ANVAY_WEBHOOK_TENANT=<tenant-uuid> \
+  -n anvay
+```
+
+## B3 — Deploy via Helm
+
+CI builds and pushes `anvay-gateway` and `anvay-web` images on every merge to `main`.
+
+```bash
+helm upgrade --install anvay infra/helm/anvay \
+  --namespace anvay \
+  --set image.gateway=<registry>/anvay-gateway:<tag> \
+  --set image.web=<registry>/anvay-web:<tag>
+```
+
+## B4 — Run Migrations + Seed
+
+```bash
+kubectl exec -n anvay deploy/anvay-gateway -- \
+  pnpm --filter anvay-gateway prisma migrate deploy
+
+kubectl exec -n anvay deploy/anvay-gateway -- \
+  pnpm --filter anvay-gateway db:seed
+```
+
+## B5 — Alertmanager Webhook
+
+In your Alertmanager config, add a receiver pointing to Anvay:
+
+```yaml
+receivers:
+  - name: anvay
+    webhook_configs:
+      - url: https://<anvay-host>/api/events/alert
+        http_config:
+          authorization:
+            credentials: <ANVAY_WEBHOOK_TOKEN>
+```
+
+Then register the Alertmanager connector in Anvay UI with that same token.

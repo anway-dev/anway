@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
+import { compare } from 'bcryptjs'
 
 interface TokenBody {
   email: string
@@ -195,6 +196,66 @@ export async function authRoutes(app: FastifyInstance) {
     })
 
     return reply.send({ token, tenantId: DEV_TENANT })
+  })
+
+  // GET /api/auth/methods — which login methods are enabled (no secrets exposed)
+  app.get('/api/auth/methods', async (_request, reply) => {
+    return reply.send({
+      local: process.env['LOCAL_AUTH_DISABLED'] !== 'true',
+      demo: process.env['DEMO_MODE'] === 'true',
+      oidc: !!process.env['OIDC_ISSUER_URL'],
+      google: !!process.env['GOOGLE_CLIENT_ID'],
+      github: !!process.env['GITHUB_CLIENT_ID'],
+    })
+  })
+
+  // POST /api/auth/login — local email + password login
+  // Disable with LOCAL_AUTH_DISABLED=true
+  app.post<{ Body: { email: string; password: string; tenantId?: string } }>('/api/auth/login', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string' },
+          password: { type: 'string' },
+          tenantId: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (process.env['LOCAL_AUTH_DISABLED'] === 'true') {
+      return reply.code(404).send({ error: 'local auth disabled' })
+    }
+    const ip = request.ip
+    if (!checkRateLimit(ip)) {
+      return reply.code(429).send({ error: 'too many requests — try again in 1 minute' })
+    }
+    const { email, password } = request.body
+    const tenantId = request.body.tenantId ?? process.env['OIDC_TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001'
+
+    let user: { id: string; role: string; password_hash: string | null } | null = null
+    try {
+      const rows = await prisma.$queryRaw<{ id: string; role: string; password_hash: string | null }[]>`
+        SELECT id, role, password_hash FROM users
+        WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1
+      `
+      user = rows[0] ?? null
+    } catch { /* DB unavailable */ }
+
+    if (!user || !user.password_hash) {
+      return reply.code(401).send({ error: 'invalid credentials' })
+    }
+
+    const valid = await compare(password, user.password_hash)
+    if (!valid) return reply.code(401).send({ error: 'invalid credentials' })
+
+    const token = await reply.jwtSign({ sub: user.id, email, tenantId, role: user.role })
+    await appendAuditEvent({
+      tenantId, userId: user.id, action: 'auth.local_login',
+      resource: 'auth:local', outcome: 'action_executed', metadata: { email },
+    }).catch(() => {})
+    return reply.send({ token, expiresIn: '24h' })
   })
 
   // GET /api/auth/me — return authenticated user info from JWT

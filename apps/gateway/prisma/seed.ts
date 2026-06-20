@@ -1,7 +1,12 @@
 import { PrismaClient } from '@prisma/client'
+import { hash } from 'bcryptjs'
 
 const prisma = new PrismaClient()
 const log = (msg: string) => process.stdout.write(`[seed] ${msg}\n`)
+
+// Default local-login password for demo admin user.
+// Change via ANVAY_ADMIN_PASSWORD env var or update in the UI after first login.
+const ADMIN_PASSWORD = process.env['ANVAY_ADMIN_PASSWORD'] ?? 'Anvay@local1'
 
 // Fixed UUID for deterministic E2E test access
 const DEMO_TENANT_ID = '00000000-0000-0000-0000-000000000001'
@@ -17,6 +22,7 @@ async function main() {
   const tenant = { id: DEMO_TENANT_ID, slug: 'demo' }
   log(`Tenant: ${tenant.slug} (${tenant.id})`)
 
+  const passwordHash = await hash(ADMIN_PASSWORD, 12)
   const user = await prisma.user.upsert({
     where: {
       tenant_id_email: {
@@ -24,14 +30,15 @@ async function main() {
         email: 'admin@demo.anvay.dev',
       },
     },
-    update: {},
+    update: { password_hash: passwordHash },
     create: {
       tenant_id: tenant.id,
       email: 'admin@demo.anvay.dev',
       role: 'admin',
+      password_hash: passwordHash,
     },
   })
-  log(`User: ${user.email} (role=${user.role})`)
+  log(`User: ${user.email} (role=${user.role}, local-login: enabled)`)
 
   await prisma.$executeRaw`
     INSERT INTO sessions (id, user_id, tenant_id, created_at, expires_at, updated_at, turn_count)

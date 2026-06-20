@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import LoginPage from "@/components/login-page";
 import { LifecycleView } from "@/components/lifecycle";
 import { ConnectorsView } from "@/components/connectors";
 import { ApiClientView } from "@/components/apiclient";
@@ -61,10 +62,30 @@ export default function App() {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [orchestratorContext, setOrchestratorContext] = useState<OrchestratorContext | undefined>(undefined);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [authed, setAuthed] = useState<boolean | null>(null); // null = checking
 
   // User identity — fetched from /api/auth/me
   const [userEmail, setUserEmail] = useState("—");
   const [userRole, setUserRole] = useState("—");
+
+  // Handle #token= fragment from OAuth/OIDC redirects
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#token=')) return;
+    const token = decodeURIComponent(hash.slice('#token='.length));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    fetch('/api/auth/set-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
+      .then(() => { setAuthed(true); })
+      .catch(() => {});
+  }, []);
+
+  const checkAuth = useCallback(() => {
+    fetch('/api/auth/me')
+      .then(r => { setAuthed(r.ok); })
+      .catch(() => setAuthed(false));
+  }, []);
+
+  useEffect(() => { checkAuth(); }, [checkAuth]);
 
   // Sidebar data — fetched from gateway APIs
   const [recentQueries, setRecentQueries] = useState<{ id: string; query: string }[]>([]);
@@ -142,6 +163,14 @@ export default function App() {
     setOrchestratorContext({ query, title: context.title, source: context.source });
     setView("chat");
   };
+
+  if (authed === null) {
+    return <div style={{ minHeight: "100vh", background: "#080808" }} />;
+  }
+
+  if (!authed) {
+    return <LoginPage onLogin={() => { setAuthed(true); checkAuth(); }} />;
+  }
 
   return (
     <>

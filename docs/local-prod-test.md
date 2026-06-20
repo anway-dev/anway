@@ -71,6 +71,30 @@ CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
 ANTHROPIC_API_KEY=sk-ant-...
 # OPENAI_API_KEY=sk-...
 # OLLAMA_ENDPOINT=http://localhost:11434/v1
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+# Local email/password login (enabled by default)
+# Password for the seeded admin@demo.anvay.dev account
+ANVAY_ADMIN_PASSWORD=Anvay@local1
+# Set to "true" to disable local login entirely (force SSO/OAuth only)
+# LOCAL_AUTH_DISABLED=true
+
+# OIDC / SSO (optional — leave unset to disable)
+# OIDC_ISSUER_URL=https://accounts.google.com   # or your IdP
+# OIDC_CLIENT_ID=<client-id>
+# OIDC_CLIENT_SECRET=<client-secret>
+# OIDC_REDIRECT_URI=http://localhost:8510/api/auth/oidc/callback
+
+# Google OAuth (optional — leave unset to disable)
+# GOOGLE_CLIENT_ID=<client-id>.apps.googleusercontent.com
+# GOOGLE_CLIENT_SECRET=<client-secret>
+
+# GitHub OAuth (optional — leave unset to disable)
+# GITHUB_CLIENT_ID=<client-id>
+# GITHUB_CLIENT_SECRET=<client-secret>
+
+# Web URL — gateway uses this to redirect back after OAuth
+WEB_URL=http://localhost:8500
 ```
 
 > Do not set `KUBECONFIG` — Anvay reads credentials from the K8s connector config after you register it.
@@ -161,7 +185,14 @@ curl -s 'http://localhost:9090/api/v1/targets?state=active' | \
 
 Open `http://localhost:8500`.
 
-Click **Demo Login** — signs a JWT for `admin@demo.anvay.dev`, no password needed.
+**Option 1 — Local login (default):**
+Email `admin@demo.anvay.dev`, password from `ANVAY_ADMIN_PASSWORD` (default: `Anvay@local1`).
+
+**Option 2 — Demo Login (if `DEMO_MODE=true`):**
+Click **Try Demo** — signs a JWT for `admin@demo.anvay.dev`, no password needed.
+
+**Option 3 — SSO / OAuth:**
+Appears automatically when `OIDC_ISSUER_URL`, `GOOGLE_CLIENT_ID`, or `GITHUB_CLIENT_ID` is set.
 
 KB graph is empty. All counts zero. Correct.
 
@@ -361,11 +392,24 @@ docker compose -f infra/docker-compose.dev.yml exec gateway \
 
 ## Troubleshooting
 
+**Local login: "invalid credentials":**
+Seed hasn't run, or `ANVAY_ADMIN_PASSWORD` changed after seed. Re-run seed:
+```bash
+docker compose -f infra/docker-compose.dev.yml exec gateway \
+  pnpm --filter anvay-gateway db:seed
+```
+
 **Demo Login missing / 404:**
 `DEMO_MODE=true` missing from `apps/gateway/.env`. Add it and restart:
 ```bash
 docker compose -f infra/docker-compose.dev.yml restart gateway
 ```
+
+**Google/GitHub OAuth redirect error:**
+`WEB_URL` must be set in `apps/gateway/.env` (e.g. `http://localhost:8500`).
+Callback URIs to register in Google/GitHub console:
+- Google: `http://localhost:8510/api/auth/google/callback`
+- GitHub: `http://localhost:8510/api/auth/github/callback`
 
 **Alert not reaching Anvay:**
 `host.docker.internal` only resolves on Mac + Docker Desktop. On Linux use host IP from `ip route | grep default | awk '{print $3}'` in `test-cloud-setup/k8s/observability/prometheus/values-local.yaml`.

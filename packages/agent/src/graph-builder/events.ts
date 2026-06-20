@@ -10,6 +10,7 @@ export type GraphEvent =
   | PrMerged
   | IncidentCreated
   | DeployCompleted
+  | DeployTrigger
   | TicketCreated
 
 export interface ConnectorRegistered {
@@ -61,6 +62,19 @@ export interface ConnectorRemoved {
   tenantId: string
   connectorType: string
   connectorId: string
+}
+
+export interface DeployTrigger {
+  type: 'deploy_trigger'
+  tenantId: string
+  service: string
+  sha: string
+  imageUri: string
+  repo: string
+  environment: string
+  triggeredBy: string
+  workflowRun?: string
+  commitMessage?: string
 }
 
 export interface TicketCreated {

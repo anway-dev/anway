@@ -41,6 +41,8 @@ export class GraphBuilderAgent {
           await this.onIncidentCreated(event); break
         case 'deploy_completed':
           await this.onDeployCompleted(event); break
+        case 'deploy_trigger':
+          await this.onDeployTrigger(event); break
         case 'ticket_created':
           await this.onTicketCreated(event); break
         case 'connector_removed':
@@ -171,6 +173,65 @@ export class GraphBuilderAgent {
       { fromEntityId: deployId, relType: 'DEPLOYED_TO', toEntityId: serviceId },
       tenantId,
     )
+  }
+
+  private async onDeployTrigger(event: GraphEvent & { type: 'deploy_trigger' }): Promise<void> {
+    const tenantId = this.tid(event.tenantId)
+
+    // Ensure Service entity exists
+    const serviceId = await this.kg.upsertEntity(
+      { type: 'Service', name: event.service },
+      tenantId,
+    )
+
+    // Create pending Deploy entity — status transitions to 'success'/'failed' on deploy_completed
+    await this.kg.upsertEntity(
+      {
+        type: 'Deploy',
+        name: `${event.service}-${event.sha.slice(0, 7)}`,
+        metadata: {
+          sha: event.sha,
+          imageUri: event.imageUri,
+          env: event.environment,
+          repo: event.repo,
+          triggeredBy: event.triggeredBy,
+          workflowRun: event.workflowRun,
+          commitMessage: event.commitMessage,
+          status: 'pending',
+        },
+      },
+      tenantId,
+    )
+
+    // Resolve Repo entity (may already exist from GitHub bootstrap)
+    const repoId = await this.kg.upsertEntity(
+      { type: 'Repo', name: event.repo, metadata: {} },
+      tenantId,
+    )
+
+    await this.kg.upsertRelationship(
+      { fromEntityId: serviceId, relType: 'HOSTED_IN', toEntityId: repoId },
+      tenantId,
+    )
+
+    await this.kg.addEpisode({
+      text: `Deploy triggered for ${event.service} (${event.sha.slice(0, 7)}) to ${event.environment} by ${event.triggeredBy}. Image: ${event.imageUri}. ${event.commitMessage ?? ''}`,
+      source: 'deploy-trigger',
+      timestamp: new Date(),
+    }).catch(() => {})
+
+    // Publish to pipeline gate channel so the gateway can surface a gate in the UI
+    await this.redisPublisher?.publish('deploy:gate_pending', JSON.stringify({
+      tenantId: event.tenantId,
+      service: event.service,
+      sha: event.sha,
+      imageUri: event.imageUri,
+      environment: event.environment,
+      triggeredBy: event.triggeredBy,
+      workflowRun: event.workflowRun,
+      commitMessage: event.commitMessage,
+      triggeredAt: new Date().toISOString(),
+    })).catch(() => {})
   }
 
   private async onIncidentCreated(event: GraphEvent & { type: 'incident_created' }): Promise<void> {

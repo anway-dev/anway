@@ -192,13 +192,13 @@ services:
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
     ports:
-      - "8500:3000"
+      - "8500:8500"
     volumes:
       - ../:/app:delegated
       - web_nm:/app/apps/web/node_modules
       - web_next:/app/apps/web/.next
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/providers || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8500/api/providers || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 20

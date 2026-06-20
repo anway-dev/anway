@@ -67,17 +67,16 @@ ANVAY_WEBHOOK_TENANT=00000000-0000-0000-0000-000000000001
 # CD connector key (used by deploy_trigger events from GitHub Actions / CI)
 CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
 
-# LLM — pick one
-ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
-# OLLAMA_ENDPOINT=http://localhost:11434/v1
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 # Local email/password login (enabled by default)
-# Password for the seeded admin@demo.anvay.dev account
-ANVAY_ADMIN_PASSWORD=Anvay@local1
+# On first visit, Anvay prompts you to create an admin account — no seed password needed.
 # Set to "true" to disable local login entirely (force SSO/OAuth only)
 # LOCAL_AUTH_DISABLED=true
+
+# ── LLM (optional — AI features disabled without this) ────────────────────────
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# OLLAMA_ENDPOINT=http://localhost:11434/v1
 
 # OIDC / SSO (optional — leave unset to disable)
 # OIDC_ISSUER_URL=https://accounts.google.com   # or your IdP
@@ -186,7 +185,8 @@ curl -s 'http://localhost:9090/api/v1/targets?state=active' | \
 Open `http://localhost:8500`.
 
 **Option 1 — Local login (default):**
-Email `admin@demo.anvay.dev`, password from `ANVAY_ADMIN_PASSWORD` (default: `Anvay@local1`).
+First visit shows a setup form — enter your email + password to create the admin account.
+Subsequent logins use that email + password.
 
 **Option 2 — Demo Login (if `DEMO_MODE=true`):**
 Click **Try Demo** — signs a JWT for `admin@demo.anvay.dev`, no password needed.
@@ -392,12 +392,13 @@ docker compose -f infra/docker-compose.dev.yml exec gateway \
 
 ## Troubleshooting
 
-**Local login: "invalid credentials":**
-Seed hasn't run, or `ANVAY_ADMIN_PASSWORD` changed after seed. Re-run seed:
+**Local login: "invalid credentials" or setup form not appearing:**
+Migrations haven't run. Run:
 ```bash
 docker compose -f infra/docker-compose.dev.yml exec gateway \
-  pnpm --filter anvay-gateway db:seed
+  pnpm --filter anvay-gateway prisma migrate deploy
 ```
+Then refresh — setup form appears on first visit when no admin exists.
 
 **Demo Login missing / 404:**
 `DEMO_MODE=true` missing from `apps/gateway/.env`. Add it and restart:
@@ -453,7 +454,7 @@ kubectl create secret generic anvay-secrets \
   --from-literal=ENCRYPTION_KEY=<64-char-hex> \
   --from-literal=DATABASE_URL=postgresql://user:pass@host:5432/anvay \
   --from-literal=REDIS_URL=redis://host:6379 \
-  --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-...   `# optional — AI features` \
   --from-literal=CONNECTOR_API_KEYS=<key>:<tenantId> \
   --from-literal=ANVAY_WEBHOOK_TOKEN=<random-token> \
   --from-literal=ANVAY_WEBHOOK_TENANT=<tenant-uuid> \

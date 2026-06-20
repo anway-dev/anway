@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
-import { compare } from 'bcryptjs'
+import { compare, hash } from 'bcryptjs'
 
 interface TokenBody {
   email: string
@@ -200,13 +200,68 @@ export async function authRoutes(app: FastifyInstance) {
 
   // GET /api/auth/methods — which login methods are enabled (no secrets exposed)
   app.get('/api/auth/methods', async (_request, reply) => {
+    const localEnabled = process.env['LOCAL_AUTH_DISABLED'] !== 'true'
+    let setupRequired = false
+    if (localEnabled) {
+      try {
+        const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+          SELECT COUNT(*) as count FROM users WHERE password_hash IS NOT NULL
+        `
+        setupRequired = Number(rows[0]?.count ?? 0) === 0
+      } catch { /* DB unavailable — don't block login page */ }
+    }
     return reply.send({
-      local: process.env['LOCAL_AUTH_DISABLED'] !== 'true',
+      local: localEnabled,
       demo: process.env['DEMO_MODE'] === 'true',
       oidc: !!process.env['OIDC_ISSUER_URL'],
       google: !!process.env['GOOGLE_CLIENT_ID'],
       github: !!process.env['GITHUB_CLIENT_ID'],
+      setupRequired,
     })
+  })
+
+  // POST /api/auth/setup — create first admin user (blocked once any local user exists)
+  app.post<{ Body: { email: string; password: string } }>('/api/auth/setup', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string' },
+          password: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (process.env['LOCAL_AUTH_DISABLED'] === 'true') {
+      return reply.code(404).send({ error: 'local auth disabled' })
+    }
+    const existing = await prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*) as count FROM users WHERE password_hash IS NOT NULL
+    `
+    if (Number(existing[0]?.count ?? 0) > 0) {
+      return reply.code(409).send({ error: 'setup already complete' })
+    }
+    const { email, password } = request.body
+    if (password.length < 8) {
+      return reply.code(400).send({ error: 'password must be at least 8 characters' })
+    }
+    const tenantId = process.env['OIDC_TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001'
+    const passwordHash = await hash(password, 12)
+    const rows = await prisma.$queryRaw<{ id: string; role: string }[]>`
+      INSERT INTO users (id, tenant_id, email, role, password_hash)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${email}, 'admin', ${passwordHash})
+      ON CONFLICT (tenant_id, email) DO UPDATE SET password_hash = ${passwordHash}, role = 'admin'
+      RETURNING id, role
+    `
+    const u = rows[0]
+    if (!u) return reply.code(500).send({ error: 'failed to create user' })
+    const token = await reply.jwtSign({ sub: u.id, email, tenantId, role: u.role })
+    await appendAuditEvent({
+      tenantId, userId: u.id, action: 'auth.setup',
+      resource: 'auth:setup', outcome: 'action_executed', metadata: { email },
+    }).catch(() => {})
+    return reply.send({ token, expiresIn: '24h' })
   })
 
   // POST /api/auth/login — local email + password login

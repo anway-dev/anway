@@ -160,9 +160,9 @@ services:
       - "8510:8510"
     volumes:
       - ../:/app:delegated
-      # Named volumes shadow host node_modules so container packages don't leak to host
+      # Isolated named volumes — gateway never shares with web to avoid broken symlinks
       - gateway_nm:/app/apps/gateway/node_modules
-      - root_nm:/app/node_modules
+      - gateway_root_nm:/app/node_modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,6 +195,8 @@ services:
       - "8500:8500"
     volumes:
       - ../:/app:delegated
+      # Isolated named volumes — web never shares with gateway to avoid broken symlinks
+      - web_root_nm:/app/node_modules
       - web_nm:/app/apps/web/node_modules
       - web_next:/app/apps/web/.next
     healthcheck:
@@ -214,8 +216,9 @@ volumes:
   alertmanager_data:
   loki_data:
   gateway_nm:
-  root_nm:
+  gateway_root_nm:
   web_nm:
+  web_root_nm:
   web_next:
 
 networks:

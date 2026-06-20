@@ -114,14 +114,14 @@ docker compose -f infra/docker-compose.dev.yml logs -f gateway
 
 ```bash
 docker compose -f infra/docker-compose.dev.yml exec gateway \
-  pnpm --filter anvay-gateway prisma migrate deploy
+  sh -c "cd apps/gateway && pnpm prisma migrate deploy"
 ```
 
 Seed demo data (optional — populates sample services, incidents, pipelines):
 
 ```bash
 docker compose -f infra/docker-compose.dev.yml exec gateway \
-  pnpm --filter anvay-gateway db:seed
+  sh -c "cd apps/gateway && pnpm db:seed"
 ```
 
 ### A2d. Verify
@@ -383,10 +383,10 @@ docker compose -f infra/docker-compose.dev.yml down -v
 ```bash
 docker compose -f infra/docker-compose.dev.yml up -d postgres redis gateway web
 docker compose -f infra/docker-compose.dev.yml exec gateway \
-  pnpm --filter anvay-gateway prisma migrate deploy
+  sh -c "cd apps/gateway && pnpm prisma migrate deploy"
 # optional: seed demo data
 docker compose -f infra/docker-compose.dev.yml exec gateway \
-  pnpm --filter anvay-gateway db:seed
+  sh -c "cd apps/gateway && pnpm db:seed"
 # Then follow A5 onwards — first visit prompts admin account creation
 ```
 
@@ -398,7 +398,7 @@ docker compose -f infra/docker-compose.dev.yml exec gateway \
 Migrations haven't run. Run:
 ```bash
 docker compose -f infra/docker-compose.dev.yml exec gateway \
-  pnpm --filter anvay-gateway prisma migrate deploy
+  sh -c "cd apps/gateway && pnpm prisma migrate deploy"
 ```
 Then refresh — setup form appears on first visit when no admin exists.
 
@@ -478,10 +478,11 @@ helm upgrade --install anvay infra/helm/anvay \
 
 ```bash
 kubectl exec -n anvay deploy/anvay-gateway -- \
-  pnpm --filter anvay-gateway prisma migrate deploy
+  sh -c "cd apps/gateway && pnpm prisma migrate deploy"
 
+# optional: seed demo data
 kubectl exec -n anvay deploy/anvay-gateway -- \
-  pnpm --filter anvay-gateway db:seed
+  sh -c "cd apps/gateway && pnpm db:seed"
 ```
 
 ## B5 — Alertmanager Webhook

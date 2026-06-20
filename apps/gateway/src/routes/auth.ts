@@ -1,13 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
-import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
 import { compare, hash } from 'bcryptjs'
-
-interface TokenBody {
-  email: string
-  tenantId: string
-}
 
 // Simple in-memory rate limiter (5 req/min per IP)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
@@ -29,58 +23,6 @@ function checkRateLimit(ip: string): boolean {
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  // /auth/token is a dev/test shortcut — never available in production.
-  // Real auth goes through OIDC (/api/auth/oidc/* routes).
-  if (process.env['NODE_ENV'] !== 'production') app.post<{ Body: TokenBody }>('/auth/token', {
-    schema: {
-      body: {
-        type: 'object',
-        required: ['email', 'tenantId'],
-        properties: {
-          email: { type: 'string' },
-          tenantId: { type: 'string' },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const ip = request.ip
-    if (!checkRateLimit(ip)) {
-      return reply.code(429).send({ error: 'too many requests — try again in 1 minute' })
-    }
-    const { email, tenantId } = request.body
-
-    // Verify tenant exists
-    let tenantExists = false
-    try {
-      const rows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<{ id: string }[]>`SELECT id FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1`
-      )
-      tenantExists = rows.length > 0
-    } catch { /* fall through to 400 */ }
-    if (!tenantExists) return reply.code(400).send({ error: 'invalid tenantId' })
-
-    // Look up user — no auto-provision (provisioned by admin)
-    let user: { id: string; role: string } | null = null
-    try {
-      const rows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<{ id: string; role: string }[]>`
-          SELECT id, role FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1
-        `
-      )
-      user = rows[0] ?? null
-    } catch { /* DB unavailable */ }
-
-    if (!user) return reply.code(401).send({ error: 'user not found' })
-
-    const token = await reply.jwtSign({
-      sub: user.id,
-      email,
-      tenantId,
-      role: user.role,
-    })
-
-    return reply.send({ token, expiresIn: '24h' })
-  })
 
   // Demo login — available when DEMO_MODE=true
   app.post('/api/auth/demo', async (request, reply) => {
@@ -107,96 +49,6 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ token, expiresIn: '24h' })
   })
 
-  // Dev-only: returns a signed JWT + upserts dev tenant/user — no auth required
-  // Only available when NODE_ENV=development
-  app.get('/api/auth/dev-token', async (request, reply) => {
-    if (process.env.NODE_ENV !== 'development' || process.env['ALLOW_DEV_TOKEN'] !== 'true') {
-      return reply.code(404).send({ error: 'not found' })
-    }
-
-    const DEV_TENANT = '00000000-0000-0000-0000-000000000001'
-    const DEV_USER = '00000000-0000-0000-0000-000000000002'
-    const DEV_EMAIL = 'dev@anvay.local'
-
-    // Upsert tenant + user so withTenant() works downstream
-    try {
-      await prisma.$executeRaw`
-        INSERT INTO tenants (id, name, slug, plan) VALUES (${DEV_TENANT}::uuid, 'Dev Tenant', 'dev', 'tier1')
-        ON CONFLICT (id) DO NOTHING
-      `
-      await prisma.$executeRaw`
-        INSERT INTO users (id, tenant_id, email, role) VALUES (${DEV_USER}::uuid, ${DEV_TENANT}::uuid, ${DEV_EMAIL}, 'admin')
-        ON CONFLICT (id) DO NOTHING
-      `
-    } catch { /* table may not exist yet — still return token */ }
-
-    const token = await reply.jwtSign({
-      sub: DEV_USER,
-      email: DEV_EMAIL,
-      tenantId: DEV_TENANT,
-      role: 'admin',
-    })
-
-    return reply.send({ token, tenantId: DEV_TENANT })
-  })
-
-  // Second dev user — needed for gate e2e tests (SoD blocks same-user approve)
-  // Only available when ALLOW_DEV_TOKEN=true (same guard as dev-token)
-  app.get('/api/auth/dev-token2', async (request, reply) => {
-    if (process.env.NODE_ENV !== 'development' || process.env['ALLOW_DEV_TOKEN'] !== 'true') {
-      return reply.code(404).send({ error: 'not found' })
-    }
-
-    const DEV_TENANT2 = '00000000-0000-0000-0000-000000000001'
-    const DEV_USER2 = '00000000-0000-0000-0000-000000000003'
-    const DEV_EMAIL2 = 'dev2@anvay.local'
-
-    // Upsert second dev user (sre role — required for gate decide endpoint)
-    try {
-      await prisma.$executeRaw`
-        INSERT INTO users (id, tenant_id, email, role) VALUES (${DEV_USER2}::uuid, ${DEV_TENANT2}::uuid, ${DEV_EMAIL2}, 'sre')
-        ON CONFLICT (id) DO UPDATE SET role = 'sre'
-      `
-    } catch { /* table may not exist yet — still return token */ }
-
-    const token = await reply.jwtSign({
-      sub: DEV_USER2,
-      email: DEV_EMAIL2,
-      tenantId: DEV_TENANT2,
-      role: 'sre',
-    })
-
-    return reply.send({ token, tenantId: DEV_TENANT2 })
-  })
-
-  // Third dev user — dev role for RBAC e2e tests
-  // Only available when ALLOW_DEV_TOKEN=true (same guard as dev-token)
-  app.get('/api/auth/dev-token3', async (request, reply) => {
-    if (process.env.NODE_ENV !== 'development' || process.env['ALLOW_DEV_TOKEN'] !== 'true') {
-      return reply.code(404).send({ error: 'not found' })
-    }
-
-    const DEV_TENANT = '00000000-0000-0000-0000-000000000001'
-    const DEV_USER3 = '00000000-0000-0000-0000-000000000004'
-    const DEV_EMAIL3 = 'dev3@anvay.local'
-
-    try {
-      await prisma.$executeRaw`
-        INSERT INTO users (id, tenant_id, email, role)
-        VALUES (${DEV_USER3}::uuid, ${DEV_TENANT}::uuid, ${DEV_EMAIL3}, 'dev')
-        ON CONFLICT (id) DO UPDATE SET role = 'dev'
-      `
-    } catch { /* ignore */ }
-
-    const token = await reply.jwtSign({
-      sub: DEV_USER3,
-      email: DEV_EMAIL3,
-      tenantId: DEV_TENANT,
-      role: 'dev',
-    })
-
-    return reply.send({ token, tenantId: DEV_TENANT })
-  })
 
   // GET /api/auth/methods — which login methods are enabled (no secrets exposed)
   app.get('/api/auth/methods', async (_request, reply) => {

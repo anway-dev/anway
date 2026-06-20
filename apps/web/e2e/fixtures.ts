@@ -3,18 +3,32 @@ import type { APIRequestContext, BrowserContext } from '@playwright/test'
 export const GATEWAY = 'http://127.0.0.1:8510'
 export const WEB = 'http://localhost:8500'
 export const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
-export const DEMO_EMAIL = 'dev@anvay.local'
+export const DEMO_EMAIL = 'admin@demo.anvay.dev'
 
+// Auth via demo login — requires DEMO_MODE=true on gateway
 export async function getToken(request: APIRequestContext): Promise<string> {
-  const r = await request.get(`${GATEWAY}/api/auth/dev-token`)
+  const r = await request.post(`${GATEWAY}/api/auth/demo`)
+  const body = await r.json() as { token?: string }
+  return body.token ?? ''
+}
+
+// For multi-role tests: login as a seeded user with a known password
+// Seed must have created the user with password_hash before tests run
+async function loginAs(request: APIRequestContext, email: string, password: string): Promise<string> {
+  const r = await request.post(`${GATEWAY}/api/auth/login`, {
+    data: { email, password },
+    headers: { 'Content-Type': 'application/json' },
+  })
   const body = await r.json() as { token?: string }
   return body.token ?? ''
 }
 
 export async function getToken2(request: APIRequestContext): Promise<string> {
-  const r = await request.get(`${GATEWAY}/api/auth/dev-token2`)
-  const body = await r.json() as { token?: string }
-  return body.token ?? ''
+  return loginAs(request, process.env['E2E_USER2_EMAIL'] ?? 'sre@demo.anvay.dev', process.env['E2E_USER2_PASSWORD'] ?? '')
+}
+
+export async function getToken3(request: APIRequestContext): Promise<string> {
+  return loginAs(request, process.env['E2E_USER3_EMAIL'] ?? 'dev@demo.anvay.dev', process.env['E2E_USER3_PASSWORD'] ?? '')
 }
 
 export async function authHeaders(request: APIRequestContext): Promise<Record<string, string>> {
@@ -27,18 +41,12 @@ export async function authHeaders2(request: APIRequestContext): Promise<Record<s
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-export async function getToken3(request: APIRequestContext): Promise<string> {
-  const r = await request.get(`${GATEWAY}/api/auth/dev-token3`)
-  const body = await r.json() as { token?: string }
-  return body.token ?? ''
-}
-
 export async function authHeaders3(request: APIRequestContext): Promise<Record<string, string>> {
   const token = await getToken3(request)
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/** Set auth cookie on browser context — bypasses login redirect for UI tests. */
+/** Set auth cookie on browser context — uses demo login. */
 export async function setAuthCookie(context: BrowserContext): Promise<void> {
   const token = await getToken(context.request)
   if (token) {

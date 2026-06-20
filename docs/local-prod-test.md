@@ -15,8 +15,6 @@ No `pnpm install` on the host — containers manage their own dependencies.
 
 ---
 
----
-
 # Path A — Local (docker-compose + minikube)
 
 ---
@@ -51,9 +49,6 @@ helm version             # v3.14+
 Create `apps/gateway/.env` in the repo:
 
 ```bash
-# Demo mode — enables one-click login
-DEMO_MODE=true
-
 # JWT signing key
 JWT_SECRET=local-dev-secret-change-me
 
@@ -68,10 +63,10 @@ ANVAY_WEBHOOK_TENANT=00000000-0000-0000-0000-000000000001
 CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-# Local email/password login (enabled by default)
-# On first visit, Anvay prompts you to create an admin account — no seed password needed.
-# Set to "true" to disable local login entirely (force SSO/OAuth only)
-# LOCAL_AUTH_DISABLED=true
+# Local email/password login is ON by default.
+# First visit shows a setup form — create your admin account there, no password seeded.
+# DEMO_MODE=true       # enables one-click Try Demo button (no password needed)
+# LOCAL_AUTH_DISABLED=true  # disables local login, forces SSO/OAuth only
 
 # ── LLM (optional — AI features disabled without this) ────────────────────────
 # ANTHROPIC_API_KEY=sk-ant-...
@@ -113,12 +108,16 @@ docker compose -f infra/docker-compose.dev.yml logs -f gateway
 # Wait for: Gateway listening at http://0.0.0.0:8510
 ```
 
-### A2c. Run migrations + seed
+### A2c. Run migrations
 
 ```bash
 docker compose -f infra/docker-compose.dev.yml exec gateway \
   pnpm --filter anvay-gateway prisma migrate deploy
+```
 
+Seed demo data (optional — populates sample services, incidents, pipelines):
+
+```bash
 docker compose -f infra/docker-compose.dev.yml exec gateway \
   pnpm --filter anvay-gateway db:seed
 ```
@@ -202,7 +201,7 @@ KB graph is empty. All counts zero. Correct.
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Anvay web | `http://localhost:8500` | Demo Login |
+| Anvay web | `http://localhost:8500` | Set on first login (see A4) |
 | Anvay gateway | `http://localhost:8510` | — |
 | Grafana (minikube) | `http://localhost:3001` | admin / admin |
 | Prometheus | `http://localhost:9090` | — |
@@ -383,9 +382,10 @@ docker compose -f infra/docker-compose.dev.yml down -v
 docker compose -f infra/docker-compose.dev.yml up -d postgres redis gateway web
 docker compose -f infra/docker-compose.dev.yml exec gateway \
   pnpm --filter anvay-gateway prisma migrate deploy
+# optional: seed demo data
 docker compose -f infra/docker-compose.dev.yml exec gateway \
   pnpm --filter anvay-gateway db:seed
-# Then follow A5 onwards
+# Then follow A5 onwards — first visit prompts admin account creation
 ```
 
 ---

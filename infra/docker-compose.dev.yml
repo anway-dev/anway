@@ -147,7 +147,6 @@ services:
     command: >-
       sh -c "npm install -g pnpm@9.15.4 --quiet &&
              pnpm install &&
-             pnpm --filter anvay-gateway prisma generate &&
              pnpm --filter anvay-gateway dev"
     environment:
       NODE_ENV: development
@@ -158,7 +157,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       LOG_LEVEL: info
     ports:
-      - "8510:4000"
+      - "8510:8510"
     volumes:
       - ../:/app:delegated
       # Named volumes shadow host node_modules so container packages don't leak to host

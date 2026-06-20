@@ -147,6 +147,7 @@ services:
     command: >-
       sh -c "npm install -g pnpm@9.15.4 --quiet &&
              pnpm install &&
+             pnpm --filter anvay-gateway prisma generate &&
              pnpm --filter anvay-gateway dev"
     environment:
       NODE_ENV: development

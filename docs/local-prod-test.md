@@ -101,12 +101,14 @@ From the repo root:
 docker compose -f infra/docker-compose.dev.yml up -d postgres redis gateway web
 ```
 
-First run pulls images and installs packages inside containers (~3 min). Watch progress:
+First run pulls images, installs packages, and generates the Prisma client inside containers (~3–5 min). Watch progress:
 
 ```bash
 docker compose -f infra/docker-compose.dev.yml logs -f gateway
 # Wait for: Gateway listening at http://0.0.0.0:8510
 ```
+
+> **Note:** If you see `@prisma/client did not initialize yet`, the container is still running `prisma generate`. Wait for the "Gateway listening" line — it appears after generate completes.
 
 ### A2c. Run migrations
 

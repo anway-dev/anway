@@ -191,6 +191,10 @@ services:
       PORT: "8500"
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
+      # Server-side: use Docker service name to reach gateway inside the network
+      GATEWAY_URL: http://gateway:8510
+      # Client-side: browser reaches gateway on the host-mapped port
+      NEXT_PUBLIC_GATEWAY_URL: http://localhost:8510
     ports:
       - "8500:8500"
     volumes:

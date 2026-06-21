@@ -4,6 +4,7 @@ export interface ConnectorBootstrapResult {
   entitiesUpserted: number
   relationshipsUpserted: number
   episodeHints: string[]
+  metadata?: Record<string, unknown>
 }
 
 export interface IConnectorBootstrap {

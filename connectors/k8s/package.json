@@ -17,7 +17,8 @@
   },
   "dependencies": {
     "@anvay/agent": "workspace:*",
-    "@anvay/types": "workspace:*"
+    "@anvay/types": "workspace:*",
+    "@kubernetes/client-node": "^1.4.0"
   },
   "devDependencies": {
     "typescript": "^5.0.0",

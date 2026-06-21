@@ -163,13 +163,18 @@ kubectl get pods -n demo          # all 15: Running
 kubectl get pods -n observability # kube-prometheus-stack-*, loki-*: Running
 ```
 
-**Open three port-forwards** (one terminal tab each):
+**Open four port-forwards** (one terminal tab each):
 
 ```bash
-kubectl port-forward svc/kube-prometheus-stack-prometheus 9090:9090 -n observability
-kubectl port-forward svc/kube-prometheus-stack-grafana 3001:80 -n observability
-kubectl port-forward svc/kube-prometheus-stack-alertmanager 9093:9093 -n observability
+kubectl port-forward --address 0.0.0.0 svc/kube-prometheus-stack-grafana 3001:80 -n observability
+kubectl port-forward --address 0.0.0.0 svc/prometheus-operated 9090:9090 -n observability
+kubectl port-forward --address 0.0.0.0 svc/alertmanager-operated 9093:9093 -n observability
+kubectl port-forward --address 0.0.0.0 svc/api-gateway 8080:3000 -n demo
 ```
+
+> **`--address 0.0.0.0` is required.** The gateway runs inside Docker and reaches these services via `host.docker.internal`. Without this flag the port-forward only listens on the host loopback and the gateway container cannot reach it.
+>
+> **macOS firewall:** if you see a timeout when testing connectors, macOS may be blocking `kubectl` from accepting connections. Go to **System Settings → Privacy & Security → Firewall → Firewall Options** and allow `kubectl`.
 
 Verify Prometheus scraping demo services:
 
@@ -205,9 +210,9 @@ KB graph is empty. All counts zero. Correct.
 |---------|-----|-------------|
 | Anvay web | `http://localhost:8500` | Set on first login (see A4) |
 | Anvay gateway | `http://localhost:8510` | — |
-| Grafana (minikube) | `http://localhost:3001` | admin / admin |
-| Prometheus | `http://localhost:9090` | — |
-| Alertmanager | `http://localhost:9093` | — |
+| Grafana | `http://localhost:3001` (browser) · `http://host.docker.internal:3001` (connector URL) | admin / admin |
+| Prometheus | `http://localhost:9090` (browser) · `http://host.docker.internal:9090` (connector URL) | — |
+| Alertmanager | `http://localhost:9093` (browser) · `http://host.docker.internal:9093` (connector URL) | — |
 
 ---
 
@@ -236,7 +241,9 @@ Click **Prometheus** → Configure.
 
 | Field | Value |
 |-------|-------|
-| Endpoint URL | `http://localhost:9090` |
+| Endpoint URL | `http://host.docker.internal:9090` |
+
+> The gateway runs inside Docker. Use `host.docker.internal` instead of `localhost` to reach port-forwarded services on your Mac. The port-forward must be started with `--address 0.0.0.0` (see A3).
 
 Save → Bootstrap.
 
@@ -248,7 +255,7 @@ Click **Alertmanager** → Configure.
 
 | Field | Value |
 |-------|-------|
-| Endpoint URL | `http://localhost:9093` |
+| Endpoint URL | `http://host.docker.internal:9093` |
 | Webhook Token | `anvay-demo-webhook-token` |
 
 Save. No bootstrap needed — receive-only.
@@ -261,24 +268,18 @@ Click **Grafana** → Configure.
 
 | Field | Value |
 |-------|-------|
-| Grafana URL | `http://localhost:3001` |
+| Grafana URL | `http://host.docker.internal:3001` |
+| Grafana URL | `http://grafana:3000` |
 
 Save → Bootstrap (discovers existing dashboards).
 
 ---
 
-## A6 — Provision Grafana Dashboards
+## A6 — Grafana Dashboards
 
-Get your session token:
-> Browser DevTools → Application → Cookies → `localhost:8500` → `token` value
+Dashboards are provisioned automatically when the Grafana connector bootstrap completes. No manual step needed.
 
-```bash
-TOKEN=<paste-token-here>
-
-curl -s -X POST http://localhost:8510/api/connectors/grafana/provision-dashboards \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-# { "ok": true, "created": [...], "total": 15 }
-```
+To re-provision (e.g. after new services are added): go to **Connectors** → Grafana card → **Provision dashboards**.
 
 Open `http://localhost:3001` → Dashboards — 15 dashboards named `{service} — Service Overview`.
 
@@ -413,6 +414,9 @@ docker compose -f infra/docker-compose.dev.yml restart gateway
 Callback URIs to register in Google/GitHub console:
 - Google: `http://localhost:8510/api/auth/google/callback`
 - GitHub: `http://localhost:8510/api/auth/github/callback`
+
+**Prometheus / Grafana / Alertmanager connector: "TypeError: fetch failed" or timeout:**
+The gateway runs inside Docker — `localhost` in connector URLs refers to the container, not your Mac. Use `host.docker.internal` instead (e.g. `http://host.docker.internal:9090`). Also ensure port-forwards are started with `--address 0.0.0.0` and macOS firewall allows `kubectl` to accept incoming connections.
 
 **Alert not reaching Anvay:**
 `host.docker.internal` only resolves on Mac + Docker Desktop. On Linux use host IP from `ip route | grep default | awk '{print $3}'` in `test-cloud-setup/k8s/observability/prometheus/values-local.yaml`.

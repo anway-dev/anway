@@ -28,24 +28,37 @@ interface AuditRow {
 
 export async function appendAuditEvent(params: {
   tenantId: string
-  userId: string
+  userId?: string
   action: string
   resource: string
   outcome: string
   metadata: Record<string, unknown>
 }): Promise<void> {
+  const userId = params.userId ?? null
   await withTenant(prisma, params.tenantId, (tx) =>
-    tx.$executeRaw`
-      INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
-      VALUES (gen_random_uuid(), ${params.tenantId}::uuid, ${params.userId}::uuid,
-              ${params.action},
-              ${JSON.stringify(redactSecrets({
-                resource: params.resource,
-                outcome: params.outcome,
-                ...params.metadata,
-              }) as object)}::jsonb,
-              NOW())
-    `
+    userId
+      ? tx.$executeRaw`
+          INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
+          VALUES (gen_random_uuid(), ${params.tenantId}::uuid, ${userId}::uuid,
+                  ${params.action},
+                  ${JSON.stringify(redactSecrets({
+                    resource: params.resource,
+                    outcome: params.outcome,
+                    ...params.metadata,
+                  }) as object)}::jsonb,
+                  NOW())
+        `
+      : tx.$executeRaw`
+          INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
+          VALUES (gen_random_uuid(), ${params.tenantId}::uuid, NULL,
+                  ${params.action},
+                  ${JSON.stringify(redactSecrets({
+                    resource: params.resource,
+                    outcome: params.outcome,
+                    ...params.metadata,
+                  }) as object)}::jsonb,
+                  NOW())
+        `
   )
 }
 

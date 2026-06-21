@@ -100,60 +100,88 @@ export class AnthropicProvider implements IModelProvider {
       ...(opts.stopSequences && opts.stopSequences.length > 0 ? { stop_sequences: opts.stopSequences } : {}),
     }
 
-    // Track partial tool call args per content block index
-    const partialToolCalls = new Map<number, { id: string; name: string; argsJson: string }>()
-    let inputTokens = 0
-    let outputTokens = 0
+    const MAX_RETRIES = 2
 
-    try {
-      const stream = this.client.messages.stream(params, { signal: opts.signal })
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Reset per-attempt state — required for clean retry
+      const partialToolCalls = new Map<number, { id: string; name: string; argsJson: string }>()
+      let inputTokens = 0
+      let outputTokens = 0
+      let startedYielding = false
+      let completedToolCallCount = 0
 
-      for await (const event of stream) {
-        if (event.type === 'content_block_start') {
-          if (event.content_block.type === 'tool_use') {
-            partialToolCalls.set(event.index, {
-              id: event.content_block.id,
-              name: event.content_block.name,
-              argsJson: '',
-            })
-          }
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta') {
-            yield { type: 'text_delta', content: event.delta.text }
-          } else if (event.delta.type === 'input_json_delta') {
+      try {
+        const stream = this.client.messages.stream(params, { signal: opts.signal })
+
+        for await (const event of stream) {
+          if (event.type === 'content_block_start') {
+            if (event.content_block.type === 'tool_use') {
+              partialToolCalls.set(event.index, {
+                id: event.content_block.id,
+                name: event.content_block.name,
+                argsJson: '',
+              })
+            }
+          } else if (event.type === 'content_block_delta') {
+            if (event.delta.type === 'text_delta') {
+              startedYielding = true
+              yield { type: 'text_delta', content: event.delta.text }
+            } else if (event.delta.type === 'input_json_delta') {
+              const partial = partialToolCalls.get(event.index)
+              if (partial) {
+                partial.argsJson += event.delta.partial_json
+              }
+            }
+          } else if (event.type === 'content_block_stop') {
             const partial = partialToolCalls.get(event.index)
             if (partial) {
-              partial.argsJson += event.delta.partial_json
+              let args: Record<string, unknown> = {}
+              try {
+                args = JSON.parse(partial.argsJson) as Record<string, unknown>
+              } catch {
+                args = {}
+              }
+              startedYielding = true
+              completedToolCallCount++
+              yield {
+                type: 'tool_call',
+                toolName: partial.name,
+                toolCallId: partial.id,
+                args,
+              }
+              partialToolCalls.delete(event.index)
             }
+          } else if (event.type === 'message_delta') {
+            outputTokens = event.usage.output_tokens
+          } else if (event.type === 'message_start') {
+            inputTokens = event.message.usage.input_tokens
           }
-        } else if (event.type === 'content_block_stop') {
-          const partial = partialToolCalls.get(event.index)
-          if (partial) {
-            let args: Record<string, unknown> = {}
-            try {
-              args = JSON.parse(partial.argsJson) as Record<string, unknown>
-            } catch {
-              args = {}
-            }
-            yield {
-              type: 'tool_call',
-              toolName: partial.name,
-              toolCallId: partial.id,
-              args,
-            }
-            partialToolCalls.delete(event.index)
-          }
-        } else if (event.type === 'message_delta') {
-          outputTokens = event.usage.output_tokens
-        } else if (event.type === 'message_start') {
-          inputTokens = event.message.usage.input_tokens
         }
-      }
 
-      yield { type: 'done', inputTokens, outputTokens }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Anthropic stream error'
-      yield { type: 'error', code: 'UPSTREAM_ERROR', message }
+        yield { type: 'done', inputTokens, outputTokens }
+        return
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : ''
+        const isTransient = msg.includes('Premature close') || msg.includes('ECONNRESET') || msg.includes('socket hang up')
+
+        if (isTransient) {
+          // Case 1: no output yet — safe full retry
+          if (!startedYielding && attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, 600 * (attempt + 1)))
+            continue
+          }
+          // Case 2: stream dropped AFTER all tool calls completed (no partial state)
+          // The connection closed before message_stop but we have complete tool data — treat as done.
+          if (completedToolCallCount > 0 && partialToolCalls.size === 0) {
+            yield { type: 'done', inputTokens, outputTokens }
+            return
+          }
+        }
+
+        const message = error instanceof Error ? error.message : 'Unknown Anthropic stream error'
+        yield { type: 'error', code: 'UPSTREAM_ERROR', message }
+        return
+      }
     }
   }
 

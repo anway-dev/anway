@@ -163,6 +163,21 @@ services:
       # Isolated named volumes — gateway never shares with web to avoid broken symlinks
       - gateway_nm:/app/apps/gateway/node_modules
       - gateway_root_nm:/app/node_modules
+      # K8s connector: mount kubeconfig + minikube certs at same host path so cert
+      # file references in kubeconfig resolve inside the container.
+      # create_host_path: true — safe on machines without minikube (creates empty dir).
+      - type: bind
+        source: ${HOME}/.kube
+        target: ${HOME}/.kube
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${HOME}/.minikube
+        target: ${HOME}/.minikube
+        read_only: true
+        bind:
+          create_host_path: true
     depends_on:
       postgres:
         condition: service_healthy

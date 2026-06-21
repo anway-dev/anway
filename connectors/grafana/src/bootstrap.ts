@@ -11,10 +11,15 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
 
   async bootstrap(_tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
     const baseUrl = (payload['baseUrl'] ?? payload['url'] ?? this.baseUrl ?? process.env['GRAFANA_URL'] ?? 'http://localhost:3000') as string
+    // publicUrl is the browser-accessible URL for dashboard links — may differ from internal API baseUrl
+    const publicUrl = (payload['dashboardUrl'] ?? payload['publicUrl'] ?? payload['externalUrl'] ?? baseUrl) as string
     const token = (payload['token'] ?? payload['apiKey'] ?? this.apiToken ?? process.env['GRAFANA_API_KEY']) as string | undefined
-    if (!token) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Grafana bootstrap: no API key configured'] }
-
-    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    const user = (payload['user'] ?? payload['username'] ?? 'admin') as string
+    const password = (payload['password'] ?? '') as string
+    const authHeader = token
+      ? `Bearer ${token}`
+      : `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
+    const headers: Record<string, string> = { Authorization: authHeader, 'Content-Type': 'application/json' }
 
     let entitiesUpserted = 0
 
@@ -26,11 +31,11 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
     const alertResp = await fetch(`${baseUrl}/api/v1/provisioning/alert-rules`, { headers })
     const alertRules = alertResp.ok ? await alertResp.json() as Array<{ uid: string; title: string; labels?: Record<string, string> }> : []
 
-    // Fetch datasources (services monitoring)
+    // Fetch datasources — each datasource becomes a Service entity so agents can
+    // resolve "which Grafana datasource backs this service"
     const dsResp = await fetch(`${baseUrl}/api/datasources`, { headers })
     const datasources = dsResp.ok ? await dsResp.json() as Array<{ uid: string; name: string; type: string }> : []
 
-    // Upsert discovered services from datasources
     for (const ds of datasources) {
       await this.kg.upsertEntity({
         type: 'Service', name: ds.name,
@@ -42,20 +47,18 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
       entitiesUpserted++
     }
 
-    // Upsert dashboards as Dashboard entities
     for (const dash of dashboards) {
       await this.kg.upsertEntity({
         type: 'Dashboard', name: dash.title,
         metadata: {
           externalId: dash.uid,
-          url: `${baseUrl}/d/${dash.uid}`,
+          url: `${publicUrl}/d/${dash.uid}`,
           connectorCoordinates: { grafana: { connectorType: 'grafana', resourceIds: { uid: dash.uid, title: dash.title }, resolvedAt: new Date().toISOString(), confidence: 1.0 } },
         },
       }, _tenantId)
       entitiesUpserted++
     }
 
-    // Upsert alert rules
     for (const rule of alertRules) {
       await this.kg.upsertEntity({
         type: 'Alert', name: rule.title,
@@ -68,10 +71,12 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
       entitiesUpserted++
     }
 
+    // Relationships (Dashboard→MONITORS→Service, Alert→MONITORS→Service) are resolved
+    // by the mapping phase that runs after every bootstrap — not inline here.
     return {
       entitiesUpserted,
       relationshipsUpserted: 0,
-      episodeHints: [`Grafana: ${dashboards.length} dashboards, ${alertRules.length} alert rules, ${datasources.length} datasources`],
+      episodeHints: [`Grafana: ${dashboards.length} dashboards, ${alertRules.length} alert rules, ${datasources.length} datasources indexed`],
     }
   }
 }

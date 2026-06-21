@@ -5,6 +5,8 @@ import { withTenant } from '../db/prisma.js'
 import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief, CloudSecurityScan, CostAnomalyDetection, IncidentRetrospective, DataRetentionJob } from './cron-monitors.js'
 import { SchedulerFactory } from '../scheduler/factory.js'
 import { runFreshnessDecay } from '../kb/freshness-daemon.js'
+import { bootstrapUnindexedConnectors } from '../graph-builder/boot-scan.js'
+import { runMappingPhaseAllTenants } from '../graph-builder/mapper.js'
 import type { IScheduler } from '@anvay/agent'
 
 async function updateLastRun(tenantId: string, jobType: string, result: unknown): Promise<void> {
@@ -181,6 +183,28 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     schedule: '*/5 * * * *',
     async run() {
       return runFreshnessDecay(redisUrl)
+    },
+  })
+
+  // Connector bootstrap recovery — re-publishes connector_registered for any connector
+  // that never completed bootstrap (bootstrapped_at IS NULL). Catches missed pub/sub events.
+  await scheduler.register({
+    id: 'connector-bootstrap-recovery',
+    name: 'connector_bootstrap_recovery',
+    schedule: '*/15 * * * *',
+    async run() {
+      return bootstrapUnindexedConnectors(redisUrl, { info: () => {}, warn: () => {} })
+    },
+  })
+
+  // Periodic mapping phase — re-resolves cross-entity relationships for all tenants.
+  // Runs every 15 min so KB stays consistent even if mapping was missed after a bootstrap.
+  await scheduler.register({
+    id: 'kb-entity-mapping',
+    name: 'kb_entity_mapping',
+    schedule: '*/15 * * * *',
+    async run() {
+      return runMappingPhaseAllTenants()
     },
   })
 

@@ -51,10 +51,26 @@ export async function k8sRoutes(app: FastifyInstance) {
       return { connected: false, namespaces: [], workloads: [], events: [], summary: null }
     }
 
+    // Load connector-level namespace filter (null = all namespaces)
+    let connectorNsFilter: string[] | null = null
+    try {
+      const cfgRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<{ last_bootstrap_summary: Record<string, unknown> | null }[]>`
+          SELECT last_bootstrap_summary FROM connector_config
+          WHERE tenant_id = ${tenantId}::uuid AND connector_type = ANY(${K8S_CONNECTOR_TYPES}::text[])
+            AND enabled = true LIMIT 1
+        `
+      )
+      const summary = cfgRows[0]?.last_bootstrap_summary
+      if (summary && Array.isArray(summary['namespace_filter'])) {
+        connectorNsFilter = summary['namespace_filter'] as string[]
+      }
+    } catch { /* ignore — proceed without filter */ }
+
     const entities = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<EntityRow[]>`
         SELECT id, name, type, metadata FROM entities
-        WHERE type IN ('Service', 'Namespace', 'Alert')
+        WHERE tenant_id = ${tenantId}::uuid AND type IN ('Service', 'Namespace', 'Alert')
         ORDER BY type, name LIMIT 500
       `
     ).catch(() => [])
@@ -63,8 +79,10 @@ export async function k8sRoutes(app: FastifyInstance) {
     const serviceEntities = entities.filter(e => e.type === 'Service')
     const alertEntities = entities.filter(e => e.type === 'Alert')
 
-    const nsAllowed = (name: string) =>
-      allowedNs === null || allowedNs.includes('*') || allowedNs.includes(name)
+    const nsAllowed = (name: string) => {
+      if (connectorNsFilter !== null && connectorNsFilter.length > 0 && !connectorNsFilter.includes(name)) return false
+      return allowedNs === null || allowedNs.includes('*') || allowedNs.includes(name)
+    }
 
     const namespaces = namespaceEntities.map(ns => {
       const meta = (ns.metadata ?? {}) as Record<string, unknown>

@@ -18,6 +18,7 @@ export async function bootstrapUnindexedConnectors(redisUrl: string, log: Logger
   await pub.connect()
   try {
     for (const row of rows) {
+      await pub.del(`graph:bootstrap:lock:${row.tenant_id}:${row.connector_type}`).catch(() => {})
       await pub.publish('connector_registered', JSON.stringify({
         type: 'connector_registered',
         tenantId: row.tenant_id,
@@ -25,7 +26,7 @@ export async function bootstrapUnindexedConnectors(redisUrl: string, log: Logger
         connectorId: row.connector_type,
         payload: {},
       }))
-      log.info({ tenantId: row.tenant_id, connectorType: row.connector_type }, 'boot-scan: published connector_registered for un-indexed connector')
+      log.info({ tenantId: row.tenant_id, connectorType: row.connector_type }, 'boot-scan: cleared lock + published connector_registered for un-indexed connector')
     }
   } finally {
     await pub.quit()

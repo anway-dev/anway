@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { Prisma } from '@prisma/client'
+import { createClient } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
@@ -8,6 +9,24 @@ import { encryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
 import dns from 'node:dns/promises'
+
+let _settingsPub: import('redis').RedisClientType | null = null
+let _settingsPubPromise: Promise<import('redis').RedisClientType> | null = null
+
+async function getSettingsPub(): Promise<import('redis').RedisClientType | null> {
+  const url = process.env['REDIS_URL']
+  if (!url) return null
+  if (_settingsPub) return _settingsPub
+  if (!_settingsPubPromise) {
+    _settingsPubPromise = (async () => {
+      const client = createClient({ url }) as import('redis').RedisClientType
+      await client.connect()
+      _settingsPub = client
+      return client
+    })().catch(() => { _settingsPubPromise = null; return null as unknown as import('redis').RedisClientType })
+  }
+  return _settingsPubPromise
+}
 
 function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint?: string; defaultBaseUrl?: string }): string[] {
   if (Array.isArray(manifest.models)) return manifest.models
@@ -159,7 +178,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     'slack', 'grafana', 'elastic', 'dynatrace', 'sentry', 'jenkins',
     'circleci', 'vercel', 'k8s', 'vault', 'snyk', 'sonarqube',
     'opsgenie', 'launchdarkly', 'confluence',
-    'eks', 'gke', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
+    'eks', 'gke', 'aks', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
     'alertmanager',
   ]
 
@@ -189,8 +208,8 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         `
       )
 
-      // Emit connector_registered only on first registration (not credential update)
-      if (isNew && opts?.pub) {
+      const pub = await getSettingsPub().catch(() => null)
+      if (pub) {
         const creds = await withTenant(prisma, tenantId, (tx) =>
           tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
             SELECT credentials_enc FROM connector_config
@@ -198,8 +217,11 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
           `
         ).catch(() => [])
         const credPayload = effectiveCredentials(creds[0])
-        await opts.pub.publish('connector_registered', JSON.stringify({
-          type: 'connector_registered',
+        // First registration → full bootstrap; credential update → reconnect (re-bootstrap with updated creds)
+        const eventType = isNew ? 'connector_registered' : 'connector_reconnected'
+        await pub.del(`graph:bootstrap:lock:${tenantId}:${type}`).catch(() => {})
+        await pub.publish(eventType, JSON.stringify({
+          type: eventType,
           tenantId,
           connectorType: type,
           connectorId: type,

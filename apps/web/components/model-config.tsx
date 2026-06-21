@@ -31,8 +31,10 @@ export function ModelConfig() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selected, setSelected] = useState("anthropic");
   const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
+  const [loadingProviders, setLoadingProviders] = useState(true);
 
   useEffect(() => {
+    setLoadingProviders(true);
     fetch("/api/settings/provider-manifests")
       .then(r => r.json())
       .then((manifests: Array<{ id: string; displayName: string; models: string[] }>) => {
@@ -47,7 +49,8 @@ export function ModelConfig() {
           envVar: (m.id).toUpperCase() + '_API_KEY',
         })));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingProviders(false));
   }, []);
 
   const [endpoints, setEndpoints] = useState<Record<string, string>>({
@@ -149,28 +152,49 @@ export function ModelConfig() {
         )}
 
         <div style={{ padding: "6px 8px", flex: 1, overflowY: "auto" }}>
-          <div style={{ fontSize: "9px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "6px 8px 4px" }}>Cloud</div>
-          {providers.filter((p) => p.type === "cloud").map((p) => (
-            <button key={p.id} onClick={() => setSelected(p.id)} style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "7px 8px", borderRadius: "6px", cursor: "pointer", border: "none", background: selected === p.id ? "#1a1a1a" : "transparent", textAlign: "left" }}>
-              <span style={{ fontSize: "14px", color: p.color, width: "18px", textAlign: "center" }}>{p.icon}</span>
-              <span style={{ fontSize: "12px", color: selected === p.id ? "#e5e5e5" : "#888", flex: 1 }}>{p.name}</span>
-              {p.connected && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />}
-            </button>
-          ))}
+          {loadingProviders ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "10px 4px" }}>
+              {[1,2,3,4,5].map(i => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 8px" }}>
+                  <div style={{ width: "18px", height: "18px", borderRadius: "4px", background: "#1a1a1a", animation: "pulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.1}s` }} />
+                  <div style={{ height: "10px", borderRadius: "4px", background: "#1a1a1a", flex: 1, animation: "pulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.1}s` }} />
+                </div>
+              ))}
+              <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:.7} }`}</style>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: "9px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "6px 8px 4px" }}>Cloud</div>
+              {providers.filter((p) => p.type === "cloud").map((p) => (
+                <button key={p.id} onClick={() => setSelected(p.id)} style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "7px 8px", borderRadius: "6px", cursor: "pointer", border: "none", background: selected === p.id ? "#1a1a1a" : "transparent", textAlign: "left" }}>
+                  <span style={{ fontSize: "14px", color: p.color, width: "18px", textAlign: "center" }}>{p.icon}</span>
+                  <span style={{ fontSize: "12px", color: selected === p.id ? "#e5e5e5" : "#888", flex: 1 }}>{p.name}</span>
+                  {p.connected && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />}
+                </button>
+              ))}
 
-          <div style={{ fontSize: "9px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "12px 8px 4px" }}>Local</div>
-          {providers.filter((p) => p.type === "local").map((p) => (
-            <button key={p.id} onClick={() => setSelected(p.id)} style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "7px 8px", borderRadius: "6px", cursor: "pointer", border: "none", background: selected === p.id ? "#1a1a1a" : "transparent", textAlign: "left" }}>
-              <span style={{ fontSize: "14px", color: p.color, width: "18px", textAlign: "center" }}>{p.icon}</span>
-              <span style={{ fontSize: "12px", color: selected === p.id ? "#e5e5e5" : "#888", flex: 1 }}>{p.name}</span>
-              {p.connected && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />}
-            </button>
-          ))}
+              <div style={{ fontSize: "9px", color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", padding: "12px 8px 4px" }}>Local</div>
+              {providers.filter((p) => p.type === "local").map((p) => (
+                <button key={p.id} onClick={() => setSelected(p.id)} style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "7px 8px", borderRadius: "6px", cursor: "pointer", border: "none", background: selected === p.id ? "#1a1a1a" : "transparent", textAlign: "left" }}>
+                  <span style={{ fontSize: "14px", color: p.color, width: "18px", textAlign: "center" }}>{p.icon}</span>
+                  <span style={{ fontSize: "12px", color: selected === p.id ? "#e5e5e5" : "#888", flex: 1 }}>{p.name}</span>
+                  {p.connected && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
       {/* Right: config panel */}
-      {provider && (
+      {loadingProviders && !provider && (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "12px" }}>
+          <div style={{ width: "28px", height: "28px", border: "2px solid #1a1a1a", borderTop: "2px solid #10b981", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ fontSize: "11px", color: "#444" }}>Loading providers…</div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+      {!loadingProviders && provider && (
       <div style={{ flex: 1, overflow: "auto", padding: "24px 32px" }}>
         <div style={{ maxWidth: "600px" }}>
 
@@ -242,7 +266,13 @@ export function ModelConfig() {
                 )}
               </div>
               <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                {provider.models.map((m) => (
+                {testState[provider.id] === "testing" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px" }}>
+                    <div style={{ width: "16px", height: "16px", border: "2px solid #1a1a1a", borderTop: "2px solid #10b981", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+                    <span style={{ fontSize: "11px", color: "#555" }}>Discovering models…</span>
+                  </div>
+                )}
+                {testState[provider.id] !== "testing" && provider.models.map((m) => (
                   <button
                     key={m}
                     onClick={() => handleModelSelect(provider.id, m)}

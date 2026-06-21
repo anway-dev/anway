@@ -6,6 +6,7 @@ import { ProviderFactory } from '@anvay/agent'
 import type { ProviderConfig } from '@anvay/agent'
 import type { TenantId } from '@anvay/types'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { runTenantMappingPhase } from './mapper.js'
 import { startGraphWorker } from './queue.js'
 // Tier 1 — fully operational
 import { GitHubBootstrap } from '@anvay/connector-github'
@@ -43,6 +44,7 @@ import { decryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { appendAuditEvent } from '../routes/audit.js'
 interface SubscriberLogger { warn(obj: unknown, msg?: string): void; info(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void }
 
 async function connectorCredential(tenantId: string, connectorType: string, envVar: string): Promise<string> {
@@ -113,6 +115,9 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
   reg.set('prometheus', new PrometheusBootstrap(kg))
   reg.set('loki', new LokiBootstrap(kg))
   reg.set('k8s', new KubernetesBootstrap(kg))
+  reg.set('eks', new KubernetesBootstrap(kg))
+  reg.set('gke', new KubernetesBootstrap(kg))
+  reg.set('aks', new KubernetesBootstrap(kg))
   reg.set('jira', new JiraBootstrap(kg))
   reg.set('slack', new SlackBootstrap(kg))
   reg.set('sentry', new SentryBootstrap(kg))
@@ -153,6 +158,8 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         return
       }
       const tid = event.tenantId
+      // Extract connectorType once; only set for connector lifecycle events
+      const eventConnectorType = (event as { connectorType?: string }).connectorType
 
       const providerConfig = await resolveProviderConfig(tid)
       if (!providerConfig) {
@@ -174,13 +181,13 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
 
       // Connector lifecycle events re-published internally (e.g. kb:stale) carry no
       // payload — load stored credentials so bootstrap reaches the right endpoint.
-      if ((event.type === 'connector_registered' || event.type === 'connector_reconnected') && event.connectorType) {
+      if ((event.type === 'connector_registered' || event.type === 'connector_reconnected') && eventConnectorType) {
         const existing = (event as { payload?: Record<string, unknown> }).payload
         if (!existing || Object.keys(existing).length === 0) {
           const rows = await withTenant(prisma, tid, (tx) =>
             tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
               SELECT credentials_enc FROM connector_config
-              WHERE tenant_id = ${tid}::uuid AND connector_type = ${event.connectorType} AND enabled = true
+              WHERE tenant_id = ${tid}::uuid AND connector_type = ${eventConnectorType} AND enabled = true
             `
           ).catch(() => [])
           const creds = effectiveCredentials(rows[0])
@@ -191,32 +198,85 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       // Distributed lock — only one container bootstraps per connector per tenant
       let lockKey: string | null = null
       if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
-        lockKey = `graph:bootstrap:lock:${tid}:${event.connectorType}`
-        const acquired = await graphPub.set(lockKey, '1', { NX: true, EX: 300 })
+        lockKey = `graph:bootstrap:lock:${tid}:${eventConnectorType}`
+        const acquired = await graphPub.set(lockKey, '1', { NX: true, EX: 60 })
         if (!acquired) {
           log.info({ lockKey }, 'GraphBuilderSubscriber: bootstrap lock held by another instance — skipping')
+          appendAuditEvent({ tenantId: tid, action: 'connector.bootstrap_queued', resource: eventConnectorType ?? '', outcome: 'success', metadata: { connectorType: eventConnectorType, message: 'Bootstrap already in progress — will retry automatically in ~5 min. Click Force Resync to retry now.' } }).catch(() => {})
           return
         }
       }
+      const K8S_TYPES = new Set(['k8s', 'eks', 'gke', 'aks'])
+      const isBootstrapEvent = event.type === 'connector_registered' || event.type === 'connector_reconnected'
+      if (isBootstrapEvent && eventConnectorType) {
+        appendAuditEvent({ tenantId: tid, action: 'connector.bootstrap_started', resource: eventConnectorType, outcome: 'success', metadata: { connectorType: eventConnectorType, message: 'Bootstrap started' } }).catch(() => {})
+      }
       try {
         await agent.handle(event)
-        if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
-          const connectorType = event.connectorType
+        if (isBootstrapEvent) {
+          const connectorType = eventConnectorType
           if (connectorType) {
+            // Preserve existing namespace_filter across rebootstrap
+            let existingFilter: string[] | null = null
+            try {
+              const prevRows = await withTenant(prisma, tid, (tx) =>
+                tx.$queryRaw<{ last_bootstrap_summary: Record<string, unknown> | null }[]>`
+                  SELECT last_bootstrap_summary FROM connector_config
+                  WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
+                `
+              )
+              const prev = prevRows[0]?.last_bootstrap_summary
+              if (prev && Array.isArray(prev['namespace_filter'])) {
+                existingFilter = prev['namespace_filter'] as string[]
+              }
+            } catch { /* ignore */ }
+
+            // For k8s-type connectors, fetch discovered namespaces from entities table
+            let discoveredNamespaces: string[] | undefined
+            if (K8S_TYPES.has(connectorType)) {
+              const nsRows = await withTenant(prisma, tid, (tx) =>
+                tx.$queryRaw<{ name: string }[]>`
+                  SELECT name FROM entities
+                  WHERE tenant_id = ${tid}::uuid AND type = 'Namespace'
+                  ORDER BY name
+                `
+              ).catch(() => [] as { name: string }[])
+              discoveredNamespaces = nsRows.map(r => r.name)
+            }
+
+            const summary: Record<string, unknown> = { status: 'success', at: new Date().toISOString() }
+            if (discoveredNamespaces !== undefined) summary['namespaces'] = discoveredNamespaces
+            if (existingFilter !== null) summary['namespace_filter'] = existingFilter
+
             void withTenant(prisma, tid, (tx) =>
               tx.$executeRaw`
                 UPDATE connector_config
                 SET bootstrapped_at = NOW(),
-                    last_bootstrap_summary = ${JSON.stringify({ status: 'success', at: new Date().toISOString() })}::jsonb
+                    last_bootstrap_summary = ${JSON.stringify(summary)}::jsonb
                 WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
               `
             ).catch((err: Error) => log.warn({ err, connectorType, tenantId: tid }, 'failed to write bootstrapped_at'))
+
+            const nsCount = discoveredNamespaces?.length
+            appendAuditEvent({
+              tenantId: tid, action: 'connector.bootstrap_completed', resource: connectorType, outcome: 'success',
+              metadata: { connectorType, message: nsCount !== undefined ? `Bootstrap complete — ${nsCount} namespace${nsCount !== 1 ? 's' : ''} discovered` : 'Bootstrap complete' },
+            }).catch(() => {})
+
+            // Mapping phase — runs after every bootstrap to resolve cross-entity relationships
+            appendAuditEvent({ tenantId: tid, action: 'connector.mapping_started', resource: connectorType, outcome: 'success', metadata: { connectorType, message: 'Resolving entity relationships…' } }).catch(() => {})
+            runTenantMappingPhase(tid).then((mapResult) => {
+              appendAuditEvent({ tenantId: tid, action: 'connector.mapping_completed', resource: connectorType, outcome: 'success', metadata: { connectorType, relationshipsUpserted: mapResult.relationshipsUpserted, message: `Mapping complete — ${mapResult.relationshipsUpserted} relationship${mapResult.relationshipsUpserted !== 1 ? 's' : ''} resolved` } }).catch(() => {})
+              log.info({ tenantId: tid, connectorType, ...mapResult }, 'mapping phase complete')
+            }).catch((err: Error) => {
+              log.warn({ err, tenantId: tid, connectorType }, 'mapping phase failed — non-critical, will retry on next cycle')
+            })
           }
         }
       } catch (err) {
         log.error({ err, eventType: event.type, tenantId: tid }, 'GraphBuilderAgent event handling failed')
-        if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
-          const connectorType = event.connectorType
+        if (isBootstrapEvent) {
+          const connectorType = eventConnectorType
           if (connectorType) {
             void withTenant(prisma, tid, (tx) =>
               tx.$executeRaw`
@@ -225,6 +285,11 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
                 WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
               `
             ).catch(() => {})
+
+            appendAuditEvent({
+              tenantId: tid, action: 'connector.bootstrap_failed', resource: connectorType, outcome: 'failed',
+              metadata: { connectorType, message: `Bootstrap failed: ${String(err).slice(0, 200)}` },
+            }).catch(() => {})
           }
         }
       } finally {

@@ -1,59 +1,99 @@
-import { spawnSync } from 'node:child_process'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { KubeConfig, CoreV1Api } from '@kubernetes/client-node'
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anvay/agent'
 import type { IKnowledgeGraph } from '@anvay/agent'
 import type { TenantId } from '@anvay/types'
 
-function resolveKubectlArgs(payload: Record<string, unknown>): { args: string[]; cleanup?: () => void } {
+/**
+ * Patches a loaded KubeConfig so it works from inside a Docker container:
+ * - 127.0.0.1 / localhost → host.docker.internal (reach host services)
+ * - caFile pointing to host FS paths that don't exist in container → skipTLSVerify
+ */
+function patchForContainer(kc: KubeConfig): void {
+  kc.clusters = kc.clusters.map(cluster => {
+    const c: any = { ...cluster }
+    if (c.server) {
+      const rewritten = c.server.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)/, '$1host.docker.internal')
+      if (rewritten !== c.server) {
+        c.server = rewritten
+        // host.docker.internal is not in the cert's SANs (issued for localhost/127.0.0.1/minikube)
+        // so skip TLS when we rewrote the hostname
+        c.skipTLSVerify = true
+        delete c.caFile
+        delete c.caData
+      }
+    }
+    // CA cert file from host FS not accessible in container → skip TLS
+    if (c.caFile && !existsSync(c.caFile)) {
+      delete c.caFile
+      c.skipTLSVerify = true
+    }
+    return c
+  })
+}
+
+function buildKubeConfig(payload: Record<string, unknown>): { kc: KubeConfig; cleanup?: () => void } {
+  const kc = new KubeConfig()
   const kubeconfig = payload['kubeconfig'] as string | undefined
   const server = payload['server'] as string | undefined
   const token = payload['token'] as string | undefined
 
+  if (kubeconfig?.trimStart().startsWith('apiVersion')) {
+    // Inline YAML — write temp file then load
+    const tmp = join(tmpdir(), `anvay-k8s-${Date.now()}.yaml`)
+    writeFileSync(tmp, kubeconfig, { mode: 0o600 })
+    kc.loadFromFile(tmp)
+    patchForContainer(kc)
+    return { kc, cleanup: () => { try { unlinkSync(tmp) } catch { /* ignore */ } } }
+  }
+
   if (kubeconfig) {
-    // YAML content: write temp file
-    if (kubeconfig.trimStart().startsWith('apiVersion')) {
-      const tmp = join(tmpdir(), `anvay-k8s-${Date.now()}.yaml`)
-      writeFileSync(tmp, kubeconfig, { mode: 0o600 })
-      return { args: ['--kubeconfig', tmp], cleanup: () => { try { unlinkSync(tmp) } catch {} } }
-    }
     // File path
-    return { args: ['--kubeconfig', kubeconfig] }
+    kc.loadFromFile(kubeconfig)
+    patchForContainer(kc)
+    return { kc }
   }
 
   if (server && token) {
-    return { args: ['--server', server, '--token', token, '--insecure-skip-tls-verify=true'] }
+    kc.loadFromOptions({
+      clusters: [{ name: 'anvay', server, skipTLSVerify: true }],
+      users: [{ name: 'anvay', token }],
+      contexts: [{ name: 'anvay', cluster: 'anvay', user: 'anvay' }],
+      currentContext: 'anvay',
+    })
+    return { kc }
   }
 
-  // Use default kubectl context (KUBECONFIG env or ~/.kube/config)
-  return { args: [] }
+  // Fall back to default kubeconfig context
+  kc.loadFromDefault()
+  patchForContainer(kc)
+  return { kc }
 }
 
 export class KubernetesBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
-    const { args: kubectlBase, cleanup } = resolveKubectlArgs(payload)
-    const run = (k: string) => spawnSync('kubectl', [...kubectlBase, ...k.split(' ')], { encoding: 'utf-8', timeout: 15_000 })
+    const { kc, cleanup } = buildKubeConfig(payload)
 
     try {
-      // 1. Get pods
-      const podsResult = run('get pods --all-namespaces -o json')
-      if (podsResult.status !== 0) {
-        return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['K8s bootstrap: kubectl not available or cluster unreachable'] }
-      }
+      const api = kc.makeApiClient(CoreV1Api)
 
-      const podsData = JSON.parse(podsResult.stdout) as { items: Array<{ metadata: { name: string; namespace: string; labels?: Record<string, string> } }> }
+      // 1. List all pods across all namespaces
+      const podsResp = await api.listPodForAllNamespaces()
+      const pods = podsResp.items ?? []
+
       const namespaces = new Set<string>()
       let entitiesUpserted = 0
       let relationshipsUpserted = 0
 
-      for (const pod of podsData.items) {
-        const ns = pod.metadata.namespace
+      for (const pod of pods) {
+        const ns = pod.metadata?.namespace ?? 'default'
         namespaces.add(ns)
-        const labels = pod.metadata.labels ?? {}
-        const appLabel = labels['app'] ?? labels['app.kubernetes.io/name'] ?? pod.metadata.name
+        const labels = pod.metadata?.labels ?? {}
+        const appLabel = labels['app'] ?? labels['app.kubernetes.io/name'] ?? pod.metadata?.name ?? 'unknown'
 
         const nsId = await this.kg.upsertEntity({ type: 'Namespace', name: ns, metadata: {} }, tenantId)
         const svcId = await this.kg.upsertEntity({
@@ -69,33 +109,53 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
         relationshipsUpserted++
       }
 
-      // 2. Get services
-      const svcResult = run('get services --all-namespaces -o json')
-      if (svcResult.status === 0) {
-        const svcData = JSON.parse(svcResult.stdout) as { items: Array<{ metadata: { name: string; namespace: string }; spec?: { selector?: Record<string, string> } }> }
-        for (const svc of svcData.items) {
-          const selector = svc.spec?.selector ?? {}
-          const selectorStr = Object.entries(selector).map(([k, v]) => `${k}=${v}`).join(',')
-          if (selectorStr) {
-            await this.kg.upsertEntity({
-              type: 'Service',
-              name: svc.metadata.name,
-              metadata: {
-                namespace: svc.metadata.namespace,
-                connectorCoordinates: {
-                  k8s: { resourceIds: { namespace: svc.metadata.namespace, selector: selectorStr } },
-                },
-              },
-            }, tenantId)
-            entitiesUpserted++
-          }
+      // 2. List all services across all namespaces
+      const svcsResp = await api.listServiceForAllNamespaces()
+      for (const svc of svcsResp.items ?? []) {
+        const selector = svc.spec?.selector ?? {}
+        const selectorStr = Object.entries(selector).map(([k, v]) => `${k}=${v}`).join(',')
+        if (selectorStr) {
+          const ns = svc.metadata?.namespace ?? 'default'
+          namespaces.add(ns)
+          await this.kg.upsertEntity({
+            type: 'Service',
+            name: svc.metadata?.name ?? 'unknown',
+            metadata: {
+              namespace: ns,
+              connectorCoordinates: { k8s: { resourceIds: { namespace: ns, selector: selectorStr } } },
+            },
+          }, tenantId)
+          entitiesUpserted++
         }
       }
 
       const hints = [`K8s bootstrap: found ${entitiesUpserted} services across ${namespaces.size} namespaces`]
-      return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
+      return { entitiesUpserted, relationshipsUpserted, episodeHints: hints, metadata: { namespaces: Array.from(namespaces) } }
     } finally {
       cleanup?.()
     }
+  }
+}
+
+function friendlyError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (msg.includes('ENOENT') && (msg.includes('.crt') || msg.includes('.key') || msg.includes('.pem') || msg.includes('.csr'))) {
+    return `Certificate file not found inside the gateway container: ${msg}\n\nFix: run this on your machine and paste the output into the kubeconfig field:\n  kubectl config view --raw --minify --flatten\nThis embeds all certs inline so no host filesystem paths are needed.`
+  }
+  return msg.slice(0, 600)
+}
+
+/** Lightweight connectivity check — used by the /test endpoint. */
+export async function testK8sConnectivity(payload: Record<string, unknown>): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const { kc, cleanup } = buildKubeConfig(payload)
+  try {
+    const api = kc.makeApiClient(CoreV1Api)
+    const resp = await api.listNamespace()
+    const count = resp.items?.length ?? 0
+    return { ok: true, message: `Cluster reachable — ${count} namespace${count !== 1 ? 's' : ''}` }
+  } catch (err) {
+    return { ok: false, error: friendlyError(err) }
+  } finally {
+    cleanup?.()
   }
 }

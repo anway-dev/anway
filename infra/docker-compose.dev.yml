@@ -156,6 +156,9 @@ services:
       REDIS_URL: redis://redis:6379
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       LOG_LEVEL: info
+      # Docker → host Ollama. Overrides the localhost-only .env default which
+      # resolves to the container's own loopback when running in Docker.
+      OLLAMA_ENDPOINT: http://host.docker.internal:11434/v1
     ports:
       - "8510:8510"
     volumes:

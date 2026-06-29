@@ -164,11 +164,20 @@ export interface ErrorEvent {
   readonly message: string
 }
 
+export interface AgentFindingEvent {
+  readonly type: 'agent_finding'
+  readonly agentType: string
+  readonly summary: string
+  readonly confidence: number
+  readonly toolsUsed: string[]
+}
+
 export type StreamEvent =
   | TextDeltaEvent
   | ToolCallEvent
   | ToolResultEvent
   | GateRequiredEvent
+  | AgentFindingEvent
   | DoneEvent
   | ErrorEvent
 

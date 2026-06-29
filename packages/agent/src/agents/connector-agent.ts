@@ -1,6 +1,7 @@
 import type { Message, ToolDefinition } from '../interfaces/provider.js'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { ExecutableTool } from '../orchestrator.js'
+import type { AgentPerimeter } from '../perimeter/engine.js'
 
 // ---------------------------------------------------------------------------
 // AgentFinding — structured result returned by each connector agent.
@@ -14,6 +15,8 @@ export interface AgentFinding {
   summary: string      // 2-3 sentences for orchestrator synthesis prompt
   confidence: number   // 0.0–1.0
   error?: string
+  inputTokens?: number   // accumulated from model.chat() calls
+  outputTokens?: number  // accumulated from model.chat() calls
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +187,7 @@ export class ConnectorAgent {
     readonly agentType: string,
     private model: IModelProvider,
     private tools: ExecutableTool[],
+    private perimeter?: AgentPerimeter,
   ) {}
 
   async run(ctx: SpecialistContext, signal?: AbortSignal): Promise<AgentFinding> {
@@ -227,6 +231,8 @@ export class ConnectorAgent {
 
     const rawData: Record<string, unknown> = {}
     const toolsUsed: string[] = []
+    let agentInputTokens = 0
+    let agentOutputTokens = 0
     const MAX_STEPS = 5
 
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -246,8 +252,13 @@ export class ConnectorAgent {
           summary: `${this.agentType} agent error: ${e instanceof Error ? e.message : String(e)}`,
           confidence: 0,
           error: String(e),
+          inputTokens: agentInputTokens,
+          outputTokens: agentOutputTokens,
         }
       }
+
+      agentInputTokens += resp.usage?.inputTokens ?? 0
+      agentOutputTokens += resp.usage?.outputTokens ?? 0
 
       // No tool calls → agent produced final summary
       if (!resp.toolCalls || resp.toolCalls.length === 0) {
@@ -257,6 +268,8 @@ export class ConnectorAgent {
           rawData,
           summary: resp.content || `${this.agentType}: no findings.`,
           confidence: toolsUsed.length > 0 ? 0.80 : 0.20,
+          inputTokens: agentInputTokens,
+          outputTokens: agentOutputTokens,
         }
       }
 
@@ -267,9 +280,13 @@ export class ConnectorAgent {
         let result: unknown
         if (tool) {
           try {
-            result = await tool.run(call.args)
-            rawData[call.name] = result
-            toolsUsed.push(call.name)
+            if (this.perimeter && !this.perimeter.allows({ name: call.name, args: call.args, id: call.id })) {
+              result = { error: `PERIMETER_BLOCKED: ${call.name} not permitted` }
+            } else {
+              result = await tool.run(call.args)
+              rawData[call.name] = result
+              toolsUsed.push(call.name)
+            }
           } catch (e) {
             result = { error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` }
           }
@@ -293,6 +310,8 @@ export class ConnectorAgent {
       rawData,
       summary: `${this.agentType}: max investigation steps reached. Partial data collected.`,
       confidence: 0.40,
+      inputTokens: agentInputTokens,
+      outputTokens: agentOutputTokens,
     }
   }
 }

@@ -385,7 +385,7 @@ export async function* runSession(
   const selectedTypes = selectConnectorTypes(classifiedIntent, isAlertInvestigation, [...toolMap.keys()])
 
   if (selectedTypes.length === 0) {
-    yield* synthesisOnlyFallback(model, input, graphContext, connectorContext, sreContext, ctx.effectiveRole, history)
+    yield* synthesisOnlyFallback(model, input, graphContext, connectorContext, sreContext, ctx.effectiveRole, history, checkTokens)
     return
   }
 
@@ -412,12 +412,21 @@ export async function* runSession(
     userId: ctx.userId,
   }
 
-  // Run all selected connector agents in parallel
+  // Run all selected connector agents in parallel — hard 30s timeout per P1
+  const AGENT_TIMEOUT_MS = 30_000
+  const agentAbort = new AbortController()
+  const agentTimeout = setTimeout(() => agentAbort.abort('agent_timeout'), AGENT_TIMEOUT_MS)
+  // Composite signal: respect outer signal + agent timeout
+  const agentSignal = signal
+    ? AbortSignal.any([signal, agentAbort.signal])
+    : agentAbort.signal
+
   const agentRuns = selectedTypes.map(connType =>
-    new ConnectorAgent(connType, model, toolMap.get(connType) ?? []).run(specialistCtx, signal)
+    new ConnectorAgent(connType, model, toolMap.get(connType) ?? [], config.perimeter).run(specialistCtx, agentSignal)
   )
 
   const results = await Promise.allSettled(agentRuns)
+  clearTimeout(agentTimeout)
   const findings: AgentFinding[] = []
 
   for (let i = 0; i < results.length; i++) {
@@ -444,6 +453,16 @@ export async function* runSession(
     }
   }
 
+  // Accumulate agent token usage before synthesis
+  let agentInputTokens = 0, agentOutputTokens = 0
+  for (const finding of findings) {
+    agentInputTokens += finding.inputTokens ?? 0
+    agentOutputTokens += finding.outputTokens ?? 0
+  }
+  budget.sessionUsed += agentInputTokens + agentOutputTokens
+  budget.tenantDailyUsed += agentInputTokens + agentOutputTokens
+  budget.tenantMonthlyUsed += agentInputTokens + agentOutputTokens
+
   // Token check before synthesis
   const synthesisMessages = buildSynthesisMessages(input, graphContext, findings, ctx.effectiveRole, connectorContext, sreContext, history)
   const estimatedTokens = Math.ceil(JSON.stringify(synthesisMessages).length / 4) + 500
@@ -453,12 +472,18 @@ export async function* runSession(
     return
   }
 
-  // Stream synthesis — expensive model, NO tools
+  // Stream synthesis — expensive model, NO tools. 60s timeout per P7.
   let inputTokens = 0, outputTokens = 0
   const SYNTH_MAX_RETRIES = 2
+  const synthAbort = new AbortController()
+  const synthTimeout = setTimeout(() => synthAbort.abort('synthesis_timeout'), 60_000)
+  const synthSignal = signal
+    ? AbortSignal.any([signal, synthAbort.signal])
+    : synthAbort.signal
+
   for (let attempt = 0; attempt <= SYNTH_MAX_RETRIES; attempt++) {
     try {
-      for await (const chunk of model.stream(synthesisMessages, [], { model: mainModel, maxTokens: 4096, temperature: 0.2, ...(signal ? { signal } : {}) })) {
+      for await (const chunk of model.stream(synthesisMessages, [], { model: mainModel, maxTokens: 4096, temperature: 0.2, signal: synthSignal })) {
         if (chunk.type === 'text_delta') {
           yield { type: 'text_delta' as const, content: chunk.content }
         } else if (chunk.type === 'done') {
@@ -475,6 +500,7 @@ export async function* runSession(
     }
   }
 
+  clearTimeout(synthTimeout)
   budget.sessionUsed += inputTokens + outputTokens
   budget.tenantDailyUsed += inputTokens + outputTokens
   budget.tenantMonthlyUsed += inputTokens + outputTokens
@@ -549,8 +575,17 @@ async function* synthesisOnlyFallback(
   sreContext: string | null,
   effectiveRole: string,
   history: Array<{ role: string; content: string }>,
+  checkTokens?: ReturnType<typeof createTokenMeterMiddleware>,
 ): AsyncGenerator<StreamEvent> {
   const messages = buildSynthesisMessages(input, graphContext, [], effectiveRole, connectorContext, sreContext, history)
+  const estimatedTokens = Math.ceil(JSON.stringify(messages).length / 4) + 500
+  if (checkTokens) {
+    const tokenCheck = await checkTokens({ estimatedTokens, messages, model: model.modelId })
+    if ('_tag' in tokenCheck && tokenCheck._tag === 'TokenHardBlock') {
+      yield { type: 'error' as const, code: 'TOKEN_LIMIT_EXCEEDED' as const, message: tokenCheck.reason }
+      return
+    }
+  }
   try {
     for await (const chunk of model.stream(messages, [], { model: model.modelId, maxTokens: 2048, temperature: 0.2 })) {
       if (chunk.type === 'text_delta') yield { type: 'text_delta' as const, content: chunk.content }

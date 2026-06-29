@@ -144,9 +144,21 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
 }
 
 export async function startGraphBuilderSubscriber(redisUrl: string, log: SubscriberLogger): Promise<void> {
-  const sub: RedisClientType = createClient({ url: redisUrl })
+  const sub: RedisClientType = createClient({
+    url: redisUrl,
+    socket: {
+      reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000),
+    },
+  })
+  sub.on('error', (err: Error) => log.error({ err }, 'Redis subscriber error — will reconnect'))
   await sub.connect()
-  const graphPub = createClient({ url: redisUrl })
+  const graphPub = createClient({
+    url: redisUrl,
+    socket: {
+      reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000),
+    },
+  })
+  graphPub.on('error', (err: Error) => log.error({ err }, 'Redis graphPub error — will reconnect'))
   await graphPub.connect()
 
   for (const channel of GRAPH_EVENT_CHANNELS) {
@@ -351,7 +363,13 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
       registryCache.set(tid, buildBootstrapRegistry(kg, tid))
     }
     const bootstrapRegistry = registryCache.get(tid)!
-    const pub = createClient({ url: redisUrl })
+    const pub = createClient({
+      url: redisUrl,
+      socket: {
+        reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000),
+      },
+    })
+    pub.on('error', (err: Error) => log.error({ err }, 'Redis graph-worker pub error — will reconnect'))
     await pub.connect()
     const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, pub)
 

@@ -163,11 +163,11 @@ export class StructuralGraph implements IKnowledgeGraph {
             WHEN r.from_entity_id = eg.id THEN r.to_entity_id ELSE r.from_entity_id END
           WHERE eg.depth < $3::int AND e2.tenant_id = $2::uuid
         )
-        SELECT DISTINCT id, name, type, metadata FROM entity_graph
+        SELECT DISTINCT id, name, type, metadata FROM entity_graph LIMIT 20
       `, [entityId, tenantId, depth]),
       this.query<RelRow>(`
         SELECT from_entity_id, rel_type, to_entity_id FROM relationships
-        WHERE (from_entity_id = $1::uuid OR to_entity_id = $1::uuid) AND tenant_id = $2::uuid LIMIT 500
+        WHERE (from_entity_id = $1::uuid OR to_entity_id = $1::uuid) AND tenant_id = $2::uuid LIMIT 30
       `, [entityId, tenantId]),
     ])
 

@@ -5,6 +5,6 @@ export async function GET() {
     const resp = await fetch(`${GATEWAY_URL}/api/auth/methods`)
     return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
   } catch {
-    return Response.json({ local: false, demo: false, oidc: false, google: false, github: false }, { status: 200 })
+    return Response.json({ local: false, demo: false, oidc: false, google: false, github: false, setupRequired: false }, { status: 200 })
   }
 }

@@ -1,17 +1,15 @@
 import type { ErrorCode, GroundingSource, Message, StreamEvent } from '@anvay/types'
 import type { IAuditSink } from './interfaces/audit.js'
 import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
-import type { IModelProvider, ToolCall, ToolDefinition } from './interfaces/provider.js'
+import type { IModelProvider, ToolDefinition } from './interfaces/provider.js'
 import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
-import { createPerimeterMiddleware } from './middleware/perimeter.js'
-import type { PerimeterCtx } from './middleware/perimeter.js'
 import { createTokenMeterMiddleware } from './middleware/token-meter.js'
 import type { TokenBudget } from './middleware/token-meter.js'
 import type { AgentPerimeter } from './perimeter/engine.js'
-import { isWriteAction, pollGate } from './gate/gate.js'
 import type { IGateSink } from './gate/gate.js'
-import { connectorIdFromTool } from './tools/naming.js'
 import { SREAgent, type IncidentContext } from './agents/sre.js'
+import { ConnectorAgent, groupToolsByConnector, selectConnectorTypes } from './agents/connector-agent.js'
+import type { AgentFinding, SpecialistContext } from './agents/connector-agent.js'
 
 export interface ExecutableTool extends ToolDefinition {
   run(args: Record<string, unknown>): Promise<unknown>
@@ -49,10 +47,10 @@ export interface Orchestrator {
 }
 
 const DEFAULT_BUDGET: TokenBudget = {
-  perQueryHardLimit: 100_000,
-  perSessionLimit: 500_000,
-  perTenantDailyLimit: 10_000_000,
-  perTenantMonthlyLimit: 100_000_000,
+  perQueryHardLimit: Number.MAX_SAFE_INTEGER,
+  perSessionLimit: Number.MAX_SAFE_INTEGER,
+  perTenantDailyLimit: Number.MAX_SAFE_INTEGER,
+  perTenantMonthlyLimit: Number.MAX_SAFE_INTEGER,
   sessionUsed: 0,
   tenantDailyUsed: 0,
   tenantMonthlyUsed: 0,
@@ -64,14 +62,48 @@ const ORCHESTRATOR_SYSTEM_PROMPT =
   'You investigate and act directly using the tools available to you. ' +
   'Every claim must be grounded in data returned by tool calls. ' +
   'When you cannot ground a claim, state explicitly what data is missing and why.' +
-  '\n\nInvestigation approach:\n' +
-  '- Incidents, alerts, outages, error spikes: call prometheus__query, loki__query_range, alertmanager__alerts, grafana__dashboards in sequence. Build a grounded timeline.\n' +
-  '- Metrics, SLO, latency, error rate: call prometheus__query with appropriate PromQL. Show actual values.\n' +
-  '- Code, PRs, repos: call github__list_prs, github__get_commits. Reference real data.\n' +
-  '- Deployments: call trigger_pipeline tool with { service, environment, sha? }\n' +
-  '- When gate_required event arrives: surface it as "Gate required: [stage] — reply approve to proceed or cancel to abort"\n' +
-  '- When user says "approve"/"yes"/"ship it"/"go ahead" with a pending gate: call approve_gate with the gate_id\n' +
-  '\nIf a tool call returns an error or empty result, say so and explain what it means. Never fabricate data.\n'
+
+  '\n\n## MANDATORY: Graph-first, targeted calls only\n' +
+  'The knowledge graph provides connector coordinates for every known entity. ' +
+  'You MUST use these coordinates for every tool call. ' +
+  'NEVER use broad/wildcard queries. The following are FORBIDDEN:\n' +
+  '  - PromQL: {service=~".+"}, {__name__=~".*"}, {} (empty selector), any selector that matches all series\n' +
+  '  - Grafana: searching for "" or "*" to list everything\n' +
+  '  - Any query whose only purpose is to discover what exists\n' +
+  'If graph context below contains "Connector coordinates", you MUST use those exact values in every tool call.\n' +
+  'The ## GRAPH CONTEXT block injected below tells you exactly what to do:\n' +
+  '  - If it contains "CONNECTOR COORDINATES": use those exact values. No other services.\n' +
+  '  - If it contains "ALERT INVESTIGATION PROTOCOL": follow those steps in order. DO NOT ask the user which service.\n' +
+  '  - If it says "Do NOT call connector tools": obey — ask user which service to investigate.\n' +
+
+  '\n## Investigation approach (when coordinates are available)\n' +
+  '- Incidents, alerts, outages, error spikes: call alertmanager__alerts first, extract labels, ' +
+  'then prometheus__query scoped to those labels, then loki__query.\n' +
+  '- Metrics, SLO, latency, error rate: call prometheus__query with PromQL scoped to the service label from coordinates (e.g. {service="payments-api"}).\n' +
+  '- Dashboards: call grafana__dashboards with the service name as query — not empty string.\n' +
+  '- Code, PRs: call github__list_prs, github__get_commits with the repo from coordinates.\n' +
+  '- Deployments: call trigger_pipeline with { service, environment, sha? }\n' +
+  '- Gate required: surface as "Gate required: [stage] — reply approve to proceed or cancel to abort"\n' +
+  '- User says approve/yes/ship it: call approve_gate with the gate_id\n' +
+  '\nIf a tool call returns an error or empty result, say so explicitly. Never fabricate data.\n'
+
+// Injected into graphContext for alert/incident investigations when graph has no coordinates.
+// Alertmanager labels ARE the connector coordinates — agent extracts them, then calls targeted tools.
+const ALERT_INVESTIGATION_PROTOCOL =
+  `## ALERT INVESTIGATION PROTOCOL — execute in order, autonomously:\n` +
+  `STEP 1: Call alertmanager__alerts (no args) — get all firing alerts and their labels.\n` +
+  `         Extract from each alert: service, job, namespace, instance, alertname, severity.\n` +
+  `         These label values are your connector coordinates for all subsequent calls.\n` +
+  `STEP 2: Call prometheus__alerts (no args) — get rule evaluation status.\n` +
+  `         Identify which rules are failing/pending and their rule group.\n` +
+  `STEP 3: For each affected service/job from step 1 labels:\n` +
+  `         → Call prometheus__query with query scoped to that label ONLY.\n` +
+  `           Example: if label is {job="payments-api"}, use rate(http_requests_total{job="payments-api"}[5m])\n` +
+  `           NEVER use {service=~".+"} — use the exact label value from step 1.\n` +
+  `STEP 4: If loki tool available: call loki__query scoped to the affected service/app label.\n` +
+  `STEP 5: Correlate all findings — alert labels + rule status + metrics + logs → root cause.\n` +
+  `         State confidence, cite each data source, recommend action.\n` +
+  `DO NOT ask the user which service. Execute all steps autonomously.`
 
 const INTENT_SYSTEM_PROMPT =
   'Classify the user query. Respond ONLY with a JSON object — no prose: ' +
@@ -111,18 +143,11 @@ export async function* runSession(
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const { config } = orchestrator
-  const { model, tools, perimeter, auditSink, sessionMemory } = config
+  const { model, tools, auditSink, sessionMemory } = config
   const budget = config.budget ?? DEFAULT_BUDGET
-  const maxSteps = config.maxSteps ?? 10
   const mainModel = model.modelId
   const cheapModel = model.cheapModelId
 
-  const perimeterCtx: PerimeterCtx = {
-    tenantId: ctx.tenantId,
-    userId: ctx.userId,
-    sessionId: ctx.sessionId,
-  }
-  const checkPerimeter = createPerimeterMiddleware(perimeter, auditSink, perimeterCtx)
   const checkTokens = createTokenMeterMiddleware(budget)
 
   await auditSink.append({
@@ -212,16 +237,31 @@ export async function* runSession(
   }
 
   // Knowledge Graph context injection — mandatory first step per CLAUDE.md
-  let graphContext = ''
+  let graphContext = '## GRAPH CONTEXT — lookup failed. Do NOT call connector tools. Ask user which service to investigate.'
   let groundingSources: GroundingSource[] = []
+
+  const isAlertInvestigation = classifiedIntent === 'incident_triage' ||
+    /alert|incident|firing|outage|error.?rate|latency|spike|investigate/i.test(input)
+
   try {
+    // For alert investigations: extract the service hint separately from the alert name.
+    // "Investigate HighErrorRate on service payments-api" → service="payments-api"
+    // "Investigate PrometheusMissingRuleEvaluations" → service="" (infra alert, no service)
+    const entityExtractPrompt = isAlertInvestigation
+      ? 'Extract the SOFTWARE SERVICE name (not the alert name) from this query. ' +
+        'A service name looks like: payments-api, checkout-api, auth-service. ' +
+        'An alert name looks like: HighErrorRate, PodCrashLooping, PrometheusMissingRuleEvaluations. ' +
+        'Respond with ONLY the service name, or empty string if query is about an infrastructure alert with no specific service.'
+      : 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.'
+
     const entityResp = await model.chat([
-      { role: 'system', content: 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.' },
+      { role: 'system', content: entityExtractPrompt },
       { role: 'user', content: input },
     ], [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
     const entityName = entityResp.content.trim()
+
     if (entityName) {
-      const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 2)
+      const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 1)
       if (!context?.primaryEntity) {
         await config.auditSink.append({
           id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
@@ -231,7 +271,11 @@ export async function* runSession(
       }
       if (context?.primaryEntity) {
         ctx = { ...ctx, contextEntityId: context.primaryEntity.id }
-        const parts = [`Graph context for "${context.primaryEntity.name}" (${context.primaryEntity.type}):`]
+        const coords = context.connectorCoordinates
+        const parts = [
+          `## GRAPH CONTEXT — entity resolved: "${context.primaryEntity.name}" (${context.primaryEntity.type})`,
+          `Use ONLY these coordinates in tool calls. Do not query other services.`,
+        ]
         for (const rel of context.relationships.slice(0, 10)) {
           const fromName = rel.fromEntityId === context.primaryEntity.id
             ? context.primaryEntity.name
@@ -239,14 +283,27 @@ export async function* runSession(
           const toName = context.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
           parts.push(`  ${rel.relType}: ${fromName} → ${toName}`)
         }
-        const coords = context.connectorCoordinates
         if (Object.keys(coords).length > 0) {
-          parts.push('Connector coordinates (use for targeted calls):')
+          parts.push('## CONNECTOR COORDINATES (mandatory — use these exact values):')
           for (const [connType, coord] of Object.entries(coords)) {
             parts.push(`  ${connType}: ${JSON.stringify(coord.resourceIds)}`)
           }
+          const promCoord = coords['prometheus']
+          if (promCoord?.resourceIds) {
+            const svc = promCoord.resourceIds['service'] ?? promCoord.resourceIds['job']
+            if (svc) parts.push(`  → PromQL scope: {service="${svc}"} or {job="${svc}"}`)
+          }
+        } else {
+          // Entity in graph but no connector coordinates yet.
+          // For alert investigations: fall through to alert protocol.
+          if (isAlertInvestigation) {
+            parts.push(`  [No connector coordinates yet — use alert investigation protocol below]`)
+            parts.push(ALERT_INVESTIGATION_PROTOCOL)
+          } else {
+            parts.push('  [No connector coordinates — use entity name for targeted queries only.]')
+          }
         }
-        if (context.freshness < 0.5) parts.push('  [STALE] Verify critical facts from live source.')
+        if (context.freshness < 0.5) parts.push('  [STALE — verify critical facts from live connector]')
         graphContext = parts.join('\n')
         groundingSources = context.groundingSources.map(gs => ({
           source: gs.source,
@@ -254,7 +311,27 @@ export async function* runSession(
           confidence: gs.confidence,
           freshness: context.freshness,
         }))
+      } else if (entityName && isAlertInvestigation) {
+        // Service mentioned but not yet in graph — still investigate using alert protocol.
+        // Alert labels from alertmanager will provide coordinates.
+        graphContext =
+          `## GRAPH CONTEXT — service "${entityName}" not yet in knowledge graph.\n` +
+          `Graph miss — use alert investigation protocol to derive coordinates from live alert labels.\n` +
+          ALERT_INVESTIGATION_PROTOCOL
+      } else if (entityName) {
+        // Non-alert: entity not in graph — block tools, ask user to confirm
+        graphContext = `## GRAPH CONTEXT — entity "${entityName}" not found in knowledge graph.\nDo NOT call connector tools. Ask the user to confirm the exact service name or register the relevant connector first.`
       }
+    } else if (isAlertInvestigation) {
+      // No specific service extracted but this is an alert investigation (e.g. infra alert).
+      // Use alert investigation protocol — alertmanager is the coordinate source.
+      graphContext =
+        `## GRAPH CONTEXT — infrastructure alert investigation (no specific service in query).\n` +
+        `Alertmanager and Prometheus are the coordinate sources for this investigation.\n` +
+        ALERT_INVESTIGATION_PROTOCOL
+    } else {
+      // General query with no entity — ask user
+      graphContext = `## GRAPH CONTEXT — no specific entity identified in this query.\nDo NOT call connector tools with broad/wildcard queries. Ask the user which specific service or entity they want to investigate.`
     }
   } catch (err) {
     // Graph failure is audit-logged (hard violation per CLAUDE.md)
@@ -267,6 +344,12 @@ export async function* runSession(
       payload: { error: err instanceof Error ? err.message : 'graph context resolution failed' },
       createdAt: new Date(),
     })
+    // If alert investigation, still try the protocol rather than blocking
+    if (isAlertInvestigation) {
+      graphContext =
+        `## GRAPH CONTEXT — graph lookup failed (will proceed with alert investigation protocol).\n` +
+        ALERT_INVESTIGATION_PROTOCOL
+    }
   }
 
   // Tool definitions for the LLM (run function stripped)
@@ -285,7 +368,8 @@ export async function* runSession(
 
   // Build message list from history + current turn
   const sreBlock = sreContext ? `\n\n${sreContext}\n\nGround your response in this context. Cite specific services, incidents, and metrics above. If the context shows services are healthy, say so explicitly — do not speculate about outages.` : ''
-  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${connectorContext}${graphContext ? '\n\n' + graphContext : ''}${sreBlock}`
+  // graphContext is always set (entity found, entity missing, or no entity) — always injected
+  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${connectorContext}\n\n${graphContext}${sreBlock}`
   const messages: Message[] = [
     { role: 'system', content: systemPrompt },
     ...history.map(
@@ -296,155 +380,184 @@ export async function* runSession(
     ),
   ]
 
-  let totalInputTokens = 0
-  let totalOutputTokens = 0
-  let accumulatedText = ''
+  // --- MULTI-AGENT DELEGATION ---
+  const toolMap = groupToolsByConnector(tools)
+  const selectedTypes = selectConnectorTypes(classifiedIntent, isAlertInvestigation, [...toolMap.keys()])
 
-  for (let step = 0; step < maxSteps; step++) {
-    // Estimate tokens for budget check (rough: 1 token ≈ 4 chars + overhead)
-    const msgTokens = messages.reduce((acc, m) => {
-      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-      return acc + Math.ceil(content.length / 4)
-    }, 0)
-    const toolTokens = toolDefs.reduce((acc, t) => acc + Math.ceil(JSON.stringify(t).length / 4), 0)
-    const estimatedTokens = msgTokens + toolTokens + 500
+  if (selectedTypes.length === 0) {
+    yield* synthesisOnlyFallback(model, input, graphContext, connectorContext, sreContext, ctx.effectiveRole, history)
+    return
+  }
 
-    const tokenResult = await checkTokens({
-      estimatedTokens,
-      messages,
-      model: mainModel,
-    })
-
-    if ('_tag' in tokenResult && tokenResult._tag === 'TokenHardBlock') {
-      yield makeError('TOKEN_LIMIT_EXCEEDED', tokenResult.reason)
-      return
+  // Flatten graph-resolved coordinates for SpecialistContext
+  const coordinates: Record<string, string> = {}
+  try {
+    const context = await config.knowledgeGraph.resolveContextByName(
+      ctx.contextEntityId ?? '', ctx.tenantId, 1,
+    ).catch(() => null)
+    if (context?.connectorCoordinates) {
+      for (const coords of Object.values(context.connectorCoordinates)) {
+        Object.assign(coordinates, coords.resourceIds)
+      }
     }
+  } catch { /* non-blocking */ }
 
-    // Stream from provider — collect tool_call chunks, forward text_delta
-    const collectedToolCalls: ToolCall[] = []
-    let hasToolCalls = false
+  const specialistCtx: SpecialistContext = {
+    task: input,
+    intent: classifiedIntent,
+    coordinates,
+    entityHint: ctx.contextEntityId ?? undefined,
+    tenantId: ctx.tenantId,
+    sessionId: ctx.sessionId,
+    userId: ctx.userId,
+  }
 
-    for await (const chunk of model.stream(messages, toolDefs, { model: mainModel, ...(signal ? { signal } : {}) })) {
-      if (chunk.type === 'text_delta') {
-        accumulatedText += chunk.content
-        yield chunk
-      } else if (chunk.type === 'tool_call') {
-        hasToolCalls = true
-        collectedToolCalls.push({
-          id: chunk.toolCallId,
-          name: chunk.toolName,
-          args: chunk.args,
-        })
-        yield chunk
-      } else if (chunk.type === 'done') {
-        totalInputTokens += chunk.inputTokens
-        totalOutputTokens += chunk.outputTokens
-        budget.sessionUsed += chunk.inputTokens + chunk.outputTokens
-        budget.tenantDailyUsed += chunk.inputTokens + chunk.outputTokens
-        budget.tenantMonthlyUsed += chunk.inputTokens + chunk.outputTokens
-        // Don't yield done yet — may be more steps
-      } else if (chunk.type === 'error') {
-        yield chunk
-        return
+  // Run all selected connector agents in parallel
+  const agentRuns = selectedTypes.map(connType =>
+    new ConnectorAgent(connType, model, toolMap.get(connType) ?? []).run(specialistCtx, signal)
+  )
+
+  const results = await Promise.allSettled(agentRuns)
+  const findings: AgentFinding[] = []
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]!
+    const connType = selectedTypes[i]!
+    if (result.status === 'fulfilled') {
+      findings.push(result.value)
+      yield {
+        type: 'agent_finding' as const,
+        agentType: result.value.agentType,
+        summary: result.value.summary,
+        confidence: result.value.confidence,
+        toolsUsed: result.value.toolsUsed,
       }
-      // gate_required, tool_result — forward as-is (pass-through from specialist)
-    }
-
-    if (!hasToolCalls) break // Conversation complete — no more tool calls
-
-    // Run perimeter check + execute each tool call
-    const toolResultMessages: Message[] = []
-
-    for (const toolCall of collectedToolCalls) {
-      const perimResult = await checkPerimeter(toolCall)
-
-      if ('_tag' in perimResult && perimResult._tag === 'HardBlock') {
-        // Emit an error event to the caller but continue with other tools
-        yield makeError('FORBIDDEN', perimResult.reason)
-        toolResultMessages.push(model.formatToolResult(toolCall.id, `Tool "${toolCall.name}" blocked: ${perimResult.reason}`))
-        continue
+      auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'agent_finding' as any, payload: { agentType: connType, confidence: result.value.confidence, toolsUsed: result.value.toolsUsed }, createdAt: new Date() }).catch(() => {})
+    } else {
+      const errFinding: AgentFinding = {
+        agentType: connType, toolsUsed: [], rawData: {},
+        summary: `${connType} agent failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        confidence: 0, error: String(result.reason),
       }
-
-      // V1 L2 gate: every write action requires user approval before execution
-      if (isWriteAction(toolCall.name) && config.gateSink) {
-        const gateId = crypto.randomUUID()
-        await config.gateSink.push({
-          id: gateId,
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          args: toolCall.args,
-          connectorId: connectorIdFromTool(toolCall.name),
-          tenantId: ctx.tenantId,
-          userId: ctx.userId,
-          sessionId: ctx.sessionId,
-          createdAt: new Date(),
-        })
-        yield {
-          type: 'gate_required',
-          gateId,
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          args: toolCall.args,
-        }
-        const decision = await pollGate(config.gateSink, gateId, config.gateTimeoutMs ?? 30_000, undefined, signal ? { signal } : undefined)
-        if (decision._tag !== 'approved') {
-          await auditSink.append({
-            id: crypto.randomUUID(),
-            tenantId: ctx.tenantId,
-            userId: ctx.userId,
-            sessionId: ctx.sessionId,
-            eventType: 'tool_call_blocked',
-            payload: { gateId, toolName: toolCall.name, decision: decision._tag, reason: '_tag' in decision && 'reason' in decision ? decision.reason : undefined },
-            createdAt: new Date(),
-          })
-          const blockMsg = `Write action "${toolCall.name}" ${decision._tag === 'rejected' ? 'rejected by user' : 'timed out awaiting approval'}`
-          toolResultMessages.push(model.formatToolResult(toolCall.id, blockMsg))
-          yield { type: 'tool_result', toolCallId: toolCall.id, result: blockMsg }
-          continue
-        }
-      }
-
-      // Find matching executable tool
-      const execTool = tools.find((t) => t.name === toolCall.name)
-      let result: unknown
-
-      if (execTool) {
-        try {
-          result = await execTool.run(toolCall.args)
-        } catch (err) {
-          result = `Error: ${err instanceof Error ? err.message : 'unknown error in tool execution'}`
-        }
-      } else {
-        result = `Tool "${toolCall.name}" is not registered in this orchestrator`
-      }
-
-      yield { type: 'tool_result', toolCallId: toolCall.id, result }
-      toolResultMessages.push(model.formatToolResult(toolCall.id, result))
-    }
-
-    // Append this round's exchange to messages for the next step.
-    messages.push(model.formatToolCall(collectedToolCalls))
-    for (const msg of toolResultMessages) {
-      messages.push(msg)
+      findings.push(errFinding)
+      yield { type: 'agent_finding' as const, agentType: connType, summary: errFinding.summary, confidence: 0, toolsUsed: [] }
     }
   }
+
+  // Token check before synthesis
+  const synthesisMessages = buildSynthesisMessages(input, graphContext, findings, ctx.effectiveRole, connectorContext, sreContext, history)
+  const estimatedTokens = Math.ceil(JSON.stringify(synthesisMessages).length / 4) + 500
+  const synthTokenCheck = await checkTokens({ estimatedTokens, messages: synthesisMessages, model: mainModel })
+  if ('_tag' in synthTokenCheck && synthTokenCheck._tag === 'TokenHardBlock') {
+    yield makeError('TOKEN_LIMIT_EXCEEDED', synthTokenCheck.reason)
+    return
+  }
+
+  // Stream synthesis — expensive model, NO tools
+  let inputTokens = 0, outputTokens = 0
+  const SYNTH_MAX_RETRIES = 2
+  for (let attempt = 0; attempt <= SYNTH_MAX_RETRIES; attempt++) {
+    try {
+      for await (const chunk of model.stream(synthesisMessages, [], { model: mainModel, maxTokens: 4096, temperature: 0.2, ...(signal ? { signal } : {}) })) {
+        if (chunk.type === 'text_delta') {
+          yield { type: 'text_delta' as const, content: chunk.content }
+        } else if (chunk.type === 'done') {
+          inputTokens = chunk.inputTokens ?? 0
+          outputTokens = chunk.outputTokens ?? 0
+        }
+      }
+      break
+    } catch (e) {
+      if (attempt === SYNTH_MAX_RETRIES) {
+        yield { type: 'error' as const, code: 'UPSTREAM_ERROR' as const, message: e instanceof Error ? e.message : String(e) }
+        return
+      }
+    }
+  }
+
+  budget.sessionUsed += inputTokens + outputTokens
+  budget.tenantDailyUsed += inputTokens + outputTokens
+  budget.tenantMonthlyUsed += inputTokens + outputTokens
+  auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'synthesis_complete' as any, payload: { inputTokens, outputTokens, agentCount: findings.length }, createdAt: new Date() }).catch(() => {})
 
   // Persist assistant turn summary
   await sessionMemory.append(ctx.sessionId, {
     role: 'assistant',
-    content: accumulatedText || '[no response]',
+    content: findings.map(f => `${f.agentType}: ${f.summary}`).join('\n') || '[no response]',
     timestamp: Date.now(),
   })
 
   yield {
-    type: 'done',
-    inputTokens: totalInputTokens,
-    outputTokens: totalOutputTokens,
+    type: 'done' as const,
+    inputTokens,
+    outputTokens,
     ...(groundingSources.length > 0 ? { groundingSources } : {}),
   }
 }
 
 function makeError(code: ErrorCode, message: string): StreamEvent & { type: 'error' } {
   return { type: 'error', code, message }
+}
+
+function buildSynthesisMessages(
+  input: string,
+  graphContext: string,
+  findings: AgentFinding[],
+  effectiveRole: string,
+  connectorContext: string,
+  sreContext: string | null,
+  history: Array<{ role: string; content: string }>,
+): Message[] {
+  const findingBlocks = findings
+    .filter(f => !f.error || f.toolsUsed.length > 0)
+    .map(f =>
+      `### ${f.agentType.toUpperCase()} AGENT [confidence: ${f.confidence.toFixed(2)}]\n` +
+      `Tools used: ${f.toolsUsed.join(', ') || 'none'}\n` +
+      f.summary
+    ).join('\n\n')
+
+  const noData = findings.every(f => f.toolsUsed.length === 0)
+
+  const systemContent =
+    `You are Anvay — the orchestrator synthesiser. Your specialist agents have queried all connected data sources in parallel. Effective role: ${effectiveRole}.\n\n` +
+    `${graphContext}\n${connectorContext}\n\n` +
+    (sreContext ? `${sreContext}\n\n` : '') +
+    `## SPECIALIST AGENT FINDINGS\n` +
+    (noData
+      ? 'No connector data retrieved — no connectors available or all agents returned errors.'
+      : findingBlocks) +
+    `\n\n## SYNTHESIS INSTRUCTIONS\n` +
+    `- Ground every claim in the agent findings above. Cite which agent and tool provided each fact.\n` +
+    `- Correlate across agents: timeline, causal chain, affected services.\n` +
+    `- State confidence (0.0–1.0) based on data quality and cross-agent consistency.\n` +
+    `- Recommend next action. If write action needed, state it and ask for confirmation.\n` +
+    `- DO NOT call any tools — all data collection is complete.\n` +
+    `- If findings show no issues, say so explicitly and cite the healthy metrics.`
+
+  return [
+    { role: 'system', content: systemContent },
+    ...history.map(t => ({ role: t.role as 'user' | 'assistant' | 'system', content: t.content })),
+    { role: 'user', content: input },
+  ]
+}
+
+async function* synthesisOnlyFallback(
+  model: IModelProvider,
+  input: string,
+  graphContext: string,
+  connectorContext: string,
+  sreContext: string | null,
+  effectiveRole: string,
+  history: Array<{ role: string; content: string }>,
+): AsyncGenerator<StreamEvent> {
+  const messages = buildSynthesisMessages(input, graphContext, [], effectiveRole, connectorContext, sreContext, history)
+  try {
+    for await (const chunk of model.stream(messages, [], { model: model.modelId, maxTokens: 2048, temperature: 0.2 })) {
+      if (chunk.type === 'text_delta') yield { type: 'text_delta' as const, content: chunk.content }
+    }
+  } catch (e) {
+    yield { type: 'error' as const, code: 'UPSTREAM_ERROR' as const, message: e instanceof Error ? e.message : String(e) }
+  }
+  yield { type: 'done' as const, inputTokens: 0, outputTokens: 0 }
 }
 

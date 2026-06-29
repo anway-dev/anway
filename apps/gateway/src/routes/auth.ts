@@ -99,6 +99,20 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'password must be at least 8 characters' })
     }
     const tenantId = process.env['OIDC_TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001'
+    // Auto-provision tenant + default environments on first run
+    await prisma.$executeRaw`
+      INSERT INTO tenants (id, name, slug, plan, token_budget_monthly, connector_limit)
+      VALUES (${tenantId}::uuid, 'My Organisation', 'default', 'tier2', 10000000, 10)
+      ON CONFLICT (id) DO NOTHING
+    `
+    await prisma.$executeRaw`
+      INSERT INTO environments (id, tenant_id, name, label, color, sort_order)
+      VALUES
+        (gen_random_uuid(), ${tenantId}::uuid, 'staging', 'Staging',        '#3b82f6', 0),
+        (gen_random_uuid(), ${tenantId}::uuid, 'preprod', 'Pre-production', '#f59e0b', 1),
+        (gen_random_uuid(), ${tenantId}::uuid, 'prod',    'Production',     '#10b981', 2)
+      ON CONFLICT DO NOTHING
+    `
     const passwordHash = await hash(password, 12)
     const rows = await prisma.$queryRaw<{ id: string; role: string }[]>`
       INSERT INTO users (id, tenant_id, email, role, password_hash)

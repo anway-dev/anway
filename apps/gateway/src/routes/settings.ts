@@ -265,20 +265,64 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       } catch { /* Redis unavailable */ }
     }
     if (redisUsed > used) used = redisUsed
-    // Get budget from tenant
-    let budget = 1_000_000
+    // Get budget from tenant — null means unlimited
+    let budget: number | null = null
     try {
       const tenantRows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ token_budget_monthly: number | null }>>`
           SELECT token_budget_monthly FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1
         `
       ).catch(() => [] as Array<{ token_budget_monthly: number | null }>)
-      if (tenantRows.length > 0 && tenantRows[0]!.token_budget_monthly != null) {
-        budget = tenantRows[0]!.token_budget_monthly
+      if (tenantRows.length > 0) {
+        budget = tenantRows[0]!.token_budget_monthly ?? null
       }
     } catch { /* use default */ }
     return { used, budget, month }
   })
+
+  // GET /api/settings/token-limits — return all configurable token limits for the tenant
+  app.get('/api/settings/token-limits', { preHandler: [app.authenticate, requireRole('admin')] }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ token_budget_monthly: number; per_query_token_limit: number | null; per_session_token_limit: number | null }[]>`
+        SELECT token_budget_monthly, per_query_token_limit, per_session_token_limit
+        FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1
+      `
+    ).catch(() => [])
+    const row = rows[0]
+    return {
+      monthlyBudget: row?.token_budget_monthly ?? 1_000_000,
+      perQueryLimit: row?.per_query_token_limit ?? null,
+      perSessionLimit: row?.per_session_token_limit ?? null,
+    }
+  })
+
+  // PUT /api/settings/token-limits — update token limits; null = unlimited
+  app.put<{ Body: { monthlyBudget?: number | null; perQueryLimit?: number | null; perSessionLimit?: number | null } }>(
+    '/api/settings/token-limits', { preHandler: [app.authenticate, requireRole('admin')] }, async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const body = request.body
+      if (body.monthlyBudget !== undefined && body.monthlyBudget !== null && body.monthlyBudget <= 0) {
+        return reply.code(400).send({ error: 'monthlyBudget must be positive' })
+      }
+      if (body.monthlyBudget !== undefined) {
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`UPDATE tenants SET token_budget_monthly = ${body.monthlyBudget} WHERE id = ${tenantId}::uuid`
+        )
+      }
+      if ('perQueryLimit' in body) {
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`UPDATE tenants SET per_query_token_limit = ${body.perQueryLimit ?? null} WHERE id = ${tenantId}::uuid`
+        )
+      }
+      if ('perSessionLimit' in body) {
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`UPDATE tenants SET per_session_token_limit = ${body.perSessionLimit ?? null} WHERE id = ${tenantId}::uuid`
+        )
+      }
+      return { ok: true }
+    },
+  )
 
   // TB-T1: Admin reset daily token usage
   app.delete('/api/admin/token-usage/reset', {

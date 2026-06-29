@@ -5,6 +5,77 @@ interface ProviderInfo { configured: boolean; provider?: string; defaultModel?: 
 interface ModelList { models: string[] }
 interface ManifestField { key: string; label: string; type: string; required: boolean; placeholder?: string; defaultValue?: string }
 interface ProviderManifest { id: string; displayName: string; website: string; fields: ManifestField[]; models: string[]; modelsEndpoint?: string; defaultBaseUrl?: string; openAICompatible: boolean }
+interface TokenLimits { monthlyBudget: number | null; perQueryLimit: number | null; perSessionLimit: number | null }
+
+function TokenLimitField({ label, value, onChange }: { label: string; value: number | null; onChange: (v: number | null) => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+      <span style={{ fontSize: "11px", color: "#888", fontFamily: "monospace", width: "150px", flexShrink: 0 }}>{label}</span>
+      <input
+        type="number"
+        min={1}
+        placeholder="unlimited"
+        value={value ?? ""}
+        onChange={e => onChange(e.target.value === "" ? null : parseInt(e.target.value, 10))}
+        style={{
+          width: "130px", padding: "4px 8px", background: "#080808", border: "1px solid #2a2a2a",
+          borderRadius: "4px", color: "#e5e5e5", fontSize: "11px", fontFamily: "monospace",
+        }}
+      />
+      {value === null && <span style={{ fontSize: "10px", color: "#444", fontFamily: "monospace" }}>∞ unlimited</span>}
+    </div>
+  );
+}
+
+function TokenLimitsPanel() {
+  const [limits, setLimits] = useState<TokenLimits | null>(null);
+  const [edit, setEdit] = useState<TokenLimits | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/settings/token-limits')
+      .then(r => r.ok ? r.json() as Promise<TokenLimits> : Promise.reject())
+      .then(d => { setLimits(d); setEdit(d) })
+      .catch(() => {})
+  }, [])
+
+  if (!edit) return null
+
+  const save = async () => {
+    if (!edit) return
+    setSaving(true); setMsg(null)
+    try {
+      const resp = await fetch('/api/settings/token-limits', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthlyBudget: edit.monthlyBudget, perQueryLimit: edit.perQueryLimit, perSessionLimit: edit.perSessionLimit }),
+      })
+      if (resp.ok) { setLimits(edit); setMsg({ text: 'Saved.', ok: true }) }
+      else {
+        const b = await resp.json().catch(() => ({})) as { error?: string }
+        setMsg({ text: b.error ?? 'Save failed.', ok: false })
+      }
+    } catch { setMsg({ text: 'Unreachable.', ok: false }) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: "1px solid #1a1a1a" }}>
+      <div style={{ fontSize: "10px", color: "#555", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>Token Limits</div>
+      <TokenLimitField label="Monthly budget" value={edit.monthlyBudget} onChange={v => setEdit(e => e ? { ...e, monthlyBudget: v } : e)} />
+      <TokenLimitField label="Per-query limit" value={edit.perQueryLimit} onChange={v => setEdit(e => e ? { ...e, perQueryLimit: v } : e)} />
+      <TokenLimitField label="Per-session limit" value={edit.perSessionLimit} onChange={v => setEdit(e => e ? { ...e, perSessionLimit: v } : e)} />
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px" }}>
+        <button onClick={save} disabled={saving}
+          style={{ padding: "4px 10px", fontSize: "11px", fontFamily: "monospace", background: "transparent", border: "1px solid #10b981", color: saving ? "#444" : "#10b981", borderRadius: "4px", cursor: saving ? "default" : "pointer" }}>
+          {saving ? "Saving…" : "Save limits"}
+        </button>
+        {msg && <span style={{ fontSize: "11px", color: msg.ok ? "#10b981" : "#ef4444", fontFamily: "monospace" }}>{msg.text}</span>}
+      </div>
+    </div>
+  )
+}
 
 export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => void; renderGearIn?: (gear: React.ReactNode) => React.ReactNode; inline?: boolean }) {
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
@@ -208,6 +279,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
               <span style={{ marginLeft: "auto", fontSize: "11px", color: "#10b981", fontFamily: "monospace" }}>✓ saved</span>
             )}
           </div>
+          <TokenLimitsPanel />
         </div>
       );
     }

@@ -14,7 +14,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "audit", label: "Audit" },
 ];
 
-interface TokenUsage { used: number; budget: number; month: string }
+interface TokenUsage { used: number; budget: number | null; month: string }
 
 export function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>("provider");
@@ -87,13 +87,13 @@ export function SettingsView() {
               <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>Token Usage — {tokenUsage.month}</div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <div style={{ flex: 1, height: "8px", background: "#1a1a1a", borderRadius: "4px", overflow: "hidden" }}>
-                  <div style={{ width: `${Math.min(100, tokenUsage.budget > 0 ? (tokenUsage.used / tokenUsage.budget) * 100 : 0)}%`, height: "100%", background: tokenUsage.used >= tokenUsage.budget ? "#ef4444" : "#10b981", borderRadius: "4px", transition: "width 0.3s" }} />
+                  <div style={{ width: tokenUsage.budget != null ? `${Math.min(100, tokenUsage.budget > 0 ? (tokenUsage.used / tokenUsage.budget) * 100 : 0)}%` : "0%", height: "100%", background: tokenUsage.budget != null && tokenUsage.used >= tokenUsage.budget ? "#ef4444" : "#10b981", borderRadius: "4px", transition: "width 0.3s" }} />
                 </div>
                 <span style={{ fontSize: "11px", color: "#888", fontFamily: "monospace", whiteSpace: "nowrap" }}>
-                  {tokenUsage.used.toLocaleString()} / {tokenUsage.budget.toLocaleString()}
+                  {tokenUsage.used.toLocaleString()} / {tokenUsage.budget != null ? tokenUsage.budget.toLocaleString() : "∞"}
                 </span>
               </div>
-              {tokenUsage.used >= tokenUsage.budget && (
+              {tokenUsage.budget != null && tokenUsage.used >= tokenUsage.budget && (
                 <div style={{ marginTop: "8px", fontSize: "11px", color: "#ef4444", fontFamily: "monospace" }}>Budget exceeded — further queries blocked until next billing period.</div>
               )}
               <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px" }}>

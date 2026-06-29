@@ -193,12 +193,26 @@ async function loadTokenUsage(tenantId: string): Promise<{ daily: number; monthl
   return { daily: 0, monthly: 0 }
 }
 
-function buildTokenBudget(monthlyLimit = 1_000_000, sessionUsed = 0, dailyUsed = 0, monthlyUsed = 0): TokenBudget {
+function buildTokenBudget(
+  monthlyLimit: number | null | undefined,
+  sessionUsed = 0,
+  dailyUsed = 0,
+  monthlyUsed = 0,
+  perQueryLimit?: number | null,
+  perSessionLimit?: number | null,
+): TokenBudget {
+  const unlimited = Number.MAX_SAFE_INTEGER
+  const perQueryEnv = process.env['PER_QUERY_TOKEN_LIMIT']
+  const perQueryHardLimit = perQueryLimit != null ? perQueryLimit
+    : perQueryEnv ? parseInt(perQueryEnv, 10)
+    : unlimited
+  const perSessionHardLimit = perSessionLimit != null ? perSessionLimit : unlimited
+  const monthly = monthlyLimit != null ? monthlyLimit : unlimited
   return {
-    perQueryHardLimit: 100_000,
-    perSessionLimit: 500_000,
-    perTenantDailyLimit: Math.ceil(monthlyLimit / 30),
-    perTenantMonthlyLimit: monthlyLimit,
+    perQueryHardLimit,
+    perSessionLimit: perSessionHardLimit,
+    perTenantDailyLimit: unlimited,  // daily not enforced separately — monthly covers it
+    perTenantMonthlyLimit: monthly,
     sessionUsed,
     tenantDailyUsed: dailyUsed,
     tenantMonthlyUsed: monthlyUsed,
@@ -475,7 +489,14 @@ export async function chatRoutes(app: FastifyInstance) {
       request.log.error({ err }, 'audit write failed')
     })
     const sessionUsed = getSessionUsed(sessionId)
-    const budget = buildTokenBudget(dbTenant?.token_budget_monthly, sessionUsed, usage.daily, usage.monthly)
+    const budget = buildTokenBudget(
+      dbTenant?.token_budget_monthly,
+      sessionUsed,
+      usage.daily,
+      usage.monthly,
+      undefined, // per_query_token_limit not in tenants table — env only
+      undefined, // per_session_token_limit not in tenants table — env only
+    )
 
     const knowledgeGraph: IKnowledgeGraph = new StructuralGraph(
       (sql: string, params?: unknown[]) =>
@@ -576,6 +597,10 @@ export async function chatRoutes(app: FastifyInstance) {
         for await (const event of runSession(orchestrator, query, sessionCtx, abortController.signal)) {
           if (event.type === 'text_delta') {
             accumulatedAssistantText += event.content
+          }
+          if (event.type === 'agent_finding') {
+            // Log agent finding — already serialised below via JSON.stringify(event)
+            request.log.info({ agentType: event.agentType, confidence: event.confidence, toolsUsed: event.toolsUsed }, 'agent_finding')
           }
           if (event.type === 'done') {
             totalTokens = event.inputTokens + event.outputTokens

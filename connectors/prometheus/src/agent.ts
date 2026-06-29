@@ -22,7 +22,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:9090'
       try {
-        const res = await fetch(`${base}/api/v1/alerts`)
+        const res = await fetch(`${base}/api/v2/alerts`)
         if (!res.ok) return { alerts: [] }
         const data = await res.json() as { data: { alerts: unknown[] } }
         return { alerts: data.data.alerts ?? [] }

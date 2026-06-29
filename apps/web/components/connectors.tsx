@@ -340,25 +340,29 @@ export function ConnectorsView() {
               <div style={{ overflowY: "auto", flex: 1, marginBottom: "16px" }}>
                 {/* All namespaces option */}
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px", borderRadius: "6px", cursor: "pointer", background: nsModal.selected === null ? "rgba(16,185,129,0.08)" : "transparent", border: nsModal.selected === null ? "1px solid rgba(16,185,129,0.2)" : "1px solid transparent", marginBottom: "6px" }}>
-                  <input type="checkbox" checked={nsModal.selected === null} onChange={() => setNsModal(m => m ? { ...m, selected: null } : m)} style={{ accentColor: "#10b981" }} />
+                  <input
+                    type="checkbox"
+                    checked={nsModal.selected === null}
+                    onChange={() => setNsModal(m => m ? { ...m, selected: m.selected === null ? [...m.namespaces] : null } : m)}
+                    style={{ accentColor: "#10b981" }}
+                  />
                   <span style={{ fontSize: "12px", color: nsModal.selected === null ? "#10b981" : "#e5e5e5", fontWeight: 600 }}>All namespaces</span>
                 </label>
                 <div style={{ borderTop: "1px solid #1a1a1a", marginBottom: "8px" }} />
                 {nsModal.namespaces.map(ns => {
-                  const isSelected = nsModal.selected !== null && nsModal.selected.includes(ns)
+                  const isSelected = nsModal.selected === null || nsModal.selected.includes(ns)
                   return (
-                    <label key={ns} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 8px", borderRadius: "6px", cursor: "pointer", background: isSelected ? "rgba(16,185,129,0.06)" : "transparent" }}>
+                    <label key={ns} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 8px", borderRadius: "6px", cursor: "pointer", background: isSelected && nsModal.selected !== null ? "rgba(16,185,129,0.06)" : "transparent" }}>
                       <input
                         type="checkbox"
-                        checked={nsModal.selected === null || isSelected}
-                        disabled={nsModal.selected === null}
+                        checked={isSelected}
                         onChange={() => {
-                          if (nsModal.selected === null) return
                           setNsModal(m => {
                             if (!m) return m
-                            const sel = m.selected!
-                            const next = sel.includes(ns) ? sel.filter(n => n !== ns) : [...sel, ns]
-                            return { ...m, selected: next.length === 0 ? null : next }
+                            // If "All" currently selected, switch to specific: deselect this one
+                            const current = m.selected ?? [...m.namespaces]
+                            const next = current.includes(ns) ? current.filter(n => n !== ns) : [...current, ns]
+                            return { ...m, selected: next.length === m.namespaces.length ? null : next.length === 0 ? null : next }
                           })
                         }}
                         style={{ accentColor: "#10b981" }}

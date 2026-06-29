@@ -275,10 +275,13 @@ function ProvisioningTemplate({ expanded, onToggle }: { expanded: boolean; onTog
           }}>
             {YAML_TEMPLATE}
           </pre>
-          <button style={{
-            marginTop: "8px", background: "transparent", border: "1px solid #2a2a2a", color: "#888",
-            padding: "5px 12px", borderRadius: "4px", fontSize: "11px", cursor: "pointer",
-          }}>
+          <button
+            onClick={() => navigator.clipboard.writeText(YAML_TEMPLATE).catch(() => {})}
+            style={{
+              marginTop: "8px", background: "transparent", border: "1px solid #2a2a2a", color: "#888",
+              padding: "5px 12px", borderRadius: "4px", fontSize: "11px", cursor: "pointer",
+            }}
+          >
             Copy template
           </button>
         </div>
@@ -295,6 +298,11 @@ export function AccessView() {
   const [perimeterLoading, setPerimeterLoading] = useState(false);
   const [manifestExpanded, setManifestExpanded] = useState(false);
   const [templateExpanded, setTemplateExpanded] = useState(false);
+  const [provisionModal, setProvisionModal] = useState(false);
+  const [provisionEmail, setProvisionEmail] = useState("");
+  const [provisionRole, setProvisionRole] = useState("dev");
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionError, setProvisionError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/access/users")
@@ -318,16 +326,45 @@ export function AccessView() {
       .finally(() => setPerimeterLoading(false));
   }, [selectedUser?.id]);
 
+  async function handleProvision() {
+    if (!provisionEmail.trim()) return;
+    setProvisioning(true);
+    setProvisionError(null);
+    try {
+      const r = await fetch("/api/access/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: provisionEmail.trim(), role: provisionRole }),
+      });
+      const data = await r.json() as { id: string; email: string; role: string } | { error: string };
+      if (!r.ok) { setProvisionError("error" in data ? data.error : "Failed"); return; }
+      const newUser = data as { id: string; email: string; role: string };
+      const row: ApiUser = { id: newUser.id, email: newUser.email, role: newUser.role, createdAt: new Date().toISOString() };
+      setUsers(prev => [...prev, row]);
+      setSelectedUser(row);
+      setProvisionModal(false);
+      setProvisionEmail("");
+      setProvisionRole("dev");
+    } catch (e) {
+      setProvisionError(String(e));
+    } finally {
+      setProvisioning(false);
+    }
+  }
+
   return (
     <div style={{ display: "flex", height: "100%", background: "#080808", overflow: "hidden" }}>
       {/* Left: User list */}
       <div style={{ width: "220px", flexShrink: 0, background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "14px 16px", borderBottom: "1px solid #1a1a1a" }}>
           <div style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>Users</div>
-          <button style={{
-            width: "100%", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
-            color: "#10b981", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", cursor: "pointer",
-          }}>
+          <button
+            onClick={() => { setProvisionModal(true); setProvisionError(null); }}
+            style={{
+              width: "100%", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)",
+              color: "#10b981", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", cursor: "pointer",
+            }}
+          >
             + Provision user
           </button>
         </div>
@@ -468,6 +505,69 @@ export function AccessView() {
           )
         )}
       </div>
+
+      {/* Provision user modal */}
+      {provisionModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+          <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: "12px", padding: "24px", width: "360px", maxWidth: "90vw" }}>
+            <div style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", marginBottom: "16px" }}>Provision user</div>
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ fontSize: "11px", color: "#888", display: "block", marginBottom: "4px" }}>Email</label>
+              <input
+                type="email"
+                value={provisionEmail}
+                onChange={(e) => setProvisionEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleProvision() }}
+                placeholder="user@company.com"
+                autoFocus
+                style={{
+                  width: "100%", background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: "6px",
+                  color: "#e5e5e5", padding: "7px 10px", fontSize: "12px", outline: "none", boxSizing: "border-box",
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ fontSize: "11px", color: "#888", display: "block", marginBottom: "4px" }}>Role</label>
+              <select
+                value={provisionRole}
+                onChange={(e) => setProvisionRole(e.target.value)}
+                style={{
+                  width: "100%", background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: "6px",
+                  color: "#e5e5e5", padding: "7px 10px", fontSize: "12px", outline: "none",
+                }}
+              >
+                {["admin", "sre", "dev", "pm", "ba"].map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            {provisionError && (
+              <div style={{ fontSize: "11px", color: "#ef4444", marginBottom: "12px" }}>{provisionError}</div>
+            )}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => { setProvisionModal(false); setProvisionEmail(""); setProvisionError(null); }}
+                style={{ flex: 1, background: "transparent", border: "1px solid #2a2a2a", color: "#888", padding: "8px", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleProvision}
+                disabled={provisioning || !provisionEmail.trim()}
+                style={{
+                  flex: 1, background: provisioning || !provisionEmail.trim() ? "#0a0a0a" : "#10b981",
+                  border: "none", color: provisioning || !provisionEmail.trim() ? "#444" : "#000",
+                  padding: "8px", borderRadius: "6px",
+                  cursor: provisioning || !provisionEmail.trim() ? "not-allowed" : "pointer",
+                  fontSize: "12px", fontWeight: 700,
+                }}
+              >
+                {provisioning ? "Provisioning…" : "Provision"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

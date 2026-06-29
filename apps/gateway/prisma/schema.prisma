@@ -45,8 +45,10 @@ model Tenant {
   name                 String
   slug                 String   @unique
   plan                 Plan     @default(tier1)
-  token_budget_monthly Int      @default(1000000)
-  connector_limit      Int      @default(3)
+  token_budget_monthly    Int?
+  per_query_token_limit   Int?
+  per_session_token_limit Int?
+  connector_limit         Int      @default(3)
   created_at           DateTime @default(now()) @db.Timestamptz
 
   users            User[]

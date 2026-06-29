@@ -195,6 +195,8 @@ describe('StreamEvent discriminated union', () => {
           return String(event.toolCallId)
         case 'gate_required':
           return event.gateId
+        case 'agent_finding':
+          return event.summary
         case 'done':
           return String(event.outputTokens)
         case 'error':

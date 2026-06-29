@@ -301,7 +301,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
         {/* View area */}
         <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
-          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat initialContext={orchestratorContext} onNavigate={(v: string) => setView(v as View)} onFirstMessage={() => { localStorage.setItem('anvay-onboarding-dismissed', '1'); setShowOnboarding(false); }} /></ErrorBoundary>}
+          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat initialContext={orchestratorContext} onContextConsumed={() => setOrchestratorContext(undefined)} onNavigate={(v: string) => setView(v as View)} onFirstMessage={() => { localStorage.setItem('anvay-onboarding-dismissed', '1'); setShowOnboarding(false); }} /></ErrorBoundary>}
           {view === "alerts" && <ErrorBoundary viewName="Signals"><AlertsView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
           {view === "routing" && <ErrorBoundary viewName="Routing"><IntakeView /></ErrorBoundary>}
           {view === "kb" && <ErrorBoundary viewName="Knowledge"><KbView /></ErrorBoundary>}

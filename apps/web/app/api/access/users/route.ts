@@ -24,3 +24,21 @@ export async function GET() {
     return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } })
   }
 }
+
+export async function POST(request: Request) {
+  const token = await getToken()
+  if (!token) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } })
+
+  try {
+    const body = await request.text()
+    const resp = await fetch(`${GATEWAY_URL}/api/access/users`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body,
+    })
+    const data = await resp.text()
+    return new Response(data, { status: resp.status, headers: { "Content-Type": "application/json" } })
+  } catch {
+    return new Response(JSON.stringify({ error: "gateway unreachable" }), { status: 502, headers: { "Content-Type": "application/json" } })
+  }
+}

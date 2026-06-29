@@ -1,7 +1,38 @@
 import type { ExecutableTool } from '@anvay/agent'
+import type { ConnectorCreds } from '@anvay/types'
 import { withTenant } from '../db/prisma.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import type { PrismaClient } from '@prisma/client'
+import { adaptConnectorAgent } from './connector-tools-adapter.js'
+import { ArgocdAgent } from '@anvay/connector-argocd'
+import { AwsCloudwatchAgent } from '@anvay/connector-aws-cloudwatch'
+import { AwsHealthAgent } from '@anvay/connector-aws-health'
+import { AzureMonitorAgent } from '@anvay/connector-azure-monitor'
+import { CircleciAgent } from '@anvay/connector-circleci'
+import { ConfluenceAgent } from '@anvay/connector-confluence'
+import { CoralogixAgent } from '@anvay/connector-coralogix'
+import { DatadogAgent } from '@anvay/connector-datadog'
+import { DynatraceAgent } from '@anvay/connector-dynatrace'
+import { EksAgent } from '@anvay/connector-eks'
+import { ElasticAgent } from '@anvay/connector-elastic'
+import { GcpMonitoringAgent } from '@anvay/connector-gcp-monitoring'
+import { GkeAgent } from '@anvay/connector-gke'
+import { JenkinsAgent } from '@anvay/connector-jenkins'
+import { JiraAgent } from '@anvay/connector-jira'
+import { K8sAgent } from '@anvay/connector-k8s'
+import { LaunchdarklyAgent } from '@anvay/connector-launchdarkly'
+import { LinearAgent } from '@anvay/connector-linear'
+import { NewrelicAgent } from '@anvay/connector-newrelic'
+import { NotionAgent } from '@anvay/connector-notion'
+import { OpsgenieAgent } from '@anvay/connector-opsgenie'
+import { PagerdutyAgent } from '@anvay/connector-pagerduty'
+import { SentryAgent } from '@anvay/connector-sentry'
+import { SlackAgent } from '@anvay/connector-slack'
+import { SnykAgent } from '@anvay/connector-snyk'
+import { SonarqubeAgent } from '@anvay/connector-sonarqube'
+import { TerraformAgent } from '@anvay/connector-terraform'
+import { VaultAgent } from '@anvay/connector-vault'
+import { VercelAgent } from '@anvay/connector-vercel'
 
 type ConnectorConfigRow = {
   connector_type: string
@@ -26,10 +57,13 @@ function makePrometheusTools(creds: Record<string, unknown>): ExecutableTool[] {
   return [
     {
       name: 'prometheus__query',
-      description: 'Execute a PromQL instant query. Returns metric values at current time.',
+      description: 'Execute a targeted PromQL instant query scoped to a specific service. ' +
+        'REQUIRED: query MUST include a specific service or job label filter from graph connector coordinates, ' +
+        'e.g. rate(http_requests_total{service="payments-api"}[5m]). ' +
+        'FORBIDDEN: wildcard matchers like {service=~".+"} or empty selectors {} — these are blocked at the execution layer.',
       parameters: {
         type: 'object' as const,
-        properties: { query: { type: 'string', description: 'PromQL expression, e.g. up, rate(http_requests_total[5m])' } },
+        properties: { query: { type: 'string', description: 'PromQL expression with specific service/job label, e.g. rate(http_requests_total{service="payments-api"}[5m])' } },
         required: ['query'],
       },
       run: async (args: Record<string, unknown>) => {
@@ -46,7 +80,9 @@ function makePrometheusTools(creds: Record<string, unknown>): ExecutableTool[] {
       run: async () => {
         try {
           const resp = await fetch(`${baseUrl}/api/v1/alerts`)
-          return await resp.json()
+          if (!resp.ok) return { alerts: [] }
+          const data = await resp.json() as { data?: { alerts?: unknown[] } }
+          return { alerts: data?.data?.alerts ?? [] }
         } catch (e) { return { error: String(e) } }
       },
     },
@@ -112,11 +148,14 @@ function makeLokiTools(creds: Record<string, unknown>): ExecutableTool[] {
   return [
     {
       name: 'loki__query',
-      description: 'Execute a LogQL range query against Loki. Returns log lines.',
+      description: 'Execute a targeted LogQL range query against Loki scoped to a specific service. ' +
+        'REQUIRED: query MUST include a specific app or service label from graph connector coordinates, ' +
+        'e.g. {app="payments-api"} |= "error". ' +
+        'FORBIDDEN: wildcard matchers like {app=~".+"} or empty selectors {} — these are blocked at the execution layer.',
       parameters: {
         type: 'object' as const,
         properties: {
-          query: { type: 'string', description: 'LogQL expression, e.g. {app="payments-api"} |= "error"' },
+          query: { type: 'string', description: 'LogQL expression with specific service label, e.g. {app="payments-api"} |= "error"' },
           since: { type: 'string', description: 'Lookback window, e.g. 5m, 1h, 24h (default: 1h)' },
           limit: { type: 'number', description: 'Max log lines to return (default: 50)' },
         },
@@ -160,13 +199,15 @@ function makeGrafanaTools(creds: Record<string, unknown>): ExecutableTool[] {
   return [
     {
       name: 'grafana__dashboards',
-      description: 'Search Grafana dashboards. Returns list of matching dashboards with URLs.',
+      description: 'Search Grafana dashboards by service name. ' +
+        'REQUIRED: pass the specific service name from graph connector coordinates as query, e.g. "payments-api". ' +
+        'FORBIDDEN: empty string or "*" — these are blocked at the execution layer.',
       parameters: {
         type: 'object' as const,
         properties: {
-          query: { type: 'string', description: 'Search string (leave empty for all dashboards)' },
+          query: { type: 'string', description: 'Service name to search for, e.g. "payments-api". Must be a specific name — not empty or wildcard.' },
         },
-        required: [],
+        required: ['query'],
       },
       run: async (args: Record<string, unknown>) => {
         try {
@@ -287,7 +328,35 @@ export async function getNativeConnectorTools(
       case 'loki':          tools.push(...makeLokiTools(creds)); break
       case 'grafana':       tools.push(...makeGrafanaTools(creds)); break
       case 'github':        tools.push(...makeGitHubTools(creds)); break
-      // vault: read-only listing is risky; skip for now
+      case 'argocd':          tools.push(...adaptConnectorAgent(new ArgocdAgent(), creds as ConnectorCreds)); break
+      case 'aws-cloudwatch':  tools.push(...adaptConnectorAgent(new AwsCloudwatchAgent(), creds as ConnectorCreds)); break
+      case 'aws-health':      tools.push(...adaptConnectorAgent(new AwsHealthAgent(), creds as ConnectorCreds)); break
+      case 'azure-monitor':   tools.push(...adaptConnectorAgent(new AzureMonitorAgent(), creds as ConnectorCreds)); break
+      case 'circleci':        tools.push(...adaptConnectorAgent(new CircleciAgent(), creds as ConnectorCreds)); break
+      case 'confluence':      tools.push(...adaptConnectorAgent(new ConfluenceAgent(), creds as ConnectorCreds)); break
+      case 'coralogix':       tools.push(...adaptConnectorAgent(new CoralogixAgent(), creds as ConnectorCreds)); break
+      case 'datadog':         tools.push(...adaptConnectorAgent(new DatadogAgent(), creds as ConnectorCreds)); break
+      case 'dynatrace':       tools.push(...adaptConnectorAgent(new DynatraceAgent(), creds as ConnectorCreds)); break
+      case 'eks':             tools.push(...adaptConnectorAgent(new EksAgent(), creds as ConnectorCreds)); break
+      case 'elastic':         tools.push(...adaptConnectorAgent(new ElasticAgent(), creds as ConnectorCreds)); break
+      case 'gcp-monitoring':  tools.push(...adaptConnectorAgent(new GcpMonitoringAgent(), creds as ConnectorCreds)); break
+      case 'gke':             tools.push(...adaptConnectorAgent(new GkeAgent(), creds as ConnectorCreds)); break
+      case 'jenkins':         tools.push(...adaptConnectorAgent(new JenkinsAgent(), creds as ConnectorCreds)); break
+      case 'jira':            tools.push(...adaptConnectorAgent(new JiraAgent(), creds as ConnectorCreds)); break
+      case 'k8s':             tools.push(...adaptConnectorAgent(new K8sAgent(), creds as ConnectorCreds)); break
+      case 'launchdarkly':    tools.push(...adaptConnectorAgent(new LaunchdarklyAgent(), creds as ConnectorCreds)); break
+      case 'linear':          tools.push(...adaptConnectorAgent(new LinearAgent(), creds as ConnectorCreds)); break
+      case 'newrelic':        tools.push(...adaptConnectorAgent(new NewrelicAgent(), creds as ConnectorCreds)); break
+      case 'notion':          tools.push(...adaptConnectorAgent(new NotionAgent(), creds as ConnectorCreds)); break
+      case 'opsgenie':        tools.push(...adaptConnectorAgent(new OpsgenieAgent(), creds as ConnectorCreds)); break
+      case 'pagerduty':       tools.push(...adaptConnectorAgent(new PagerdutyAgent(), creds as ConnectorCreds)); break
+      case 'sentry':          tools.push(...adaptConnectorAgent(new SentryAgent(), creds as ConnectorCreds)); break
+      case 'slack':           tools.push(...adaptConnectorAgent(new SlackAgent(), creds as ConnectorCreds)); break
+      case 'snyk':            tools.push(...adaptConnectorAgent(new SnykAgent(), creds as ConnectorCreds)); break
+      case 'sonarqube':       tools.push(...adaptConnectorAgent(new SonarqubeAgent(), creds as ConnectorCreds)); break
+      case 'terraform':       tools.push(...adaptConnectorAgent(new TerraformAgent(), creds as ConnectorCreds)); break
+      case 'vault':           tools.push(...adaptConnectorAgent(new VaultAgent(), creds as ConnectorCreds)); break
+      case 'vercel':          tools.push(...adaptConnectorAgent(new VercelAgent(), creds as ConnectorCreds)); break
     }
   }
   return tools

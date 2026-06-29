@@ -33,6 +33,7 @@ type StreamEvent =
   | { type: "text_delta"; content: string }
   | { type: "tool_call"; toolCallId: string; toolName: string; args: Record<string, unknown> }
   | { type: "tool_result"; toolCallId: string; result: unknown }
+  | { type: "agent_finding"; agentType: string; summary: string; confidence: number; toolsUsed: string[] }
   | { type: "gate_required"; gateId: string; toolCallId: string; toolName: string; args: Record<string, unknown> }
   | { type: "done"; inputTokens: number; outputTokens: number; groundingSources?: { source: string; fetchedAt: string; confidence: number; freshness: number }[] }
   | { type: "error"; code: string; message: string };
@@ -369,7 +370,7 @@ function formatRelativeTime(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }: { initialContext?: OrchestratorContext; onNavigate?: (view: string) => void; onFirstMessage?: () => void }) {
+export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate, onFirstMessage }: { initialContext?: OrchestratorContext; onContextConsumed?: () => void; onNavigate?: (view: string) => void; onFirstMessage?: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [logLines, setLogLines] = useState<LogLine[]>([]);
   const [agentStates, setAgentStates] = useState<AgentState[]>([]);
@@ -392,14 +393,33 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
   const logEndRef = useRef<HTMLDivElement>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastFiredContextRef = useRef<string | null>(null);
-  const sessionIdRef = useRef<string>(`session-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  // Persist session ID across navigation — restored from localStorage on mount.
+  // Without this, every navigation back to Chat creates a new session and loses context.
+  const sessionIdRef = useRef<string>('');
   const toolNamesRef = useRef(new Map<string, string>());
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logLines]);
   useEffect(() => () => timeoutsRef.current.forEach(clearTimeout), []);
 
-  useEffect(() => { setActiveSessionId(sessionIdRef.current); }, []);
+  // On mount: restore last session ID from localStorage and reload its turns from DB.
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('anvay-session-id') : null;
+    const id = stored ?? `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    if (!stored) localStorage.setItem('anvay-session-id', id);
+    sessionIdRef.current = id;
+    setActiveSessionId(id);
+    // Restore turns from DB so messages are visible after navigation
+    fetch(`/api/sessions/${encodeURIComponent(id)}/turns`)
+      .then(r => r.ok ? r.json() as Promise<{ data?: Array<{ id: string; role: string; content: string; createdAt: string }> }> : null)
+      .then(body => {
+        if (Array.isArray(body?.data) && body!.data!.length > 0) {
+          setMessages(body!.data!.map(t => ({ id: t.id, role: t.role as 'user' | 'assistant', content: t.content })));
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refreshSessions = useCallback(() => {
     fetch('/api/sessions')
@@ -427,6 +447,7 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
     if (isThinking) return;
     const newId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     sessionIdRef.current = newId;
+    localStorage.setItem('anvay-session-id', newId);
     setActiveSessionId(newId);
     setMessages([]);
     setLogLines([]);
@@ -441,6 +462,7 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
   async function loadSession(sessionId: string) {
     if (isThinking || sessionId === sessionIdRef.current) return;
     sessionIdRef.current = sessionId;
+    localStorage.setItem('anvay-session-id', sessionId);
     setActiveSessionId(sessionId);
     // Clear UI for loading state
     setMessages([]);
@@ -468,6 +490,8 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
       lastFiredContextRef.current = initialContext.query;
       setContextSource({ title: initialContext.title, source: initialContext.source });
       sendRealForm(initialContext.query);
+      // Clear context in parent so remounting chat doesn't re-fire the same query
+      onContextConsumed?.();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialContext]);
@@ -579,6 +603,14 @@ export function OrchestratorChat({ initialContext, onNavigate, onFirstMessage }:
             const resultStr = typeof event.result === 'string' ? event.result : JSON.stringify(event.result).slice(0, 100);
             pushLog({ actor: "TOOL", actorColor: "#555", text: `→ ${resultStr}...`, status: 'done', ms: 0 });
             setAgentStates(prev => prev.map(a => a.name === toolName ? { ...a, currentStatus: 'done' } : a));
+          } else if (event.type === 'agent_finding') {
+            setAgentStates(prev => prev.map(a => a.name === event.agentType ? { ...a, currentStatus: 'done' as const } : a));
+            pushLog({
+              actor: event.agentType.toUpperCase(),
+              actorColor: "#8b5cf6",
+              text: `[conf: ${(event.confidence * 100).toFixed(0)}%] ${(event.summary as string).slice(0, 200)}`,
+              status: 'done',
+            });
           } else if (event.type === 'gate_required') {
             setGateRequired({ gateId: event.gateId, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
             pushLog({ actor: "GATE", actorColor: "#f59e0b", text: `${event.toolName} — awaiting approval`, status: 'running' });

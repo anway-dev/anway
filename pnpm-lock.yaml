@@ -29,6 +29,12 @@ importers:
       '@anvay/connector-aws-cloudwatch':
         specifier: workspace:*
         version: link:../../connectors/aws-cloudwatch
+      '@anvay/connector-aws-health':
+        specifier: workspace:*
+        version: link:../../connectors/aws-health
+      '@anvay/connector-azure-monitor':
+        specifier: workspace:*
+        version: link:../../connectors/azure-monitor
       '@anvay/connector-circleci':
         specifier: workspace:*
         version: link:../../connectors/circleci
@@ -44,12 +50,21 @@ importers:
       '@anvay/connector-dynatrace':
         specifier: workspace:*
         version: link:../../connectors/dynatrace
+      '@anvay/connector-eks':
+        specifier: workspace:*
+        version: link:../../connectors/eks
       '@anvay/connector-elastic':
         specifier: workspace:*
         version: link:../../connectors/elastic
+      '@anvay/connector-gcp-monitoring':
+        specifier: workspace:*
+        version: link:../../connectors/gcp-monitoring
       '@anvay/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
+      '@anvay/connector-gke':
+        specifier: workspace:*
+        version: link:../../connectors/gke
       '@anvay/connector-grafana':
         specifier: workspace:*
         version: link:../../connectors/grafana
@@ -283,6 +298,38 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  connectors/aws-health:
+    dependencies:
+      '@anvay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  connectors/azure-monitor:
+    dependencies:
+      '@anvay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   connectors/circleci:
     dependencies:
       '@anvay/agent':
@@ -366,6 +413,22 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@24.13.2)(lightningcss@1.32.0)
 
+  connectors/eks:
+    dependencies:
+      '@anvay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   connectors/elastic:
     dependencies:
       '@anvay/agent':
@@ -381,6 +444,22 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@24.13.2)(lightningcss@1.32.0)
+
+  connectors/gcp-monitoring:
+    dependencies:
+      '@anvay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
   connectors/github:
     dependencies:
@@ -400,6 +479,22 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
+
+  connectors/gke:
+    dependencies:
+      '@anvay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@anvay/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
   connectors/grafana:
     dependencies:
@@ -8760,8 +8855,8 @@ snapshots:
       '@next/eslint-plugin-next': 16.2.6
       eslint: 9.39.4(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.4(jiti@2.7.0))
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-react: 7.37.5(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.7.0))
@@ -8783,7 +8878,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.4(jiti@2.7.0)):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.3
@@ -8794,21 +8889,21 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.13.0(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0)):
+  eslint-module-utils@2.13.0(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       eslint: 9.39.4(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.4(jiti@2.7.0))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0)):
+  eslint-plugin-import@2.32.0(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9
@@ -8819,7 +8914,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 9.39.4(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
-      eslint-module-utils: 2.13.0(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-module-utils: 2.13.0(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
       hasown: 2.0.4
       is-core-module: 2.16.2
       is-glob: 4.0.3

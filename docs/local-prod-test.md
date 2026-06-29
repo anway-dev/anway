@@ -155,6 +155,11 @@ ANVAY_WEBHOOK_TOKEN=anvay-demo-webhook-token
 source .env.local
 ./scripts/local-k8s.sh
 ```
+### or
+```
+source .env.local
+./scripts/local-orbstack.sh
+```
 
 Takes 8–12 minutes. When done, verify:
 
@@ -290,7 +295,7 @@ Open `http://localhost:3001` → Dashboards — 15 dashboards named `{service} �
 Fire a test alert manually:
 
 ```bash
-curl -X POST http://localhost:9093/api/v1/alerts \
+curl -X POST http://localhost:9093/api/v2/alerts \
   -H "Content-Type: application/json" \
   -d '[{
     "labels": { "alertname": "HighErrorRate", "severity": "critical", "service": "order-service", "job": "demo-services" },

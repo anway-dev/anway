@@ -87,15 +87,35 @@ export async function alertRoutes(app: FastifyInstance) {
       source: 'Incidents',
       sourceIcon: 'IN',
       sourceColor: '#10b981',
-      service: r.description?.split('\n')[0]?.trim() || 'unknown',
+      service: extractService(r.description),
       timestamp: timeAgo(r.created_at),
       triageStatus: (r.status === 'active' || r.status === 'investigating') ? 'triaging' : 'pending' as 'auto_triaged' | 'triaging' | 'pending' | 'escalated',
       triageSummary: r.suggested_root_cause ?? undefined,
-      orchestratorQuery: `Explain: ${r.title}`,
+      orchestratorQuery: buildOrchestratorQuery(r.title, extractService(r.description), r.description),
     })),
       nextCursor: hasMore && last ? `${last.created_at.toISOString()},${last.id}` : null,
     }
   })
+}
+
+// Incident description is stored as "svc — annotation text" (events.ts line 172).
+// If no separator, the whole string is the annotation (no service was in the labels).
+function extractService(desc: string | null): string {
+  if (!desc) return 'unknown'
+  const sepIdx = desc.indexOf(' — ')
+  if (sepIdx > 0) return desc.slice(0, sepIdx).trim()
+  return 'unknown'
+}
+
+// Build a rich query so the orchestrator can resolve the service via graph lookup
+// instead of asking "which service?" for every alert-triggered investigation.
+function buildOrchestratorQuery(title: string, service: string, desc: string | null): string {
+  const annotation = desc ? desc.replace(/^[^—]*—\s*/, '').trim() : ''
+  if (service !== 'unknown') {
+    const annotationPart = annotation ? ` ${annotation}.` : ''
+    return `Investigate the "${title}" alert on service ${service}.${annotationPart} What is the root cause?`
+  }
+  return `Investigate the "${title}" alert. What is the root cause?`
 }
 
 function timeAgo(date: Date): string {

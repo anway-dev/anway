@@ -459,6 +459,27 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
     setNoProvider(false);
   }
 
+  async function deleteSession(sessionId: string) {
+    if (isThinking) return;
+    try {
+      await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      if (sessionId === sessionIdRef.current) {
+        startNewSession();
+      }
+      refreshSessions();
+    } catch { /* ignore */ }
+  }
+
+  async function clearAllSessions() {
+    if (isThinking) return;
+    if (!window.confirm('Delete all conversation history? This cannot be undone.')) return;
+    try {
+      await fetch('/api/sessions', { method: 'DELETE' });
+      startNewSession();
+      setSessions([]);
+    } catch { /* ignore */ }
+  }
+
   async function loadSession(sessionId: string) {
     if (isThinking || sessionId === sessionIdRef.current) return;
     sessionIdRef.current = sessionId;
@@ -923,16 +944,29 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
         {rightTab === 'sessions' && (
           <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
             <div style={{ padding: "10px 14px", borderBottom: "1px solid #080808", flexShrink: 0 }}>
-              <button onClick={startNewSession} disabled={isThinking}
-                style={{
-                  width: "100%", padding: "7px 0", background: "rgba(16,185,129,0.07)",
-                  border: "1px solid rgba(16,185,129,0.15)", borderRadius: "4px",
-                  color: "#10b981", fontSize: "10px", fontFamily: "monospace",
-                  cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.4 : 1,
-                }}
-                onMouseEnter={e => { if (!isThinking) e.currentTarget.style.background = "rgba(16,185,129,0.12)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(16,185,129,0.07)"; }}
-              >+ new session</button>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button onClick={startNewSession} disabled={isThinking}
+                  style={{
+                    flex: 1, padding: "7px 0", background: "rgba(16,185,129,0.07)",
+                    border: "1px solid rgba(16,185,129,0.15)", borderRadius: "4px",
+                    color: "#10b981", fontSize: "10px", fontFamily: "monospace",
+                    cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.4 : 1,
+                  }}
+                  onMouseEnter={e => { if (!isThinking) e.currentTarget.style.background = "rgba(16,185,129,0.12)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(16,185,129,0.07)"; }}
+                >+ new session</button>
+                <button onClick={clearAllSessions} disabled={isThinking}
+                  title="Clear all conversations"
+                  style={{
+                    padding: "7px 10px", background: "rgba(239,68,68,0.06)",
+                    border: "1px solid rgba(239,68,68,0.12)", borderRadius: "4px",
+                    color: "#ef4444", fontSize: "10px", fontFamily: "monospace",
+                    cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.4 : 1,
+                  }}
+                  onMouseEnter={e => { if (!isThinking) e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.06)"; }}
+                >clear all</button>
+              </div>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
               <div style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>active</div>
@@ -947,24 +981,40 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
               ) : sessions.map(s => {
                 const isCurrent = s.id === activeSessionId;
                 return (
-                  <button key={s.id} onClick={() => { loadSession(s.id); setRightTab("trace"); }}
-                    disabled={isThinking}
-                    style={{
-                      display: "block", width: "100%", textAlign: "left",
-                      padding: "8px 10px", marginBottom: "4px",
-                      background: isCurrent ? "rgba(16,185,129,0.05)" : "transparent",
-                      border: isCurrent ? "1px solid rgba(16,185,129,0.12)" : "1px solid #0e0e0e",
-                      borderRadius: "3px", cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.5 : 1,
-                    }}
-                    onMouseEnter={e => { if (!isThinking && !isCurrent) e.currentTarget.style.borderColor = "#1a1a1a"; }}
-                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.borderColor = "#0e0e0e"; }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "2px" }}>
-                      <span style={{ fontSize: "9px", color: isCurrent ? "#10b981" : "#333", fontFamily: "monospace" }}>{formatRelativeTime(s.updatedAt)}</span>
-                      <span style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace" }}>{s.turnCount}t</span>
-                    </div>
-                    <div style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.preview ? s.preview.slice(0, 60) : s.id.slice(0, 28)}&hellip;</div>
-                  </button>
+                  <div key={s.id} style={{ position: "relative", marginBottom: "4px" }}>
+                    <button onClick={() => { loadSession(s.id); setRightTab("trace"); }}
+                      disabled={isThinking}
+                      style={{
+                        display: "block", width: "100%", textAlign: "left",
+                        padding: "8px 24px 8px 10px",
+                        background: isCurrent ? "rgba(16,185,129,0.05)" : "transparent",
+                        border: isCurrent ? "1px solid rgba(16,185,129,0.12)" : "1px solid #0e0e0e",
+                        borderRadius: "3px", cursor: isThinking ? "not-allowed" : "pointer", opacity: isThinking ? 0.5 : 1,
+                      }}
+                      onMouseEnter={e => { if (!isThinking && !isCurrent) e.currentTarget.style.borderColor = "#1a1a1a"; }}
+                      onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.borderColor = "#0e0e0e"; }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "2px" }}>
+                        <span style={{ fontSize: "9px", color: isCurrent ? "#10b981" : "#333", fontFamily: "monospace" }}>{formatRelativeTime(s.updatedAt)}</span>
+                        <span style={{ fontSize: "9px", color: "#1a1a1a", fontFamily: "monospace" }}>{s.turnCount}t</span>
+                      </div>
+                      <div style={{ fontSize: "9px", color: "#222", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.preview ? s.preview.slice(0, 60) : s.id.slice(0, 28)}&hellip;</div>
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); void deleteSession(s.id); }}
+                      disabled={isThinking}
+                      title="Delete session"
+                      style={{
+                        position: "absolute", top: "4px", right: "4px",
+                        background: "transparent", border: "none",
+                        color: "#333", fontSize: "10px", fontFamily: "monospace",
+                        cursor: isThinking ? "not-allowed" : "pointer", padding: "2px 4px",
+                        lineHeight: 1,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = "#333"; }}
+                    >×</button>
+                  </div>
                 );
               })}
             </div>

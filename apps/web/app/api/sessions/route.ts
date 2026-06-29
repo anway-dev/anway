@@ -15,3 +15,17 @@ export async function GET(request: Request) {
     return Response.json([], { status: 200 })
   }
 }
+
+export async function DELETE(request: Request) {
+  const auth = await resolveAuthHeader(request)
+  if (!auth) return new Response(null, { status: 401 })
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/api/sessions`, {
+      method: 'DELETE',
+      headers: { Authorization: auth },
+    })
+    return new Response(null, { status: resp.status })
+  } catch {
+    return new Response(null, { status: 500 })
+  }
+}

@@ -26,6 +26,20 @@ interface TurnRow {
 }
 
 export async function sessionRoutes(app: FastifyInstance) {
+  // Delete ALL sessions for the current tenant
+  app.delete('/api/sessions', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`
+        DELETE FROM session_turns
+        WHERE tenant_id = ${tenantId}::uuid
+      `
+    ).catch(() => {})
+    return reply.code(204).send()
+  })
+
   // List recent sessions for current tenant — derived from session_turns (no sessions table dependency).
   // session_turns.session_id stores client-generated text IDs (session-{ts}-{random}).
   // The sessions table uses UUIDs — incompatible with the client-generated IDs, so we derive
@@ -117,5 +131,20 @@ export async function sessionRoutes(app: FastifyInstance) {
         createdAt: r.created_at.toISOString(),
       })),
     })
+  })
+
+  // Delete all turns for a specific session
+  app.delete<{ Params: { id: string } }>('/api/sessions/:id', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { id } = request.params
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$executeRaw`
+        DELETE FROM session_turns
+        WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id}
+      `
+    ).catch(() => {})
+    return reply.code(204).send()
   })
 }

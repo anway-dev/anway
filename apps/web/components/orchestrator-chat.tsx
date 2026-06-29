@@ -461,13 +461,15 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
 
   async function deleteSession(sessionId: string) {
     if (isThinking) return;
+    // Optimistic: remove immediately so UI responds instantly
+    setSessions(prev => prev.filter(s => s.id !== sessionId));
+    if (sessionId === sessionIdRef.current) startNewSession();
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
-      if (sessionId === sessionIdRef.current) {
-        startNewSession();
-      }
-      refreshSessions();
-    } catch { /* ignore */ }
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      if (!resp.ok) refreshSessions(); // restore list if server rejected
+    } catch {
+      refreshSessions(); // restore list on network error
+    }
   }
 
   async function clearAllSessions() {

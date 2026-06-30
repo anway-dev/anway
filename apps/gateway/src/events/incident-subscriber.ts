@@ -37,6 +37,7 @@ async function resolveProviderConfig(tenantId: string): Promise<ProviderConfig |
   // Env var fallback (keyed providers first, then keyless local)
   if (process.env['ANTHROPIC_API_KEY']) return { type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }
   if (process.env['OPENAI_API_KEY']) return { type: 'openai', apiKey: process.env['OPENAI_API_KEY'] }
+  if (process.env['DEEPSEEK_API_KEY']) return { type: 'deepseek', apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com' }
   if (process.env['GROQ_API_KEY']) return { type: 'groq', apiKey: process.env['GROQ_API_KEY'] }
   if (process.env['MISTRAL_API_KEY']) return { type: 'mistral', apiKey: process.env['MISTRAL_API_KEY'] }
   if (process.env['OLLAMA_ENDPOINT']) return { type: 'ollama', baseURL: process.env['OLLAMA_ENDPOINT'] }
@@ -60,14 +61,14 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
   await sub.subscribe('incident_created', (message) => {
     // Non-blocking: fire-and-forget with error logging
     void (async () => {
-      let payload: { id?: string; tenantId?: string; title?: string; description?: string; severity?: string }
+      let payload: { incidentId?: string; tenantId?: string; title?: string; description?: string; severity?: string }
       try {
         payload = JSON.parse(message)
       } catch {
         return
       }
 
-      const { id, tenantId, title, description } = payload
+      const { incidentId: id, tenantId, title, description } = payload
 
       if (
         typeof id !== 'string' || !UUID_RE.test(id) ||

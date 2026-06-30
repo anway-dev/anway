@@ -48,7 +48,7 @@ function mapMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
 
 export class OpenAIProvider implements IModelProvider {
   get modelId(): string { return this.config.defaultModel ?? 'gpt-4o' }
-  get cheapModelId(): string { return this.config.cheapModel ?? 'gpt-4o-mini' }
+  get cheapModelId(): string { return this.config.cheapModel ?? this.config.defaultModel ?? 'gpt-4o-mini' }
 
   private readonly client: OpenAI
 

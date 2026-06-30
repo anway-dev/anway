@@ -4,11 +4,6 @@ import type { FixtureRoute, FixtureServer } from '@anway/agent'
 import { NotionBootstrap } from './bootstrap.js'
 import { NotionAgent } from './agent.js'
 
-class FakeKG {
-  readonly entities: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []
-  async upsertEntity(e: { type: string; name: string; metadata: Record<string, unknown> }, _tid: string) { this.entities.push(e); return `${e.type}:${e.name}` }
-  async upsertRelationship(_r: { fromEntityId: string; relType: string; toEntityId: string }, _tid: string) { return 'r-1' }
-}
 
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'POST', path: '/v1/search', status: 200, body: {'results': [{'id': 'db-1', 'object': 'database', 'title': [{'plain_text': 'Incidents'}]}]} }

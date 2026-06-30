@@ -2,11 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { KubernetesBootstrap } from './bootstrap.js'
 import { K8sAgent } from './agent.js'
 
-class FakeKG {
-  readonly entities: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []
-  async upsertEntity(e: { type: string; name: string; metadata: Record<string, unknown> }, _tid: string) { this.entities.push(e); return `${e.type}:${e.name}` }
-  async upsertRelationship(_r: { fromEntityId: string; relType: string; toEntityId: string }, _tid: string) { return 'r-1' }
-}
 
 const token = process.env['KUBECONFIG']
 const skip = !token

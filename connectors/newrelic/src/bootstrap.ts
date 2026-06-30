@@ -10,10 +10,8 @@ export class NewRelicBootstrap implements IConnectorBootstrap {
   ) {}
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.newrelic.com'
-    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['NEW_RELIC_API_KEY']
-    const apiKey = (payload['apiKey'] as string | undefined) ?? this.apiKey
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? baseUrl
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? 'https://api.newrelic.com'
+    const apiKey = (payload['apiKey'] as string | undefined) ?? this.apiKey ?? process.env['NEW_RELIC_API_KEY']
     if (!apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['newrelic: no credentials configured'] }
     }

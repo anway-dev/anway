@@ -4,11 +4,6 @@ import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import { VaultBootstrap } from './bootstrap.js'
 import { VaultAgent } from './agent.js'
 
-class FakeKG {
-  readonly entities: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []
-  async upsertEntity(e: { type: string; name: string; metadata: Record<string, unknown> }, _tid: string) { this.entities.push(e); return `${e.type}:${e.name}` }
-  async upsertRelationship(_r: { fromEntityId: string; relType: string; toEntityId: string }, _tid: string) { return 'r-1' }
-}
 
 describe('vault — integration (real Docker)', () => {
   let baseUrl: string
@@ -39,8 +34,7 @@ describe('vault — integration (real Docker)', () => {
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
     const firstTool = tools[0]!
-    try {
-      const result = await firstTool.execute({}, { baseUrl, token: 'dev-root-token' }))
-      expect(result).toBeDefined()
+    const result = await firstTool.execute({}, { baseUrl, token: 'dev-root-token' })
+    expect(result).toBeDefined()
   })
 })

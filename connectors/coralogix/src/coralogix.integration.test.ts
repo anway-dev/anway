@@ -4,11 +4,6 @@ import type { FixtureRoute, FixtureServer } from '@anway/agent'
 import { CoralogixBootstrap } from './bootstrap.js'
 import { CoralogixAgent } from './agent.js'
 
-class FakeKG {
-  readonly entities: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []
-  async upsertEntity(e: { type: string; name: string; metadata: Record<string, unknown> }, _tid: string) { this.entities.push(e); return `${e.type}:${e.name}` }
-  async upsertRelationship(_r: { fromEntityId: string; relType: string; toEntityId: string }, _tid: string) { return 'r-1' }
-}
 
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'POST', path: '/api/v1/logs/get-applications', status: 200,

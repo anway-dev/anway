@@ -4,11 +4,6 @@ import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import { GrafanaBootstrap } from './bootstrap.js'
 import { GrafanaAgent } from './agent.js'
 
-class FakeKG {
-  readonly entities: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []
-  async upsertEntity(e: { type: string; name: string; metadata: Record<string, unknown> }, _tid: string) { this.entities.push(e); return `${e.type}:${e.name}` }
-  async upsertRelationship(_r: { fromEntityId: string; relType: string; toEntityId: string }, _tid: string) { return 'r-1' }
-}
 
 describe('grafana — integration (real Docker)', () => {
   let baseUrl: string

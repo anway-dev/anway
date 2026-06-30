@@ -2,7 +2,7 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-async function graphqlQuery(token: string, query: string): Promise<Record<string, unknown>> {
+async function graphqlQuery(token: string, baseUrl: string, query: string): Promise<Record<string, unknown>> {
   const res = await fetch(baseUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -24,8 +24,8 @@ export class LinearBootstrap implements IConnectorBootstrap {
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
     const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.linear.app/graphql'
-    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['baseUrl_KEY']
-    if (!this.apiKey) {
+    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['LINEAR_API_KEY']
+    if (!apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Linear bootstrap: no API key'] }
     }
 
@@ -34,7 +34,7 @@ export class LinearBootstrap implements IConnectorBootstrap {
 
     // 1. Fetch teams
     try {
-      const teamsData = await graphqlQuery(this.apiKey, '{ teams { nodes { id name key } } }') as { data?: { teams?: { nodes: TeamNode[] } } }
+      const teamsData = await graphqlQuery(apiKey, baseUrl, '{ teams { nodes { id name key } } }') as { data?: { teams?: { nodes: TeamNode[] } } }
       const teams = teamsData?.data?.teams?.nodes ?? []
 
       for (const team of teams) {
@@ -47,7 +47,7 @@ export class LinearBootstrap implements IConnectorBootstrap {
       }
 
       // 2. Fetch projects
-      const projData = await graphqlQuery(this.apiKey, '{ projects { nodes { id name } } }') as { data?: { projects?: { nodes: Array<{ id: string; name: string }> } } }
+      const projData = await graphqlQuery(apiKey, baseUrl, '{ projects { nodes { id name } } }') as { data?: { projects?: { nodes: Array<{ id: string; name: string }> } } }
       const projects = projData?.data?.projects?.nodes ?? []
 
       for (const proj of projects) {
@@ -60,7 +60,7 @@ export class LinearBootstrap implements IConnectorBootstrap {
       }
 
       // 3. Fetch recent issues (last 30 days)
-      const issuesData = await graphqlQuery(this.apiKey, `{ issues(filter: { createdAt: { gte: "${new Date(Date.now() - 30 * 86400000).toISOString()}" } }, first: 100) { nodes { id identifier title description } } }`) as { data?: { issues?: { nodes: IssueNode[] } } }
+      const issuesData = await graphqlQuery(apiKey, baseUrl, `{ issues(filter: { createdAt: { gte: "${new Date(Date.now() - 30 * 86400000).toISOString()}" } }, first: 100) { nodes { id identifier title description } } }`) as { data?: { issues?: { nodes: IssueNode[] } } }
       const issues = issuesData?.data?.issues?.nodes ?? []
 
       for (const issue of issues) {

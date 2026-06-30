@@ -5,11 +5,6 @@ import { PrometheusBootstrap } from './bootstrap.js'
 import { PrometheusAgent } from './agent.js'
 
 // In-memory fake KG for integration tests
-class FakeKG {
-  readonly entities: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []
-  async upsertEntity(e: { type: string; name: string; metadata: Record<string, unknown> }, _tid: string) { this.entities.push(e); return `${e.type}:${e.name}` }
-  async upsertRelationship(_r: { fromEntityId: string; relType: string; toEntityId: string }, _tid: string) { return 'r-1' }
-}
 
 describe('prometheus — integration (real Docker)', () => {
   let baseUrl: string

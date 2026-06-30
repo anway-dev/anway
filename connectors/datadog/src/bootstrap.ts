@@ -5,9 +5,9 @@ import type { TenantId } from '@anway/types'
 export class DatadogBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
 
-  async ddApi(path: string, apiKey: string, appKey: string): Promise<unknown | null> {
+  async ddApi(path: string, apiKey: string, appKey: string, baseUrl: string): Promise<unknown | null> {
     try {
-      const resp = await fetch(`${payload['baseUrl'] ?? 'https://api.datadoghq.com'}${path}`, {
+      const resp = await fetch(`${baseUrl}${path}`, {
         headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey },
       })
       if (!resp.ok) return null
@@ -17,8 +17,8 @@ export class DatadogBootstrap implements IConnectorBootstrap {
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
     const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.datadoghq.com'
-    const apiKey = process.env['DD_API_KEY']
-    const appKey = process.env['DD_APP_KEY']
+    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['DD_API_KEY'] ?? ''
+    const appKey = (payload['appKey'] as string | undefined) ?? process.env['DD_APP_KEY'] ?? ''
     if (!apiKey || !appKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Datadog bootstrap: DD_API_KEY/DD_APP_KEY not set'] }
     }
@@ -27,7 +27,7 @@ export class DatadogBootstrap implements IConnectorBootstrap {
     let relationshipsUpserted = 0
 
     // 1. Fetch monitors (existing)
-    const monitors = await this.ddApi('/api/v1/monitor', apiKey, appKey) as Array<{ id?: number; name?: string; type?: string; overall_state?: string }> | null
+    const monitors = await this.ddApi('/api/v1/monitor', apiKey, appKey, baseUrl) as Array<{ id?: number; name?: string; type?: string; overall_state?: string }> | null
     if (monitors) {
       for (const m of monitors) {
         if (!m.name) continue
@@ -41,7 +41,7 @@ export class DatadogBootstrap implements IConnectorBootstrap {
     }
 
     // 2. Fetch service definitions
-    const svcDefs = await this.ddApi('/api/v2/services/definitions', apiKey, appKey) as { data?: Array<{ type: string; attributes: { name: string; id?: string } }> } | null
+    const svcDefs = await this.ddApi('/api/v2/services/definitions', apiKey, appKey, baseUrl) as { data?: Array<{ type: string; attributes: { name: string; id?: string } }> } | null
     if (svcDefs?.data) {
       for (const svc of svcDefs.data) {
         await this.kg.upsertEntity({

@@ -10,10 +10,8 @@ export class OpsGenieBootstrap implements IConnectorBootstrap {
   ) {}
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.opsgenie.com'
-    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['baseUrl_KEY']
-    const apiKey = (payload['apiKey'] as string | undefined) ?? this.apiKey
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? baseUrl
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? 'https://api.opsgenie.com'
+    const apiKey = (payload['apiKey'] as string | undefined) ?? this.apiKey ?? process.env['OPSGENIE_API_KEY']
     if (!apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['opsgenie: no credentials configured'] }
     }

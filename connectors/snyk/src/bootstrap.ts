@@ -10,14 +10,14 @@ export class SnykBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { Authorization: `token ${token}`, 'Content-Type': 'application/json' }
 
     try {
-      const orgsRes = await fetch('https://api.snyk.io/v1/orgs', { headers })
+      const orgsRes = await fetch(`${payload['baseUrl'] ?? 'https://api.snyk.io'}/v1/orgs`, { headers })
       if (!orgsRes.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Snyk bootstrap: API call failed'] }
       const orgsData = await orgsRes.json() as { orgs?: Array<{ id: string; name: string }> }
       const orgs = orgsData.orgs ?? []
       let entitiesUpserted = 0
       for (const org of orgs) {
         try {
-          const projRes = await fetch(`https://api.snyk.io/v1/org/${org.id}/projects`, { headers })
+          const projRes = await fetch(`${payload['baseUrl'] ?? 'https://api.snyk.io'}/v1/org/${org.id}/projects`, { headers })
           if (!projRes.ok) continue
           const projData = await projRes.json() as { projects?: Array<{ id: string; name: string }> }
           for (const p of projData.projects ?? []) {

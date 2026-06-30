@@ -10,7 +10,7 @@ export class TerraformBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/vnd.api+json' }
 
     try {
-      const orgsRes = await fetch('https://app.terraform.io/api/v2/organizations', { headers })
+      const orgsRes = await fetch(`${payload['baseUrl'] ?? 'https://app.terraform.io'}/api/v2/organizations`, { headers })
       if (!orgsRes.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Terraform bootstrap: API call failed'] }
       const orgsData = await orgsRes.json() as { data?: Array<{ id: string; attributes: { name: string } }> }
       const orgs = orgsData.data ?? []
@@ -18,7 +18,7 @@ export class TerraformBootstrap implements IConnectorBootstrap {
       for (const org of orgs) {
         const orgName = org.attributes.name
         try {
-          const wsRes = await fetch(`https://app.terraform.io/api/v2/organizations/${orgName}/workspaces`, { headers })
+          const wsRes = await fetch(`${payload['baseUrl'] ?? 'https://app.terraform.io'}/api/v2/organizations/${orgName}/workspaces`, { headers })
           if (!wsRes.ok) continue
           const wsData = await wsRes.json() as { data?: Array<{ id: string; attributes: { name: string } }> }
           for (const w of wsData.data ?? []) {

@@ -7,7 +7,7 @@ export class DatadogBootstrap implements IConnectorBootstrap {
 
   async ddApi(path: string, apiKey: string, appKey: string): Promise<unknown | null> {
     try {
-      const resp = await fetch(`https://api.datadoghq.com${path}`, {
+      const resp = await fetch(`${payload['baseUrl'] ?? 'https://api.datadoghq.com'}${path}`, {
         headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey },
       })
       if (!resp.ok) return null

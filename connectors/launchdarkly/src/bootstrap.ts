@@ -10,7 +10,7 @@ export class LaunchDarklyBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { Authorization: `${sdkKey}`, 'Content-Type': 'application/json' }
 
     try {
-      const res = await fetch('https://app.launchdarkly.com/api/v2/projects', { headers })
+      const res = await fetch(`${payload['baseUrl'] ?? 'https://app.launchdarkly.com'}/api/v2/projects`, { headers })
       if (!res.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['LaunchDarkly bootstrap: API call failed'] }
       const data = await res.json() as { items?: Array<{ key: string; name: string }> }
       const projects = data.items ?? []

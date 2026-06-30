@@ -10,7 +10,7 @@ export class VercelBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
     try {
-      const res = await fetch('https://api.vercel.com/v9/projects', { headers })
+      const res = await fetch(`${payload['baseUrl'] ?? 'https://api.vercel.com'}/v9/projects`, { headers })
       if (!res.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Vercel bootstrap: API call failed'] }
       const data = await res.json() as { projects?: Array<{ id: string; name: string }> }
       const projects = data.projects ?? []

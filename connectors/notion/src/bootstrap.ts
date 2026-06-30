@@ -14,7 +14,7 @@ export class NotionBootstrap implements IConnectorBootstrap {
     }
 
     try {
-      const res = await fetch('https://api.notion.com/v1/search', {
+      const res = await fetch(`${payload['baseUrl'] ?? 'https://api.notion.com'}/v1/search`, {
         method: 'POST', headers,
         body: JSON.stringify({ filter: { value: 'database', property: 'object' } }),
       })

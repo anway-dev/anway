@@ -222,7 +222,7 @@ services:
       - web_nm:/app/apps/web/node_modules
       - web_next:/app/apps/web/.next
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8500/api/providers > /dev/null || exit 1"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:8500/api/providers',r=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 20

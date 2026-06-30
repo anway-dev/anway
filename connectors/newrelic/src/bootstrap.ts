@@ -2,7 +2,7 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-const NEWRELIC_API = 'https://api.newrelic.com'
+const NEWRELIC_API = (payload['baseUrl'] as string) ?? 'https://api.newrelic.com'
 
 export class NewRelicBootstrap implements IConnectorBootstrap {
   constructor(

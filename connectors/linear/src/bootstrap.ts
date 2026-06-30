@@ -2,7 +2,7 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-const LINEAR_API = 'https://api.linear.app/graphql'
+const LINEAR_API = (payload['baseUrl'] as string) ?? 'https://api.linear.app/graphql'
 
 async function graphqlQuery(token: string, query: string): Promise<Record<string, unknown>> {
   const res = await fetch(LINEAR_API, {

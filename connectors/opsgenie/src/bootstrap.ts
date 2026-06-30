@@ -2,7 +2,7 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-const OPSGENIE_API = 'https://api.opsgenie.com'
+const OPSGENIE_API = (payload['baseUrl'] as string) ?? 'https://api.opsgenie.com'
 
 export class OpsGenieBootstrap implements IConnectorBootstrap {
   constructor(

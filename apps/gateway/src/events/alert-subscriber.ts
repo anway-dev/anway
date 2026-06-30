@@ -29,6 +29,14 @@ export async function startAlertSubscriber(redisUrl: string): Promise<void> {
 
   const incidentService = new IncidentService(prisma)
 
+  // Publisher for incident_created — notifies incident-subscriber so SRE analysis runs
+  const pub: RedisClientType = createClient({
+    url: redisUrl,
+    socket: { reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000) },
+  }) as RedisClientType
+  pub.on('error', (err) => log.error({ err }, 'AlertSubscriber pub Redis error'))
+  await pub.connect()
+
   await sub.subscribe('alert_fired', (message) => {
     void (async () => {
       let payload: { tenantId?: string; title?: string; severity?: string; description?: string; service?: string; incidentId?: string }
@@ -62,6 +70,14 @@ export async function startAlertSubscriber(redisUrl: string): Promise<void> {
           description: desc || undefined,
         })
         log.info({ incidentId: incident.id, tenantId, title }, 'alert-subscriber: incident created from alert')
+        // Publish incident_created so incident-subscriber runs SRE analysis
+        await pub.publish('incident_created', JSON.stringify({
+          type: 'incident_created',
+          tenantId,
+          incidentId: incident.id,
+          title,
+          description: desc || undefined,
+        })).catch((err) => log.error({ err }, 'alert-subscriber: incident_created publish failed'))
       } catch (err) {
         log.error({ err, tenantId, title }, 'alert-subscriber: failed to create incident')
       }

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Anvay E2E Suite Runner
+# Anway E2E Suite Runner
 # Starts required services, runs Playwright E2E tests, reports results.
 # Usage: ./scripts/run-e2e.sh [playwright-flags...]
 # =============================================================================

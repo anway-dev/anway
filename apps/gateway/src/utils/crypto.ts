@@ -6,10 +6,10 @@ const KEY_LEN = 32
 const PREFIX = 'v1:'
 
 function getKey(): Buffer {
-  const raw = process.env['ANVAY_ENCRYPTION_KEY']
-  if (!raw) throw new Error('ANVAY_ENCRYPTION_KEY not set')
+  const raw = process.env['ANWAY_ENCRYPTION_KEY']
+  if (!raw) throw new Error('ANWAY_ENCRYPTION_KEY not set')
   const key = Buffer.from(raw, 'base64')
-  if (key.length !== KEY_LEN) throw new Error(`ANVAY_ENCRYPTION_KEY must decode to ${KEY_LEN} bytes, got ${key.length}`)
+  if (key.length !== KEY_LEN) throw new Error(`ANWAY_ENCRYPTION_KEY must decode to ${KEY_LEN} bytes, got ${key.length}`)
   return key
 }
 
@@ -46,6 +46,6 @@ export function assertEncryptionKey(): void {
   try {
     getKey()
   } catch (err) {
-    throw new Error(`ANVAY_ENCRYPTION_KEY required in production: ${err instanceof Error ? err.message : ''}`)
+    throw new Error(`ANWAY_ENCRYPTION_KEY required in production: ${err instanceof Error ? err.message : ''}`)
   }
 }

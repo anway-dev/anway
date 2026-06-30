@@ -4,7 +4,7 @@ const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:8510'
 async function getToken(): Promise<string | null> {
   try {
     const { cookies } = await import('next/headers')
-    return (await cookies()).get('anvay_token')?.value ?? null
+    return (await cookies()).get('anway_token')?.value ?? null
   } catch {
     return null
   }

@@ -1,6 +1,6 @@
 variable "app_name" {
   type    = string
-  default = "anvay"
+  default = "anway"
 }
 
 variable "environment" {
@@ -65,12 +65,12 @@ variable "web_replicas" {
 
 variable "gateway_image" {
   type    = string
-  default = "anvay/gateway:latest"
+  default = "anway/gateway:latest"
 }
 
 variable "web_image" {
   type    = string
-  default = "anvay/web:latest"
+  default = "anway/web:latest"
 }
 
 variable "jwt_secret" {

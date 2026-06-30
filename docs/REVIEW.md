@@ -1,4 +1,4 @@
-# Anvay — Continuous Code Review
+# Anway — Continuous Code Review
 
 Agent instruction: read this file before starting any task. Fix issues marked `BLOCKING`
 before proceeding. `HIGH` must be fixed in the same task that touches the affected file.
@@ -772,7 +772,7 @@ Fable reported 3 BLOCKINGs. One is a false alarm.
 
 ### False alarm — dismissed
 
-**Fable B1** — `packages/types/dist/index.d.ts` stale, missing `GRAPH_CONTEXT_FAILED`. **Not a code defect.** `turbo.json` sets `typecheck: { dependsOn: ["^build"] }` — turbo builds `@anvay/types` before running typecheck on dependents. Source is correct (`packages/types/src/index.ts` has `GRAPH_CONTEXT_FAILED`). Fable ran against a stale local dist that predated the fix. No action needed.
+**Fable B1** — `packages/types/dist/index.d.ts` stale, missing `GRAPH_CONTEXT_FAILED`. **Not a code defect.** `turbo.json` sets `typecheck: { dependsOn: ["^build"] }` — turbo builds `@anway/types` before running typecheck on dependents. Source is correct (`packages/types/src/index.ts` has `GRAPH_CONTEXT_FAILED`). Fable ran against a stale local dist that predated the fix. No action needed.
 
 ---
 
@@ -915,7 +915,7 @@ All six BLOCKINGs are TypeScript compile errors confirmed by `tsc --noEmit`.
 | FA-B2 | `packages/agent/src/specialist-agent.ts:197` | `formatToolCall({ id, name, args })` — passes single plain object; interface requires `ToolCall[]`. TS2353. |
 | FA-B3 | `packages/agent/src/orchestrator.ts:155` | `intentResp?.content` in `catch` block — `intentResp` declared inside `try`, out of scope in `catch`. TS2304 + runtime ReferenceError. |
 | FA-B4 | `packages/agent/src/orchestrator.ts:154,185` | `'intent_parse_failed'` and `'graph_miss'` not in `AuditEventType` union in `interfaces/audit.ts`. TS compile error. |
-| FA-B5 | `packages/agent/src/specialist-agent.ts:80` | `'GRAPH_CONTEXT_FAILED'` not in `ErrorCode` union in `@anvay/types`. TS compile error. |
+| FA-B5 | `packages/agent/src/specialist-agent.ts:80` | `'GRAPH_CONTEXT_FAILED'` not in `ErrorCode` union in `@anway/types`. TS compile error. |
 | FA-B6 | `packages/agent/src/kb/structural-graph.ts:93-100` | `search()` returns `{ ttl, freshness_score, data }` — wrong shape. `KBEntry` requires `{ ttlSeconds, freshnessScore, content, tenantId }`. TS2322. |
 
 ### HIGH
@@ -1397,7 +1397,7 @@ Commit: `fix: P1-B1 — cacheSetAdapter infinite recursion`
 
 ### LOW
 
-**L1** `apps/gateway/src/routes/chat-stream.ts` — S4 static import map uses `/src/agent.js` paths (e.g. `@anvay/connector-prometheus/src/agent.js`). Couples directly to internal src layout. Should use the package's exported entry point if `exports` field is defined in `package.json`. Verify each connector's `package.json` exports field.
+**L1** `apps/gateway/src/routes/chat-stream.ts` — S4 static import map uses `/src/agent.js` paths (e.g. `@anway/connector-prometheus/src/agent.js`). Couples directly to internal src layout. Should use the package's exported entry point if `exports` field is defined in `package.json`. Verify each connector's `package.json` exports field.
 
 **L2** `apps/gateway/src/routes/auth.ts` — S5 in-memory rate limit works for single-instance only. Acceptable for V1 but document this constraint. If gateway scales horizontally, rate limit per instance = N × 5 req/min effective.
 
@@ -1522,7 +1522,7 @@ Full codebase audit — `apps/gateway/src/`, `apps/web/`, `packages/agent/src/`,
 
 **S6** `apps/gateway/src/routes/settings.ts:49-63` — `POST /api/settings/provider` has no role check. Any authenticated user (dev/ba/pm) can reconfigure LLM provider and store a new API key. Admin-only per spec.
 
-**S7** `apps/gateway/src/routes/chat-stream.ts` — `/api/chat/stream` bypasses the entire `@anvay/agent` orchestrator: no perimeter check on tool calls, no audit logging, no token budget, no V1 gate on write actions, no graph context injection. Parallel unguarded path nullifies all security architecture.
+**S7** `apps/gateway/src/routes/chat-stream.ts` — `/api/chat/stream` bypasses the entire `@anway/agent` orchestrator: no perimeter check on tool calls, no audit logging, no token budget, no V1 gate on write actions, no graph context injection. Parallel unguarded path nullifies all security architecture.
 
 **D3** `packages/agent/src/specialist-agent.ts:165-169` — Multi-step loop formats tool calls/results as plaintext strings (`role: 'assistant', content: '[tool_call id=...]'`). Must use `model.formatToolCall()` / `model.formatToolResult()` as orchestrator does. Breaks multi-turn tool use on all providers.
 
@@ -1601,7 +1601,7 @@ Full codebase audit — `apps/gateway/src/`, `apps/web/`, `packages/agent/src/`,
 
 ### Scope
 
-Commit `f54209f` — add `@anvay/connector-prometheus` + `@anvay/connector-loki` to gateway `package.json`; replace bare `sleep 1` with active wait loops in `start_demo.sh` modes 2 and 3.
+Commit `f54209f` — add `@anway/connector-prometheus` + `@anway/connector-loki` to gateway `package.json`; replace bare `sleep 1` with active wait loops in `start_demo.sh` modes 2 and 3.
 
 ### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 0 LOW — CLEAN
 
@@ -1930,7 +1930,7 @@ Commits `e7921b2` (test: S1-S11 real UI assertions + fixture dedup) + `5703b44` 
 
 ### Verdict: 0 BLOCKING, 0 HIGH, 0 MEDIUM, 1 LOW — CLEAN (1 nit)
 
-All 10 shell specs enriched with real `toBeVisible` assertions. `anvay.spec.ts` deduped against `fixtures.ts`. Bridge properly closed with append + `[CLOSED]`.
+All 10 shell specs enriched with real `toBeVisible` assertions. `anway.spec.ts` deduped against `fixtures.ts`. Bridge properly closed with append + `[CLOSED]`.
 
 ---
 
@@ -2381,7 +2381,7 @@ await expect(badge).toBeVisible()
 
 `/health/live`, `/health/ready`, `/health/startup` and request-counter-increment tests not added. Specified in Wave 1 plan.
 
-Fix — add to `apps/web/e2e/anvay.spec.ts` or new `infra.spec.ts`:
+Fix — add to `apps/web/e2e/anway.spec.ts` or new `infra.spec.ts`:
 ```typescript
 test('GET /health/live returns 200', async ({ request }) => {
   expect((await request.get(`${GATEWAY}/health/live`)).status()).toBe(200)
@@ -2458,7 +2458,7 @@ All 5 LOWs from 2026-06-10e closed. Two new LOWs found.
 | Dimension | Score | Notes |
 |-----------|-------|-------|
 | D1 Feature Completeness | 5/5 | L-e1/L-e2/L1/L4 ✅. L3 partial — limit configurable but no cursor pagination. |
-| D2 Code Standards | 4/5 | `ConnectorCreds` interface duplicated across 7 agent files instead of shared from `@anvay/types`. |
+| D2 Code Standards | 4/5 | `ConnectorCreds` interface duplicated across 7 agent files instead of shared from `@anway/types`. |
 | D3 Performance | 5/5 | No regressions. Audit limit cap (200) prevents runaway queries. |
 | D4 Security | 5/5 | Limit capped to 200 via `Math.min` before use in raw query. No injection risk. |
 | D5 Readability | 5/5 | Clean mechanical changes. k8s comment is clear. |
@@ -2489,12 +2489,12 @@ Verify: `GET /api/audit?limit=10&offset=10` returns the second page.
 
 Each of `connectors/*/src/agent.ts` defines its own identical `interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }`. If a new field is needed (e.g. `region`, `orgId`), all 7 files must be updated.
 
-Fix — export from `@anvay/types`:
+Fix — export from `@anway/types`:
 ```typescript
 // packages/types/src/index.ts
 export interface ConnectorCreds { baseUrl?: string; token?: string; apiKey?: string; password?: string; org?: string; [k: string]: unknown }
 ```
-Import in each agent: `import type { ConnectorCreds } from '@anvay/types'`. Remove local declarations.
+Import in each agent: `import type { ConnectorCreds } from '@anway/types'`. Remove local declarations.
 
 Verify: `pnpm typecheck` clean after change.
 
@@ -2576,13 +2576,13 @@ Verify: no functional change — comment only.
 |------|--------|-------|
 | M0-T1 Monorepo root | ✅ Done | pnpm workspaces, turbo, .nvmrc |
 | M0-T2 Docker Compose infra | ✅ Done | pgvector image, redis, neo4j |
-| M0-T3 packages/types | ✅ Done | @anvay/types |
+| M0-T3 packages/types | ✅ Done | @anway/types |
 | M0-T4 DB schema — Prisma migrations | ✅ Done | 18 migrations applied |
 | M0-T5 Gateway server skeleton | ✅ Done | /health, /metrics, /auth/token |
 | M0-T6 Web API routes | ✅ Done | All proxy routes with try/catch |
 | M0-T7 CI pipeline | ⚠️ Unclear | .github/workflows/ not verified |
 | M0-T8 E2E smoke test | ✅ Done | 50/50 Playwright passing |
-| M1 Agent harness (@anvay/agent) | ⚠️ Partial | Provider factory exists; orchestrator/specialist agents not built |
+| M1 Agent harness (@anway/agent) | ⚠️ Partial | Provider factory exists; orchestrator/specialist agents not built |
 | M1 Knowledge Graph | ❌ Not started | Apache AGE / Graphiti absent |
 | M1 Connector bootstrap contract | ❌ Not started | Event seeded; graph not populated |
 | M2 SRE Agent | ❌ Not started | |
@@ -2758,13 +2758,13 @@ Verify: tool call with `pod: "../info"` results in a 404 from Docker, not a diff
 
 ---
 
-**M3 — `connectors/grafana/src/agent.ts` line 7: default password `'anvay'` wrong — should be `'admin'`**
+**M3 — `connectors/grafana/src/agent.ts` line 7: default password `'anway'` wrong — should be `'admin'`**
 
 `connectors/grafana/src/agent.ts`:7:
 ```typescript
-const auth = btoa(`admin:${(creds as any).password ?? 'anvay'}`)
+const auth = btoa(`admin:${(creds as any).password ?? 'anway'}`)
 ```
-If `password` is missing from credentials (fallback hit), the Basic auth header encodes `admin:anvay`. Grafana's actual default password is `admin`. The demo seeds `"password":"admin"` correctly, so this only breaks if the fallback is used (e.g., a user registers Grafana without the password field).
+If `password` is missing from credentials (fallback hit), the Basic auth header encodes `admin:anway`. Grafana's actual default password is `admin`. The demo seeds `"password":"admin"` correctly, so this only breaks if the fallback is used (e.g., a user registers Grafana without the password field).
 
 Fix: change fallback to `'admin'`:
 ```typescript
@@ -2870,13 +2870,13 @@ const auth = _req.headers.get('authorization') || await getDemoToken().then(t =>
 |------|--------|-------|
 | M0-T1 Monorepo root | ✅ Done | pnpm workspaces, turbo pipeline, .nvmrc |
 | M0-T2 Docker Compose infra | ✅ Done | postgres (pgvector), redis, neo4j. pgvector added this batch. |
-| M0-T3 packages/types | ✅ Done | @anvay/types exists |
+| M0-T3 packages/types | ✅ Done | @anway/types exists |
 | M0-T4 DB schema — Prisma migrations | ✅ Done | 18 migrations applied, all tables up |
 | M0-T5 Gateway server skeleton | ✅ Done | /health, /metrics, /auth/token, structured logs |
 | M0-T6 Web API routes | ✅ Done | All proxy routes with try/catch |
 | M0-T7 CI pipeline | ⚠️ Unclear | .github/workflows/ not in diff — may not exist |
 | M0-T8 E2E smoke test | ✅ Done | 50/50 Playwright tests passing |
-| M1 Agent harness (@anvay/agent) | ⚠️ Partial | Provider factory, connector tool interface exist; orchestrator/specialist agents not built |
+| M1 Agent harness (@anway/agent) | ⚠️ Partial | Provider factory, connector tool interface exist; orchestrator/specialist agents not built |
 | M1 Knowledge Graph | ❌ Not started | Apache AGE / Graphiti layer absent |
 | M1 Connector bootstrap contract | ❌ Not started | Bootstrap event seeded but graph not populated |
 | M2 SRE Agent | ❌ Not started | |
@@ -2911,7 +2911,7 @@ Commits `6ad07ea` → `d4bb124`. 946c380 (4-item milestone: demo counters, prod 
 | D2 Code Standards | 3/5 | 7 proxy routes still have no try/catch. Alert event route publishes raw Alertmanager format but subscriber expects different shape. |
 | D3 Performance | 4/5 | Demo services dynamic counters correctly implemented. start_demo.sh solid structure. |
 | D4 Security | 4/5 | Provider-config now properly auth-gated. No regressions. |
-| D5 Readability | 4/5 | anvay.spec.ts is thorough and well-organised. playwright.config.ts clean. |
+| D5 Readability | 4/5 | anway.spec.ts is thorough and well-organised. playwright.config.ts clean. |
 | D6 Clarity/Comments | 3/5 | start_demo.sh comments good. alert-subscriber/events.ts format mismatch not commented. |
 
 ---
@@ -2961,10 +2961,10 @@ app.post('/api/events/alert', async (request) => {
 })
 ```
 
-**B2 — anvay.spec.ts `getToken()` uses email that is never seeded — all API test suites fail**
+**B2 — anway.spec.ts `getToken()` uses email that is never seeded — all API test suites fail**
 
-`apps/web/e2e/anvay.spec.ts` line 13: `const DEMO_EMAIL = 'admin@demo.anvay.dev'`.
-`getToken()` calls `POST /auth/token` with this email. The dev-token seeds `dev@anvay.local` as admin. No user with `admin@demo.anvay.dev` exists → 401 → all suites B.1-H.3 fail.
+`apps/web/e2e/anway.spec.ts` line 13: `const DEMO_EMAIL = 'admin@demo.anway.dev'`.
+`getToken()` calls `POST /auth/token` with this email. The dev-token seeds `dev@anway.local` as admin. No user with `admin@demo.anway.dev` exists → 401 → all suites B.1-H.3 fail.
 
 Fix: replace `getToken()`:
 ```typescript
@@ -2980,12 +2980,12 @@ Remove `DEMO_TENANT` and `DEMO_EMAIL` constants (now unused).
 
 **B3 — orchestrator-chat.spec.ts wrong placeholder selector**
 
-`apps/web/e2e/orchestrator-chat.spec.ts` checks `input[placeholder*="query"]`. Actual placeholder in `orchestrator-chat.tsx` is `"ask anvay anything..."`. Selector never matches → `exists = false` → test fails.
+`apps/web/e2e/orchestrator-chat.spec.ts` checks `input[placeholder*="query"]`. Actual placeholder in `orchestrator-chat.tsx` is `"ask anway anything..."`. Selector never matches → `exists = false` → test fails.
 
 Fix:
 ```typescript
-const input = page.locator('input[placeholder*="anvay"]').first()
-const textarea = page.locator('textarea[placeholder*="anvay"]').first()
+const input = page.locator('input[placeholder*="anway"]').first()
+const textarea = page.locator('textarea[placeholder*="anway"]').first()
 ```
 
 **B4 — 7 Next.js proxy routes missing try/catch → 500 on ECONNREFUSED**
@@ -3046,7 +3046,7 @@ This route is used by connector config save in the UI. It has no try/catch (cove
 
 `infra/prod/docker-compose.yml` uses `postgres:16-alpine`. The structural graph requires Apache AGE Cypher extension. No init SQL is included. DB migrations may fail silently if AGE is required. Demo compose has the same issue but uses standard Postgres as well — the Cypher queries are deferred. Document clearly that AGE is required for graph features, add `# NOTE: Apache AGE extension required for graph features` comment in docker-compose.
 
-**M2 — `anvay.spec.ts` Suite D.1 allows 404 — fragile test**
+**M2 — `anway.spec.ts` Suite D.1 allows 404 — fragile test**
 
 `expect([200, 404]).toContain(resp.status())` for `GET /api/incidents` is too permissive. If DB unreachable, returns 500 and test passes vacuously. Change to `expect(resp.status()).toBe(200)` — a seeded tenant with no incidents should still return `200 []`.
 
@@ -3054,7 +3054,7 @@ This route is used by connector config save in the UI. It has no try/catch (cove
 
 ### LOW
 
-**L1 — anvay.spec.ts imports unused constants after B2 fix**
+**L1 — anway.spec.ts imports unused constants after B2 fix**
 
 After removing `DEMO_EMAIL` + `DEMO_TENANT` from `getToken()`, delete those constants.
 
@@ -3273,7 +3273,7 @@ Add `onClick={() => void approveGate(gateId!)}` calling `POST /api/gates/{gateId
 
 **M5 — `apps/web/components/audit-view.tsx:5` — `AuditOutcome` type missing gateway values; runtime crash**
 
-Frontend missing `'action_executed'`, `'action_failed'`, `'escalated'`, `'handed_off'`. Add to type + `OUTCOME_CONFIG`. Move to `@anvay/types`.
+Frontend missing `'action_executed'`, `'action_failed'`, `'escalated'`, `'handed_off'`. Add to type + `OUTCOME_CONFIG`. Move to `@anway/types`.
 
 ---
 
@@ -3344,7 +3344,7 @@ All commits from `36e1d50` → `50c6243`. 255 files changed across gateway route
 | Phase 2 — real connector execute() | GitHub + Linear call live APIs | Agents implemented. Tool-result role bug means multi-hop queries are broken. Single-shot tool calls work. | ~60% |
 | Phase 3 — event bus flow | alert → EventBus → GraphBuilder → KG → Orchestrator → SSE | Redis pub/sub wired, subscribers exist. Three blockers: async bug in graph-builder, SSE type mismatch, no audit on stream path. | ~40% |
 | Phase 4 — UI wired to real data | Chat shows real connector data | Hard-blocked by SSE event type mismatch. Bootstrap-status proxy drops auth header. | ~25% |
-| End-to-end demo | Demo starts → alert fires → Anvay surfaces root cause in chat | Not working. B3, B4, B5 together mean streaming chat path is dead. | ~35% |
+| End-to-end demo | Demo starts → alert fires → Anway surfaces root cause in chat | Not working. B3, B4, B5 together mean streaming chat path is dead. | ~35% |
 
 ---
 
@@ -3551,7 +3551,7 @@ No `LIMIT` on the query. A tenant with 33 connectors each with a large credentia
 
 **M6 — `infra/demo/docker-compose.yml:27` — chaos container mounts raw Docker socket; `docker kill` filter matches by substring, not exact name**
 
-`--filter "name=$TARGET"` matches any container whose name *contains* the string. A host running a production `payments-api` alongside the demo would have it killed. Use exact-name filter: `--filter "name=^/anvay-demo_${TARGET}"` or route all docker CLI calls through the socket proxy.
+`--filter "name=$TARGET"` matches any container whose name *contains* the string. A host running a production `payments-api` alongside the demo would have it killed. Use exact-name filter: `--filter "name=^/anway-demo_${TARGET}"` or route all docker CLI calls through the socket proxy.
 
 ---
 
@@ -3582,8 +3582,8 @@ CLAUDE.md requires model IDs from config, not hardcoded. If tenant configures Gr
 **L3 — `infra/demo/services/chaos/chaos.sh:23–28` — Gitea credentials hardcoded in script**
 
 ```bash
-GITEA_USER="${GITEA_USER:-anvay}"
-GITEA_PASS="${GITEA_PASS:-anvaypassword}"
+GITEA_USER="${GITEA_USER:-anway}"
+GITEA_PASS="${GITEA_PASS:-anwaypassword}"
 ```
 Source from env vars set by `docker-compose.yml` instead of hardcoding.
 
@@ -3887,10 +3887,10 @@ Verify: start with wrong `NEO4J_URI`, logs show full traceback.
 ```python
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "anvay")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "anway")
 ```
 
-`"anvay"` default password ships in source. Any deployment without explicit env override uses this. Should fail loudly if not set, not silently use default.
+`"anway"` default password ships in source. Any deployment without explicit env override uses this. Should fail loudly if not set, not silently use default.
 
 Fix: require all three env vars, no defaults:
 ```python
@@ -3925,7 +3925,7 @@ Verify: insert same relationship twice, confirm second call returns non-empty ID
 
 **M8 — `connectors/argocd/src/bootstrap.ts`, `connectors/datadog/src/bootstrap.ts` — stub no-ops**
 
-Both bootstrap implementations return `{ entitiesUpserted: 0, ... }` unconditionally. No CLI calls made. Per CLAUDE.md, `connector_registered` must trigger real bootstrap: "Every connector registered in Anvay MUST provide a bootstrap implementation."
+Both bootstrap implementations return `{ entitiesUpserted: 0, ... }` unconditionally. No CLI calls made. Per CLAUDE.md, `connector_registered` must trigger real bootstrap: "Every connector registered in Anway MUST provide a bootstrap implementation."
 
 These are stubs, not implementations. ArgoCD should list apps via `argocd app list`, Datadog should list monitors/dashboards.
 
@@ -4230,7 +4230,7 @@ export function parseHelpOutput(
 ): DiscoveredCommand[]
 ```
 
-**Verify:** `pnpm --filter @anvay/cli-adapter typecheck` passes with `noUnusedParameters: true`.
+**Verify:** `pnpm --filter @anway/cli-adapter typecheck` passes with `noUnusedParameters: true`.
 
 ---
 
@@ -4396,7 +4396,7 @@ onClick={() => setGateRequired(null)}  // Approve
 onClick={() => setGateRequired(null)}  // Reject
 ```
 
-The gate sink is polling `gate:<gateId>:decision` in Redis. Without a call to the gate-decide endpoint, the Redis key is never set, `pollGate()` times out after 30 seconds, and every write action is permanently blocked. The V1 trust principle (L2 Approve — user explicitly confirms before Anvay executes) is completely broken. This is the most critical issue in the codebase.
+The gate sink is polling `gate:<gateId>:decision` in Redis. Without a call to the gate-decide endpoint, the Redis key is never set, `pollGate()` times out after 30 seconds, and every write action is permanently blocked. The V1 trust principle (L2 Approve — user explicitly confirms before Anway executes) is completely broken. This is the most critical issue in the codebase.
 
 **Fix:**
 1. Create `apps/web/app/api/gate/[id]/decide/route.ts`:
@@ -4540,7 +4540,7 @@ sub.on('reconnecting', () => {
 
 **Fix:** Make `makeRegistrationTools` role-aware:
 ```typescript
-import type { AgentRole } from '@anvay/types'
+import type { AgentRole } from '@anway/types'
 
 export function makeRegistrationTools(tenantId: string, role: AgentRole): ExecutableTool[] {
   return [{
@@ -4630,7 +4630,7 @@ Note: `withTenant` cannot be used without a `tenantId` parameter; the raw UPDATE
 **Fix:** Extract to `apps/web/lib/gateway-client.ts`:
 ```typescript
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:4000'
-const DEMO_EMAIL   = process.env['DEMO_EMAIL']   ?? 'demo@anvay.dev'
+const DEMO_EMAIL   = process.env['DEMO_EMAIL']   ?? 'demo@anway.dev'
 const DEMO_TENANT  = process.env['DEMO_TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001'
 
 let _tokenCache: { token: string; expiresAt: number } | null = null
@@ -4752,7 +4752,7 @@ function toDisplay(a: ApiIncident): DisplayIncident {
 ```
 Update all render sites to use `shortId` for the badge and `id` for selection/queries.
 
-**Verify:** Click "Investigate with Anvay" on an incident. Confirm the query sent to the orchestrator contains a full UUID.
+**Verify:** Click "Investigate with Anway" on an incident. Confirm the query sent to the orchestrator contains a full UUID.
 
 ---
 
@@ -5586,11 +5586,11 @@ RUN cp -r gateway_node_modules/. node_modules/ 2>/dev/null || true && rm -rf gat
 
 #### [MEDIUM] pnpm build steps use || true — build failures silently ignored
 **File:** `apps/gateway/Dockerfile` (builder stage, lines 21-22)
-**Issue:** `RUN pnpm --filter @anvay/types build || true` and `RUN pnpm --filter @anvay/agent build || true`. If either package fails to compile, the Docker build continues and the runtime container will crash when gateway tries to import missing dist files. Failure is invisible in CI.
+**Issue:** `RUN pnpm --filter @anway/types build || true` and `RUN pnpm --filter @anway/agent build || true`. If either package fails to compile, the Docker build continues and the runtime container will crash when gateway tries to import missing dist files. Failure is invisible in CI.
 **Fix:** Remove `|| true`. If workspace packages fail to build, the gateway build should fail:
 ```dockerfile
-RUN pnpm --filter @anvay/types build
-RUN pnpm --filter @anvay/agent build
+RUN pnpm --filter @anway/types build
+RUN pnpm --filter @anway/agent build
 ```
 If the packages are optional (not required at runtime), add an explicit comment explaining why failure is acceptable.
 **Verify:** Introduce a syntax error in `packages/types/src/index.ts` → Docker build must fail at the types build step.
@@ -6158,9 +6158,9 @@ Opencode reports Docker daemon unavailable in agent environment. All acceptance 
 pass except the Docker smoke test:
 
 - `pnpm typecheck` — 14/14 packages, 0 errors ✓
-- `@anvay/agent test` — 53/53 ✓
-- `anvay-gateway test` — 23/23 ✓
-- `@anvay/web test` — 8/8 ✓
+- `@anway/agent test` — 53/53 ✓
+- `anway-gateway test` — 23/23 ✓
+- `@anway/web test` — 8/8 ✓
 - `grep execSync connectors/` — 0 results ✓
 - Docker build/up — ❌ daemon not available in agent environment
 
@@ -6996,7 +6996,7 @@ All BLOCKING and HIGH issues from prior reviews resolved in this batch.
 ESM migration incomplete — `.js` extension missing on 4 imports across these 2 files. Committed
 gateway batch (`0952f49`) missed them. Files sit in working tree unchanged.  
 **Fix:** Add `.js` to each bare import and commit. Two-line change per file.  
-**Verify:** `pnpm --filter anvay-gateway build` exits 0.
+**Verify:** `pnpm --filter anway-gateway build` exits 0.
 
 **LOW — L-4** `apps/gateway/src/__tests__/chat.test.ts:261`  
 `as never` cast used to pass invalid type to `resolveProviderConfig` in test. Confirms security
@@ -7087,7 +7087,7 @@ B-14/B-15 remain top priority — compile blocked until fixed.
 | B-14/B-15 orchestrator.test.ts | Not fixed | **BLOCKING** — compile fails |
 | H-2 RedisSessionMemory in chat.ts | Not fixed | InMemorySessionMemory used in prod path |
 | H-17/H-18 mapMessages tool fields | Not fixed | OpenAI/Ollama tool turns broken |
-| M-18 Message.tool_calls field | Not fixed | Missing from @anvay/types |
+| M-18 Message.tool_calls field | Not fixed | Missing from @anway/types |
 
 <!-- REVIEW SECTION END — 2026-06-25 -->
 
@@ -7269,8 +7269,8 @@ describe('runSession', () => {
 })
 ```
 
-**Verify:** `pnpm --filter @anvay/agent test` shows at least 1 test in orchestrator.test.ts.
-`pnpm --filter @anvay/agent typecheck` exits 0.
+**Verify:** `pnpm --filter @anway/agent test` shows at least 1 test in orchestrator.test.ts.
+`pnpm --filter @anway/agent typecheck` exits 0.
 
 Note: In the fix, all the previously deleted test cases (text_delta+done, audit events,
 perimeter middleware, tool_result emission, token budget exhausted, perimeter blocks) should
@@ -7363,7 +7363,7 @@ The `tool_calls` field is not in the `Message` interface — it's cast in. This 
   is consumed (e.g., `mapMessages` can't see `tool_calls` without casting back)
 - Any code that copies `Message` objects via spread loses `tool_calls`
 
-**Fix:** Add `tool_calls` to `Message` in `@anvay/types`:
+**Fix:** Add `tool_calls` to `Message` in `@anway/types`:
 ```typescript
 export type OpenAIToolCall = {
   readonly id: string
@@ -7672,7 +7672,7 @@ formatToolCall(toolCalls: ToolCall[]): Message {
 }
 ```
 
-This also requires widening `Message` in `@anvay/types` to support the assistant tool-call
+This also requires widening `Message` in `@anway/types` to support the assistant tool-call
 shape (same root as B-11-R/B-12/B-13 — the `Message` type is the blocker).
 
 **Verify:** Send a query that triggers a tool call. Capture the messages array after the
@@ -7720,7 +7720,7 @@ The correct fix requires widening `Message` to support content block arrays (alr
 identified in B-11-R Option A). Once `Message` supports arrays, `formatToolResult` can
 return the proper Anthropic content block and the compile check passes.
 
-**Fix:** Widen `Message` in `@anvay/types` first (same as B-11-R Option A fix), then:
+**Fix:** Widen `Message` in `@anway/types` first (same as B-11-R Option A fix), then:
 
 ```typescript
 formatToolResult(toolCallId: string, result: unknown): Message {
@@ -7848,7 +7848,7 @@ Ratings and open issues unchanged. B-11-R/B-12/B-13 remain top priority.
 | Clarity and comments | 7/10 |
 
 All issues from 2026-06-12 open. Next commit must fix B-11-R/B-12/B-13 together — all three
-require widening `Message` type in `@anvay/types` first.
+require widening `Message` type in `@anway/types` first.
 
 <!-- REVIEW SECTION END — 2026-06-13 -->
 
@@ -7901,7 +7901,7 @@ formatToolResult(toolCallId: string, result: unknown): Message {
 }
 ```
 
-`Message.content` is `readonly content: string` in `@anvay/types/src/index.ts:85`. Array
+`Message.content` is `readonly content: string` in `@anway/types/src/index.ts:85`. Array
 content is the correct Anthropic API wire format but violates the `Message` type. TypeScript
 rejects: `Type '{ type: string; tool_use_id: string; content: string; }[]' is not assignable
 to type 'string'`.
@@ -7911,7 +7911,7 @@ require a content-block array wrapped in a `user` role message — a fundamental
 shape. The `Message` type must be widened, or the Anthropic provider must serialize the
 content block to a string and reconstruct it before sending.
 
-**Fix — Option A (recommended): widen `Message` type in `@anvay/types`**
+**Fix — Option A (recommended): widen `Message` type in `@anway/types`**
 
 ```typescript
 // packages/types/src/index.ts
@@ -7951,7 +7951,7 @@ formatToolResult(toolCallId: string, result: unknown): Message {
 Option A is cleaner — it models the actual wire format in the type system. Option B is a
 workaround that hides the type mismatch behind a runtime convention.
 
-**Verify:** `pnpm --filter @anvay/agent typecheck` exits 0. `pnpm --filter @anvay/types build`
+**Verify:** `pnpm --filter @anway/agent typecheck` exits 0. `pnpm --filter @anway/types build`
 exits 0. No TS2322 errors on `content` assignment.
 
 ---
@@ -7981,7 +7981,7 @@ Without `role: "tool"` the API cannot distinguish this message from a normal use
 OpenAI returns `400 invalid_request_error` for malformed tool result sequences. Multi-turn
 tool use (the orchestrator's agentic loop) is completely broken.
 
-**Fix:** Add `'tool'` to `MessageRole` in `@anvay/types` and `tool_call_id?: string` to
+**Fix:** Add `'tool'` to `MessageRole` in `@anway/types` and `tool_call_id?: string` to
 `Message` (same change as B-11-R Option A), then:
 
 ```typescript
@@ -8047,14 +8047,14 @@ return {
 
 ### Root cause: `Message` type too narrow
 
-B-11-R, B-12, B-13 share a common root: `Message` in `@anvay/types` was designed for
+B-11-R, B-12, B-13 share a common root: `Message` in `@anway/types` was designed for
 simple user/assistant/system text turns. The agentic loop requires a fourth message shape
 (tool results) that has a different role (`tool`), an additional field (`tool_call_id`), and
 optionally structured content. The type was not extended when `formatToolResult` was added to
 the interface.
 
 **Correct fix sequence:**
-1. Extend `Message` in `@anvay/types`: add `'tool'` to `MessageRole`, add optional
+1. Extend `Message` in `@anway/types`: add `'tool'` to `MessageRole`, add optional
    `tool_call_id?: string`, widen `content` to `string | AnthropicContentBlock[]`
 2. Fix `AnthropicProvider` — already correct shape, just needs type to match
 3. Fix `OpenAIProvider.formatToolResult` — `role: 'tool'`, `tool_call_id`
@@ -8231,7 +8231,7 @@ reviewed: `apps/gateway/package.json`, `apps/gateway/tsconfig.json`, `apps/gatew
 | Issue | Status |
 |-------|--------|
 | H-8 — web chat stub | **PARTIAL** ↑ — route now returns proper SSE stream (text_delta + DONE). `sendRealForm` wired and parsing correctly. Still returns a static "stub response" — no real LLM call yet. |
-| B-10 — Dockerfile symlinks | OPEN — workspace deps `@anvay/agent` + `@anvay/types` now declared in gateway `package.json`, which makes the symlink issue more visible but still not fixed. |
+| B-10 — Dockerfile symlinks | OPEN — workspace deps `@anway/agent` + `@anway/types` now declared in gateway `package.json`, which makes the symlink issue more visible but still not fixed. |
 | All others B-2-R through H-12 | OPEN — no change |
 
 ---
@@ -8252,7 +8252,7 @@ export interface IModelProvider {
 
 `AnthropicProvider`, `OpenAIProvider`, and `OllamaProvider` all `implements IModelProvider`
 but none has a `formatToolResult` method. TypeScript compile fails for the entire
-`@anvay/agent` package — every downstream consumer (gateway chat route, orchestrator, all tests)
+`@anway/agent` package — every downstream consumer (gateway chat route, orchestrator, all tests)
 fails to build.
 
 **Fix:** Implement `formatToolResult` on all three providers. The Anthropic format requires
@@ -8282,7 +8282,7 @@ Note: The `Message` type in `packages/agent/src/interfaces/provider.ts` must sup
 `role: 'tool'` and `tool_call_id: string`. If the current `Message` type only allows
 `user | assistant | system`, add `tool` as a valid role and the `tool_call_id` field.
 
-**Verify:** `pnpm --filter @anvay/agent typecheck` exits 0. `pnpm --filter @anvay/agent build`
+**Verify:** `pnpm --filter @anway/agent typecheck` exits 0. `pnpm --filter @anway/agent build`
 exits 0. All three provider classes satisfy the interface.
 
 ---
@@ -8463,7 +8463,7 @@ with `no-unused-vars`, this fails the lint step.
 
 **ESM migration (gateway):** `"type": "module"` + `module: NodeNext` + `.js` extensions on
 all internal imports is the correct approach. `__dirname` → `import.meta.dirname` in tests
-is the right ESM-compatible replacement. This unblocks the `@anvay/agent` workspace
+is the right ESM-compatible replacement. This unblocks the `@anway/agent` workspace
 dependency working correctly at runtime (imports via package `exports` field rather than
 CJS path hacking). Neutral risk — no logic changed, mechanical correctness improvement.
 
@@ -8579,7 +8579,7 @@ These are the issues that block M2 progress or pose active production risk. Orde
 
 **File:** `apps/gateway/Dockerfile`
 
-Workspace symlinks `@anvay/agent → ../../../../packages/agent` break in the distroless runner.
+Workspace symlinks `@anway/agent → ../../../../packages/agent` break in the distroless runner.
 Production image cannot start. Nothing else matters until the container runs.
 
 **Fix:** Replace the manual COPY approach with `pnpm deploy`:
@@ -8588,7 +8588,7 @@ FROM base AS deployer
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
-RUN pnpm --filter=anvay-gateway deploy --prod /app/deploy
+RUN pnpm --filter=anway-gateway deploy --prod /app/deploy
 
 FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
 WORKDIR /app
@@ -8599,7 +8599,7 @@ EXPOSE 4000
 CMD ["dist/src/server.js"]
 ```
 
-**Verify:** `docker build -f apps/gateway/Dockerfile . && docker run --rm anvay-gateway node -e "require('@anvay/agent')"` exits 0.
+**Verify:** `docker build -f apps/gateway/Dockerfile . && docker run --rm anway-gateway node -e "require('@anway/agent')"` exits 0.
 
 ---
 
@@ -8722,7 +8722,7 @@ reply.code(401).send({ error: 'Unauthorized', code: 'JWT_INVALID' })
 across all tenants, all users, all requests. Switch to `RedisSessionMemory` (already
 implemented at `packages/agent/src/memory/redis-session.ts`):
 ```typescript
-import { RedisSessionMemory } from '@anvay/agent'
+import { RedisSessionMemory } from '@anway/agent'
 const sessionMemory = new RedisSessionMemory(redisClient, modelProvider)
 ```
 The in-memory implementation should be deleted from chat.ts; it exists only for dev/test.
@@ -8838,7 +8838,7 @@ cycle. The MEDIUM items that will surface naturally as M2 work starts:
 <!-- REVIEW SECTION START — 2026-06-06 -->
 ## Review — 2026-06-06 | CI, Dockerfiles, docker-compose, seed, smoke-test, remaining infrastructure
 
-**Scope:** No new feature commits since 2026-06-05. Final sweep of unreviewed files: `.github/workflows/ci.yml`, `apps/gateway/Dockerfile`, `apps/web/Dockerfile`, `infra/docker-compose.yml`, `infra/docker-compose.dev.yml`, `scripts/smoke-test.sh`, `apps/gateway/prisma/seed.ts`, `apps/gateway/src/routes/metrics.ts`, `apps/gateway/src/logger.ts`, `apps/web/next.config.ts`. Symlink structure in `node_modules/@anvay/*` confirmed via `ls`.
+**Scope:** No new feature commits since 2026-06-05. Final sweep of unreviewed files: `.github/workflows/ci.yml`, `apps/gateway/Dockerfile`, `apps/web/Dockerfile`, `infra/docker-compose.yml`, `infra/docker-compose.dev.yml`, `scripts/smoke-test.sh`, `apps/gateway/prisma/seed.ts`, `apps/gateway/src/routes/metrics.ts`, `apps/gateway/src/logger.ts`, `apps/web/next.config.ts`. Symlink structure in `node_modules/@anway/*` confirmed via `ls`.
 
 | Dimension | Rating | Δ from last review |
 |-----------|--------|-------------------|
@@ -8866,18 +8866,18 @@ All issues from 2026-06-03 through 2026-06-05 remain open except:
 
 **File:** `apps/gateway/Dockerfile:21–28`
 
-**Issue:** `apps/gateway/node_modules/@anvay/agent` and `@anvay/types` are relative symlinks:
+**Issue:** `apps/gateway/node_modules/@anway/agent` and `@anway/types` are relative symlinks:
 ```
-apps/gateway/node_modules/@anvay/agent → ../../../../packages/agent
-apps/gateway/node_modules/@anvay/types → ../../../../packages/types
+apps/gateway/node_modules/@anway/agent → ../../../../packages/agent
+apps/gateway/node_modules/@anway/types → ../../../../packages/types
 ```
-These resolve correctly in the builder stage (`/app/apps/gateway/node_modules/@anvay/agent` → `/app/packages/agent`). In the runner stage, Docker COPY preserves symlinks as-is. After:
+These resolve correctly in the builder stage (`/app/apps/gateway/node_modules/@anway/agent` → `/app/packages/agent`). In the runner stage, Docker COPY preserves symlinks as-is. After:
 ```dockerfile
 COPY --from=builder /app/apps/gateway/node_modules ./node_modules
 ```
-The symlink now lives at `/app/node_modules/@anvay/agent → ../../../../packages/agent`, which resolves to `/packages/agent` — a path that does not exist in the distroless image. The gateway process crashes immediately on startup with `Cannot find module '@anvay/agent'`.
+The symlink now lives at `/app/node_modules/@anway/agent → ../../../../packages/agent`, which resolves to `/packages/agent` — a path that does not exist in the distroless image. The gateway process crashes immediately on startup with `Cannot find module '@anway/agent'`.
 
-Verified: `ls -la apps/gateway/node_modules/@anvay/` confirms the `../../../../packages/agent` relative target.
+Verified: `ls -la apps/gateway/node_modules/@anway/` confirms the `../../../../packages/agent` relative target.
 
 **Fix — Option A (recommended): use `pnpm deploy`**
 ```dockerfile
@@ -8885,7 +8885,7 @@ FROM base AS deployer
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
-RUN pnpm deploy --filter=anvay-gateway --prod /app/deploy
+RUN pnpm deploy --filter=anway-gateway --prod /app/deploy
 
 FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
 WORKDIR /app
@@ -8906,9 +8906,9 @@ COPY --from=builder /app/packages/agent/package.json ./packages/agent/package.js
 COPY --from=builder /app/packages/types/dist ./packages/types/dist
 COPY --from=builder /app/packages/types/package.json ./packages/types/package.json
 ```
-Since the symlink `../../../../packages/agent` from `/app/node_modules/@anvay/agent` now resolves to `/packages/agent`, you also need to adjust the symlink depth or use absolute-path resolution. Option A is cleaner.
+Since the symlink `../../../../packages/agent` from `/app/node_modules/@anway/agent` now resolves to `/packages/agent`, you also need to adjust the symlink depth or use absolute-path resolution. Option A is cleaner.
 
-**Verify:** Run `docker build -f apps/gateway/Dockerfile .` then `docker run --rm anvay-gateway:ci node -e "require('@anvay/agent')"`. Currently exits with module not found. With fix, exits 0.
+**Verify:** Run `docker build -f apps/gateway/Dockerfile .` then `docker run --rm anway-gateway:ci node -e "require('@anway/agent')"`. Currently exits with module not found. With fix, exits 0.
 
 ---
 
@@ -8926,7 +8926,7 @@ app.get('/metrics', async (_request, reply) => {
 })
 ```
 No `preHandler: [app.authenticate]`. Prometheus metrics include HTTP request rates, error rates, route names, status code distributions, active connections, and all Node.js runtime metrics. An unauthenticated caller can:
-- Enumerate all API routes (`anvay_gateway_http_requests_total` labels include `route`)
+- Enumerate all API routes (`anway_gateway_http_requests_total` labels include `route`)
 - Detect error spikes, high-traffic periods, and system load patterns
 - Map the internal service topology from metrics labels
 
@@ -9000,8 +9000,8 @@ test:
     postgres:
       image: postgres:16
       env:
-        POSTGRES_DB: anvay_test
-        POSTGRES_USER: anvay
+        POSTGRES_DB: anway_test
+        POSTGRES_USER: anway
         POSTGRES_PASSWORD: test_secret
       options: >-
         --health-cmd pg_isready
@@ -9016,7 +9016,7 @@ test:
         --health-timeout 5s
         --health-retries 5
   env:
-    DATABASE_URL: postgresql://anvay:test_secret@localhost:5432/anvay_test
+    DATABASE_URL: postgresql://anway:test_secret@localhost:5432/anway_test
     REDIS_URL: redis://localhost:6379
 ```
 
@@ -9034,7 +9034,7 @@ test:
 
 When a new package is added without any test files, Turbo runs its `test` task which calls Vitest with `--passWithNoTests`. Vitest exits 0. CI passes. An untested package ships with no warning. This flag exists to handle the web package which has no Vitest tests (it uses Next.js testing conventions). The flag is correct for `apps/web` but wrong as a global flag.
 
-**Fix:** Move `--passWithNoTests` to only the web package's vitest config or test script. Remove from the root CI command. Alternatively use `turbo test --filter='!anvay-web'` to exclude the Next.js app from vitest:
+**Fix:** Move `--passWithNoTests` to only the web package's vitest config or test script. Remove from the root CI command. Alternatively use `turbo test --filter='!anway-web'` to exclude the Next.js app from vitest:
 ```yaml
 - run: pnpm test -- --passWithNoTests  # keep for web compatibility
 ```
@@ -9060,8 +9060,8 @@ Never used. Dead import. Delete it.
 **File:** `infra/docker-compose.dev.yml:17, 91`
 
 ```yaml
-POSTGRES_PASSWORD: anvay_dev_secret
-GF_SECURITY_ADMIN_PASSWORD: anvay_grafana_dev
+POSTGRES_PASSWORD: anway_dev_secret
+GF_SECURITY_ADMIN_PASSWORD: anway_grafana_dev
 ```
 
 The production `docker-compose.yml` correctly requires these via `${POSTGRES_PASSWORD:?must be set}`. The dev variant hardcodes them. Risk: if a staging or CI environment accidentally picks up the dev compose file, it runs with known plaintext credentials. Low risk in a truly local-only context, but document explicitly:
@@ -9071,14 +9071,14 @@ The production `docker-compose.yml` correctly requires these via `${POSTGRES_PAS
 
 ---
 
-#### L-10 — Gateway Dockerfile: `pnpm install --filter=anvay-gateway...` without copying all `packages/*/package.json` — deps stage may be incomplete
+#### L-10 — Gateway Dockerfile: `pnpm install --filter=anway-gateway...` without copying all `packages/*/package.json` — deps stage may be incomplete
 
 **File:** `apps/gateway/Dockerfile:6–9`
 
 ```dockerfile
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/gateway/package.json apps/gateway/
-RUN pnpm install --frozen-lockfile --filter=anvay-gateway...
+RUN pnpm install --frozen-lockfile --filter=anway-gateway...
 ```
 
 `pnpm-workspace.yaml` declares `packages: ['packages/*']` but none of the workspace package manifests are copied before install. pnpm with `--frozen-lockfile` reads the lockfile to resolve versions without needing all manifests, so this works. But if a workspace package adds a new dependency that requires a manifest presence check, this stage would silently fail. Safer to copy all package manifests:
@@ -9782,9 +9782,9 @@ This is a clarification of B-3, not a new issue. B-3 remains the root problem.
 
 **File:** `packages/agent/src/memory/factory.ts`
 
-The chat route imports `MemoryFactory` from `@anvay/agent`. Verify this import exists and the factory correctly instantiates `RedisSessionMemory`. If this factory is missing or doesn't pass the `summariseProvider` option, Redis sessions will use fallback summaries only (no LLM summarisation). Confirm the export chain is complete.
+The chat route imports `MemoryFactory` from `@anway/agent`. Verify this import exists and the factory correctly instantiates `RedisSessionMemory`. If this factory is missing or doesn't pass the `summariseProvider` option, Redis sessions will use fallback summaries only (no LLM summarisation). Confirm the export chain is complete.
 
-**Verify:** `import { MemoryFactory } from '@anvay/agent'` compiles without error. `MemoryFactory.create({ type: 'redis', redisUrl: '...' })` returns a `RedisSessionMemory` instance.
+**Verify:** `import { MemoryFactory } from '@anway/agent'` compiles without error. `MemoryFactory.create({ type: 'redis', redisUrl: '...' })` returns a `RedisSessionMemory` instance.
 
 ---
 
@@ -10020,7 +10020,7 @@ Store role from caller. Every user in dev mode is currently treated as `dev`. Wr
 
 #### L-1 — `AnthropicProvider` re-exports `AppError` — wrong file
 **File:** `packages/agent/src/providers/anthropic.ts:161`
-Remove `export { AppError }`. It belongs to `@anvay/types`, not to a provider.
+Remove `export { AppError }`. It belongs to `@anway/types`, not to a provider.
 
 #### L-2 — No request timeout on SSE chat route
 **File:** `apps/gateway/src/routes/chat.ts:215`
@@ -10078,7 +10078,7 @@ Wave 3 of CODEX-PLAN.md complete. Six commits, seven bugs closed. No regressions
 `orchestrator.ts:131–134` — `catch` block now sets `classifiedIntent = 'general'` and continues.
 No longer yields `INTENT_CLASSIFICATION_FAILED` error and returns. Correct — a bad intent parse
 should not abort the user's session. The `INTENT_CLASSIFICATION_FAILED` ErrorCode constant in
-`@anvay/types` is now unused; harmless to keep, can be pruned in a later cleanup pass.
+`@anway/types` is now unused; harmless to keep, can be pruned in a later cleanup pass.
 
 #### ✓ B-2-R — `5f4e40e` — Session token usage persists across calls
 `apps/gateway/src/routes/chat.ts` — module-level `sessionTokenUsage: Map<string, { used, lastSeen }>`
@@ -10119,13 +10119,13 @@ so this is low risk, but a `DROP TRIGGER IF EXISTS ... CASCADE` before the `CREA
 be safer. Not blocking.
 
 #### ✓ B-10 — `8ac311e` — Dockerfile `pnpm deploy` for workspace symlinks
-Builder stage now runs `pnpm deploy --filter=anvay-gateway /app/deploy --prod` after the build.
+Builder stage now runs `pnpm deploy --filter=anway-gateway /app/deploy --prod` after the build.
 This copies a self-contained, symlink-free node_modules into `/app/deploy`. Runner stage copies
 from `/app/deploy/node_modules` instead of `apps/gateway/node_modules`.
 
-**Verify:** `--filter=anvay-gateway` assumes the `name` field in `apps/gateway/package.json` is
-`anvay-gateway` (no `@` scope). If it's `@anvay/gateway`, the filter needs shell-quoting:
-`--filter='@anvay/gateway'`. Run a Docker build dry-run to confirm filter resolves correctly.
+**Verify:** `--filter=anway-gateway` assumes the `name` field in `apps/gateway/package.json` is
+`anway-gateway` (no `@` scope). If it's `@anway/gateway`, the filter needs shell-quoting:
+`--filter='@anway/gateway'`. Run a Docker build dry-run to confirm filter resolves correctly.
 
 ---
 
@@ -10138,7 +10138,7 @@ from `/app/deploy/node_modules` instead of `apps/gateway/node_modules`.
 | M-2 | `packages/agent/src/orchestrator.ts:172` | Token estimation ignores tool definitions — underestimates by 20–40% on tool-heavy calls |
 | M-3 | `packages/agent/src/providers/anthropic.ts:129` | `content_block_stop` emits all partial tool calls, not just the stopped block |
 | M-4 | `packages/agent/src/perimeter/engine.ts:63` | `WRITE_SUFFIXES` substring match — `autocreate` matches `create` (false positive) |
-| L-1 | `packages/agent/src/providers/anthropic.ts:161` | `export { AppError }` — wrong file, belongs in `@anvay/types` |
+| L-1 | `packages/agent/src/providers/anthropic.ts:161` | `export { AppError }` — wrong file, belongs in `@anway/types` |
 | L-3 | `packages/agent/src/gate.ts` | `createGate` implementation status unknown — verify or mark TODO |
 | L-5 | `packages/agent/src/providers/ollama.ts` | `content: ''` should be `content: null` for assistant messages with tool_calls |
 
@@ -10264,7 +10264,7 @@ Covers: `NODE_ENV`, `DATABASE_URL`, `JWT_SECRET`, `REDIS_URL`, `PORT`, `HOST`, a
 
 ### `a6c0231` — IConnector types + connector registry
 
-New types in `@anvay/types`: `IConnector`, `CapabilityManifest`, `ConnectorResult`, `ConnectorQuery`, `ConnectorAction`, `HealthStatus`. Clean interface contracts.
+New types in `@anway/types`: `IConnector`, `CapabilityManifest`, `ConnectorResult`, `ConnectorQuery`, `ConnectorAction`, `HealthStatus`. Clean interface contracts.
 
 `apps/gateway/src/connectors/registry.ts` — loads connectors from DB per tenant, caches in module-level Map, converts to `ExecutableTool[]` via `getToolsForTenant()`. Orchestrator now receives real tools instead of `[]`.
 
@@ -10318,7 +10318,7 @@ headers: {
 
 ### `f809f9b` — GitHub connector via gh CLI
 
-New `connectors/github` package (`@anvay/connector-github`). `GitHubConnector implements IConnector` — 5 read operations (list_prs, get_pr, list_commits, get_workflow_run, search_code) via `gh` CLI. `makeGitHubTools(connector)` returns `ExecutableTool[]`. Correct strategy per CLAUDE.md (CLI before SDK). `pnpm-workspace.yaml` updated to include `connectors/*`.
+New `connectors/github` package (`@anway/connector-github`). `GitHubConnector implements IConnector` — 5 read operations (list_prs, get_pr, list_commits, get_workflow_run, search_code) via `gh` CLI. `makeGitHubTools(connector)` returns `ExecutableTool[]`. Correct strategy per CLAUDE.md (CLI before SDK). `pnpm-workspace.yaml` updated to include `connectors/*`.
 
 **SECURITY — Shell injection via `execSync(string)` — fix before any real use:**
 ```typescript
@@ -10754,7 +10754,7 @@ Verdict: **REJECTED — 4 BLOCKING.** Acceptance criteria were not run: gateway 
 Condition is `row[0].api_key || KEYLESS_PROVIDERS.has(provider)` but settings.ts now writes `api_key = NULL` and only `api_key_enc`. Result: every keyed provider's DB config is ignored, silent fallback to env — regression of the provider-resolution fix shipped this morning. Must be `(row[0].api_key || row[0].api_key_enc || KEYLESS_PROVIDERS.has(...))` (subscriber.ts got this right). Also delete the no-op line 127 `...(r.api_key_enc ?? r.api_key ? {} : {})`.
 
 **B3 — BLOCKING — `apps/gateway/src/utils/crypto.test.ts` 4/7 tests fail.**
-`ANVAY_ENCRYPTION_KEY not set` — tests never set the env key. Add `beforeEach` setting a valid 32-byte base64 key (and a test that unsets it for the missing-key case). `pnpm -r test` green was acceptance criterion #1.
+`ANWAY_ENCRYPTION_KEY not set` — tests never set the env key. Add `beforeEach` setting a valid 32-byte base64 key (and a test that unsets it for the missing-key case). `pnpm -r test` green was acceptance criterion #1.
 
 **B4 — BLOCKING — `apps/gateway/src/routes/graph-events.ts` not wired (task item 3).**
 `tenantProviderFor` still selects/uses plaintext `api_key` only. Same enc-first read required.

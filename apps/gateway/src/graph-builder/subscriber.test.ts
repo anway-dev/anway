@@ -38,9 +38,9 @@ vi.mock('../db/prisma.js', () => ({
   }),
 }))
 
-// Mock @anvay/agent
+// Mock @anway/agent
 const mockHandle = vi.fn()
-vi.mock('@anvay/agent', () => ({
+vi.mock('@anway/agent', () => ({
   GraphBuilderAgent: vi.fn(function (this: Record<string, unknown>) {
     this.handle = mockHandle
     return this

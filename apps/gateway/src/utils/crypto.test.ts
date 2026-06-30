@@ -3,7 +3,7 @@ import { encryptJson, decryptJson, isEncrypted, assertEncryptionKey } from './cr
 
 describe('crypto', () => {
   beforeEach(() => {
-    process.env['ANVAY_ENCRYPTION_KEY'] = Buffer.alloc(32, 7).toString('base64')
+    process.env['ANWAY_ENCRYPTION_KEY'] = Buffer.alloc(32, 7).toString('base64')
   })
 
   it('roundtrips an object', () => {
@@ -50,14 +50,14 @@ describe('crypto', () => {
 
   it('assertEncryptionKey throws in production without key', () => {
     const prev = process.env['NODE_ENV']
-    const prevKey = process.env['ANVAY_ENCRYPTION_KEY']
+    const prevKey = process.env['ANWAY_ENCRYPTION_KEY']
     try {
       process.env['NODE_ENV'] = 'production'
-      delete process.env['ANVAY_ENCRYPTION_KEY']
+      delete process.env['ANWAY_ENCRYPTION_KEY']
       expect(() => assertEncryptionKey()).toThrow()
     } finally {
       process.env['NODE_ENV'] = prev
-      process.env['ANVAY_ENCRYPTION_KEY'] = prevKey
+      process.env['ANWAY_ENCRYPTION_KEY'] = prevKey
     }
   })
 })

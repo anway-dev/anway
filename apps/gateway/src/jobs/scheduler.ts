@@ -7,7 +7,7 @@ import { SchedulerFactory } from '../scheduler/factory.js'
 import { runFreshnessDecay } from '../kb/freshness-daemon.js'
 import { bootstrapUnindexedConnectors } from '../graph-builder/boot-scan.js'
 import { runMappingPhaseAllTenants } from '../graph-builder/mapper.js'
-import type { IScheduler } from '@anvay/agent'
+import type { IScheduler } from '@anway/agent'
 
 async function updateLastRun(tenantId: string, jobType: string, result: unknown): Promise<void> {
   try {

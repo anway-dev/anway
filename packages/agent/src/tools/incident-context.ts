@@ -1,7 +1,7 @@
 import type { ExecutableTool } from '../orchestrator.js'
 import type { IKnowledgeGraph } from '../interfaces/knowledge-graph.js'
 import type { IModelProvider } from '../interfaces/provider.js'
-import { TenantId } from '@anvay/types'
+import { TenantId } from '@anway/types'
 import { SREAgent } from '../agents/sre.js'
 import type { IncidentContext } from '../agents/sre.js'
 

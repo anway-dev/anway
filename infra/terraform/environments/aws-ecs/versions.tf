@@ -9,11 +9,11 @@ terraform {
   }
 
   # backend "s3" {
-  #   bucket         = "anvay-terraform-state"
+  #   bucket         = "anway-terraform-state"
   #   key            = "aws-ecs/terraform.tfstate"
   #   region         = var.aws_region
   #   encrypt        = true
-  #   dynamodb_table = "anvay-terraform-locks"
+  #   dynamodb_table = "anway-terraform-locks"
   # }
 }
 

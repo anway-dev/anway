@@ -1,6 +1,6 @@
-import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anvay/agent'
-import type { IKnowledgeGraph } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent'
+import type { IKnowledgeGraph } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 
 export class DynatraceBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}

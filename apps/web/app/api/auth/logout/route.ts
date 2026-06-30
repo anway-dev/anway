@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   }).catch(() => {})
 
   const response = NextResponse.json({ ok: true })
-  response.cookies.set('anvay_token', '', {
+  response.cookies.set('anway_token', '', {
     httpOnly: true,
     secure: process.env['NODE_ENV'] === 'production',
     sameSite: 'strict',

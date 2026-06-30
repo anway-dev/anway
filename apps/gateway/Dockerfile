@@ -25,10 +25,10 @@ COPY --from=deps /app/connectors/datadog/node_modules ./connectors/datadog/node_
 COPY --from=deps /app/connectors/linear/node_modules ./connectors/linear/node_modules
 COPY --from=deps /app/connectors/argocd/node_modules ./connectors/argocd/node_modules
 COPY . .
-RUN pnpm --filter @anvay/types build
-RUN pnpm --filter @anvay/agent build
+RUN pnpm --filter @anway/types build
+RUN pnpm --filter @anway/agent build
 RUN cd apps/gateway && pnpm exec prisma generate
-RUN pnpm --filter anvay-gateway build
+RUN pnpm --filter anway-gateway build
 
 # --- runtime ---
 FROM node:22 AS runtime
@@ -57,7 +57,7 @@ COPY --from=builder /app/apps/gateway/dist ./apps/gateway/dist
 COPY --from=builder /app/apps/gateway/prisma ./apps/gateway/prisma
 COPY --from=builder /app/apps/gateway/package.json ./apps/gateway/package.json
 
-# Copy workspace packages (targets for @anvay/* symlinks in node_modules)
+# Copy workspace packages (targets for @anway/* symlinks in node_modules)
 COPY --from=builder /app/packages/agent ./packages/agent
 COPY --from=builder /app/packages/types ./packages/types
 COPY --from=builder /app/connectors/github ./connectors/github

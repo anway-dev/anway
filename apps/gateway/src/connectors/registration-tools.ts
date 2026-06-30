@@ -1,5 +1,5 @@
-import type { ExecutableTool } from '@anvay/agent'
-import type { AgentRole } from '@anvay/types'
+import type { ExecutableTool } from '@anway/agent'
+import type { AgentRole } from '@anway/types'
 import { registerConnectorTool, listConnectorsTool } from './registry.js'
 
 /**

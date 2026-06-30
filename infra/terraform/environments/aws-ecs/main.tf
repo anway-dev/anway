@@ -100,22 +100,22 @@ resource "aws_security_group" "redis" {
 
 # ── RDS (PostgreSQL) ──────────────────────────────────────────────────────────
 
-resource "aws_db_subnet_group" "anvay" {
+resource "aws_db_subnet_group" "anway" {
   name       = local.name
   subnet_ids = module.vpc.private_subnets
 }
 
-resource "aws_db_instance" "anvay" {
+resource "aws_db_instance" "anway" {
   identifier     = local.name
   engine         = "postgres"
   engine_version = "16"
   instance_class = var.db_instance_class
 
-  db_name  = "anvay"
-  username = "anvay"
+  db_name  = "anway"
+  username = "anway"
   password = var.postgres_password
 
-  db_subnet_group_name   = aws_db_subnet_group.anvay.name
+  db_subnet_group_name   = aws_db_subnet_group.anway.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
   allocated_storage     = var.db_storage_gb
@@ -130,19 +130,19 @@ resource "aws_db_instance" "anvay" {
 
 # ── ElastiCache ───────────────────────────────────────────────────────────────
 
-resource "aws_elasticache_subnet_group" "anvay" {
+resource "aws_elasticache_subnet_group" "anway" {
   name       = local.name
   subnet_ids = module.vpc.private_subnets
 }
 
-resource "aws_elasticache_replication_group" "anvay" {
+resource "aws_elasticache_replication_group" "anway" {
   replication_group_id = local.name
-  description          = "Anvay Redis"
+  description          = "Anway Redis"
   node_type            = var.redis_node_type
   num_cache_clusters   = var.environment == "prod" ? 2 : 1
   port                 = 6379
 
-  subnet_group_name  = aws_elasticache_subnet_group.anvay.name
+  subnet_group_name  = aws_elasticache_subnet_group.anway.name
   security_group_ids = [aws_security_group.redis.id]
 
   at_rest_encryption_enabled = true
@@ -150,7 +150,7 @@ resource "aws_elasticache_replication_group" "anvay" {
 
 # ── ALB ───────────────────────────────────────────────────────────────────────
 
-resource "aws_lb" "anvay" {
+resource "aws_lb" "anway" {
   name               = local.name
   internal           = false
   load_balancer_type = "application"
@@ -189,7 +189,7 @@ resource "aws_lb_target_group" "web" {
 }
 
 resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.anvay.arn
+  load_balancer_arn = aws_lb.anway.arn
   port              = 80
   protocol          = "HTTP"
 
@@ -215,7 +215,7 @@ resource "aws_lb_listener_rule" "gateway" {
 
 # ── ECS Cluster ───────────────────────────────────────────────────────────────
 
-resource "aws_ecs_cluster" "anvay" {
+resource "aws_ecs_cluster" "anway" {
   name = local.name
 
   setting {
@@ -224,8 +224,8 @@ resource "aws_ecs_cluster" "anvay" {
   }
 }
 
-resource "aws_ecs_cluster_capacity_providers" "anvay" {
-  cluster_name       = aws_ecs_cluster.anvay.name
+resource "aws_ecs_cluster_capacity_providers" "anway" {
+  cluster_name       = aws_ecs_cluster.anway.name
   capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 
   default_capacity_provider_strategy {
@@ -271,8 +271,8 @@ resource "aws_cloudwatch_log_group" "web" {
 # ── Task Definitions ──────────────────────────────────────────────────────────
 
 locals {
-  db_url    = "postgresql://anvay:${var.postgres_password}@${aws_db_instance.anvay.address}:5432/anvay"
-  redis_url = "redis://${aws_elasticache_replication_group.anvay.primary_endpoint_address}:6379"
+  db_url    = "postgresql://anway:${var.postgres_password}@${aws_db_instance.anway.address}:5432/anway"
+  redis_url = "redis://${aws_elasticache_replication_group.anway.primary_endpoint_address}:6379"
 }
 
 resource "aws_ecs_task_definition" "gateway" {
@@ -297,7 +297,7 @@ resource "aws_ecs_task_definition" "gateway" {
       { name = "DATABASE_URL",          value = local.db_url },
       { name = "REDIS_URL",             value = local.redis_url },
       { name = "JWT_SECRET",            value = var.jwt_secret },
-      { name = "ANVAY_ENCRYPTION_KEY",  value = var.encryption_key },
+      { name = "ANWAY_ENCRYPTION_KEY",  value = var.encryption_key },
     ]
 
     logConfiguration = {
@@ -336,7 +336,7 @@ resource "aws_ecs_task_definition" "web" {
 
     environment = [
       { name = "NODE_ENV",       value = "production" },
-      { name = "GATEWAY_URL",    value = "http://${aws_lb.anvay.dns_name}/api" },
+      { name = "GATEWAY_URL",    value = "http://${aws_lb.anway.dns_name}/api" },
     ]
 
     logConfiguration = {
@@ -354,7 +354,7 @@ resource "aws_ecs_task_definition" "web" {
 
 resource "aws_ecs_service" "gateway" {
   name            = "${local.name}-gateway"
-  cluster         = aws_ecs_cluster.anvay.id
+  cluster         = aws_ecs_cluster.anway.id
   task_definition = aws_ecs_task_definition.gateway.arn
   desired_count   = var.gateway_replicas
   launch_type     = "FARGATE"
@@ -379,7 +379,7 @@ resource "aws_ecs_service" "gateway" {
 
 resource "aws_ecs_service" "web" {
   name            = "${local.name}-web"
-  cluster         = aws_ecs_cluster.anvay.id
+  cluster         = aws_ecs_cluster.anway.id
   task_definition = aws_ecs_task_definition.web.arn
   desired_count   = var.web_replicas
   launch_type     = "FARGATE"

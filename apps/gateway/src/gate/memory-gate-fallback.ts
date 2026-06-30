@@ -1,4 +1,4 @@
-import { InMemoryGateSink } from '@anvay/agent'
+import { InMemoryGateSink } from '@anway/agent'
 
 let _sink: InMemoryGateSink | null = null
 

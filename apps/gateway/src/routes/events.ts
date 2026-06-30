@@ -12,7 +12,7 @@ const log = pino({ name: 'event-routes' })
 /**
  * Resolve the tenant for an inbound webhook alert.
  * Priority:
- *   1. Static ANVAY_WEBHOOK_TOKEN env var (backward compat, maps to ANVAY_WEBHOOK_TENANT)
+ *   1. Static ANWAY_WEBHOOK_TOKEN env var (backward compat, maps to ANWAY_WEBHOOK_TENANT)
  *   2. Per-tenant alertmanager connector_config.credentials_enc.webhookToken
  */
 async function webhookTenantFor(request: FastifyRequest): Promise<string | null> {
@@ -21,12 +21,12 @@ async function webhookTenantFor(request: FastifyRequest): Promise<string | null>
   const presented = header.slice('Bearer '.length)
 
   // 1. Static env var (backward compat)
-  const expected = process.env['ANVAY_WEBHOOK_TOKEN']
+  const expected = process.env['ANWAY_WEBHOOK_TOKEN']
   if (expected) {
     const a = Buffer.from(presented)
     const b = Buffer.from(expected)
     if (a.length === b.length && timingSafeEqual(a, b)) {
-      return process.env['ANVAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
+      return process.env['ANWAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
     }
   }
 

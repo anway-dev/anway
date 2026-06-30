@@ -19,17 +19,17 @@ resource "google_project_service" "apis" {
 
 # ── VPC ───────────────────────────────────────────────────────────────────────
 
-resource "google_compute_network" "anvay" {
+resource "google_compute_network" "anway" {
   name                    = local.name
   auto_create_subnetworks = false
   depends_on              = [google_project_service.apis]
 }
 
-resource "google_compute_subnetwork" "anvay" {
+resource "google_compute_subnetwork" "anway" {
   name          = "${local.name}-nodes"
   ip_cidr_range = var.subnet_cidr
   region        = var.gcp_region
-  network       = google_compute_network.anvay.id
+  network       = google_compute_network.anway.id
 
   secondary_ip_range {
     range_name    = "pods"
@@ -47,11 +47,11 @@ resource "google_compute_global_address" "private_ip_range" {
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
   prefix_length = 16
-  network       = google_compute_network.anvay.id
+  network       = google_compute_network.anway.id
 }
 
 resource "google_service_networking_connection" "private_vpc" {
-  network                 = google_compute_network.anvay.id
+  network                 = google_compute_network.anway.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_range.name]
   depends_on              = [google_project_service.apis]
@@ -68,8 +68,8 @@ module "gke" {
   region     = var.gcp_region
   zones      = var.gcp_zones
 
-  network           = google_compute_network.anvay.name
-  subnetwork        = google_compute_subnetwork.anvay.name
+  network           = google_compute_network.anway.name
+  subnetwork        = google_compute_subnetwork.anway.name
   ip_range_pods     = "pods"
   ip_range_services = "services"
 
@@ -78,7 +78,7 @@ module "gke" {
   remove_default_node_pool = true
 
   node_pools = [{
-    name               = "anvay-pool"
+    name               = "anway-pool"
     machine_type       = var.node_machine_type
     min_count          = var.node_min_count
     max_count          = var.node_max_count
@@ -94,7 +94,7 @@ module "gke" {
 
 # ── Cloud SQL (PostgreSQL 16) ─────────────────────────────────────────────────
 
-resource "google_sql_database_instance" "anvay" {
+resource "google_sql_database_instance" "anway" {
   name             = local.name
   database_version = "POSTGRES_16"
   region           = var.gcp_region
@@ -115,7 +115,7 @@ resource "google_sql_database_instance" "anvay" {
 
     ip_configuration {
       ipv4_enabled    = false
-      private_network = google_compute_network.anvay.id
+      private_network = google_compute_network.anway.id
     }
 
     database_flags {
@@ -128,29 +128,29 @@ resource "google_sql_database_instance" "anvay" {
   depends_on          = [google_service_networking_connection.private_vpc]
 }
 
-resource "google_sql_database" "anvay" {
-  name     = "anvay"
-  instance = google_sql_database_instance.anvay.name
+resource "google_sql_database" "anway" {
+  name     = "anway"
+  instance = google_sql_database_instance.anway.name
 }
 
-resource "google_sql_user" "anvay" {
-  name     = "anvay"
-  instance = google_sql_database_instance.anvay.name
+resource "google_sql_user" "anway" {
+  name     = "anway"
+  instance = google_sql_database_instance.anway.name
   password = var.postgres_password
 }
 
 # ── Memorystore (Redis) ───────────────────────────────────────────────────────
 
-resource "google_redis_instance" "anvay" {
+resource "google_redis_instance" "anway" {
   name           = local.name
   tier           = var.environment == "prod" ? "STANDARD_HA" : "BASIC"
   memory_size_gb = var.redis_memory_gb
   region         = var.gcp_region
 
-  authorized_network = google_compute_network.anvay.id
+  authorized_network = google_compute_network.anway.id
 
   redis_version     = "REDIS_7_0"
-  display_name      = "Anvay Redis"
+  display_name      = "Anway Redis"
   connect_mode      = "PRIVATE_SERVICE_ACCESS"
   reserved_ip_range = google_compute_global_address.private_ip_range.name
 
@@ -162,7 +162,7 @@ resource "google_redis_instance" "anvay" {
 resource "kubernetes_persistent_volume_claim" "neo4j" {
   metadata {
     name      = "neo4j-data"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
   }
 
   spec {
@@ -178,7 +178,7 @@ resource "kubernetes_persistent_volume_claim" "neo4j" {
 resource "kubernetes_deployment" "neo4j" {
   metadata {
     name      = "neo4j"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
     labels    = { app = "neo4j" }
   }
 
@@ -214,13 +214,13 @@ resource "kubernetes_deployment" "neo4j" {
     }
   }
 
-  depends_on = [module.anvay_app]
+  depends_on = [module.anway_app]
 }
 
 resource "kubernetes_service" "neo4j" {
   metadata {
     name      = "neo4j"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
   }
 
   spec {
@@ -232,19 +232,19 @@ resource "kubernetes_service" "neo4j" {
   }
 }
 
-# ── Anvay App (Helm) ──────────────────────────────────────────────────────────
+# ── Anway App (Helm) ──────────────────────────────────────────────────────────
 
-module "anvay_app" {
-  source = "../../modules/anvay-helm"
+module "anway_app" {
+  source = "../../modules/anway-helm"
 
-  namespace   = "anvay"
+  namespace   = "anway"
   environment = var.environment
 
   jwt_secret     = var.jwt_secret
   encryption_key = var.encryption_key
 
-  database_url   = "postgresql://anvay:${var.postgres_password}@${google_sql_database_instance.anvay.private_ip_address}:5432/anvay"
-  redis_url      = "redis://${google_redis_instance.anvay.host}:6379"
+  database_url   = "postgresql://anway:${var.postgres_password}@${google_sql_database_instance.anway.private_ip_address}:5432/anway"
+  redis_url      = "redis://${google_redis_instance.anway.host}:6379"
   neo4j_uri      = "bolt://neo4j:7687"
   neo4j_password = var.neo4j_password
 
@@ -260,7 +260,7 @@ module "anvay_app" {
 
   depends_on = [
     module.gke,
-    google_sql_database_instance.anvay,
-    google_redis_instance.anvay,
+    google_sql_database_instance.anway,
+    google_redis_instance.anway,
   ]
 }

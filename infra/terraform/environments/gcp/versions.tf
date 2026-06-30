@@ -17,7 +17,7 @@ terraform {
   }
 
   # backend "gcs" {
-  #   bucket = "anvay-terraform-state"
+  #   bucket = "anway-terraform-state"
   #   prefix = "gcp"
   # }
 }

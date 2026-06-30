@@ -1,6 +1,6 @@
-import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anvay/agent'
-import type { IKnowledgeGraph } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent'
+import type { IKnowledgeGraph } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 
 const CIRCLECI_API = 'https://circleci.com/api/v2'
 
@@ -26,7 +26,7 @@ export class CircleCIBootstrap implements IConnectorBootstrap {
     let entitiesUpserted = 0
 
     // Fetch pipelines
-    const resp = await fetch(`${baseUrl}/pipeline?org-slug=gh/anvay`, { headers })
+    const resp = await fetch(`${baseUrl}/pipeline?org-slug=gh/anway`, { headers })
     if (resp.ok) {
       const data = await resp.json() as { items?: Array<{ id: string; state: string; vcs?: { branch?: string; commit?: { subject?: string } } }> }
       for (const p of (data.items ?? []).slice(0, 20)) {
@@ -44,7 +44,7 @@ export class CircleCIBootstrap implements IConnectorBootstrap {
     }
 
     // Fetch recent projects
-    const projResp = await fetch(`${baseUrl}/project/gh/anvay`, { headers })
+    const projResp = await fetch(`${baseUrl}/project/gh/anway`, { headers })
     if (projResp.ok) {
       const projects = (await projResp.json() as Array<{ slug: string; vcs_url?: string }>).slice(0, 20)
       for (const proj of projects) {

@@ -1,4 +1,4 @@
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const TOOLS: ConnectorTool[] = [
   { definition: { name: 'get_issues', description: 'List Sentry issues', parameters: { type: 'object', properties: { project: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['project'] } }, execute: () => Promise.resolve({ issues: [{ id:'s-1',title:'TypeError: undefined',count:42,firstSeen:new Date().toISOString(),lastSeen:new Date().toISOString() }] }), write: false },

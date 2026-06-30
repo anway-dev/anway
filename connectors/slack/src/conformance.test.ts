@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
-import { describeConnectorConformance } from '@anvay/agent/testing'
-import type { IKnowledgeGraph } from '@anvay/agent'
+import { describeConnectorConformance } from '@anway/agent/testing'
+import type { IKnowledgeGraph } from '@anway/agent'
 import { SlackBootstrap } from './bootstrap.js'
 
 const MOCK = 'https://mock-slack.local'

@@ -1,4 +1,4 @@
-import type { ConnectorQuery } from '@anvay/types'
+import type { ConnectorQuery } from '@anway/types'
 import type { GitHubConnector } from './connector.js'
 
 export function makeGitHubTools(connector: GitHubConnector) {

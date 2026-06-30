@@ -124,9 +124,9 @@ export async function accessRoutes(app: FastifyInstance) {
       for (const p of request.body.perimeter.slice(0, count)) {
         await audit.append({
           id: crypto.randomUUID(),
-          tenantId: user.tenantId as import('@anvay/types').TenantId,
-          userId: user.sub as import('@anvay/types').UserId,
-          sessionId: '' as import('@anvay/types').SessionId,
+          tenantId: user.tenantId as import('@anway/types').TenantId,
+          userId: user.sub as import('@anway/types').UserId,
+          sessionId: '' as import('@anway/types').SessionId,
           eventType: 'perimeter_changed',
           payload: { userId, connectorName: p.connectorName, readScopes: p.readScopes, writeScopes: p.writeScopes },
           createdAt: new Date(),
@@ -137,9 +137,9 @@ export async function accessRoutes(app: FastifyInstance) {
       for (const name of prunedNames) {
         await audit.append({
           id: crypto.randomUUID(),
-          tenantId: user.tenantId as import('@anvay/types').TenantId,
-          userId: user.sub as import('@anvay/types').UserId,
-          sessionId: '' as import('@anvay/types').SessionId,
+          tenantId: user.tenantId as import('@anway/types').TenantId,
+          userId: user.sub as import('@anway/types').UserId,
+          sessionId: '' as import('@anway/types').SessionId,
           eventType: 'perimeter_removed',
           payload: { userId, connectorName: name },
           createdAt: new Date(),

@@ -43,7 +43,7 @@ export async function buildApp() {
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
       base: {
-        service: 'anvay-gateway',
+        service: 'anway-gateway',
         version: process.env.APP_VERSION ?? '0.0.1',
         env: process.env.NODE_ENV ?? 'development',
       },

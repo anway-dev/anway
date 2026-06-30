@@ -1,11 +1,11 @@
 output "namespace" {
-  value = kubernetes_namespace.anvay.metadata[0].name
+  value = kubernetes_namespace.anway.metadata[0].name
 }
 
 output "release_name" {
-  value = helm_release.anvay.name
+  value = helm_release.anway.name
 }
 
 output "release_status" {
-  value = helm_release.anvay.status
+  value = helm_release.anway.status
 }

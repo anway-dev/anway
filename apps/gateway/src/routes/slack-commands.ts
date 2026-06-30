@@ -106,45 +106,45 @@ export async function slackCommandRoutes(app: FastifyInstance) {
     }
 
     const { command, text, user_id } = request.body ?? {}
-    if (command !== '/anvay') {
+    if (command !== '/anway') {
       return reply.send({ response_type: 'ephemeral', text: 'Unknown command.' })
     }
 
     const trimmed = (text ?? '').trim()
     // Tenant resolved from server-side env only — never from an attacker-controlled header.
     // The Slack team_id (verified by the HMAC above) should map to a tenant; for now
-    // ANVAY_WEBHOOK_TENANT is the admin-configured binding.
-    const tenantId = process.env['ANVAY_WEBHOOK_TENANT']
+    // ANWAY_WEBHOOK_TENANT is the admin-configured binding.
+    const tenantId = process.env['ANWAY_WEBHOOK_TENANT']
       ?? '00000000-0000-0000-0000-000000000001'
 
     try {
-      // /anvay incidents
+      // /anway incidents
       if (trimmed === 'incidents') {
         const result = await formatIncidentList(tenantId, user_id ?? 'slack-user')
         return reply.send({ response_type: 'ephemeral', text: result })
       }
 
-      // /anvay deploy <service> <env>
+      // /anway deploy <service> <env>
       if (trimmed.startsWith('deploy ')) {
         const parts = trimmed.split(' ').slice(1)
         if (parts.length < 2) {
-          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anvay deploy <service> <env>' })
+          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anway deploy <service> <env>' })
         }
         const [service, env] = parts
         return reply.send({
           response_type: 'ephemeral',
-          text: `Deploy of *${service}* to *${env}* initiated. Use \`/anvay status ${service}\` to monitor.`,
+          text: `Deploy of *${service}* to *${env}* initiated. Use \`/anway status ${service}\` to monitor.`,
         })
       }
 
-      // /anvay approve <gate-id>
+      // /anway approve <gate-id>
       if (trimmed.startsWith('approve ')) {
         const gateId = trimmed.split(' ')[1]
         if (!gateId || !UUID_RE.test(gateId)) {
-          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anvay approve <gate-id> (must be a valid UUID)' })
+          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anway approve <gate-id> (must be a valid UUID)' })
         }
         const slashUserId = (request.body as Record<string, string> | undefined)?.['user_id'] ?? 'slack-unknown'
-        // Use sentinel UUID for decided_by (Slack user_id is not an Anvay UUID)
+        // Use sentinel UUID for decided_by (Slack user_id is not an Anway UUID)
         const affected = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
@@ -162,16 +162,16 @@ export async function slackCommandRoutes(app: FastifyInstance) {
           action: 'gate.approve',
           resource: `gate_event:${gateId}`,
           outcome: 'action_executed',
-          metadata: { source: 'slack_slash_command', command: '/anvay approve', gateId, slackUser: slashUserId },
+          metadata: { source: 'slack_slash_command', command: '/anway approve', gateId, slackUser: slashUserId },
         }).catch(() => { /* non-blocking */ })
         return reply.send({ response_type: 'ephemeral', text: `Gate *${gateId}* approved.` })
       }
 
-      // /anvay status <service>
+      // /anway status <service>
       if (trimmed.startsWith('status ')) {
         const serviceName = trimmed.split(' ')[1]
         if (!serviceName) {
-          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anvay status <service>' })
+          return reply.send({ response_type: 'ephemeral', text: 'Usage: /anway status <service>' })
         }
         const result = await getServiceStatus(tenantId, serviceName)
         return reply.send({ response_type: 'ephemeral', text: result })

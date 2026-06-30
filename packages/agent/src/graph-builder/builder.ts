@@ -1,4 +1,4 @@
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { IModelProvider, Message } from '../interfaces/provider.js'
 import type { IKnowledgeGraph } from '../interfaces/knowledge-graph.js'
 import type { GraphEvent } from './events.js'

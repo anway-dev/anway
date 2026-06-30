@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "anvay.fullname" . }}-promtail
+  name: {{ include "anway.fullname" . }}-promtail
   namespace: {{ .Release.Namespace }}
 data:
   promtail.yaml: |
@@ -11,7 +11,7 @@ data:
     clients:
       - url: {{ .Values.loki.endpoint }}/loki/api/v1/push
     scrape_configs:
-      - job_name: anvay-gateway
+      - job_name: anway-gateway
         kubernetes_sd_configs:
           - role: pod
             namespaces:
@@ -19,7 +19,7 @@ data:
         relabel_configs:
           - source_labels: [__meta_kubernetes_pod_label_app]
             action: keep
-            regex: anvay-gateway
+            regex: anway-gateway
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
           - source_labels: [__meta_kubernetes_namespace]

@@ -1,5 +1,5 @@
 {
-  "name": "@anvay/connector-github",
+  "name": "@anway/connector-github",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anvay/agent": "workspace:*",
-    "@anvay/types": "workspace:*"
+    "@anway/agent": "workspace:*",
+    "@anway/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

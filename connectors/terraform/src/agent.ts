@@ -1,4 +1,4 @@
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const TOOLS: ConnectorTool[] = [
   { definition: { name: 'get_workspaces', description: 'List workspaces', parameters: { type: 'object', properties: { } } }, execute: () => Promise.resolve({ workspaces: [{ name:'prod',status:'healthy',lastRun:new Date().toISOString() }] }), write: false },

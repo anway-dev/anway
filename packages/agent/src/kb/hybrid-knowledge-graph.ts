@@ -1,4 +1,4 @@
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { IKnowledgeGraph, Entity, Relationship, KBEntry, Episode, Fact, AgentContext, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
 import { StructuralGraph } from './structural-graph.js'
 import { GraphitiClient } from './graphiti-client.js'

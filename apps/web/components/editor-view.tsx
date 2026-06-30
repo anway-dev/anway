@@ -636,7 +636,7 @@ export function EditorView() {
             </button>
           ))}
           <div style={{ flex: 1 }} />
-          <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "10px", fontSize: "10px", color: "#10b981", fontWeight: 700 }} title="Anvay AI">✦</div>
+          <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "10px", fontSize: "10px", color: "#10b981", fontWeight: 700 }} title="Anway AI">✦</div>
         </div>
 
         {/* Sidebar */}
@@ -702,7 +702,7 @@ export function EditorView() {
                 <div style={{ padding: "10px 12px" }}>
                   <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "8px" }}>Git Credentials</div>
                   <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif", marginBottom: "8px", lineHeight: "1.5" }}>
-                    Store a personal access token so Anvay can push code changes on your behalf.
+                    Store a personal access token so Anway can push code changes on your behalf.
                   </div>
                   {gitCreds.length === 0 ? (
                     <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif", marginBottom: "8px" }}>No credentials configured</div>
@@ -836,7 +836,7 @@ export function EditorView() {
             {/* Right review panel */}
             <div style={{ width: "260px", background: "#252526", borderLeft: "1px solid #1a1a1a", display: "flex", flexDirection: "column", flexShrink: 0 }}>
               <div style={{ padding: "8px 12px", borderBottom: "1px solid #1a1a1a", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ color: "#10b981" }}>✦</span> Anvay
+                <span style={{ color: "#10b981" }}>✦</span> Anway
                 {state === "analyzing" && <span style={{ marginLeft: "auto", color: "#0078d4", animation: "pulse-dot 1s infinite" }}>●</span>}
               </div>
 
@@ -1105,7 +1105,7 @@ export function EditorView() {
                       <span style={{ color: f.severity === "error" ? "#f44747" : "#cca700", flexShrink: 0 }}>●</span>
                       <span style={{ color: "#d4d4d4" }}>{f.title}</span>
                       <span style={{ color: "#666" }}>{filename}:{f.line}</span>
-                      <span style={{ color: "#555", marginLeft: "auto" }}>Anvay</span>
+                      <span style={{ color: "#555", marginLeft: "auto" }}>Anway</span>
                     </div>
                   ))}
                 </>
@@ -1182,7 +1182,7 @@ export function EditorView() {
           <span>{language}</span>
           <span>UTF-8</span>
           {filename && <span>{codeLines.length} lines</span>}
-          <span style={{ color: "#fff", background: "rgba(255,255,255,0.15)", padding: "0 6px", borderRadius: "2px" }}>✦ Anvay</span>
+          <span style={{ color: "#fff", background: "rgba(255,255,255,0.15)", padding: "0 6px", borderRadius: "2px" }}>✦ Anway</span>
         </div>
         {state === "writing" && fileContent && (
           <button

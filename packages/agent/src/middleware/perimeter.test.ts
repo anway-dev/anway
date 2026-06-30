@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SessionId, TenantId, UserId } from '@anvay/types'
+import { SessionId, TenantId, UserId } from '@anway/types'
 import type { IAuditSink } from '../interfaces/audit.js'
 import type { ToolCall } from '../interfaces/provider.js'
 import { AgentPerimeter } from '../perimeter/engine.js'

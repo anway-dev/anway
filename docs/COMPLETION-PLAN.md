@@ -1,6 +1,6 @@
-# Anvay — Completion Plan
+# Anway — Completion Plan
 
-**Purpose:** Every task required to call Anvay complete and demo-ready. Execute in order.
+**Purpose:** Every task required to call Anway complete and demo-ready. Execute in order.
 **Branch:** `claude/claude-md-docs-k210H`
 **Repo:** `/Users/raj/workspace_code/ai-proj/restol`
 **Stack:** TypeScript monorepo · pnpm workspaces · turborepo · Vitest · Fastify · Next.js · Postgres/pgvector · Redis
@@ -21,9 +21,9 @@
 
 - `git pull` before every session
 - `pnpm typecheck` after every task. Fix errors before committing
-- After agent/types changes: `pnpm --filter @anvay/agent test`
-- After gateway changes: `pnpm --filter anvay-gateway test`
-- After web changes: `pnpm --filter @anvay/web test`
+- After agent/types changes: `pnpm --filter @anway/agent test`
+- After gateway changes: `pnpm --filter anway-gateway test`
+- After web changes: `pnpm --filter @anway/web test`
 - Commit each task separately: `fix|feat|chore(scope): description — Task S-1`
 - Post to `docs/BRIDGE.md` if blocked. Claude reads it and responds within minutes.
 - Check `docs/BRIDGE.md` for Claude's latest messages before starting each session
@@ -72,7 +72,7 @@ CMD ["node", "apps/gateway/dist/server.js"]
 
 Note: `argocd` CLI install is optional for V1 — ArgoCD connector can be wired to HTTP API instead (recommended). Do not add large CLIs (kubectl, aws, gcloud) — those are infra tooling, not gateway dependencies.
 
-**Verify:** `docker build -t anvay-gateway -f apps/gateway/Dockerfile . && docker run --rm anvay-gateway gh --version`
+**Verify:** `docker build -t anway-gateway -f apps/gateway/Dockerfile . && docker run --rm anway-gateway gh --version`
 
 **Commit:** `fix(gateway): switch runtime to node:22-slim; install gh CLI`
 
@@ -139,7 +139,7 @@ Two problems:
 **Fix — replace with direct Linear HTTP GraphQL API using variables:**
 
 ```typescript
-import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anvay/types'
+import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anway/types'
 
 export class LinearConnector implements IConnector {
   readonly id: string
@@ -256,7 +256,7 @@ Remove the `execSync` import from `connectors/linear/src/connector.ts`.
 `datadog` CLI used does not exist — every call throws `ENOENT`. Replace with Datadog HTTP API v1:
 
 ```typescript
-import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anvay/types'
+import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anway/types'
 
 export class DatadogConnector implements IConnector {
   readonly id: string
@@ -527,7 +527,7 @@ if (entityName) {
 
 ```typescript
 import type { PrismaClient } from '@prisma/client'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { IKnowledgeGraph, Entity, Relationship, KBEntry, Episode, Fact, AgentContext, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
 import { withTenant } from '../../apps/gateway/src/db/prisma.js'  // or pass prisma from gateway
 
@@ -548,7 +548,7 @@ Remove the `DbPool` type. Remove the `pool` constructor parameter.
 
 Wire in `apps/gateway/src/routes/chat.ts`:
 ```typescript
-import { StructuralGraph } from '@anvay/agent'
+import { StructuralGraph } from '@anway/agent'
 
 // In chatRoutes, after prisma is defined:
 const knowledgeGraph = new StructuralGraph(prisma)
@@ -712,7 +712,7 @@ beforeEach(() => {
 // existing tests unchanged
 ```
 
-**Verify:** `pnpm --filter @anvay/web test` all green.
+**Verify:** `pnpm --filter @anway/web test` all green.
 
 **Commit:** `test(web): mock gateway fetch — fixes CI test failures`
 
@@ -807,7 +807,7 @@ No `makeArgoCDTools` exported. Registry can't build tools for ArgoCD. Create fol
 
 ```typescript
 // connectors/argocd/src/tools.ts
-import type { ConnectorQuery } from '@anvay/types'
+import type { ConnectorQuery } from '@anway/types'
 import type { ArgoCDConnector } from './connector.js'
 
 export function makeArgoCDTools(connector: ArgoCDConnector) {
@@ -877,10 +877,10 @@ For Datadog tools: `get_metrics`, `list_monitors`, `get_monitor`, `search_logs`,
 
 **Fix:**
 ```typescript
-import { GitHubConnector, makeGitHubTools } from '@anvay/connector-github'
-import { LinearConnector, makeLinearTools } from '@anvay/connector-linear'
-import { ArgoCDConnector, makeArgoCDTools } from '@anvay/connector-argocd'
-import { DatadogConnector, makeDatadogTools } from '@anvay/connector-datadog'
+import { GitHubConnector, makeGitHubTools } from '@anway/connector-github'
+import { LinearConnector, makeLinearTools } from '@anway/connector-linear'
+import { ArgoCDConnector, makeArgoCDTools } from '@anway/connector-argocd'
+import { DatadogConnector, makeDatadogTools } from '@anway/connector-datadog'
 
 function createConnectorWithTools(row: ConnectorRow): { connector: IConnector; tools: ExecutableTool[] } {
   const raw = row.capability_manifest as { capabilities?: { read?: string[]; write?: string[] } } | null
@@ -921,10 +921,10 @@ export async function getToolsForTenant(prisma: PrismaClient, tenantId: string):
 
 Add workspace deps to `apps/gateway/package.json`:
 ```json
-"@anvay/connector-github": "workspace:*",
-"@anvay/connector-linear": "workspace:*",
-"@anvay/connector-argocd": "workspace:*",
-"@anvay/connector-datadog": "workspace:*"
+"@anway/connector-github": "workspace:*",
+"@anway/connector-linear": "workspace:*",
+"@anway/connector-argocd": "workspace:*",
+"@anway/connector-datadog": "workspace:*"
 ```
 
 Run `pnpm install` after updating package.json. Commit the updated `pnpm-lock.yaml`.
@@ -953,7 +953,7 @@ Key implementation points:
 - `error` → show error state
 - Do NOT remove `@/lib/mock` imports used by other parts of the component (scenario list, etc.)
 
-**Verify:** `pnpm --filter @anvay/web dev` → send query → confirm real LLM stream renders (not mock data).
+**Verify:** `pnpm --filter @anway/web dev` → send query → confirm real LLM stream renders (not mock data).
 
 **Commit:** `feat(web): OrchestratorChat real SSE stream; remove mock data source`
 
@@ -971,7 +971,7 @@ Add after redis service:
       dockerfile: apps/gateway/Dockerfile
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-anvay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-anvay_dev}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-anway}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-anway_dev}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -995,7 +995,7 @@ Add after redis service:
       retries: 5
       start_period: 30s
     networks:
-      - anvay-dev
+      - anway-dev
 
   web:
     build:
@@ -1010,7 +1010,7 @@ Add after redis service:
       gateway:
         condition: service_healthy
     networks:
-      - anvay-dev
+      - anway-dev
 ```
 
 Update `infra/.env.example` — add missing keys:
@@ -1190,12 +1190,12 @@ Run after I-1 through I-6 complete:
 ```bash
 # From repo root
 pnpm typecheck                                     # must be 0 errors
-pnpm --filter @anvay/agent test                    # all green
-pnpm --filter anvay-gateway test                   # all green
-pnpm --filter @anvay/web test                      # all green
+pnpm --filter @anway/agent test                    # all green
+pnpm --filter anway-gateway test                   # all green
+pnpm --filter @anway/web test                      # all green
 
 # Docker
-docker build -t anvay-gateway -f apps/gateway/Dockerfile .
+docker build -t anway-gateway -f apps/gateway/Dockerfile .
 cd infra && cp .env.example .env
 # Edit .env: set JWT_SECRET, add at least ANTHROPIC_API_KEY
 docker compose up -d --build
@@ -1242,7 +1242,7 @@ if (!isUuid(tenantId)) return reply.code(400).send({ error: 'Invalid tenantId' }
 
 ### CL-3 — Remove AppError re-export from AnthropicProvider
 **File:** `packages/agent/src/providers/anthropic.ts`
-Remove `export { AppError }` — belongs in `@anvay/types` not a provider.
+Remove `export { AppError }` — belongs in `@anway/types` not a provider.
 **Commit:** `fix(anthropic): remove AppError re-export`
 
 ### CL-4 — Ollama null content for assistant+tool_calls
@@ -1266,9 +1266,9 @@ const estimatedTokens = msgTokens + toolTokens + 500
 |-------|---------|----------|
 | No shell injection | `grep -rn "execSync\`" connectors/` | 0 results |
 | TypeScript | `pnpm typecheck` | 0 errors |
-| Agent tests | `pnpm --filter @anvay/agent test` | All green |
-| Gateway tests | `pnpm --filter anvay-gateway test` | All green |
-| Web tests | `pnpm --filter @anvay/web test` | All green |
+| Agent tests | `pnpm --filter @anway/agent test` | All green |
+| Gateway tests | `pnpm --filter anway-gateway test` | All green |
+| Web tests | `pnpm --filter @anway/web test` | All green |
 | Docker build | `docker compose -f infra/docker-compose.yml build` | Exit 0 |
 | Stack healthy | `docker compose -f infra/docker-compose.yml up -d` | All services healthy |
 | Gateway health | `curl http://localhost:4000/health` | `{"status":"ok"}` |

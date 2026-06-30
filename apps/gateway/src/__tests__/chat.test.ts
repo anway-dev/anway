@@ -3,7 +3,7 @@ import {
   createOrchestrator,
   runSession,
   AgentPerimeter,
-} from '@anvay/agent'
+} from '@anway/agent'
 import type {
   IModelProvider,
   IAuditSink,
@@ -15,10 +15,10 @@ import type {
   InferenceOptions,
   ChatResponse,
   ToolCall,
-} from '@anvay/agent'
-import type { StreamChunk } from '@anvay/agent'
-import { TenantId, UserId, SessionId } from '@anvay/types'
-import type { Message } from '@anvay/types'
+} from '@anway/agent'
+import type { StreamChunk } from '@anway/agent'
+import { TenantId, UserId, SessionId } from '@anway/types'
+import type { Message } from '@anway/types'
 import { resolveProviderConfig } from '../routes/chat.js'
 
 const providerEnvKeys = [

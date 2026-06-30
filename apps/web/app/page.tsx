@@ -33,7 +33,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 type View = "chat" | "alerts" | "routing" | "lifecycle" | "editor" | "kb" | "workflow" | "approvals" | "api" | "connectors" | "audit" | "access" | "k8s" | "cloud" | "incident" | "catalog" | "automations" | "settings" | "projects" | "pipeline" | "environments";
 
 const NAV: { id: View; label: string; icon: string }[] = [
-  { id: "chat",        label: "Anvay",        icon: "✦" },
+  { id: "chat",        label: "Anway",        icon: "✦" },
   { id: "alerts",      label: "Signals",      icon: "◎" },
   { id: "incident",    label: "War Room",     icon: "⚠" },
   { id: "catalog",     label: "Services",     icon: "⬢" },
@@ -92,7 +92,7 @@ export default function App() {
   const [criticalCount, setCriticalCount] = useState(0);
   const [activeIncidents, setActiveIncidents] = useState(0);
   const [cloudIssues, setCloudIssues] = useState(0);
-  const [workspaceName, setWorkspaceName] = useState("Anvay");
+  const [workspaceName, setWorkspaceName] = useState("Anway");
   const [connectorCount, setConnectorCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -133,7 +133,7 @@ export default function App() {
       .then(list => {
         const count = list.filter(c => c.connected).length
         setConnectorCount(count)
-        if (count === 0 && typeof window !== 'undefined' && !localStorage.getItem('anvay-onboarding-dismissed')) {
+        if (count === 0 && typeof window !== 'undefined' && !localStorage.getItem('anway-onboarding-dismissed')) {
           setShowOnboarding(true)
         }
       })
@@ -184,7 +184,7 @@ export default function App() {
             <div style={{ width: "24px", height: "24px", background: "#10b981", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 900, color: "#000" }}>
               A
             </div>
-            <span style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", letterSpacing: "-0.02em" }}>anvay</span>
+            <span style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", letterSpacing: "-0.02em" }}>anway</span>
             <span style={{ fontSize: "10px", background: "#1a2a1a", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)", padding: "1px 5px", borderRadius: "3px", marginLeft: "2px" }}>
               beta
             </span>
@@ -301,7 +301,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minWidth: 0 }}>
         {/* View area */}
         <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
-          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat initialContext={orchestratorContext} onContextConsumed={() => setOrchestratorContext(undefined)} onNavigate={(v: string) => setView(v as View)} onFirstMessage={() => { localStorage.setItem('anvay-onboarding-dismissed', '1'); setShowOnboarding(false); }} /></ErrorBoundary>}
+          {view === "chat" && <ErrorBoundary viewName="Orchestrator"><OrchestratorChat initialContext={orchestratorContext} onContextConsumed={() => setOrchestratorContext(undefined)} onNavigate={(v: string) => setView(v as View)} onFirstMessage={() => { localStorage.setItem('anway-onboarding-dismissed', '1'); setShowOnboarding(false); }} /></ErrorBoundary>}
           {view === "alerts" && <ErrorBoundary viewName="Signals"><AlertsView onTriggerOrchestrator={handleTriggerOrchestrator} onGoToConnectors={() => setView("connectors")} /></ErrorBoundary>}
           {view === "routing" && <ErrorBoundary viewName="Routing"><IntakeView /></ErrorBoundary>}
           {view === "kb" && <ErrorBoundary viewName="Knowledge"><KbView /></ErrorBoundary>}
@@ -337,7 +337,7 @@ export default function App() {
     </EnvProvider>
     {showOnboarding && (
       <OnboardingModal
-        onDismiss={() => { localStorage.setItem('anvay-onboarding-dismissed', '1'); setShowOnboarding(false); }}
+        onDismiss={() => { localStorage.setItem('anway-onboarding-dismissed', '1'); setShowOnboarding(false); }}
         onGoToConnectors={() => { setView('connectors'); setShowOnboarding(false); }}
         onGoToChat={() => { setView('chat'); setShowOnboarding(false); }}
       />

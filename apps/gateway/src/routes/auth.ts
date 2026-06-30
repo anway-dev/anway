@@ -28,7 +28,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/demo', async (request, reply) => {
     if (process.env['DEMO_MODE'] !== 'true') return reply.code(404).send({ error: 'not found' })
     const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
-    const DEMO_EMAIL = 'admin@demo.anvay.dev'
+    const DEMO_EMAIL = 'admin@demo.anway.dev'
     let user: { id: string; role: string } | null = null
     try {
       const rows = await prisma.$queryRaw<{ id: string; role: string }[]>`

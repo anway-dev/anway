@@ -2,12 +2,12 @@
 # Equivalent to AWS RDS automated backups + ElastiCache snapshots.
 
 # PostgreSQL Flexible Server automated backups are configured inline:
-#   azurerm_postgresql_flexible_server.anvay_primary.backup_retention_days = 7
-#   azurerm_postgresql_flexible_server.anvay_primary.geo_redundant_backup_enabled = true
+#   azurerm_postgresql_flexible_server.anway_primary.backup_retention_days = 7
+#   azurerm_postgresql_flexible_server.anway_primary.geo_redundant_backup_enabled = true
 
 # Azure Cache for Redis (equivalent to ElastiCache):
-# resource "azurerm_redis_cache" "anvay_redis" {
-#   name                = "anvay-redis"
+# resource "azurerm_redis_cache" "anway_redis" {
+#   name                = "anway-redis"
 #   resource_group_name = var.az_resource_group
 #   location            = var.az_location
 #   capacity            = 1

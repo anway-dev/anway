@@ -1,30 +1,30 @@
-# Anvay Operations
+# Anway Operations
 
-Anvay monitors and remediates itself. Manual runbooks are not maintained here.
+Anway monitors and remediates itself. Manual runbooks are not maintained here.
 
-## If Anvay is unreachable
+## If Anway is unreachable
 
-Anvay is down — use these bootstrap-only commands to bring it back:
+Anway is down — use these bootstrap-only commands to bring it back:
 
 ```bash
 # Check pod status
-kubectl get pods -n anvay
+kubectl get pods -n anway
 
 # Check gateway logs
-kubectl logs -n anvay deploy/anvay-gateway --tail=50
+kubectl logs -n anway deploy/anway-gateway --tail=50
 
 # Roll back to last known good release
-helm rollback anvay -n anvay
+helm rollback anway -n anway
 
 # Re-run migrations (idempotent)
-kubectl run migrate-recovery --image=<REGISTRY>/anvay-gateway:<SHA> \
-  --namespace anvay --restart=Never --rm --attach \
+kubectl run migrate-recovery --image=<REGISTRY>/anway-gateway:<SHA> \
+  --namespace anway --restart=Never --rm --attach \
   -- npx prisma migrate deploy
 
 # Health check
-curl https://anvay.yourdomain.com/health/ready
+curl https://anway.yourdomain.com/health/ready
 ```
 
 ## Everything else
 
-Open Anvay → War Room. The SRE agent has already triaged it.
+Open Anway → War Room. The SRE agent has already triaged it.

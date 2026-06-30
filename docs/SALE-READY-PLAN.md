@@ -18,7 +18,7 @@ vendor review) after Phases 1–5.
    - Bare-named harness tools must be added to the perimeter builtin allowlist.
    - Write-action tool names must match `WRITE_ACTION_PATTERNS` in
      `packages/agent/src/gate/gate.ts` or extend the patterns.
-6. **Webhook senders** authenticate with `ANVAY_WEBHOOK_TOKEN` (see
+6. **Webhook senders** authenticate with `ANWAY_WEBHOOK_TOKEN` (see
    `apps/gateway/src/routes/events.ts`), never JWT.
 7. Every new feature gets a certification test appended to
    `apps/web/e2e/99-certification.spec.ts` (success path, no escape hatches).
@@ -32,7 +32,7 @@ Statuses: `[ ]` open · `[~]` in progress · `[x]` done · `[B]` blocked.
 
 ### S1. Encrypt connector credentials at rest
 - `[ ]` **S1.1** Create `apps/gateway/src/utils/crypto.ts`: `encryptJson(obj): string` /
-  `decryptJson(str): obj` using AES-256-GCM, key from `ANVAY_ENCRYPTION_KEY` env
+  `decryptJson(str): obj` using AES-256-GCM, key from `ANWAY_ENCRYPTION_KEY` env
   (32-byte base64). Format: `v1:<iv-b64>:<tag-b64>:<ciphertext-b64>`. Throw at startup
   in production if key missing. Unit tests: roundtrip, tamper detection, missing key.
 - `[ ]` **S1.2** Migration `0023_encrypted_credentials`: add `credentials_enc TEXT` to
@@ -74,7 +74,7 @@ Statuses: `[ ]` open · `[~]` in progress · `[x]` done · `[B]` blocked.
   unconfigured. Unit tests with mocked issuer.
 - `[ ]` **S3.2** Login page: when `GET /auth/oidc/status` reports configured, show
   "Sign in with SSO" button above the email form; clicking navigates to
-  `/auth/oidc/login?redirect=<path>`. Callback must set the `anvay_token` cookie via
+  `/auth/oidc/login?redirect=<path>`. Callback must set the `anway_token` cookie via
   existing `/api/auth/set-token` flow (gateway redirects to
   `web/login/sso-complete#token=...`; page posts token to set-token then routes home).
 - `[ ]` **S3.3** Cert test (skipped unless `OIDC_ISSUER_URL` set): status endpoint shape;
@@ -205,7 +205,7 @@ launchdarkly, notion): same recipe, P2 — only after C1–C10 certified.
   scale + nginx).
 - `[ ]` **O2** Graceful shutdown + readiness: SIGTERM drains SSE streams, BullMQ worker
   close, Redis quit. `/health/ready` returns 503 during drain. Unit test.
-- `[ ]` **O3** Helm chart `infra/helm/anvay/`: gateway, web, agent-service, BullMQ
+- `[ ]` **O3** Helm chart `infra/helm/anway/`: gateway, web, agent-service, BullMQ
   worker split-out optional; values for replicas, resources, secrets via existing env
   names. `helm template` lint in CI.
 - `[ ]` **O4** Load baseline: `scripts/load/k6-chat.js` (50 VU chat, 500 VU events

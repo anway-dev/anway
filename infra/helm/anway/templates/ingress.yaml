@@ -9,10 +9,10 @@ spec:
   ingressClassName: nginx
   tls:
   - hosts:
-    - {{ .Values.ingress.host | default "anvay.local" }}
+    - {{ .Values.ingress.host | default "anway.local" }}
     secretName: {{ .Release.Name }}-tls
   rules:
-  - host: {{ .Values.ingress.host | default "anvay.local" }}
+  - host: {{ .Values.ingress.host | default "anway.local" }}
     http:
       paths:
       - path: /

@@ -3,7 +3,7 @@ import type { APIRequestContext, BrowserContext } from '@playwright/test'
 export const GATEWAY = 'http://127.0.0.1:8510'
 export const WEB = 'http://localhost:8500'
 export const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
-export const DEMO_EMAIL = 'admin@demo.anvay.dev'
+export const DEMO_EMAIL = 'admin@demo.anway.dev'
 
 // Auth via demo login — requires DEMO_MODE=true on gateway
 export async function getToken(request: APIRequestContext): Promise<string> {
@@ -24,11 +24,11 @@ async function loginAs(request: APIRequestContext, email: string, password: stri
 }
 
 export async function getToken2(request: APIRequestContext): Promise<string> {
-  return loginAs(request, process.env['E2E_USER2_EMAIL'] ?? 'sre@demo.anvay.dev', process.env['E2E_USER2_PASSWORD'] ?? '')
+  return loginAs(request, process.env['E2E_USER2_EMAIL'] ?? 'sre@demo.anway.dev', process.env['E2E_USER2_PASSWORD'] ?? '')
 }
 
 export async function getToken3(request: APIRequestContext): Promise<string> {
-  return loginAs(request, process.env['E2E_USER3_EMAIL'] ?? 'dev@demo.anvay.dev', process.env['E2E_USER3_PASSWORD'] ?? '')
+  return loginAs(request, process.env['E2E_USER3_EMAIL'] ?? 'dev@demo.anway.dev', process.env['E2E_USER3_PASSWORD'] ?? '')
 }
 
 export async function authHeaders(request: APIRequestContext): Promise<Record<string, string>> {
@@ -51,7 +51,7 @@ export async function setAuthCookie(context: BrowserContext): Promise<void> {
   const token = await getToken(context.request)
   if (token) {
     await context.addCookies([{
-      name: 'anvay_token',
+      name: 'anway_token',
       value: token,
       domain: 'localhost',
       path: '/',

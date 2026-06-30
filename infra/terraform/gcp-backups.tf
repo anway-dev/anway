@@ -2,7 +2,7 @@
 # Equivalent to AWS RDS automated backups + ElastiCache snapshots.
 
 # Cloud SQL automated backups are configured inline on the instance:
-#   google_sql_database_instance.anvay_primary.settings.backup_configuration {
+#   google_sql_database_instance.anway_primary.settings.backup_configuration {
 #     enabled                        = true
 #     point_in_time_recovery_enabled = true
 #     backup_retention_settings {
@@ -11,8 +11,8 @@
 #   }
 
 # Memorystore for Redis (equivalent to ElastiCache):
-# resource "google_redis_instance" "anvay_redis" {
-#   name               = "anvay-redis"
+# resource "google_redis_instance" "anway_redis" {
+#   name               = "anway-redis"
 #   tier               = "STANDARD_HA"
 #   memory_size_gb     = 1
 #   region             = var.gcp_region

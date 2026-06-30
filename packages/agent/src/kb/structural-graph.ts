@@ -1,4 +1,4 @@
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type {
   IKnowledgeGraph,
   Entity,

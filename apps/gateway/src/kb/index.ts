@@ -1,8 +1,8 @@
-import { StructuralGraph, createPostgresQueryFn, HybridKnowledgeGraph, GraphitiClient } from '@anvay/agent'
-import type { PgPoolLike, IKnowledgeGraph } from '@anvay/agent'
+import { StructuralGraph, createPostgresQueryFn, HybridKnowledgeGraph, GraphitiClient } from '@anway/agent'
+import type { PgPoolLike, IKnowledgeGraph } from '@anway/agent'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 /**
  * Returns the IKnowledgeGraph implementation for the given tenant.

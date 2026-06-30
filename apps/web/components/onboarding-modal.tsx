@@ -28,7 +28,7 @@ export function OnboardingModal({ onDismiss, onGoToConnectors, onGoToChat }: Onb
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: "13px", fontWeight: 900, color: "#000",
           }}>A</div>
-          <span style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", letterSpacing: "-0.02em" }}>anvay</span>
+          <span style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5", letterSpacing: "-0.02em" }}>anway</span>
           {step > 1 && (
             <span style={{ marginLeft: "auto", fontSize: "11px", color: "#555", fontFamily: "monospace" }}>
               Step {step} of 3
@@ -54,7 +54,7 @@ export function OnboardingModal({ onDismiss, onGoToConnectors, onGoToChat }: Onb
               Connect your first connector
             </div>
             <div style={{ fontSize: "12px", color: "#888", lineHeight: "1.7", marginBottom: "16px" }}>
-              Anvay integrates with your existing tools — GitHub, Datadog, Linear, K8s, ArgoCD, and more.
+              Anway integrates with your existing tools — GitHub, Datadog, Linear, K8s, ArgoCD, and more.
               Start by connecting a connector to build your knowledge graph.
             </div>
             <button
@@ -87,7 +87,7 @@ export function OnboardingModal({ onDismiss, onGoToConnectors, onGoToChat }: Onb
               Bootstrap your knowledge graph
             </div>
             <div style={{ fontSize: "12px", color: "#888", lineHeight: "1.7", marginBottom: "16px" }}>
-              Anvay scans your connected tools to build an intelligent knowledge graph — services,
+              Anway scans your connected tools to build an intelligent knowledge graph — services,
               repos, teams, deploys, and incidents linked together. This powers every query you make.
             </div>
             <div style={{
@@ -132,11 +132,11 @@ export function OnboardingModal({ onDismiss, onGoToConnectors, onGoToChat }: Onb
         {step === 3 && (
           <div>
             <div style={{ fontSize: "16px", fontWeight: 700, color: "#e5e5e5", marginBottom: "8px" }}>
-              Start chatting with Anvay
+              Start chatting with Anway
             </div>
             <div style={{ fontSize: "12px", color: "#888", lineHeight: "1.7", marginBottom: "16px" }}>
               Ask questions about your infrastructure, debug incidents, review PRs, check deployments —
-              all from one surface. Anvay orchestrates agents across all your tools.
+              all from one surface. Anway orchestrates agents across all your tools.
             </div>
             <button
               onClick={() => { onGoToChat(); }}

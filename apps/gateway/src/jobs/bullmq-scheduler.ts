@@ -1,7 +1,7 @@
 // BullMQ scheduler — persistent, retry-capable, Redis-backed.
 // Replaces node-cron per CLAUDE.md §11 locked decision.
 import { Queue, Worker } from 'bullmq'
-import type { IScheduler, ScheduledJob } from '@anvay/agent'
+import type { IScheduler, ScheduledJob } from '@anway/agent'
 
 export class BullMQScheduler implements IScheduler {
   private readonly queue: Queue

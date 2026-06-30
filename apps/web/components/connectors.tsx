@@ -255,7 +255,7 @@ export function ConnectorsView() {
           >{connected} / {catalog.length} connected</span>
         </div>
         <p style={{ fontSize: "12px", color: "#888", marginTop: "6px", maxWidth: "520px" }}>
-          Anvay reads from your existing tools — no data migration, no rip-and-replace. Connect once, get unified lifecycle visibility.
+          Anway reads from your existing tools — no data migration, no rip-and-replace. Connect once, get unified lifecycle visibility.
         </p>
       </div>
 
@@ -331,7 +331,7 @@ export function ConnectorsView() {
           <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: "12px", padding: "24px", width: "440px", maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
             <div style={{ marginBottom: "16px" }}>
               <div style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5" }}>Namespace Filter — {nsModal.connectorName}</div>
-              <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>Select which namespaces Anvay monitors. Discovered after bootstrap.</div>
+              <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>Select which namespaces Anway monitors. Discovered after bootstrap.</div>
             </div>
 
             {nsModal.namespaces.length === 0 ? (
@@ -439,7 +439,7 @@ export function ConnectorsView() {
 
             <div style={{ display: "flex", gap: "8px", fontSize: "11px", color: "#555", marginBottom: "14px", alignItems: "flex-start" }}>
               <span>🔒</span>
-              <span>Credentials are encrypted at rest. Anvay only reads — it never writes to your tools unless a workflow hook explicitly requires it.</span>
+              <span>Credentials are encrypted at rest. Anway only reads — it never writes to your tools unless a workflow hook explicitly requires it.</span>
             </div>
 
             {/* Connectivity test */}

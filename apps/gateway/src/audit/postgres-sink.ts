@@ -1,4 +1,4 @@
-import type { AuditEvent, IAuditSink } from '@anvay/agent'
+import type { AuditEvent, IAuditSink } from '@anway/agent'
 import type { PrismaClient } from '@prisma/client'
 import { withTenant } from '../db/prisma.js'
 import { isValidUUID } from '../utils/validators.js'

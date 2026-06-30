@@ -1,5 +1,5 @@
 import { createClient } from 'redis'
-import type { IGateSink, GateEvent } from '@anvay/agent'
+import type { IGateSink, GateEvent } from '@anway/agent'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import pino from 'pino'

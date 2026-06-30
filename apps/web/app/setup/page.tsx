@@ -71,7 +71,7 @@ export default function SetupPage() {
         border: '1px solid #1a1a1a', borderRadius: '12px',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>anvay</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>anway</div>
           <div style={{ fontSize: '15px', fontWeight: 600, color: '#e5e5e5', marginBottom: '6px' }}>Set up your workspace</div>
           <div style={{ fontSize: '12px', color: '#555' }}>First-time setup. Creates your organization and admin account.</div>
         </div>

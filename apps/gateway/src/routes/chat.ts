@@ -9,7 +9,7 @@ import {
   AgentPerimeter,
   RedisSessionMemory,
   MemoryFactory,
-} from '@anvay/agent'
+} from '@anway/agent'
 import type {
   UserPerimeter,
   ConnectorManifest,
@@ -19,14 +19,14 @@ import type {
   SessionMeta,
   ConversationTurn,
   SessionContext,
-} from '@anvay/agent'
-import type { ProviderConfig } from '@anvay/agent'
-import { TenantId, UserId, SessionId } from '@anvay/types'
-import type { AgentRole } from '@anvay/types'
+} from '@anway/agent'
+import type { ProviderConfig } from '@anway/agent'
+import { TenantId, UserId, SessionId } from '@anway/types'
+import type { AgentRole } from '@anway/types'
 import type { PrismaClient } from '@prisma/client'
 import { prisma } from '../db/client.js'
-import { StructuralGraph } from '@anvay/agent'
-import type { IKnowledgeGraph } from '@anvay/agent'
+import { StructuralGraph } from '@anway/agent'
+import type { IKnowledgeGraph } from '@anway/agent'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'

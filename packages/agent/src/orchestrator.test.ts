@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { SessionId, TenantId, UserId, Message } from '@anvay/types'
-import type { StreamEvent } from '@anvay/types'
+import { SessionId, TenantId, UserId, Message } from '@anway/types'
+import type { StreamEvent } from '@anway/types'
 import type { IAuditSink, AuditEvent } from './interfaces/audit.js'
 import type { IModelProvider, ChatResponse } from './interfaces/provider.js'
 import type { ISessionMemory, SessionContext, ConversationTurn } from './interfaces/memory.js'

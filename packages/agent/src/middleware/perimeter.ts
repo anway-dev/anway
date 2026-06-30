@@ -1,4 +1,4 @@
-import type { SessionId, TenantId, UserId } from '@anvay/types'
+import type { SessionId, TenantId, UserId } from '@anway/types'
 import type { IAuditSink } from '../interfaces/audit.js'
 import type { ToolCall } from '../interfaces/provider.js'
 import type { HardBlock } from '../perimeter/engine.js'

@@ -1,7 +1,7 @@
 variable "app_name" {
   description = "Application name prefix for all resources"
   type        = string
-  default     = "anvay"
+  default     = "anway"
 }
 
 variable "environment" {
@@ -25,26 +25,26 @@ variable "postgres_password" {
   description = "PostgreSQL password"
   type        = string
   sensitive   = true
-  default     = "anvay"
+  default     = "anway"
 }
 
 variable "neo4j_password" {
   description = "Neo4j password"
   type        = string
   sensitive   = true
-  default     = "anvaypassword"
+  default     = "anwaypassword"
 }
 
 variable "gateway_image" {
   description = "Gateway container image"
   type        = string
-  default     = "anvay/gateway:latest"
+  default     = "anway/gateway:latest"
 }
 
 variable "web_image" {
   description = "Web container image"
   type        = string
-  default     = "anvay/web:latest"
+  default     = "anway/web:latest"
 }
 
 variable "gateway_replicas" {

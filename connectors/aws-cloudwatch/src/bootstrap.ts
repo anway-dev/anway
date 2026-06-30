@@ -1,6 +1,6 @@
 import { execSync } from 'child_process'
-import type { IConnectorBootstrap, ConnectorBootstrapResult, IKnowledgeGraph } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { IConnectorBootstrap, ConnectorBootstrapResult, IKnowledgeGraph } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 
 interface AwsCredentials {
   accessKeyId?: string

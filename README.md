@@ -1,4 +1,4 @@
-# Anvay
+# Anway
 
 **The central nervous system of a software organisation.**
 
@@ -26,7 +26,7 @@ apps/
   web/           Next.js UI (port 3000)
   gateway/       Fastify BFF — auth, RBAC, audit, connector proxy (port 4000)
   agent-service/ Python FastAPI — LLM inference, episodic graph (port 8000)
-  cli/           anvay CLI
+  cli/           anway CLI
 
 packages/
   agent/         Orchestrator harness, specialist agents, IModelProvider
@@ -37,7 +37,7 @@ packages/
 infra/
   docker-compose.yml      Dev dependencies (Postgres, Redis, Neo4j)
   docker-compose.dev.yml  Extended dev stack (Prometheus, Grafana, OTEL)
-  helm/anvay/             Production Helm chart
+  helm/anway/             Production Helm chart
   terraform/              AWS / GCP / Azure Terraform modules
 ```
 
@@ -70,7 +70,7 @@ infra/
 
 ```bash
 git clone <repo>
-cd anvay
+cd anway
 pnpm install
 ```
 
@@ -174,7 +174,7 @@ The demo tenant (ID `00000000-0000-0000-0000-000000000001`) is populated by the 
 
 | Variable | Example | Purpose |
 |----------|---------|---------|
-| `DATABASE_URL` | `postgresql://anvay:pass@host:5432/anvay` | Postgres connection |
+| `DATABASE_URL` | `postgresql://anway:pass@host:5432/anway` | Postgres connection |
 | `JWT_SECRET` | 64 random chars | HS256 signing secret (dev only) |
 | `JWT_PRIVATE_KEY` | RSA PEM | RS256 private key (production — use instead of JWT_SECRET) |
 | `JWT_PUBLIC_KEY` | RSA PEM | RS256 public key |
@@ -205,7 +205,7 @@ The demo tenant (ID `00000000-0000-0000-0000-000000000001`) is populated by the 
 | `SLACK_SIGNING_SECRET` | — | ChatOps slash commands |
 | `GITHUB_WEBHOOK_SECRET` | — | Webhook HMAC verification |
 | `DD_WEBHOOK_SECRET` | — | Datadog webhook HMAC |
-| `ANVAY_WEBHOOK_TOKEN` | — | Static bearer token for Alertmanager / CI |
+| `ANWAY_WEBHOOK_TOKEN` | — | Static bearer token for Alertmanager / CI |
 | `ALLOW_DEV_TOKEN` | `false` | Accept `dev-token` header (e2e tests only) |
 
 **Connector API keys:**
@@ -266,8 +266,8 @@ The certification spec (`99-certification.spec.ts`) is the gate — it verifies 
 
 ```bash
 # Build images
-docker build -t anvay-gateway:latest apps/gateway
-docker build -t anvay-web:latest apps/web
+docker build -t anway-gateway:latest apps/gateway
+docker build -t anway-web:latest apps/web
 
 # Configure
 cp apps/gateway/.env.example apps/gateway/.env.prod
@@ -281,29 +281,29 @@ docker compose -f infra/docker-compose.yml \
 
 ### Option B — Kubernetes (Helm)
 
-The Helm chart at `infra/helm/anvay/` includes: gateway deployment, web deployment, HPA (2–10 pods, CPU 70%), PDB (minAvailable: 1), NetworkPolicy, Ingress (nginx), ServiceAccount with IRSA annotations.
+The Helm chart at `infra/helm/anway/` includes: gateway deployment, web deployment, HPA (2–10 pods, CPU 70%), PDB (minAvailable: 1), NetworkPolicy, Ingress (nginx), ServiceAccount with IRSA annotations.
 
 ```bash
 # 1. Create namespace
-kubectl create namespace anvay
+kubectl create namespace anway
 
 # 2. Create secrets
-kubectl create secret generic anvay-secrets \
-  --namespace anvay \
+kubectl create secret generic anway-secrets \
+  --namespace anway \
   --from-literal=database-url="postgresql://..." \
   --from-literal=redis-url="redis://..." \
   --from-literal=jwt-private-key="$(cat jwt.key)" \
   --from-literal=jwt-public-key="$(cat jwt.key.pub)"
 
 # 3. Install chart
-helm install anvay infra/helm/anvay \
-  --namespace anvay \
+helm install anway infra/helm/anway \
+  --namespace anway \
   --set gateway.image.tag=<version> \
   --set web.image.tag=<version> \
-  --set ingress.host=anvay.yourdomain.com
+  --set ingress.host=anway.yourdomain.com
 
 # 4. Run migrations (Job)
-kubectl apply -f infra/k8s/migrate-job.yaml -n anvay
+kubectl apply -f infra/k8s/migrate-job.yaml -n anway
 ```
 
 ### Option C — Terraform (AWS EKS)
@@ -335,7 +335,7 @@ This provisions: EKS cluster, RDS PostgreSQL (Multi-AZ in prod), ElastiCache Red
 [ ] SENTRY_DSN configured for error tracking
 [ ] OTEL collector reachable if telemetry required
 [ ] Connector API keys rotated from dev defaults
-[ ] ANVAY_WEBHOOK_TOKEN set and matches alertmanager/CI config
+[ ] ANWAY_WEBHOOK_TOKEN set and matches alertmanager/CI config
 [ ] RDS automated backups enabled (Terraform does this automatically)
 ```
 
@@ -361,14 +361,14 @@ Roles are set at user provisioning time via the Access view or API.
 
 ### SSO (OIDC)
 
-Anvay supports any OIDC-compliant provider (Azure AD, Okta, Google Workspace, Keycloak, Dex).
+Anway supports any OIDC-compliant provider (Azure AD, Okta, Google Workspace, Keycloak, Dex).
 
 ```env
 OIDC_ISSUER_URL=https://login.microsoftonline.com/<tenant>/v2.0
 OIDC_CLIENT_ID=<app-id>
 OIDC_CLIENT_SECRET=<secret>
-OIDC_REDIRECT_URI=https://anvay.yourdomain.com/auth/oidc/callback
-OIDC_TENANT_ID=<anvay-tenant-uuid>
+OIDC_REDIRECT_URI=https://anway.yourdomain.com/auth/oidc/callback
+OIDC_TENANT_ID=<anway-tenant-uuid>
 ```
 
 For local testing, the demo compose stack includes Dex (`infra/demo/dex/`) as a mock OIDC provider.

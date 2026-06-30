@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import { Prisma } from '@prisma/client'
-import type { GraphEvent } from '@anvay/agent'
-import { GraphBuilderAgent } from '@anvay/agent'
-import { ProviderFactory } from '@anvay/agent'
-import type { IModelProvider, ProviderConfig } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { GraphEvent } from '@anway/agent'
+import { GraphBuilderAgent } from '@anway/agent'
+import { ProviderFactory } from '@anway/agent'
+import type { IModelProvider, ProviderConfig } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 import { createKnowledgeGraph } from '../kb/index.js'
 import { decryptJson } from '../utils/crypto.js'
 import { prisma } from '../db/client.js'
@@ -258,7 +258,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
       // For deploy_trigger: create a pipeline + pending gate so the UI surfaces the approval
       if (event.type === 'deploy_trigger') {
-        const dt = event as import('@anvay/agent').DeployTrigger
+        const dt = event as import('@anway/agent').DeployTrigger
         const pipelineName = `Deploy ${dt.service}:${dt.sha.slice(0, 7)} → ${dt.environment}`
         const stages = [
           { id: 'gate.deploy', name: '→ Deploy', icon: '⊡', color: '#f59e0b', type: 'gate', gate: true, env: null },

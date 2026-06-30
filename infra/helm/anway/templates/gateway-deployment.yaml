@@ -65,7 +65,7 @@ spec:
       volumes:
         - name: promtail-config
           configMap:
-            name: {{ include "anvay.fullname" . }}-promtail
+            name: {{ include "anway.fullname" . }}-promtail
         - name: varlog
           emptyDir: {}
       {{- end }}

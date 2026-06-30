@@ -3,7 +3,7 @@ import { GraphBuilderAgent } from './builder.js'
 import type { GraphEvent, PrMerged, DeployCompleted, IncidentCreated, TicketCreated } from './events.js'
 import type { IKnowledgeGraph, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
 import type { IModelProvider, ChatResponse } from '../interfaces/provider.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 function makeMockKG(): IKnowledgeGraph {
   const entities = new Map<string, string>() // name → id

@@ -16,7 +16,7 @@ export function startTelemetry(): void {
 
   sdk = new NodeSDK({
     resource: new Resource({
-      'service.name': process.env.OTEL_SERVICE_NAME ?? 'anvay-gateway',
+      'service.name': process.env.OTEL_SERVICE_NAME ?? 'anway-gateway',
       'service.version': process.env.APP_VERSION ?? '0.0.1',
     }),
     traceExporter: exporter,

@@ -70,8 +70,8 @@ const MODE_LABEL: Record<IntakeMode, string> = { bypass: "Bypass", monitor: "Mon
 const MODE_COLOR: Record<IntakeMode, string> = { bypass: "#555", monitor: "#3b82f6", handle: "#10b981" };
 const MODE_DESC: Record<IntakeMode, string> = {
   bypass:  "Signals pass through to your existing escalation policy unchanged.",
-  monitor: "Anvay observes and logs signals but does not intercept or respond.",
-  handle:  "Anvay triages and surfaces root cause context to your team. Human decides on action — no auto-resolution.",
+  monitor: "Anway observes and logs signals but does not intercept or respond.",
+  handle:  "Anway triages and surfaces root cause context to your team. Human decides on action — no auto-resolution.",
 };
 
 const DISP_COLOR: Record<string, string> = { context_surfaced: "#10b981", escalated: "#f59e0b", suppressed: "#555", open: "#3b82f6" };
@@ -123,7 +123,7 @@ function SourceCard({ source, selected, onClick }: { source: IntakeSource; selec
 
 function ConfigPanel({ source }: { source: IntakeSource }) {
   const [mode, setMode] = useState<IntakeMode>(() => {
-    try { return (localStorage.getItem('anvay-routing-mode') ?? source.mode) as IntakeMode; }
+    try { return (localStorage.getItem('anway-routing-mode') ?? source.mode) as IntakeMode; }
     catch { return source.mode; }
   });
   const [threshold, setThreshold] = useState(source.confidenceThreshold);
@@ -133,11 +133,11 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
 
   const handleModeChange = (m: IntakeMode) => {
     setMode(m);
-    try { localStorage.setItem('anvay-routing-mode', m); } catch { /* ignore */ }
+    try { localStorage.setItem('anway-routing-mode', m); } catch { /* ignore */ }
   };
 
   const handleCopyWebhook = () => {
-    const webhookUrl = `https://app.anvay.io${source.webhookPath}`;
+    const webhookUrl = `https://app.anway.io${source.webhookPath}`;
     navigator.clipboard.writeText(webhookUrl).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -146,7 +146,7 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
 
   const handleSave = () => {
     try {
-      localStorage.setItem('anvay-routing-config', JSON.stringify({ mode, threshold, escalationPolicy }));
+      localStorage.setItem('anway-routing-config', JSON.stringify({ mode, threshold, escalationPolicy }));
     } catch { /* ignore */ }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -211,7 +211,7 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
             <span>0.99 — high confidence only</span>
           </div>
           <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>
-            Signals with confidence ≥ <span style={{ color: "#10b981" }}>{threshold.toFixed(2)}</span>: Anvay surfaces root cause + recommended action.
+            Signals with confidence ≥ <span style={{ color: "#10b981" }}>{threshold.toFixed(2)}</span>: Anway surfaces root cause + recommended action.
             Below threshold → escalated directly to <span style={{ color: "#888" }}>{escalationPolicy}</span> with partial context.
           </div>
         </div>
@@ -238,7 +238,7 @@ function ConfigPanel({ source }: { source: IntakeSource }) {
         <div style={{ background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "6px", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
           <div style={{ width: "5px", height: "5px", borderRadius: "50%", flexShrink: 0, background: source.webhookConfigured ? "#10b981" : "#555" }} />
           <code style={{ flex: 1, fontSize: "11px", fontFamily: "monospace", color: source.webhookConfigured ? "#d1d5db" : "#555" }}>
-            https://app.anvay.io{source.webhookPath}
+            https://app.anway.io{source.webhookPath}
           </code>
           <button onClick={handleCopyWebhook} style={{ background: "none", border: "1px solid #2a2a2a", color: copied ? "#10b981" : "#888", padding: "2px 8px", borderRadius: "4px", fontSize: "10px", cursor: "pointer" }}>
             {copied ? "Copied!" : "Copy"}
@@ -299,7 +299,7 @@ export function IntakeView() {
             <div style={{ fontSize: "11px", color: "#555", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>Signal Routing</div>
             <div style={{ fontSize: "14px", fontWeight: 700, color: "#e5e5e5" }}>Signal Assist</div>
             <div style={{ fontSize: "11px", color: "#555", marginTop: "4px", lineHeight: "1.5" }}>
-              Anvay triages signals and surfaces context. Your team decides what to do.
+              Anway triages signals and surfaces context. Your team decides what to do.
             </div>
           </div>
 

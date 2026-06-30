@@ -2,9 +2,9 @@ import { KubeConfig, CoreV1Api } from '@kubernetes/client-node'
 import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anvay/agent'
-import type { IKnowledgeGraph } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent'
+import type { IKnowledgeGraph } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 
 /**
  * Patches a loaded KubeConfig so it works from inside a Docker container:
@@ -42,7 +42,7 @@ function buildKubeConfig(payload: Record<string, unknown>): { kc: KubeConfig; cl
 
   if (kubeconfig?.trimStart().startsWith('apiVersion')) {
     // Inline YAML — write temp file then load
-    const tmp = join(tmpdir(), `anvay-k8s-${Date.now()}.yaml`)
+    const tmp = join(tmpdir(), `anway-k8s-${Date.now()}.yaml`)
     writeFileSync(tmp, kubeconfig, { mode: 0o600 })
     kc.loadFromFile(tmp)
     patchForContainer(kc)
@@ -58,10 +58,10 @@ function buildKubeConfig(payload: Record<string, unknown>): { kc: KubeConfig; cl
 
   if (server && token) {
     kc.loadFromOptions({
-      clusters: [{ name: 'anvay', server, skipTLSVerify: true }],
-      users: [{ name: 'anvay', token }],
-      contexts: [{ name: 'anvay', cluster: 'anvay', user: 'anvay' }],
-      currentContext: 'anvay',
+      clusters: [{ name: 'anway', server, skipTLSVerify: true }],
+      users: [{ name: 'anway', token }],
+      contexts: [{ name: 'anway', cluster: 'anway', user: 'anway' }],
+      currentContext: 'anway',
     })
     return { kc }
   }

@@ -32,4 +32,4 @@ export function createLogger(context: { service: string; version?: string; env?:
   })
 }
 
-export const logger = createLogger({ service: 'anvay-gateway' })
+export const logger = createLogger({ service: 'anway-gateway' })

@@ -9,10 +9,10 @@ export async function GET(request: Request) {
       headers: { ...(auth ? { Authorization: auth } : {}) },
     })
     if (!resp.ok) {
-      return Response.json({ name: 'Anvay' }, { status: 200 })
+      return Response.json({ name: 'Anway' }, { status: 200 })
     }
     return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })
   } catch {
-    return Response.json({ name: 'Anvay' }, { status: 200 })
+    return Response.json({ name: 'Anway' }, { status: 200 })
   }
 }

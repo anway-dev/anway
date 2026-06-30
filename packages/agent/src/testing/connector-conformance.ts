@@ -15,7 +15,7 @@
  *  4. `episodeHints` non-empty on success — the episodic layer needs text.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type {
   IKnowledgeGraph, EntitySpec, RelationshipSpec, Episode, Fact, Entity, Relationship,
   KBEntry, AgentContext,

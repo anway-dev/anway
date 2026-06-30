@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import type { ExecutableTool } from '@anvay/agent'
+import type { ExecutableTool } from '@anway/agent'
 import { discoverSubcommands } from './discovery.js'
 import type { DiscoveredCommand } from './discovery.js'
 
@@ -17,7 +17,7 @@ export interface CliExecEntry {
 }
 
 /**
- * Generic CLI adapter — wraps any CLI binary as Anvay tools.
+ * Generic CLI adapter — wraps any CLI binary as Anway tools.
  * Allowlist-based: only subcommands in `allowedSubcommands` are exposed.
  * If `allowedSubcommands` is omitted, auto-discovers from `binary --help`.
  *

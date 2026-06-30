@@ -14,7 +14,7 @@ interface EnvContextValue {
   setEnv: (name: string) => void;
   environments: Env[];
   reloadEnvs: () => Promise<void>;
-  // Fetch wrapper — adds X-Anvay-Env header to every request
+  // Fetch wrapper — adds X-Anway-Env header to every request
   apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
@@ -26,7 +26,7 @@ const EnvContext = createContext<EnvContextValue>({
   apiFetch: (url, init) => fetch(url, init),
 });
 
-const STORAGE_KEY = "anvay-env";
+const STORAGE_KEY = "anway-env";
 
 export function EnvProvider({ children }: { children: ReactNode }) {
   const [env, setEnvState] = useState<string>("prod");
@@ -62,7 +62,7 @@ export function EnvProvider({ children }: { children: ReactNode }) {
 
   const apiFetch = useCallback((url: string, init: RequestInit = {}): Promise<Response> => {
     const headers = new Headers(init.headers ?? {});
-    headers.set("X-Anvay-Env", env);
+    headers.set("X-Anway-Env", env);
     return fetch(url, { ...init, headers });
   }, [env]);
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backs up Anvay Postgres + Redis to a timestamped directory.
+# Backs up Anway Postgres + Redis to a timestamped directory.
 # Usage: ./scripts/backup.sh [OUTPUT_DIR]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,7 +7,7 @@ OUT="${1:-$ROOT/backups}/$(date '+%Y%m%d_%H%M%S')"
 mkdir -p "$OUT"
 
 echo "[backup] Postgres → $OUT/postgres.dump"
-pg_dump "${DATABASE_URL:-postgres://anvay:anvay@localhost:5432/anvay}" \
+pg_dump "${DATABASE_URL:-postgres://anway:anway@localhost:5432/anway}" \
   --format=custom --no-owner --no-acl \
   -f "$OUT/postgres.dump"
 

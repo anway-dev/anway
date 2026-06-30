@@ -1,16 +1,16 @@
-# Anvay — Project Context for Claude Code
+# Anway — Project Context for Claude Code
 
 ## What This Is
 
-Anvay is the **central nervous system of a software organisation**.
+Anway is the **central nervous system of a software organisation**.
 
-Every team already has GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty, Terraform, Coralogix, AWS/GCP/Azure — they never talked to each other. Anvay connects all of them as datasources, builds intelligence on top, and gives every person in the org one surface to query, act, and govern the entire software lifecycle.
+Every team already has GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty, Terraform, Coralogix, AWS/GCP/Azure — they never talked to each other. Anway connects all of them as datasources, builds intelligence on top, and gives every person in the org one surface to query, act, and govern the entire software lifecycle.
 
 **We are not a devtool. We are the connective tissue.**
 
 ```
 Before:  Product ←——→ Eng ←——→ SRE   (siloed, context lost at boundaries)
-After:   Product ←—— Anvay ——→ Eng ←—— Anvay ——→ SRE   (one nervous system)
+After:   Product ←—— Anway ——→ Eng ←—— Anway ——→ SRE   (one nervous system)
 ```
 
 Every connector added = more intelligence for the entire org. Network effect within.
@@ -101,7 +101,7 @@ User never picks an agent. Never sees the plumbing. One surface.
 
 ## User Modes
 
-| Role | Example query | What Anvay does |
+| Role | Example query | What Anway does |
 |------|--------------|-----------------|
 | **SRE/Oncall** | "Alert fired — what's the trail?" | Traces root cause across logs/metrics/deploys |
 | **PM** | "Status of Feature X?" | Queries lifecycle graph + Linear + PRs + deploy state |
@@ -318,15 +318,15 @@ Audit feeds intelligence — org-level query patterns, bottleneck detection, usa
 
 **V1 ships read-only by default. Every write action requires explicit user confirmation.**
 
-Rationale: trust is earned incrementally. Users must see Anvay surface accurate context and useful suggestions before they will let it act. Skipping this step and shipping autonomous actions in v1 destroys trust on first mistake.
+Rationale: trust is earned incrementally. Users must see Anway surface accurate context and useful suggestions before they will let it act. Skipping this step and shipping autonomous actions in v1 destroys trust on first mistake.
 
 ### V1 contract
 ```
-Anvay reads from all connected sources.
-Anvay surfaces: root cause, triage context, recommended action.
+Anway reads from all connected sources.
+Anway surfaces: root cause, triage context, recommended action.
 User sees the recommendation.
 User clicks "Apply" / "Confirm" / "Run".
-Only then does Anvay execute the write.
+Only then does Anway execute the write.
 ```
 
 Every write action — PR creation, deploy trigger, pod restart, ticket update, comment — is gated. No exceptions in v1. The gate UI must:
@@ -339,10 +339,10 @@ Every write action — PR creation, deploy trigger, pod restart, ticket update, 
 
 The full autonomy dial (L1→L4) is the product roadmap. V1 is L2 for everything:
 
-- **L1 Assist** (V1 default) — Anvay reads and suggests. Human does the action manually.
-- **L2 Approve** (V1 writes) — Anvay generates + shows gate. Human confirms. Anvay executes.
-- **L3 Supervise** — Anvay executes, human can interrupt. Unlock per-service after trust established.
-- **L4 Autonomous** — Anvay executes within policy bounds, async audit only. Unlock explicitly, never default.
+- **L1 Assist** (V1 default) — Anway reads and suggests. Human does the action manually.
+- **L2 Approve** (V1 writes) — Anway generates + shows gate. Human confirms. Anway executes.
+- **L3 Supervise** — Anway executes, human can interrupt. Unlock per-service after trust established.
+- **L4 Autonomous** — Anway executes within policy bounds, async audit only. Unlock explicitly, never default.
 
 ---
 
@@ -357,20 +357,20 @@ The full autonomy dial (L1→L4) is the product roadmap. V1 is L2 for everything
 
 ### Monorepo Layout
 ```
-anvay/
+anway/
 ├── apps/
 │   ├── web/              # Next.js UI
-│   ├── cli/              # `anvay` CLI
+│   ├── cli/              # `anway` CLI
 │   ├── gateway/          # Fastify BFF — auth, perimeter enforcement
 │   └── agent-service/    # Python FastAPI — LLM inference, embedding
 │
 ├── packages/
-│   ├── agent/            # @anvay/agent — harness SDK, orchestrator core
-│   ├── collection/       # @anvay/collection — file format + runner
-│   ├── repo/             # @anvay/repo — codebase analysis
-│   ├── k8s/              # @anvay/k8s — cluster client
-│   ├── ui/               # @anvay/ui — shared components
-│   └── types/            # @anvay/types — shared TS types
+│   ├── agent/            # @anway/agent — harness SDK, orchestrator core
+│   ├── collection/       # @anway/collection — file format + runner
+│   ├── repo/             # @anway/repo — codebase analysis
+│   ├── k8s/              # @anway/k8s — cluster client
+│   ├── ui/               # @anway/ui — shared components
+│   └── types/            # @anway/types — shared TS types
 │
 ├── infra/                # docker-compose, helm, terraform
 ├── CLAUDE.md
@@ -432,7 +432,7 @@ Mock data only. Purpose: design validation + demos.
 3. ~~Build `WorkflowView`~~ ✓ Done
 4. ~~Build Incident War Room + Service Catalog~~ ✓ Done
 5. ~~Build Automations (triggers + crons)~~ ✓ Done
-6. Build real `@anvay/agent` harness in `packages/agent`
+6. Build real `@anway/agent` harness in `packages/agent`
 7. Wire `/api/chat` + `/api/providers` route handlers for real LLM calls
 
 ### Nav Order (current)
@@ -460,7 +460,7 @@ Mock data only. Purpose: design validation + demos.
 |---------|-------------|----------|
 | **Change Timeline** | Every deploy/PR/config/alert on one horizontal timeline across all connectors. Scrub time → see org state. Answers "what changed before X broke?" | High |
 | **Blast Radius Preview** | Before any L2 write action, show graph of affected services/users/traffic. "Restart pod X → drops 47 active sessions." Reinforces V1 trust. | High |
-| **Proactive Signals Inbox** | Anvay watches overnight. Morning brief: "3 anomalies, 1 deploy stuck, oncall paged twice." Shifts reactive → proactive. | Medium |
+| **Proactive Signals Inbox** | Anway watches overnight. Morning brief: "3 anomalies, 1 deploy stuck, oncall paged twice." Shifts reactive → proactive. | Medium |
 | **SLO Dashboard** | Per-service SLO tracking — error budget burn, 30d trend, Datadog/Prometheus integration. | Medium |
 | **Oncall Handoff View** | Shift-change brief auto-generated. What happened, what's open, what to watch. | Medium |
 
@@ -744,7 +744,7 @@ Every LLM system that operates on org knowledge has two failure modes:
 1. **Context rot** — knowledge that was true 3 weeks ago is served as current fact. Stale deploy state, outdated runbooks, resolved incidents treated as open.
 2. **Hallucination** — the model fills gaps it cannot see with plausible-sounding fabrications. No citation, no timestamp, no way to verify.
 
-Both failures destroy trust faster than no AI at all. Anvay's KB architecture is designed to make both structurally impossible.
+Both failures destroy trust faster than no AI at all. Anway's KB architecture is designed to make both structurally impossible.
 
 ---
 
@@ -758,7 +758,7 @@ L2  Recent events     Indexed from connectors on sync cycle (deploys, PRs, incid
                       TTL: connector-defined (e.g. GitHub: 2 min, Datadog: 1 min)
                       Invalidation: event-driven (deploy event → invalidate deploy state)
 
-L3  Derived knowledge Summaries, root cause analyses, architecture maps built by Anvay agents
+L3  Derived knowledge Summaries, root cause analyses, architecture maps built by Anway agents
                       TTL: explicit — tagged with source events that invalidate it
                       Example: "payments-api architecture" invalidates on next merged PR to that repo
 
@@ -919,7 +919,7 @@ Graphiti extracts entities and relationships from these events and populates Lay
 
 #### Connector Bootstrap Contract
 
-Every connector registered in Anvay MUST provide a bootstrap implementation. This is non-negotiable — no connector ships without it.
+Every connector registered in Anway MUST provide a bootstrap implementation. This is non-negotiable — no connector ships without it.
 
 **Bootstrap runs on:** `connector_registered` event AND `connector_reconnected` event.
 

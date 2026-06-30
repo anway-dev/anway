@@ -1,7 +1,7 @@
 import { Queue, Worker } from 'bullmq'
-import type { GraphEvent } from '@anvay/agent'
-import { GraphBuilderAgent } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { GraphEvent } from '@anway/agent'
+import { GraphBuilderAgent } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 
 const QUEUE_NAME = 'graph-events'
 

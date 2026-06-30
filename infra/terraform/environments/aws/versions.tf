@@ -18,11 +18,11 @@ terraform {
 
   # Uncomment to store state in S3
   # backend "s3" {
-  #   bucket         = "anvay-terraform-state"
+  #   bucket         = "anway-terraform-state"
   #   key            = "aws/terraform.tfstate"
   #   region         = var.aws_region
   #   encrypt        = true
-  #   dynamodb_table = "anvay-terraform-locks"
+  #   dynamodb_table = "anway-terraform-locks"
   # }
 }
 
@@ -42,17 +42,17 @@ provider "aws" {
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  token                  = data.aws_eks_cluster_auth.anvay.token
+  token                  = data.aws_eks_cluster_auth.anway.token
 }
 
 provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    token                  = data.aws_eks_cluster_auth.anvay.token
+    token                  = data.aws_eks_cluster_auth.anway.token
   }
 }
 
-data "aws_eks_cluster_auth" "anvay" {
+data "aws_eks_cluster_auth" "anway" {
   name = module.eks.cluster_name
 }

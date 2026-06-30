@@ -72,8 +72,8 @@ export type { IConnectorAgent, ConnectorTool } from './interfaces/connector-agen
 
 // NOTE: the connector conformance harness (C0) is intentionally NOT exported here.
 // It imports `vitest` at module top-level; pulling it into the main barrel drags
-// vitest into every production import of @anvay/agent and crashes the gateway at
-// startup. Import it via the dedicated subpath instead: `@anvay/agent/testing`.
+// vitest into every production import of @anway/agent and crashes the gateway at
+// startup. Import it via the dedicated subpath instead: `@anway/agent/testing`.
 
 // Agents
 export { SREAgent } from './agents/sre.js'

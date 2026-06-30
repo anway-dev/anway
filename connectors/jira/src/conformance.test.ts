@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
-import { describeConnectorConformance } from '@anvay/agent/testing'
-import type { IKnowledgeGraph } from '@anvay/agent'
+import { describeConnectorConformance } from '@anway/agent/testing'
+import type { IKnowledgeGraph } from '@anway/agent'
 import { JiraBootstrap } from './bootstrap.js'
 
 const MOCK = 'https://mock-jira.atlassian.net'
@@ -20,7 +20,7 @@ const ISSUES = {
 
 describeConnectorConformance('jira', {
   makeBootstrap: (kg: IKnowledgeGraph) => new JiraBootstrap(kg),
-  validPayload: { baseUrl: MOCK, email: 'dev@anvay.local', apiToken: 'token-123' },
+  validPayload: { baseUrl: MOCK, email: 'dev@anway.local', apiToken: 'token-123' },
   unreachablePayload: { baseUrl: 'https://unreachable.invalid', email: 'x@y.z', apiToken: 't' },
   setupMock: () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => {

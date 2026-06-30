@@ -116,7 +116,7 @@ const ACTION_LABEL: Record<string, string> = {
   notify_channel:    "Notify channel",
   create_incident:   "Create incident",
   open_war_room:     "Open war room",
-  surface_context:   "Surface to Anvay",
+  surface_context:   "Surface to Anway",
   escalate:          "Escalate",
   run_runbook:       "Run runbook",
   block_deploy_gate: "Block deploy gate",

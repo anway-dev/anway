@@ -1,10 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import type { ExecutableTool } from '@anvay/agent'
+import type { ExecutableTool } from '@anway/agent'
 
 /**
  * Generic MCP connector — connects to any MCP server and auto-registers
- * its tools as Anvay ExecutableTool[].
+ * its tools as Anway ExecutableTool[].
  *
  * Uses official MCP SDK with JSON-RPC 2.0 transport (not raw REST).
  *
@@ -27,7 +27,7 @@ export class McpConnector {
 
   private async getClient(): Promise<Client> {
     if (this.client) return this.client
-    this.client = new Client({ name: 'anvay-mcp-adapter', version: '0.1.0' })
+    this.client = new Client({ name: 'anway-mcp-adapter', version: '0.1.0' })
     const transport = new StreamableHTTPClientTransport(new URL(this.config.url))
     await this.client.connect(transport)
     return this.client

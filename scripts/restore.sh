@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Restores Anvay from a backup directory created by backup.sh.
+# Restores Anway from a backup directory created by backup.sh.
 # Usage: ./scripts/restore.sh BACKUP_DIR
 set -euo pipefail
 BACKUP="${1:?Usage: restore.sh BACKUP_DIR}"
 
 echo "[restore] Postgres ← $BACKUP/postgres.dump"
-pg_restore "${DATABASE_URL:-postgres://anvay:anvay@localhost:5432/anvay}" \
+pg_restore "${DATABASE_URL:-postgres://anway:anway@localhost:5432/anway}" \
   --clean --if-exists --no-owner --no-acl \
   "$BACKUP/postgres.dump"
 

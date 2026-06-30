@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { IModelProvider, ChatResponse, StreamChunk, InferenceOptions, ToolCall, ToolDefinition } from '../interfaces/provider.js'
 import { ProviderFactory } from './factory.js'
-import type { Message } from '@anvay/types'
+import type { Message } from '@anway/types'
 
 // ---------------------------------------------------------------------------
 // ProviderFactory instantiation
@@ -138,7 +138,7 @@ describe('IModelProvider contract via MockProvider', () => {
 // Public API surface — verify concrete providers NOT exported from index
 // ---------------------------------------------------------------------------
 
-describe('@anvay/agent public exports', () => {
+describe('@anway/agent public exports', () => {
   it('exports ProviderFactory', async () => {
     const mod = await import('../index.js')
     expect(mod.ProviderFactory).toBeDefined()

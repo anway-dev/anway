@@ -106,7 +106,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 ### P2-1.7: Empty state — new session
 - **Intent:** Fresh chat shows empty state with scenario cards, no message history
 - **UI assertion:**
-  - "ask anvay anything..." placeholder visible
+  - "ask anway anything..." placeholder visible
   - Scenario cards visible (at least 4)
   - No messages in chat area
   - No follow-up chips visible
@@ -129,7 +129,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 
 ---
 
-## 2. Auth & Session (anvay.spec.ts)
+## 2. Auth & Session (anway.spec.ts)
 
 ### P0-2.1: Token issuance — valid credentials
 - **Intent:** Valid email + tenantId returns JWT that can access protected endpoints
@@ -171,7 +171,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 
 ---
 
-## 3. Incidents (anvay.spec.ts + incident-view.tsx)
+## 3. Incidents (anway.spec.ts + incident-view.tsx)
 
 ### P0-3.1: Create incident — full roundtrip
 - **Intent:** Create incident via API, verify it appears in list and UI
@@ -388,7 +388,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 
 ---
 
-## 6. Automations (anvay.spec.ts + automations-view.tsx)
+## 6. Automations (anway.spec.ts + automations-view.tsx)
 
 ### P0-6.1: Trigger CRUD — create, read, delete
 - **Intent:** Full lifecycle of an automation trigger
@@ -1190,7 +1190,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 ### P0-22.1: All 16+ nav items exist
 - **Intent:** Every declared nav item is visible in the sidebar
 - **UI assertion:**
-  - All nav items verified visible: Anvay, Signals, War Room, Services, Lifecycle, Editor, Knowledge, Workflows, Approvals, Automations, API Client, Connectors, Audit, Access, Cloud, K8s, Settings
+  - All nav items verified visible: Anway, Signals, War Room, Services, Lifecycle, Editor, Knowledge, Workflows, Approvals, Automations, API Client, Connectors, Audit, Access, Cloud, K8s, Settings
 
 ### P0-22.2: Nav click switches view and updates content
 - **Intent:** Clicking each nav item changes the main content area to the correct view
@@ -1211,7 +1211,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 ### P0-22.4: Logo and workspace selector
 - **Intent:** App shell shows logo and workspace name
 - **UI assertion:**
-  - "anvay" logo text visible in sidebar header
+  - "anway" logo text visible in sidebar header
   - Workspace selector visible (may show mock workspace name)
 
 ### P1-22.5: Recent queries — clickable
@@ -1252,7 +1252,7 @@ Tests must be **self-cleaning** — every created resource must be deleted in `a
 - **Intent:** Metrics endpoint exposes Prometheus-compatible telemetry
 - **API assertion:**
   - `GET /metrics` → 200
-  - Response contains `anvay_gateway` metric
+  - Response contains `anway_gateway` metric
   - Request counters increment after API calls
 
 ### P0-23.3: Web UI — homepage loads without errors
@@ -1441,7 +1441,7 @@ e2e/
 
 | Spec File | Current State | What's Missing |
 |-----------|--------------|----------------|
-| `anvay.spec.ts` | ~32 tests, best coverage | Split into health, auth, security, incidents, automations, chat |
+| `anway.spec.ts` | ~32 tests, best coverage | Split into health, auth, security, incidents, automations, chat |
 | `cert-alert-flow.spec.ts` | 5 tests, good pipeline | Extend with severity matching, dedup, resolved alerts |
 | `connectors-api.spec.ts` | 9 tests, good API | Add delete, reconnect, validation edge cases |
 | `security.spec.ts` | 6 tests, good security | Add SQL injection, XSS, rate limiting, privilege escalation |

@@ -1,6 +1,6 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface IncidentSummary { title: string; severity: string; startedAt: string; status: string }
 export interface ShiftBrief { summary: string; openIncidents: IncidentSummary[]; recentDeploys: string[]; watchItems: string[]; handoffNotes: string }

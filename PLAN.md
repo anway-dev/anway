@@ -1,4 +1,4 @@
-# Anvay — Hardening Plan
+# Anway — Hardening Plan
 
 **Owner:** Claude (autonomous executor)  
 **Goal:** Close every sale-readiness and production-readiness gap identified in gap analysis.  
@@ -70,7 +70,7 @@ Routes return `403` with `{ error: "insufficient role" }` when rule violated. Al
 **DoD:** `events.ts` verifies HMAC-SHA256 signature for GitHub (`X-Hub-Signature-256`) and Datadog (`DD-REQUEST-SIGNATURE`) webhooks when `GITHUB_WEBHOOK_SECRET` / `DD_WEBHOOK_SECRET` env vars are set. Returns `401` on signature mismatch. Falls back to token auth if secrets not configured (backwards compatible).
 
 ### E7: Onboarding flow
-**DoD:** New tenant landing on Anvay (zero connectors connected) sees an onboarding modal with 3 steps: (1) Connect first connector, (2) Bootstrap graph, (3) Start chatting. Progress tracked. Dismissed permanently on first chat message sent. Not shown after any connector is connected.
+**DoD:** New tenant landing on Anway (zero connectors connected) sees an onboarding modal with 3 steps: (1) Connect first connector, (2) Bootstrap graph, (3) Start chatting. Progress tracked. Dismissed permanently on first chat message sent. Not shown after any connector is connected.
 
 ---
 
@@ -117,7 +117,7 @@ Routes return `403` with `{ error: "insufficient role" }` when rule violated. Al
 **DoD:** AWS EKS Terraform environment provisions RDS with Multi-AZ enabled and one read replica in a second AZ. `DATABASE_URL` points to writer. `DATABASE_REPLICA_URL` points to reader (used for read-heavy queries in KB/audit). GCP and Azure equivalents added.
 
 ### C3: Helm chart complete
-**DoD:** `infra/helm/anvay/` includes templates for: Postgres (or external DB secret), Redis, Neo4j, Ingress (nginx), NetworkPolicy (deny-all + allow gateway→postgres, gateway→redis), HorizontalPodAutoscaler (gateway: 2–10 pods, CPU 70%), PodDisruptionBudget (minAvailable: 1), ServiceAccount + IRSA annotations for AWS.
+**DoD:** `infra/helm/anway/` includes templates for: Postgres (or external DB secret), Redis, Neo4j, Ingress (nginx), NetworkPolicy (deny-all + allow gateway→postgres, gateway→redis), HorizontalPodAutoscaler (gateway: 2–10 pods, CPU 70%), PodDisruptionBudget (minAvailable: 1), ServiceAccount + IRSA annotations for AWS.
 
 ### C4: Automated backup config
 **DoD:** AWS EKS Terraform: RDS automated backups enabled (retention 7 days), S3 export enabled. GCP: Cloud SQL automated backups enabled. Azure: Azure Database automated backups with geo-redundant storage. All Terraform outputs include backup schedule info.
@@ -126,7 +126,7 @@ Routes return `403` with `{ error: "insufficient role" }` when rule violated. Al
 **DoD:** Gateway has `@sentry/node` initialized at startup (when `SENTRY_DSN` set). All unhandled exceptions and Fastify errors captured with tenant context (tenantId in Sentry scope). Source maps uploaded in CI. Sentry connector available in connector catalog.
 
 ### C6: ChatOps Slack slash commands
-**DoD:** Slack app handles: `/anvay incidents` (lists active), `/anvay deploy <service> <env>` (triggers pipeline), `/anvay approve <gate-id>` (approves gate), `/anvay status <service>` (shows health). All responses are ephemeral Slack messages with action buttons.
+**DoD:** Slack app handles: `/anway incidents` (lists active), `/anway deploy <service> <env>` (triggers pipeline), `/anway approve <gate-id>` (approves gate), `/anway status <service>` (shows health). All responses are ephemeral Slack messages with action buttons.
 
 ### C7: SLO burn rate cron
 **DoD:** `slo_burn_check` cron job (every 5 min) computes 1h and 6h error budget burn rate for all services with SLO configured. Burn rate > 2× budget → emit alert event → triggers automations. SLO data visible in service detail view.

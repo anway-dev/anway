@@ -1,6 +1,6 @@
 -- Per-user git credentials (GitHub PAT, GitLab token, etc.)
 -- Encrypted with the same AES key as connector credentials.
--- Users can push code via Anvay editor without exposing tokens to other team members.
+-- Users can push code via Anway editor without exposing tokens to other team members.
 CREATE TABLE IF NOT EXISTS user_git_credentials (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

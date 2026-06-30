@@ -2,7 +2,7 @@ import type { ProviderManifest, ProviderConfig, IModelProvider } from '../interf
 import { AnthropicProvider } from './anthropic.js'
 import { OpenAIProvider } from './openai.js'
 import { OllamaProvider } from './ollama.js'
-import { AppError } from '@anvay/types'
+import { AppError } from '@anway/types'
 
 class ProviderManifestRegistry {
   private manifests = new Map<string, ProviderManifest>()

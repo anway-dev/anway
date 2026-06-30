@@ -5,7 +5,7 @@ locals {
 
 # ── Resource Group ────────────────────────────────────────────────────────────
 
-resource "azurerm_resource_group" "anvay" {
+resource "azurerm_resource_group" "anway" {
   name     = local.name
   location = local.location
 
@@ -18,24 +18,24 @@ resource "azurerm_resource_group" "anvay" {
 
 # ── Virtual Network ───────────────────────────────────────────────────────────
 
-resource "azurerm_virtual_network" "anvay" {
+resource "azurerm_virtual_network" "anway" {
   name                = local.name
   address_space       = [var.vnet_cidr]
-  location            = azurerm_resource_group.anvay.location
-  resource_group_name = azurerm_resource_group.anvay.name
+  location            = azurerm_resource_group.anway.location
+  resource_group_name = azurerm_resource_group.anway.name
 }
 
 resource "azurerm_subnet" "aks" {
   name                 = "aks-nodes"
-  resource_group_name  = azurerm_resource_group.anvay.name
-  virtual_network_name = azurerm_virtual_network.anvay.name
+  resource_group_name  = azurerm_resource_group.anway.name
+  virtual_network_name = azurerm_virtual_network.anway.name
   address_prefixes     = [var.aks_subnet_cidr]
 }
 
 resource "azurerm_subnet" "db" {
   name                 = "databases"
-  resource_group_name  = azurerm_resource_group.anvay.name
-  virtual_network_name = azurerm_virtual_network.anvay.name
+  resource_group_name  = azurerm_resource_group.anway.name
+  virtual_network_name = azurerm_virtual_network.anway.name
   address_prefixes     = [var.db_subnet_cidr]
 
   delegation {
@@ -49,22 +49,22 @@ resource "azurerm_subnet" "db" {
 
 resource "azurerm_private_dns_zone" "postgres" {
   name                = "${local.name}.private.postgres.database.azure.com"
-  resource_group_name = azurerm_resource_group.anvay.name
+  resource_group_name = azurerm_resource_group.anway.name
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
   name                  = "${local.name}-postgres"
   private_dns_zone_name = azurerm_private_dns_zone.postgres.name
-  resource_group_name   = azurerm_resource_group.anvay.name
-  virtual_network_id    = azurerm_virtual_network.anvay.id
+  resource_group_name   = azurerm_resource_group.anway.name
+  virtual_network_id    = azurerm_virtual_network.anway.id
 }
 
 # ── AKS ───────────────────────────────────────────────────────────────────────
 
-resource "azurerm_kubernetes_cluster" "anvay" {
+resource "azurerm_kubernetes_cluster" "anway" {
   name                = local.name
-  location            = azurerm_resource_group.anvay.location
-  resource_group_name = azurerm_resource_group.anvay.name
+  location            = azurerm_resource_group.anway.location
+  resource_group_name = azurerm_resource_group.anway.name
   dns_prefix          = local.name
 
   kubernetes_version = var.k8s_version
@@ -93,17 +93,17 @@ resource "azurerm_kubernetes_cluster" "anvay" {
     load_balancer_sku = "standard"
   }
 
-  tags = azurerm_resource_group.anvay.tags
+  tags = azurerm_resource_group.anway.tags
 }
 
 # ── Azure Database for PostgreSQL Flexible Server ─────────────────────────────
 
-resource "azurerm_postgresql_flexible_server" "anvay" {
+resource "azurerm_postgresql_flexible_server" "anway" {
   name                   = local.name
-  resource_group_name    = azurerm_resource_group.anvay.name
-  location               = azurerm_resource_group.anvay.location
+  resource_group_name    = azurerm_resource_group.anway.name
+  location               = azurerm_resource_group.anway.location
   version                = "16"
-  administrator_login    = "anvay"
+  administrator_login    = "anway"
   administrator_password = var.postgres_password
 
   storage_mb   = var.db_storage_mb
@@ -120,25 +120,25 @@ resource "azurerm_postgresql_flexible_server" "anvay" {
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
 
-resource "azurerm_postgresql_flexible_server_database" "anvay" {
-  name      = "anvay"
-  server_id = azurerm_postgresql_flexible_server.anvay.id
+resource "azurerm_postgresql_flexible_server_database" "anway" {
+  name      = "anway"
+  server_id = azurerm_postgresql_flexible_server.anway.id
   collation = "en_US.utf8"
   charset   = "utf8"
 }
 
 resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
   name      = "azure.extensions"
-  server_id = azurerm_postgresql_flexible_server.anvay.id
+  server_id = azurerm_postgresql_flexible_server.anway.id
   value     = "VECTOR,PG_STAT_STATEMENTS,AGE"
 }
 
 # ── Azure Cache for Redis ─────────────────────────────────────────────────────
 
-resource "azurerm_redis_cache" "anvay" {
+resource "azurerm_redis_cache" "anway" {
   name                = local.name
-  location            = azurerm_resource_group.anvay.location
-  resource_group_name = azurerm_resource_group.anvay.name
+  location            = azurerm_resource_group.anway.location
+  resource_group_name = azurerm_resource_group.anway.name
   capacity            = var.redis_capacity
   family              = var.redis_family
   sku_name            = var.redis_sku
@@ -150,7 +150,7 @@ resource "azurerm_redis_cache" "anvay" {
     maxmemory_policy = "allkeys-lru"
   }
 
-  tags = azurerm_resource_group.anvay.tags
+  tags = azurerm_resource_group.anway.tags
 }
 
 # ── Neo4j on AKS ─────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ resource "azurerm_redis_cache" "anvay" {
 resource "kubernetes_persistent_volume_claim" "neo4j" {
   metadata {
     name      = "neo4j-data"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
   }
 
   spec {
@@ -174,7 +174,7 @@ resource "kubernetes_persistent_volume_claim" "neo4j" {
 resource "kubernetes_deployment" "neo4j" {
   metadata {
     name      = "neo4j"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
     labels    = { app = "neo4j" }
   }
 
@@ -208,13 +208,13 @@ resource "kubernetes_deployment" "neo4j" {
     }
   }
 
-  depends_on = [module.anvay_app]
+  depends_on = [module.anway_app]
 }
 
 resource "kubernetes_service" "neo4j" {
   metadata {
     name      = "neo4j"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
   }
 
   spec {
@@ -225,19 +225,19 @@ resource "kubernetes_service" "neo4j" {
   }
 }
 
-# ── Anvay App (Helm) ──────────────────────────────────────────────────────────
+# ── Anway App (Helm) ──────────────────────────────────────────────────────────
 
-module "anvay_app" {
-  source = "../../modules/anvay-helm"
+module "anway_app" {
+  source = "../../modules/anway-helm"
 
-  namespace   = "anvay"
+  namespace   = "anway"
   environment = var.environment
 
   jwt_secret     = var.jwt_secret
   encryption_key = var.encryption_key
 
-  database_url   = "postgresql://anvay:${var.postgres_password}@${azurerm_postgresql_flexible_server.anvay.fqdn}:5432/anvay?sslmode=require"
-  redis_url      = "rediss://:${azurerm_redis_cache.anvay.primary_access_key}@${azurerm_redis_cache.anvay.hostname}:6380"
+  database_url   = "postgresql://anway:${var.postgres_password}@${azurerm_postgresql_flexible_server.anway.fqdn}:5432/anway?sslmode=require"
+  redis_url      = "rediss://:${azurerm_redis_cache.anway.primary_access_key}@${azurerm_redis_cache.anway.hostname}:6380"
   neo4j_uri      = "bolt://neo4j:7687"
   neo4j_password = var.neo4j_password
 
@@ -252,8 +252,8 @@ module "anvay_app" {
   tls_secret_name = var.tls_secret_name
 
   depends_on = [
-    azurerm_kubernetes_cluster.anvay,
-    azurerm_postgresql_flexible_server.anvay,
-    azurerm_redis_cache.anvay,
+    azurerm_kubernetes_cluster.anway,
+    azurerm_postgresql_flexible_server.anway,
+    azurerm_redis_cache.anway,
   ]
 }

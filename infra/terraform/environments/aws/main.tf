@@ -60,7 +60,7 @@ module "eks" {
   }
 
   eks_managed_node_groups = {
-    anvay = {
+    anway = {
       instance_types = [var.node_instance_type]
       min_size       = var.node_min_count
       max_size       = var.node_max_count
@@ -83,7 +83,7 @@ module "eks" {
 
 # ── RDS (PostgreSQL with pgvector) ───────────────────────────────────────────
 
-resource "aws_db_subnet_group" "anvay" {
+resource "aws_db_subnet_group" "anway" {
   name       = local.name
   subnet_ids = module.vpc.private_subnets
   tags       = local.tags
@@ -104,17 +104,17 @@ resource "aws_security_group" "rds" {
   tags = local.tags
 }
 
-resource "aws_db_instance" "anvay" {
+resource "aws_db_instance" "anway" {
   identifier     = local.name
   engine         = "postgres"
   engine_version = "16"
   instance_class = var.db_instance_class
 
-  db_name  = "anvay"
-  username = "anvay"
+  db_name  = "anway"
+  username = "anway"
   password = var.postgres_password
 
-  db_subnet_group_name   = aws_db_subnet_group.anvay.name
+  db_subnet_group_name   = aws_db_subnet_group.anway.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
   allocated_storage     = var.db_storage_gb
@@ -128,12 +128,12 @@ resource "aws_db_instance" "anvay" {
   multi_az                = var.environment == "prod" ? true : false
 
   # pgvector extension is installed via migration, not here
-  parameter_group_name = aws_db_parameter_group.anvay.name
+  parameter_group_name = aws_db_parameter_group.anway.name
 
   tags = local.tags
 }
 
-resource "aws_db_parameter_group" "anvay" {
+resource "aws_db_parameter_group" "anway" {
   name   = local.name
   family = "postgres16"
 
@@ -147,7 +147,7 @@ resource "aws_db_parameter_group" "anvay" {
 
 # ── ElastiCache (Redis) ────────────────────────────────────────────────────────
 
-resource "aws_elasticache_subnet_group" "anvay" {
+resource "aws_elasticache_subnet_group" "anway" {
   name       = local.name
   subnet_ids = module.vpc.private_subnets
   tags       = local.tags
@@ -168,15 +168,15 @@ resource "aws_security_group" "redis" {
   tags = local.tags
 }
 
-resource "aws_elasticache_replication_group" "anvay" {
+resource "aws_elasticache_replication_group" "anway" {
   replication_group_id = local.name
-  description          = "Anvay Redis cache"
+  description          = "Anway Redis cache"
 
   node_type          = var.redis_node_type
   num_cache_clusters = var.environment == "prod" ? 2 : 1
   port               = 6379
 
-  subnet_group_name  = aws_elasticache_subnet_group.anvay.name
+  subnet_group_name  = aws_elasticache_subnet_group.anway.name
   security_group_ids = [aws_security_group.redis.id]
 
   at_rest_encryption_enabled = true
@@ -192,7 +192,7 @@ resource "aws_elasticache_replication_group" "anvay" {
 resource "kubernetes_persistent_volume_claim" "neo4j" {
   metadata {
     name      = "neo4j-data"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
   }
 
   spec {
@@ -208,7 +208,7 @@ resource "kubernetes_persistent_volume_claim" "neo4j" {
 resource "kubernetes_deployment" "neo4j" {
   metadata {
     name      = "neo4j"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
     labels    = { app = "neo4j" }
   }
 
@@ -258,13 +258,13 @@ resource "kubernetes_deployment" "neo4j" {
     }
   }
 
-  depends_on = [module.anvay_app]
+  depends_on = [module.anway_app]
 }
 
 resource "kubernetes_service" "neo4j" {
   metadata {
     name      = "neo4j"
-    namespace = module.anvay_app.namespace
+    namespace = module.anway_app.namespace
   }
 
   spec {
@@ -285,19 +285,19 @@ resource "kubernetes_service" "neo4j" {
   }
 }
 
-# ── Anvay App (Helm) ──────────────────────────────────────────────────────────
+# ── Anway App (Helm) ──────────────────────────────────────────────────────────
 
-module "anvay_app" {
-  source = "../../modules/anvay-helm"
+module "anway_app" {
+  source = "../../modules/anway-helm"
 
-  namespace   = "anvay"
+  namespace   = "anway"
   environment = var.environment
 
   jwt_secret     = var.jwt_secret
   encryption_key = var.encryption_key
 
-  database_url   = "postgresql://anvay:${var.postgres_password}@${aws_db_instance.anvay.address}:5432/anvay"
-  redis_url      = "redis://${aws_elasticache_replication_group.anvay.primary_endpoint_address}:6379"
+  database_url   = "postgresql://anway:${var.postgres_password}@${aws_db_instance.anway.address}:5432/anway"
+  redis_url      = "redis://${aws_elasticache_replication_group.anway.primary_endpoint_address}:6379"
   neo4j_uri      = "bolt://neo4j:7687"
   neo4j_password = var.neo4j_password
 
@@ -313,7 +313,7 @@ module "anvay_app" {
 
   depends_on = [
     module.eks,
-    aws_db_instance.anvay,
-    aws_elasticache_replication_group.anvay,
+    aws_db_instance.anway,
+    aws_elasticache_replication_group.anway,
   ]
 }

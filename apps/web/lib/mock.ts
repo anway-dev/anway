@@ -46,8 +46,8 @@ export const FEATURES: Feature[] = [
         actions: ["View in GitHub", "Run All", "Generate More"],
       },
       {
-        id: "col-1", type: "collection", label: "API Collection", title: "payments-v2.anvay",
-        state: "running", connector: "Anvay", connectorColor: "#10b981",
+        id: "col-1", type: "collection", label: "API Collection", title: "payments-v2.anway",
+        state: "running", connector: "Anway", connectorColor: "#10b981",
         stats: "8 requests",
         detail: `**Collection**: payments-v2\n**Environment**: staging\n**Last run**: 2 min ago · 6/8 passing\n\nPOST /v2/payments/quick-checkout ✅\nGET  /v2/payments/methods/:id ✅\nPOST /v2/payments (legacy) ✅\nDELETE /v2/payments/:id ✅\nPOST /v2/payments/refund ✅\nGET  /v2/payments/status ✅\nPOST /v2/payments/quick-checkout (high-value) ❌\nGET  /v2/payments/methods (empty) ❌`,
         actions: ["Run Collection", "View Results", "Export k6"],
@@ -199,7 +199,7 @@ export const AI_RESPONSES: Record<string, string[]> = {
   "Generate Collection": [
     "Reading spec contracts...\n",
     "Parsing endpoint schemas...\n\n",
-    "Building collection: payments-v2.anvay.yaml\n\n",
+    "Building collection: payments-v2.anway.yaml\n\n",
     "  POST /v2/payments/quick-checkout — with body + assertions\n",
     "  GET  /v2/payments/methods/:userId — parameterized\n",
     "  POST /v2/payments/quick-checkout (high-value) — edge case\n",
@@ -1061,7 +1061,7 @@ export const INTAKE_LOG: IntakeEvent[] = [
     receivedAt: "12 min ago",
     confidence: 0.93,
     disposition: "context_surfaced",
-    triageSummary: "Memory spike traced to missing GC on large search result sets. Known pattern. Anvay surfaced root cause + recommended pod restart to platform-oncall. Team actioned within 2 min.",
+    triageSummary: "Memory spike traced to missing GC on large search result sets. Known pattern. Anway surfaced root cause + recommended pod restart to platform-oncall. Team actioned within 2 min.",
     durationMs: 2100,
   },
   {
@@ -1086,7 +1086,7 @@ export const INTAKE_LOG: IntakeEvent[] = [
     receivedAt: "22 min ago",
     confidence: 0.82,
     disposition: "context_surfaced",
-    triageSummary: "Linked to payments-api v2.3.0 regression. Anvay surfaced full trace + downstream congestion context to support-tier1. Agent suggested reply template — support rep sent within 3 min.",
+    triageSummary: "Linked to payments-api v2.3.0 regression. Anway surfaced full trace + downstream congestion context to support-tier1. Agent suggested reply template — support rep sent within 3 min.",
     durationMs: 980,
   },
   {
@@ -1853,7 +1853,7 @@ export const INCIDENTS: Incident[] = [
       { at: "14:10:31", type: "alert",   label: "P0 alert fired: error rate 5.1%",  actor: "pagerduty"},
       { at: "14:11:02", type: "ack",     label: "Alice acknowledged",               actor: "alice"    },
       { at: "14:23:01", type: "spike",   label: "error rate peaked at 8.7%",        actor: "datadog"  },
-      { at: "14:24:15", type: "note",    label: "Anvay hypothesis surfaced",        actor: "anvay"    },
+      { at: "14:24:15", type: "note",    label: "Anway hypothesis surfaced",        actor: "anway"    },
     ],
     metrics: [
       { name: "Error Rate",   value: "8.7",  unit: "%",   status: "critical", spark: [2, 2, 2, 3, 3, 18, 52, 87]  },

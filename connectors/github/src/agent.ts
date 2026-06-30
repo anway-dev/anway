@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import type { ConnectorCreds } from '@anvay/types'
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { ConnectorCreds } from '@anway/types'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 
 function ghConfig(creds: Record<string, unknown>): { baseUrl: string; authHeader: string; apiPrefix: string; token: string } {

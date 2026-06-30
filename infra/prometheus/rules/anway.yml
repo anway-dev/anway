@@ -1,13 +1,13 @@
 groups:
-  - name: anvay
+  - name: anway
     interval: 30s
     rules:
 
-      - alert: AnvayPodCrashLooping
+      - alert: AnwayPodCrashLooping
         expr: |
           kube_pod_container_status_waiting_reason{
             reason="CrashLoopBackOff",
-            namespace=~"anvay.*"
+            namespace=~"anway.*"
           } > 0
         for: 2m
         labels:
@@ -16,46 +16,46 @@ groups:
         annotations:
           summary: "Pod {{ $labels.pod }} is crash looping"
           description: "Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} has been in CrashLoopBackOff for >2m."
-          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#pod-oomkilled-or-crash-loop"
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#pod-oomkilled-or-crash-loop"
 
-      - alert: AnvayHighErrorRate
+      - alert: AnwayHighErrorRate
         expr: |
-          rate(http_requests_total{namespace=~"anvay.*",status=~"5.."}[5m])
+          rate(http_requests_total{namespace=~"anway.*",status=~"5.."}[5m])
           /
-          rate(http_requests_total{namespace=~"anvay.*"}[5m]) > 0.01
+          rate(http_requests_total{namespace=~"anway.*"}[5m]) > 0.01
         for: 5m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "Anvay error rate >1%"
+          summary: "Anway error rate >1%"
           description: "HTTP 5xx rate is {{ $value | humanizePercentage }} over the last 5m."
-          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#high-error-rate"
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
 
-      - alert: AnvayDBConnectionsHigh
-        expr: pg_stat_database_numbackends{datname="anvay"} > 80
+      - alert: AnwayDBConnectionsHigh
+        expr: pg_stat_database_numbackends{datname="anway"} > 80
         for: 5m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "Anvay DB connections high ({{ $value }})"
-          description: "Postgres connections to anvay DB exceed 80. PgBouncer or pool misconfiguration."
-          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#db-connections-exhausted"
+          summary: "Anway DB connections high ({{ $value }})"
+          description: "Postgres connections to anway DB exceed 80. PgBouncer or pool misconfiguration."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#db-connections-exhausted"
 
-      - alert: AnvayRedisMemoryHigh
+      - alert: AnwayRedisMemoryHigh
         expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
         for: 10m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: "Anvay Redis memory high ({{ $value | humanizePercentage }})"
+          summary: "Anway Redis memory high ({{ $value | humanizePercentage }})"
           description: "Redis is using {{ $value | humanizePercentage }} of max memory. Risk of eviction."
-          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#redis-memory-high"
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#redis-memory-high"
 
-      - alert: AnvaySloBurnRateCritical
-        expr: anvay_slo_burn_rate_1h > 2
+      - alert: AnwaySloBurnRateCritical
+        expr: anway_slo_burn_rate_1h > 2
         for: 15m
         labels:
           severity: critical
@@ -63,15 +63,15 @@ groups:
         annotations:
           summary: "SLO burn rate critical ({{ $value }}x)"
           description: "Error budget burning at {{ $value }}x the safe rate. At this pace budget exhausts in {{ $value | humanizeDuration }}."
-          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md#high-error-rate"
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
 
-      - alert: AnvayGatewayDown
-        expr: absent(up{job="anvay-gateway"}) or up{job="anvay-gateway"} == 0
+      - alert: AnwayGatewayDown
+        expr: absent(up{job="anway-gateway"}) or up{job="anway-gateway"} == 0
         for: 1m
         labels:
           severity: critical
           team: platform
         annotations:
-          summary: "Anvay gateway is down"
+          summary: "Anway gateway is down"
           description: "No gateway scrape target found or target reports down for >1 minute."
-          runbook: "https://github.com/YOUR_ORG/anvay/blob/main/docs/RUNBOOK.md"
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"

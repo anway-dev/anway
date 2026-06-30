@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { RedisSessionMemory } from './redis-session.js'
-import { SessionId, UserId, TenantId, AgentRole } from '@anvay/types'
+import { SessionId, UserId, TenantId, AgentRole } from '@anway/types'
 import type { SessionMeta, ConversationTurn } from '../interfaces/memory.js'
 import type { IModelProvider, ChatResponse, InferenceOptions, ToolCall, ToolDefinition } from '../interfaces/provider.js'
-import type { Message } from '@anvay/types'
+import type { Message } from '@anway/types'
 
 // ---------------------------------------------------------------------------
 // Redis mock

@@ -1,4 +1,4 @@
-import { AppError } from '@anvay/types'
+import { AppError } from '@anway/types'
 import { Redis } from 'ioredis'
 import type { ISessionMemory, MemoryConfig } from '../interfaces/memory.js'
 import { RedisSessionMemory } from './redis-session.js'

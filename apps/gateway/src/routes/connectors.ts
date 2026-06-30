@@ -7,7 +7,7 @@ import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
 import { decryptJson } from '../utils/crypto.js'
-import { testK8sConnectivity } from '@anvay/connector-k8s'
+import { testK8sConnectivity } from '@anway/connector-k8s'
 import { createKnowledgeGraph } from '../kb/index.js'
 
 interface ConfigField { label: string; key: string; type: string; placeholder?: string }
@@ -28,7 +28,7 @@ const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "jira", name: "Jira", category: "Issue Tracking", description: "Issues, sprints, epics", color: "#0052cc", icon: "JR", capabilities: ["issues", "roadmap"], configFields: [{ label: "Site URL", key: "site", type: "text" }, { label: "API Token", key: "token", type: "password" }, { label: "Email", key: "email", type: "text" }] },
   { id: "loki", name: "Loki", category: "Logging", description: "Log aggregation (Grafana stack)", color: "#f9a825", icon: "LK", capabilities: ["logs"], configFields: [{ label: "Endpoint URL", key: "url", type: "text" }, { label: "Org ID", key: "org_id", type: "text" }] },
   { id: "terraform", name: "Terraform Cloud", category: "Infrastructure", description: "IaC runs, state, workspaces", color: "#7b42bc", icon: "TF", capabilities: ["infrastructure"], configFields: [{ label: "API Token", key: "token", type: "password" }, { label: "Organization", key: "org", type: "text" }] },
-  { id: "alertmanager", name: "Alertmanager", category: "Alerting", description: "Prometheus Alertmanager — active alerts, silences, inhibitions", color: "#e55b2e", icon: "AM", capabilities: ["alerts"], configFields: [{ label: "Endpoint URL", key: "baseUrl", type: "text" }, { label: "Webhook Token (Anvay receives alerts from Alertmanager with this bearer token)", key: "webhookToken", type: "password" }] },
+  { id: "alertmanager", name: "Alertmanager", category: "Alerting", description: "Prometheus Alertmanager — active alerts, silences, inhibitions", color: "#e55b2e", icon: "AM", capabilities: ["alerts"], configFields: [{ label: "Endpoint URL", key: "baseUrl", type: "text" }, { label: "Webhook Token (Anway receives alerts from Alertmanager with this bearer token)", key: "webhookToken", type: "password" }] },
   { id: "pagerduty", name: "PagerDuty", category: "Alerting", description: "Incidents, on-call schedules", color: "#06a94d", icon: "PD", capabilities: ["alerts", "incidents"], configFields: [{ label: "API Key", key: "api_key", type: "password" }, { label: "Service ID", key: "service_id", type: "text" }] },
   { id: "gke", name: "Google GKE", category: "Kubernetes", description: "GCP managed Kubernetes", color: "#4285f4", icon: "GK", capabilities: ["k8s", "infrastructure"], configFields: [{ label: "Project ID", key: "project_id", type: "text" }, { label: "Cluster Name", key: "cluster", type: "text" }, { label: "Service Account JSON", key: "sa_json", type: "textarea" }] },
   { id: "aws-cloudwatch", name: "AWS CloudWatch", category: "Cloud Health", description: "Metrics, alarms, logs, health events", color: "#ff9900", icon: "CW", capabilities: ["metrics", "logs", "alerts", "infrastructure"], configFields: [{ label: "Access Key ID", key: "access_key_id", type: "text" }, { label: "Secret Access Key", key: "secret_access_key", type: "password" }, { label: "Region", key: "region", type: "text" }] },
@@ -337,7 +337,7 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
     const created: string[] = []
     const updated: string[] = []
     const failed: string[] = []
-    const kg = createKnowledgeGraph(tenantId as import('@anvay/types').TenantId)
+    const kg = createKnowledgeGraph(tenantId as import('@anway/types').TenantId)
 
     for (const svc of services) {
       const title = `${svc.name} — Service Overview`
@@ -388,13 +388,13 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
               url: d.url ? `${grafanaPublicBase}${d.url}` : `${grafanaPublicBase}/d/${d.uid}`,
               connectorCoordinates: { grafana: { connectorType: 'grafana', resourceIds: { uid: d.uid ?? title, title }, resolvedAt: new Date().toISOString(), confidence: 1.0 } },
             },
-          }, tenantId as import('@anvay/types').TenantId).catch(() => '')
+          }, tenantId as import('@anway/types').TenantId).catch(() => '')
           if (dashId && svc.name) {
             const svcEntity = await withTenant(prisma, tenantId, (tx) =>
               tx.$queryRaw<{ id: string }[]>`SELECT id FROM entities WHERE tenant_id = ${tenantId}::uuid AND type = 'Service' AND name = ${svc.name} LIMIT 1`
             ).catch(() => [] as { id: string }[])
             if (svcEntity[0]?.id) {
-              await kg.upsertRelationship({ fromEntityId: dashId, relType: 'MONITORS', toEntityId: svcEntity[0].id }, tenantId as import('@anvay/types').TenantId).catch(() => {})
+              await kg.upsertRelationship({ fromEntityId: dashId, relType: 'MONITORS', toEntityId: svcEntity[0].id }, tenantId as import('@anway/types').TenantId).catch(() => {})
             }
           }
         } else failed.push(svc.name)

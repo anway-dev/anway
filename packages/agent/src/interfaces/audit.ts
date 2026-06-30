@@ -1,4 +1,4 @@
-import type { SessionId, TenantId, UserId } from '@anvay/types'
+import type { SessionId, TenantId, UserId } from '@anway/types'
 
 export type AuditEventType =
   | 'query_received'

@@ -227,7 +227,7 @@ export function ProjectsView({
                 Connect GitHub repo
               </div>
               <div style={{ fontSize: "12px", color: "#888", marginBottom: "20px" }}>
-                Anvay will auto-discover services, suggest project groupings, and set up knowledge bases.
+                Anway will auto-discover services, suggest project groupings, and set up knowledge bases.
               </div>
 
               {discoveryStep === "idle" && (

@@ -30,8 +30,8 @@ const CONNECTOR_ICON: Record<string, { icon: string; color: string }> = {
   grafana: { icon: "GF", color: "#f46800" },
 };
 
-const YAML_TEMPLATE = `# Anvay access provisioning template
-# Apply via: anvay access apply -f access.yaml
+const YAML_TEMPLATE = `# Anway access provisioning template
+# Apply via: anway access apply -f access.yaml
 
 user: alice
 workspace: [your-workspace-slug]

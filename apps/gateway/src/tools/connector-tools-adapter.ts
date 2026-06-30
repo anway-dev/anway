@@ -1,6 +1,6 @@
-import type { ConnectorCreds } from '@anvay/types'
-import type { IConnectorAgent } from '@anvay/agent'
-import type { ExecutableTool } from '@anvay/agent'
+import type { ConnectorCreds } from '@anway/types'
+import type { IConnectorAgent } from '@anway/agent'
+import type { ExecutableTool } from '@anway/agent'
 
 /**
  * Adapts an IConnectorAgent's tools to ExecutableTool[] for the orchestrator.

@@ -1,4 +1,4 @@
-import type { ConnectorMode, UserId } from '@anvay/types'
+import type { ConnectorMode, UserId } from '@anway/types'
 import type { ToolCall } from '../interfaces/provider.js'
 import { connectorIdFromTool } from '../tools/naming.js'
 import { isWriteAction } from '../gate/gate.js'

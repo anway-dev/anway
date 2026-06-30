@@ -1,6 +1,6 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface MetricPoint { label: string; value: string | number; trend?: 'up' | 'down' | 'stable' }
 export interface AnalysisReport { query: string; summary: string; metrics: MetricPoint[]; insights: string[]; recommendations: string[] }

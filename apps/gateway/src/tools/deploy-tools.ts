@@ -1,6 +1,6 @@
-import type { ExecutableTool, IModelProvider, IKnowledgeGraph } from '@anvay/agent'
-import { DeployAgent } from '@anvay/agent'
-import { TenantId } from '@anvay/types'
+import type { ExecutableTool, IModelProvider, IKnowledgeGraph } from '@anway/agent'
+import { DeployAgent } from '@anway/agent'
+import { TenantId } from '@anway/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 
@@ -19,7 +19,7 @@ export function makeDeployTools(
       parameters: {
         type: 'object' as const,
         properties: {
-          service: { type: 'string', description: 'Service name to deploy (e.g. "payments-api", "anvay-gateway")' },
+          service: { type: 'string', description: 'Service name to deploy (e.g. "payments-api", "anway-gateway")' },
           environment: { type: 'string', enum: ['staging', 'preprod', 'prod'], description: 'Target environment' },
           sha: { type: 'string', description: 'Git SHA or image tag to deploy. Omit to use latest.' },
         },
@@ -30,7 +30,7 @@ export function makeDeployTools(
         const environment = args['environment'] as string
         const sha = (args['sha'] as string | undefined) ?? process.env['GITHUB_SHA'] ?? 'latest'
 
-        let plan: import('@anvay/agent').DeployPlan | null = null
+        let plan: import('@anway/agent').DeployPlan | null = null
         try {
           plan = await deployAgent.planDeploy(service, environment, sha, tenantId as TenantId)
         } catch { /* non-blocking */ }
@@ -42,7 +42,7 @@ export function makeDeployTools(
               AND (
                 name ILIKE ${'%' + service + '%'}
                 OR metadata->>'serviceName' = ${service}
-                OR name = 'anvay-self-deploy'
+                OR name = 'anway-self-deploy'
               )
             ORDER BY
               CASE WHEN name ILIKE ${'%' + service + '%'} THEN 0 ELSE 1 END,

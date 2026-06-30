@@ -1,5 +1,5 @@
 {
-  "name": "@anvay/connector-k8s",
+  "name": "@anway/connector-k8s",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,8 +16,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anvay/agent": "workspace:*",
-    "@anvay/types": "workspace:*",
+    "@anway/agent": "workspace:*",
+    "@anway/types": "workspace:*",
     "@kubernetes/client-node": "^1.4.0"
   },
   "devDependencies": {

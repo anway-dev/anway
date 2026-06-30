@@ -1,15 +1,15 @@
 # Security
 
-Anvay is a multi-tenant platform connecting to an organisation's entire software lifecycle. Security is foundational, not additive.
+Anway is a multi-tenant platform connecting to an organisation's entire software lifecycle. Security is foundational, not additive.
 
 ## Encryption at Rest
 
 ### Connector Credentials (S1)
 - All connector credentials (API keys, tokens) are encrypted with **AES-256-GCM** before storage
-- Encryption key: `ANVAY_ENCRYPTION_KEY` env var (base64-encoded 32-byte key)
+- Encryption key: `ANWAY_ENCRYPTION_KEY` env var (base64-encoded 32-byte key)
 - Key never leaves the gateway container — no key in client bundle, no key in localStorage
 - Decryption happens only at call sites (`crypto.decryptJson`) — never in transit or at rest unencrypted
-- Rotate keys by generating a new key, updating `ANVAY_ENCRYPTION_KEY`, and re-encrypting all stored credentials
+- Rotate keys by generating a new key, updating `ANWAY_ENCRYPTION_KEY`, and re-encrypting all stored credentials
 
 ### Database
 - All sensitive fields in `connector_config.credentials_enc` are encrypted before INSERT
@@ -38,7 +38,7 @@ Anvay is a multi-tenant platform connecting to an organisation's entire software
 - Format: `CONNECTOR_API_KEYS=key1:tenantId1,key2:tenantId2`
 - Each key is bound to a specific tenant — cross-tenant writes rejected (403)
 - Required for `/api/graph/events` — unauthenticated access returns 401
-- Webhook auth: static `ANVAY_WEBHOOK_TOKEN` for machine senders (Alertmanager, CI, Gitea)
+- Webhook auth: static `ANWAY_WEBHOOK_TOKEN` for machine senders (Alertmanager, CI, Gitea)
 
 ## Perimeter Enforcement
 
@@ -81,12 +81,12 @@ Anvay is a multi-tenant platform connecting to an organisation's entire software
 - No API keys in client bundle (Next.js) — keys read from `process.env` server-side only
 - No API keys in localStorage — all authentication via httpOnly JWT cookies or Authorization header
 - No API keys in git — `.env.example` shows variable names, never values
-- `ANVAY_ENCRYPTION_KEY` must be a 32-byte base64 key, generated: `openssl rand -base64 32`
+- `ANWAY_ENCRYPTION_KEY` must be a 32-byte base64 key, generated: `openssl rand -base64 32`
 - `JWT_SECRET` must be changed from `dev-secret-change-in-production` before production deployment
 
 ## Webhook Auth
-- Inbound webhooks: `Authorization: Bearer <ANVAY_WEBHOOK_TOKEN>`
-- Tenant determined by `ANVAY_WEBHOOK_TENANT` env var
+- Inbound webhooks: `Authorization: Bearer <ANWAY_WEBHOOK_TOKEN>`
+- Tenant determined by `ANWAY_WEBHOOK_TENANT` env var
 - Incorrect or missing token → 401
 
 ## Docker Security
@@ -96,6 +96,6 @@ Anvay is a multi-tenant platform connecting to an organisation's entire software
 - No `ARG` values leaked in final image layers
 
 ## Reporting
-- Security vulnerabilities: report to `security@anvay.dev`
+- Security vulnerabilities: report to `security@anway.dev`
 - Do not file public issues for security findings
 - SLA: acknowledgment within 48 hours, resolution within 7 days for critical

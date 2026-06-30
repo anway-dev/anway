@@ -29,7 +29,7 @@ check_service() {
 
 # ── Interactive mode ──
 echo ""
-echo "  Anvay Demo"
+echo "  Anway Demo"
 echo ""
 PS3="  Choice: "
 options=(
@@ -60,23 +60,23 @@ case "$MODE" in
        cp -n apps/gateway/.env.example apps/gateway/.env 2>/dev/null || true
        set -a; source apps/gateway/.env 2>/dev/null || true; set +a
        pnpm install --silent 2>/dev/null || pnpm install
-       (cd apps/gateway && pnpm dev) > /tmp/anvay-gateway.log 2>&1 &
+       (cd apps/gateway && pnpm dev) > /tmp/anway-gateway.log 2>&1 &
        TRIES=0; until curl -sf http://127.0.0.1:8510/health > /dev/null 2>&1; do sleep 1; TRIES=$((TRIES+1)); [ $TRIES -ge 15 ] && break; done
        echo ""; echo "  Status:"
        check_service "Gateway  :8510" "curl -sf http://127.0.0.1:8510/health"
        echo ""
-       log "Gateway restarting — tail -f /tmp/anvay-gateway.log"
+       log "Gateway restarting — tail -f /tmp/anway-gateway.log"
        exit 0
        ;;
   3)   # ── Web only ──
        lsof -ti :8500 2>/dev/null | xargs kill -9 2>/dev/null || true
        sleep 1
-       (cd apps/web && env -u PORT pnpm dev) > /tmp/anvay-web.log 2>&1 &
+       (cd apps/web && env -u PORT pnpm dev) > /tmp/anway-web.log 2>&1 &
        TRIES=0; until curl -s http://localhost:8500 -o /dev/null -w "%{http_code}" 2>/dev/null | grep -qE '^[23]'; do sleep 1; TRIES=$((TRIES+1)); [ $TRIES -ge 15 ] && break; done
        echo ""; echo "  Status:"
        check_service "Web      :8500" "curl -sf http://localhost:8500"
        echo ""
-       log "Web restarting — tail -f /tmp/anvay-web.log"
+       log "Web restarting — tail -f /tmp/anway-web.log"
        exit 0
        ;;
   4)   # ── Docker only ──
@@ -90,7 +90,7 @@ case "$MODE" in
   5)   # ── Infra only ──
        docker compose -p infra -f infra/docker-compose.yml restart postgres redis neo4j
        echo ""; echo "  Status:"
-       docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1 && echo -e "    ${GREEN}●${NC} Postgres (ready)" || echo -e "    ${RED}✗${NC} Postgres"
+       docker exec infra-postgres-1 pg_isready -U anway > /dev/null 2>&1 && echo -e "    ${GREEN}●${NC} Postgres (ready)" || echo -e "    ${RED}✗${NC} Postgres"
        echo ""; log "Infra (postgres/redis/neo4j) restarted"
        exit 0
        ;;
@@ -120,7 +120,7 @@ docker compose -p infra -f infra/docker-compose.yml up -d postgres redis neo4j 2
 # Wait for postgres
 log "Waiting for postgres..."
 TRIES=0
-until docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1; do
+until docker exec infra-postgres-1 pg_isready -U anway > /dev/null 2>&1; do
   TRIES=$((TRIES + 1))
   [ $TRIES -ge 40 ] && err "Postgres not ready after 40s — check: docker logs infra-postgres-1"
   sleep 1
@@ -179,7 +179,7 @@ sleep 1
 
 # ── Start gateway ──
 log "Starting gateway on :8510..."
-(cd apps/gateway && pnpm dev) > /tmp/anvay-gateway.log 2>&1 &
+(cd apps/gateway && pnpm dev) > /tmp/anway-gateway.log 2>&1 &
 GATEWAY_PID=$!
 
 TRIES=0
@@ -188,8 +188,8 @@ until curl -sf http://127.0.0.1:8510/health > /dev/null 2>&1; do
   if [ $TRIES -ge 40 ]; then
     echo ""
     warn "Gateway log tail:"
-    tail -20 /tmp/anvay-gateway.log
-    err "Gateway failed to start — full log: /tmp/anvay-gateway.log"
+    tail -20 /tmp/anway-gateway.log
+    err "Gateway failed to start — full log: /tmp/anway-gateway.log"
   fi
   sleep 1
 done
@@ -201,7 +201,7 @@ DEV_TOKEN=$(curl -sf http://localhost:8510/api/auth/dev-token | jq -r '.token //
 if [ -z "$DEV_TOKEN" ]; then
   DEV_TOKEN=$(curl -sf -X POST http://localhost:8510/auth/token \
     -H "Content-Type: application/json" \
-    -d '{"email":"dev@anvay.local","tenantId":"00000000-0000-0000-0000-000000000001"}' | jq -r '.token // empty' 2>/dev/null) || DEV_TOKEN=""
+    -d '{"email":"dev@anway.local","tenantId":"00000000-0000-0000-0000-000000000001"}' | jq -r '.token // empty' 2>/dev/null) || DEV_TOKEN=""
 fi
 
 if [ -n "$DEV_TOKEN" ]; then
@@ -213,7 +213,7 @@ if [ -n "$DEV_TOKEN" ]; then
       prometheus)    CREDENTIALS='{"baseUrl":"http://localhost:8530"}' ;;
       loki)          CREDENTIALS='{"baseUrl":"http://localhost:3100"}' ;;
       grafana)       CREDENTIALS='{"baseUrl":"http://localhost:8520","password":"admin"}' ;;
-      github)        CREDENTIALS='{"token":"demo-gitea-token","baseUrl":"http://localhost:3030","org":"anvay-demo"}' ;;
+      github)        CREDENTIALS='{"token":"demo-gitea-token","baseUrl":"http://localhost:3030","org":"anway-demo"}' ;;
       alertmanager)  CREDENTIALS='{"baseUrl":"http://localhost:9093"}' ;;
     esac
     curl -sf -X PUT "http://localhost:8510/api/settings/connectors/$connector" \
@@ -230,7 +230,7 @@ fi
 
 # ── Start web ──
 log "Starting web on :8500..."
-(cd apps/web && env -u PORT pnpm dev) > /tmp/anvay-web.log 2>&1 &
+(cd apps/web && env -u PORT pnpm dev) > /tmp/anway-web.log 2>&1 &
 WEB_PID=$!
 
 TRIES=0
@@ -239,8 +239,8 @@ until curl -s http://localhost:8500 -o /dev/null -w "%{http_code}" 2>/dev/null |
   if [ $TRIES -ge 60 ]; then
     echo ""
     warn "Web log tail:"
-    tail -20 /tmp/anvay-web.log
-    err "Web failed to start — full log: /tmp/anvay-web.log"
+    tail -20 /tmp/anway-web.log
+    err "Web failed to start — full log: /tmp/anway-web.log"
   fi
   sleep 1
 done
@@ -248,28 +248,28 @@ log "Web ready"
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  Anvay demo is running${NC}"
+echo -e "${GREEN}  Anway demo is running${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 printf "  %-20s %-35s %s\n" "Service" "URL" "Status"
 printf "  %-20s %-35s %s\n" "-------" "---" "------"
-printf "  %-20s %-35s " "Anvay (web)"     "http://localhost:8500"
+printf "  %-20s %-35s " "Anway (web)"     "http://localhost:8500"
   curl -sf http://localhost:8500 > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
 printf "  %-20s %-35s " "Gateway"         "http://localhost:8510"
   curl -sf http://127.0.0.1:8510/health > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
-printf "  %-20s %-35s " "Grafana"         "http://localhost:8520  (admin / anvay)"
+printf "  %-20s %-35s " "Grafana"         "http://localhost:8520  (admin / anway)"
   curl -sf http://localhost:8520/api/health > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗ (not in this stack)${NC}"
 printf "  %-20s %-35s " "Prometheus"      "http://localhost:8530"
   curl -sf http://localhost:8530/-/ready > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
 printf "  %-20s %-35s " "Postgres"        "localhost:5432"
-  docker exec infra-postgres-1 pg_isready -U anvay > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
+  docker exec infra-postgres-1 pg_isready -U anway > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
 printf "  %-20s %-35s " "Loki"            "http://localhost:3100"
   curl -sf http://localhost:3100/ready > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
 printf "  %-20s %-35s " "Ollama"          "http://localhost:11434"
   curl -sf http://localhost:11434/api/tags > /dev/null 2>&1 && echo -e "${GREEN}●${NC}" || echo -e "${RED}✗${NC}"
 echo ""
-echo "  Logs:  tail -f /tmp/anvay-gateway.log"
-echo "         tail -f /tmp/anvay-web.log"
+echo "  Logs:  tail -f /tmp/anway-gateway.log"
+echo "         tail -f /tmp/anway-web.log"
 echo ""
 echo "  Stop: Ctrl+C"
 echo ""

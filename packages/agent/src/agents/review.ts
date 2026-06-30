@@ -1,6 +1,6 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface Finding { file: string; line?: number; severity: 'blocking' | 'high' | 'medium' | 'low'; description: string; suggestion: string }
 export interface ReviewFindings { summary: string; blocking: Finding[]; nonBlocking: Finding[]; testPlan: string[]; approvalRecommendation: 'approve' | 'approve_with_changes' | 'request_changes' }

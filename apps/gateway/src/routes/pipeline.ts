@@ -34,7 +34,7 @@ async function resolveKubeconfigPath(tenantId: string): Promise<{ path: string; 
       const creds = decryptJson<Record<string, unknown>>(rows[0]!.credentials_enc)
       const kubeconfig = creds['kubeconfig'] as string | undefined
       if (kubeconfig && kubeconfig.trimStart().startsWith('apiVersion')) {
-        const tmp = join(tmpdir(), `anvay-k8s-${tenantId}-${Date.now()}.yaml`)
+        const tmp = join(tmpdir(), `anway-k8s-${tenantId}-${Date.now()}.yaml`)
         writeFileSync(tmp, kubeconfig, { mode: 0o600 })
         return { path: tmp, cleanup: () => { try { unlinkSync(tmp) } catch {} } }
       }
@@ -533,8 +533,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
             // Strategy B: docker build locally if DOCKER_REGISTRY is configured
             if (registry) {
-              const gatewayImage = `${registry}/anvay-gateway:${gitSha}`
-              const webImage = `${registry}/anvay-web:${gitSha}`
+              const gatewayImage = `${registry}/anway-gateway:${gitSha}`
+              const webImage = `${registry}/anway-web:${gitSha}`
               sse({ type: 'status', message: `Building images for ${gitSha}…` })
 
               for (const [context, image] of [['apps/gateway', gatewayImage], ['apps/web', webImage]] as const) {
@@ -579,8 +579,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
             await new Promise(r => setTimeout(r, 500))
             const fakeSha = gitSha !== 'latest' ? gitSha : Math.random().toString(36).slice(2, 9)
             for (const line of [
-              `[DEMO] docker build apps/gateway -t <registry>/anvay-gateway:${fakeSha}`,
-              `[DEMO] docker build apps/web -t <registry>/anvay-web:${fakeSha}`,
+              `[DEMO] docker build apps/gateway -t <registry>/anway-gateway:${fakeSha}`,
+              `[DEMO] docker build apps/web -t <registry>/anway-web:${fakeSha}`,
               `[DEMO] ✓ Images built and pushed (${fakeSha})`,
             ]) {
               await new Promise(r => setTimeout(r, 300))
@@ -673,11 +673,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
             // Derive namespace from stage ID or pipeline metadata
             const helmNamespace = (pipelineMeta?.['namespace'] as string | undefined)
               ?? (stageId.includes('prod') || (envLabel ?? '').toLowerCase().includes('prod')
-                  ? (process.env['HELM_NAMESPACE_PROD'] ?? 'anvay')
-                  : (process.env['HELM_NAMESPACE_STAGING'] ?? 'anvay-staging'))
+                  ? (process.env['HELM_NAMESPACE_PROD'] ?? 'anway')
+                  : (process.env['HELM_NAMESPACE_STAGING'] ?? 'anway-staging'))
 
-            const helmRelease = process.env['HELM_RELEASE'] ?? 'anvay'
-            const helmChart = process.env['HELM_CHART'] ?? 'infra/helm/anvay'
+            const helmRelease = process.env['HELM_RELEASE'] ?? 'anway'
+            const helmChart = process.env['HELM_CHART'] ?? 'infra/helm/anway'
             const registry = process.env['DOCKER_REGISTRY'] ?? ''
             const { path: kubeconfig, cleanup: kubeconfigCleanup } = await resolveKubeconfigPath(tenantId)
 
@@ -689,7 +689,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
                 `[DEMO] helm upgrade --install ${helmRelease} ${helmChart} --namespace ${helmNamespace}`,
                 `[DEMO]   --set gateway.image.tag=${imageTag}`,
                 `[DEMO]   --set web.image.tag=${imageTag}`,
-                '[DEMO] Release "anvay" has been upgraded. Happy Helming!',
+                '[DEMO] Release "anway" has been upgraded. Happy Helming!',
               ]) {
                 await new Promise(r => setTimeout(r, 300))
                 sse({ type: 'log', line })
@@ -711,8 +711,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
               '--set', `gateway.image.tag=${imageTag}`,
               '--set', `web.image.tag=${imageTag}`,
               ...(registry ? [
-                '--set', `gateway.image.repository=${registry}/anvay-gateway`,
-                '--set', `web.image.repository=${registry}/anvay-web`,
+                '--set', `gateway.image.repository=${registry}/anway-gateway`,
+                '--set', `web.image.repository=${registry}/anway-web`,
               ] : []),
             ]
 
@@ -743,7 +743,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             await new Promise<void>((resolve) => {
               const child = trackChild(spawn('kubectl', [
                 'run', `migrate-${Date.now()}`,
-                '--image', `${registry ? `${registry}/anvay-gateway` : 'anvay-gateway'}:${imageTag}`,
+                '--image', `${registry ? `${registry}/anway-gateway` : 'anway-gateway'}:${imageTag}`,
                 '--namespace', helmNamespace,
                 '--restart=Never', '--rm', '--attach',
                 '--', 'npx', 'prisma', 'migrate', 'deploy',
@@ -769,7 +769,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const { path: kubeconfig, cleanup: kubeconfigCleanup2 } = await resolveKubeconfigPath(tenantId)
             const pipelineMeta2 = (pipelines[0] as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined
             const monitorNamespace = (pipelineMeta2?.['namespace'] as string | undefined)
-              ?? (stageId.includes('prod') ? (process.env['HELM_NAMESPACE_PROD'] ?? 'anvay') : (process.env['HELM_NAMESPACE_STAGING'] ?? 'anvay-staging'))
+              ?? (stageId.includes('prod') ? (process.env['HELM_NAMESPACE_PROD'] ?? 'anway') : (process.env['HELM_NAMESPACE_STAGING'] ?? 'anway-staging'))
             const healthUrl = process.env[`HEALTH_URL_${monitorNamespace.toUpperCase().replace(/-/g, '_')}`]
 
             let monitorOk = true
@@ -777,11 +777,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
             if (kubeconfig) {
               // Poll kubectl rollout status
-              sse({ type: 'log', line: `→ kubectl rollout status deployment/anvay-gateway -n ${monitorNamespace}` })
+              sse({ type: 'log', line: `→ kubectl rollout status deployment/anway-gateway -n ${monitorNamespace}` })
               const rolloutResult = await new Promise<{ code: number; output: string }>((resolve) => {
                 let out = ''
                 const child = spawn('kubectl', [
-                  'rollout', 'status', 'deployment/anvay-gateway',
+                  'rollout', 'status', 'deployment/anway-gateway',
                   '-n', monitorNamespace, '--timeout=120s',
                 ], { env: { ...process.env, KUBECONFIG: kubeconfig }, stdio: ['ignore', 'pipe', 'pipe'] })
                 child.stdout.on('data', (d: Buffer) => { out += d.toString() })
@@ -895,7 +895,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
                       text: `🚦 Gate pending approval`,
                       blocks: [
                         { type: 'section', text: { type: 'mrkdwn', text: `*Gate requires approval*\nPipeline: ${pipelineName}\nStage: ${stageName}\nTriggered by: ${(request.user as { email?: string }).email ?? 'unknown'}` } },
-                        { type: 'section', text: { type: 'mrkdwn', text: `Approve in Anvay → Pipeline view → Gate: ${stageId}` } }
+                        { type: 'section', text: { type: 'mrkdwn', text: `Approve in Anway → Pipeline view → Gate: ${stageId}` } }
                       ]
                     })
                   }).catch(() => { /* non-blocking */ })

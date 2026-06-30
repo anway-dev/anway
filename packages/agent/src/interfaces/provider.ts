@@ -1,5 +1,5 @@
-import type { Message, StreamEvent } from '@anvay/types'
-import { AppError } from '@anvay/types'
+import type { Message, StreamEvent } from '@anway/types'
+import { AppError } from '@anway/types'
 
 export type { Message }
 export { AppError }
@@ -37,7 +37,7 @@ export interface ChatResponse {
   }
 }
 
-// StreamChunk maps 1:1 to StreamEvent from @anvay/types
+// StreamChunk maps 1:1 to StreamEvent from @anway/types
 export type StreamChunk = StreamEvent
 
 // The ONLY interface agents and the orchestrator ever call — never a provider SDK directly

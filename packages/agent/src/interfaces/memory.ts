@@ -1,4 +1,4 @@
-import type { AgentRole, SessionId, TenantId, UserId } from '@anvay/types'
+import type { AgentRole, SessionId, TenantId, UserId } from '@anway/types'
 import type { IModelProvider, ToolCall } from './provider.js'
 
 export interface ConversationTurn {

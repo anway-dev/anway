@@ -4,7 +4,7 @@ import { createClient } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
-import { providerRegistry } from '@anvay/agent'
+import { providerRegistry } from '@anway/agent'
 import { encryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
@@ -158,7 +158,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<{ name: string }[]>`SELECT name FROM tenants WHERE id = ${tenantId}::uuid LIMIT 1`
     ).catch(() => [])
-    return { name: rows[0]?.name ?? 'Anvay' }
+    return { name: rows[0]?.name ?? 'Anway' }
   })
 
   app.get('/api/settings/connectors', { preHandler: [app.authenticate] }, async (request) => {

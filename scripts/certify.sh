@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # =============================================================================
-# Anvay Prod-Readiness Certification
+# Anway Prod-Readiness Certification
 # One run certifies the service end-to-end: infra, demo stack, gateway, web,
 # auth, connectors, graph, alert flow, automations, audit, UI.
 # Usage: ./scripts/certify.sh
@@ -75,9 +75,9 @@ if ! wait_for "$GATEWAY_URL/health" 5; then
   cp -n apps/gateway/.env.example apps/gateway/.env 2>/dev/null || true
   set -a; source apps/gateway/.env 2>/dev/null || true; set +a
   (cd apps/gateway && pnpm prisma migrate deploy) >/dev/null 2>&1 || true
-  (cd apps/gateway && pnpm dev) > /tmp/anvay-gateway.log 2>&1 &
+  (cd apps/gateway && pnpm dev) > /tmp/anway-gateway.log 2>&1 &
   if ! wait_for "$GATEWAY_URL/health" 45; then
-    err "Gateway did not become healthy. Logs: tail -f /tmp/anvay-gateway.log"
+    err "Gateway did not become healthy. Logs: tail -f /tmp/anway-gateway.log"
     fail_banner "gateway unhealthy"
   fi
 fi
@@ -94,10 +94,10 @@ if ! wait_for "$WEB_URL" 5; then
   if [ ! -d "$WEB_DIR/node_modules" ]; then
     (cd "$WEB_DIR" && npm install --silent)
   fi
-  (cd "$WEB_DIR" && WATCHPACK_POLLING=true npm run dev -- --port 3000) > /tmp/anvay-web.log 2>&1 &
+  (cd "$WEB_DIR" && WATCHPACK_POLLING=true npm run dev -- --port 3000) > /tmp/anway-web.log 2>&1 &
   STARTED_WEB=$!
   if ! wait_for "$WEB_URL/login" 60; then
-    err "Web did not start. Logs: tail -f /tmp/anvay-web.log"
+    err "Web did not start. Logs: tail -f /tmp/anway-web.log"
     fail_banner "web server unavailable"
   fi
 fi

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from .routes import episodes, facts
 from .config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
-app = FastAPI(title="Anvay Agent Service")
+app = FastAPI(title="Anway Agent Service")
 
 @app.on_event("startup")
 async def startup():

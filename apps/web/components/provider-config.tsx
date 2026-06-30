@@ -306,7 +306,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
       <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "#080808" }}>
         <div style={{ width: "420px", background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "32px" }}>
           <h1 style={{ fontSize: "18px", fontWeight: 700, color: "#e5e5e5", margin: "0 0 4px", fontFamily: "monospace" }}>Connect your AI model</h1>
-          <p style={{ fontSize: "12px", color: "#555", margin: "0 0 24px", fontFamily: "monospace" }}>Anvay needs an LLM provider to answer queries. Configure below.</p>
+          <p style={{ fontSize: "12px", color: "#555", margin: "0 0 24px", fontFamily: "monospace" }}>Anway needs an LLM provider to answer queries. Configure below.</p>
           {renderForm()}
         </div>
       </div>

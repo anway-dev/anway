@@ -1,6 +1,6 @@
 services:
   gateway:
-    image: anvay-gateway:latest
+    image: anway-gateway:latest
     ports:
       - "4000:4000"
     env_file:
@@ -18,7 +18,7 @@ services:
       retries: 3
 
   web:
-    image: anvay-web:latest
+    image: anway-web:latest
     ports:
       - "8500:3000"
     environment:

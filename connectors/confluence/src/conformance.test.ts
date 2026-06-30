@@ -1,6 +1,6 @@
 import { vi, beforeEach, afterEach } from 'vitest'
-import { describeConnectorConformance } from '@anvay/agent/testing'
-import type { IKnowledgeGraph } from '@anvay/agent'
+import { describeConnectorConformance } from '@anway/agent/testing'
+import type { IKnowledgeGraph } from '@anway/agent'
 import { ConfluenceBootstrap } from './bootstrap.js'
 
 const MOCK_HOST = 'http://mock-confluence.local'

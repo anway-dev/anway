@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: anvay
+      POSTGRES_USER: anway
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: anvay
+      POSTGRES_DB: anway
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U anvay"]
+      test: ["CMD-SHELL", "pg_isready -U anway"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -100,7 +100,7 @@ services:
     environment:
       NODE_ENV: production
       GATEWAY_URL: http://gateway:8510
-      DEMO_EMAIL: admin@anvay.local
+      DEMO_EMAIL: admin@anway.local
       DEMO_TENANT_ID: 00000000-0000-0000-0000-000000000001
     depends_on:
       - gateway

@@ -1,4 +1,4 @@
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const TOOLS: ConnectorTool[] = [
   { definition: { name: 'get_issues', description: 'List code quality issues', parameters: { type: 'object', properties: { project: { type: 'string' } }, required: ['project'] } }, execute: () => Promise.resolve({ issues: [{ severity:'critical',type:'BUG',message:'Null pointer',file:'App.java',line:42 }] }), write: false },

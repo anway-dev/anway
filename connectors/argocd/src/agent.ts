@@ -1,4 +1,4 @@
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const TOOLS: ConnectorTool[] = [
   { definition: { name: 'get_pipelines', description: 'List pipelines', parameters: { type: 'object', properties: { service: { type: 'string' } }, required: ['service'] } }, execute: () => Promise.resolve({ pipelines: [{ id:'pl-1',name:'Deploy',status:'passed',lastRun:new Date().toISOString() }] }), write: false },

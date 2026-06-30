@@ -1,4 +1,4 @@
-import type { ErrorCode, GroundingSource, Message, StreamEvent } from '@anvay/types'
+import type { ErrorCode, GroundingSource, Message, StreamEvent } from '@anway/types'
 import type { IAuditSink } from './interfaces/audit.js'
 import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
 import type { IModelProvider, ToolDefinition } from './interfaces/provider.js'
@@ -57,7 +57,7 @@ const DEFAULT_BUDGET: TokenBudget = {
 }
 
 const ORCHESTRATOR_SYSTEM_PROMPT =
-  'You are Anvay, the central nervous system of a software organisation. ' +
+  'You are Anway, the central nervous system of a software organisation. ' +
   'You are a single unified agent — never mention "routing", "specialist agents", or "handing off". ' +
   'You investigate and act directly using the tools available to you. ' +
   'Every claim must be grounded in data returned by tool calls. ' +
@@ -545,7 +545,7 @@ function buildSynthesisMessages(
   const noData = findings.every(f => f.toolsUsed.length === 0)
 
   const systemContent =
-    `You are Anvay — the orchestrator synthesiser. Your specialist agents have queried all connected data sources in parallel. Effective role: ${effectiveRole}.\n\n` +
+    `You are Anway — the orchestrator synthesiser. Your specialist agents have queried all connected data sources in parallel. Effective role: ${effectiveRole}.\n\n` +
     `${graphContext}\n${connectorContext}\n\n` +
     (sreContext ? `${sreContext}\n\n` : '') +
     `## SPECIALIST AGENT FINDINGS\n` +

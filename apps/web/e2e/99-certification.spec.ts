@@ -207,7 +207,7 @@ test.describe('CERT E: Graph indexing', () => {
 // ---------------------------------------------------------------------------
 test.describe('CERT F: Alert flow — webhook → incident → signals', () => {
   const alertName = uniqueId('CERT-Alert')
-  const WEBHOOK_TOKEN = process.env['ANVAY_WEBHOOK_TOKEN'] ?? 'anvay-demo-webhook-token'
+  const WEBHOOK_TOKEN = process.env['ANWAY_WEBHOOK_TOKEN'] ?? 'anway-demo-webhook-token'
 
   test('F.1 Alertmanager webhook accepted with static webhook token (real sender path)', async ({ request }) => {
     // This is exactly how Alertmanager calls the gateway: a static bearer
@@ -224,7 +224,7 @@ test.describe('CERT F: Alert flow — webhook → incident → signals', () => {
         }],
       },
     })
-    expect(r.status(), 'webhook with ANVAY_WEBHOOK_TOKEN must be accepted — Alertmanager cannot sign JWTs').toBe(200)
+    expect(r.status(), 'webhook with ANWAY_WEBHOOK_TOKEN must be accepted — Alertmanager cannot sign JWTs').toBe(200)
   })
 
   test('F.1b webhook with no/invalid token rejected', async ({ request }) => {
@@ -801,7 +801,7 @@ test.describe('CERT V: trigger fires', () => {
     const evResp = await request.post(`${GATEWAY}/api/events/incident`, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env['ANVAY_WEBHOOK_TOKEN'] ?? 'anvay-demo-webhook-token'}`,
+        'Authorization': `Bearer ${process.env['ANWAY_WEBHOOK_TOKEN'] ?? 'anway-demo-webhook-token'}`,
       },
       data: { title: uniqueId('cert-v-incident'), severity: 'critical' },
     })
@@ -892,7 +892,7 @@ test.describe('CERT Z: auth boundaries and tenant isolation', () => {
     const createR = await request.post(`${GATEWAY}/api/events/incident`, {
       headers: {
         ...h,
-        Authorization: `Bearer ${process.env['ANVAY_WEBHOOK_TOKEN'] ?? 'anvay-demo-webhook-token'}`,
+        Authorization: `Bearer ${process.env['ANWAY_WEBHOOK_TOKEN'] ?? 'anway-demo-webhook-token'}`,
       },
       data: { title: marker, severity: 'low' },
     })
@@ -1713,7 +1713,7 @@ test.describe('CERT AQ: perimeter enforcement — verified correct (W26-T2)', ()
     await request.post(`${GATEWAY}/api/events/incident`, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env['ANVAY_WEBHOOK_TOKEN'] ?? 'anvay-demo-webhook-token'}`,
+        'Authorization': `Bearer ${process.env['ANWAY_WEBHOOK_TOKEN'] ?? 'anway-demo-webhook-token'}`,
       },
       data: { title: marker, severity: 'high' },
     })

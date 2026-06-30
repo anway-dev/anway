@@ -1,4 +1,4 @@
-import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anvay/types'
+import type { CapabilityManifest, ConnectorResult, ConnectorQuery, ConnectorAction, HealthStatus, IConnector } from '@anway/types'
 
 export class DatadogConnector implements IConnector {
   readonly id: string

@@ -432,7 +432,7 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
                 )}
                 style={{ background: "#0a2a1a", border: "1px solid rgba(16,185,129,0.35)", color: "#10b981", padding: "5px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "11px", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}
               >
-                <span style={{ fontSize: "10px" }}>✦</span> Investigate with Anvay
+                <span style={{ fontSize: "10px" }}>✦</span> Investigate with Anway
               </button>
             </div>
           </div>
@@ -442,7 +442,7 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
             {/* Hypothesis box */}
             <div style={{ background: "#0a150e", border: "1px solid rgba(16,185,129,0.2)", borderLeft: "3px solid #10b981", borderRadius: "8px", padding: "14px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                <span style={{ fontSize: "10px", color: "#10b981", fontWeight: 700, letterSpacing: "0.08em" }}>✦ ANVAY — ROOT CAUSE HYPOTHESIS</span>
+                <span style={{ fontSize: "10px", color: "#10b981", fontWeight: 700, letterSpacing: "0.08em" }}>✦ ANWAY — ROOT CAUSE HYPOTHESIS</span>
               </div>
               <p style={{ fontSize: "12px", color: "#c8e6c9", lineHeight: "1.6", margin: 0 }}>
                 {selected.hypothesis}

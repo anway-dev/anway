@@ -11,20 +11,20 @@ terraform {
   }
 }
 
-resource "kubernetes_namespace" "anvay" {
+resource "kubernetes_namespace" "anway" {
   metadata {
     name = var.namespace
     labels = {
-      app         = "anvay"
+      app         = "anway"
       environment = var.environment
     }
   }
 }
 
-resource "kubernetes_secret" "anvay_secrets" {
+resource "kubernetes_secret" "anway_secrets" {
   metadata {
-    name      = "anvay-secrets"
-    namespace = kubernetes_namespace.anvay.metadata[0].name
+    name      = "anway-secrets"
+    namespace = kubernetes_namespace.anway.metadata[0].name
   }
 
   data = {
@@ -38,10 +38,10 @@ resource "kubernetes_secret" "anvay_secrets" {
   }
 }
 
-resource "helm_release" "anvay" {
-  name       = "anvay"
-  chart      = "${path.module}/../../../../helm/anvay"
-  namespace  = kubernetes_namespace.anvay.metadata[0].name
+resource "helm_release" "anway" {
+  name       = "anway"
+  chart      = "${path.module}/../../../../helm/anway"
+  namespace  = kubernetes_namespace.anway.metadata[0].name
   wait       = true
   timeout    = 300
 
@@ -64,7 +64,7 @@ resource "helm_release" "anvay" {
         }
       }
       envFrom = [{
-        secretRef = { name = kubernetes_secret.anvay_secrets.metadata[0].name }
+        secretRef = { name = kubernetes_secret.anway_secrets.metadata[0].name }
       }]
       ingress = {
         enabled   = var.ingress_enabled

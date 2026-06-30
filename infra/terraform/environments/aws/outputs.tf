@@ -7,12 +7,12 @@ output "cluster_endpoint" {
 }
 
 output "rds_endpoint" {
-  value     = aws_db_instance.anvay.address
+  value     = aws_db_instance.anway.address
   sensitive = true
 }
 
 output "redis_endpoint" {
-  value     = aws_elasticache_replication_group.anvay.primary_endpoint_address
+  value     = aws_elasticache_replication_group.anway.primary_endpoint_address
   sensitive = true
 }
 
@@ -21,7 +21,7 @@ output "vpc_id" {
 }
 
 output "app_namespace" {
-  value = module.anvay_app.namespace
+  value = module.anway_app.namespace
 }
 
 output "configure_kubectl" {

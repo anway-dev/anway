@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { UserId } from '@anvay/types'
+import { UserId } from '@anway/types'
 import type { ToolCall } from '../interfaces/provider.js'
 import { AgentPerimeter } from './engine.js'
 import type { ConnectorManifest, UserPerimeter } from './engine.js'

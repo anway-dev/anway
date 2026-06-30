@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 const execFileAsync = promisify(execFile)
 

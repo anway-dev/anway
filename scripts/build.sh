@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — Anvay build orchestrator
+# build.sh — Anway build orchestrator
 #
 # Architecture:
 #   Claude is the orchestrator for every task.
@@ -60,7 +60,7 @@ mark_done(){
 orchestrate() {
   local task_id="$1"
   cat <<PROMPT
-You are orchestrating the implementation of $task_id for the Anvay project.
+You are orchestrating the implementation of $task_id for the Anway project.
 Working directory: $REPO_ROOT
 
 Your steps (execute in order, do not skip):

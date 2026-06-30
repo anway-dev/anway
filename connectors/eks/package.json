@@ -1,5 +1,5 @@
 {
-  "name": "@anvay/connector-eks",
+  "name": "@anway/connector-eks",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anvay/agent": "workspace:*",
-    "@anvay/types": "workspace:*"
+    "@anway/agent": "workspace:*",
+    "@anway/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

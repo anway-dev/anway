@@ -1,14 +1,14 @@
 import { createClient } from 'redis'
 import type { RedisClientType } from 'redis'
-import { SREAgent, ProviderFactory } from '@anvay/agent'
-import type { ProviderConfig } from '@anvay/agent'
+import { SREAgent, ProviderFactory } from '@anway/agent'
+import type { ProviderConfig } from '@anway/agent'
 import { IncidentService } from '../services/incident.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { createKnowledgeGraph } from '../kb/index.js'
 import { effectiveApiKey } from '../utils/credentials.js'
 import { UUID_RE } from '../utils/validators.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import pino from 'pino'
 
 const log = pino({ name: 'incident-subscriber' })

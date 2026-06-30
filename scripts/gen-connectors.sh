@@ -55,7 +55,7 @@ for entry in "${CONNECTORS[@]}"; do
   # package.json
   cat > "$DIR/package.json" <<EOF
 {
-  "name": "@anvay/connector-$ID",
+  "name": "@anway/connector-$ID",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -65,8 +65,8 @@ for entry in "${CONNECTORS[@]}"; do
     "test": "vitest run"
   },
   "dependencies": {
-    "@anvay/agent": "workspace:*",
-    "@anvay/types": "workspace:*"
+    "@anway/agent": "workspace:*",
+    "@anway/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.0.0",
@@ -80,9 +80,9 @@ EOF
 
   # src/bootstrap.ts
   cat > "$DIR/src/bootstrap.ts" <<EOF
-import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anvay/agent'
-import type { IKnowledgeGraph } from '@anvay/agent'
-import type { TenantId } from '@anvay/types'
+import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent'
+import type { IKnowledgeGraph } from '@anway/agent'
+import type { TenantId } from '@anway/types'
 
 export class $CLASS implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}

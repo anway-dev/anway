@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test — verifies all Anvay services are healthy.
+# End-to-end smoke test — verifies all Anway services are healthy.
 # Run after: docker compose -f infra/docker-compose.dev.yml up -d
 #
 # Exits 0 if all checks pass, 1 if any fail.

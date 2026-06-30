@@ -1,6 +1,6 @@
 variable "app_name" {
   type    = string
-  default = "anvay"
+  default = "anway"
 }
 
 variable "environment" {
@@ -99,12 +99,12 @@ variable "neo4j_password" {
 
 variable "gateway_image" {
   type    = string
-  default = "anvay/gateway:latest"
+  default = "anway/gateway:latest"
 }
 
 variable "web_image" {
   type    = string
-  default = "anvay/web:latest"
+  default = "anway/web:latest"
 }
 
 variable "gateway_replicas" {
@@ -119,7 +119,7 @@ variable "web_replicas" {
 
 variable "app_hostname" {
   type    = string
-  default = "anvay.example.com"
+  default = "anway.example.com"
 }
 
 variable "tls_secret_name" {

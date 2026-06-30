@@ -11,7 +11,7 @@
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { createKnowledgeGraph } from '../kb/index.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface MappingResult {
   tenantsProcessed: number

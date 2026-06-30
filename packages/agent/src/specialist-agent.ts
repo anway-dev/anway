@@ -1,4 +1,4 @@
-import type { Message, StreamEvent } from '@anvay/types'
+import type { Message, StreamEvent } from '@anway/types'
 import type { IAuditSink } from './interfaces/audit.js'
 import type { IModelProvider, ToolCall, ToolDefinition } from './interfaces/provider.js'
 import type { SessionContext } from './interfaces/memory.js'

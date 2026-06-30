@@ -1,4 +1,4 @@
-import type { IScheduler } from '@anvay/agent'
+import type { IScheduler } from '@anway/agent'
 import { BullMQScheduler } from '../jobs/bullmq-scheduler.js'
 
 /**

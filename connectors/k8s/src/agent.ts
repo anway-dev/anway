@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import type { ConnectorCreds } from '@anvay/types'
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { ConnectorCreds } from '@anway/types'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 function kubectl(args: string[], creds: Record<string, unknown>): { stdout: string; status: number | null } {
   const kubeconfig = typeof (creds as ConnectorCreds).kubeconfig === 'string' ? (creds as ConnectorCreds).kubeconfig as string : undefined

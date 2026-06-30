@@ -1,17 +1,17 @@
-# Anvay — Product Requirements & Execution Plan
+# Anway — Product Requirements & Execution Plan
 
 **Version:** 0.1 · **Status:** Pre-seed prototype → Production roadmap  
 **Audience:** Engineering, founding team, contributors
 
 ---
 
-## 1. What Anvay Is
+## 1. What Anway Is
 
-Anvay is the **central nervous system of a software organisation**.
+Anway is the **central nervous system of a software organisation**.
 
 Every engineering team already runs GitHub, Datadog, Linear, Kubernetes, Loki, Prometheus, Jira, ArgoCD, PagerDuty, Terraform, Coralogix, and one or more cloud providers. None of these tools talk to each other with intelligence. Context is lost at every boundary. Incidents get triaged by cross-referencing six browser tabs. Feature status lives in someone's head. Deploy causation for outages requires a 30-minute investigation.
 
-Anvay solves this by:
+Anway solves this by:
 1. Connecting every tool as a typed, permissioned datasource (connector)
 2. Building a live knowledge graph across all of them
 3. Exposing a single intelligent surface — the orchestrator — where any person in the org can query, act, and govern the entire software lifecycle
@@ -20,7 +20,7 @@ Anvay solves this by:
 
 ```
 Before:   Product ←——→ Eng ←——→ SRE    (siloed, context lost at every boundary)
-After:    Product ←—— Anvay ——→ Eng ←—— Anvay ——→ SRE  (one nervous system)
+After:    Product ←—— Anway ——→ Eng ←—— Anway ——→ SRE  (one nervous system)
 ```
 
 Every connector added compounds the intelligence. The product has a network effect within the organisation — not across organisations.
@@ -53,7 +53,7 @@ The user never picks an agent. Never sees routing logic. Never touches a connect
 
 ## 3. User Personas and Query Modes
 
-| Role | Example query | Anvay behaviour |
+| Role | Example query | Anway behaviour |
 |------|--------------|-----------------|
 | **SRE / Oncall** | "Alert fired on payments-api — what's the trail?" | Traces root cause across metrics, deploys, logs, recent PRs |
 | **PM** | "What's the status of the checkout feature?" | Queries lifecycle graph + Linear + GitHub + deploy state |
@@ -88,7 +88,7 @@ The primary surface. Every user interaction starts here.
 - Connector grounding: every claim in response cited with source + timestamp
 - Confidence score on every response (0.0–1.0); low-confidence responses flagged explicitly
 - Suggested follow-up actions post-response
-- Execution trace log: timestamped, actor-tagged (ANVAY, PERIMETER, agent name, CONF, AUDIT)
+- Execution trace log: timestamped, actor-tagged (ANWAY, PERIMETER, agent name, CONF, AUDIT)
 
 **V1 contract:**  
 Read from all connected sources. Surface context + recommended action. User confirms before any write executes.
@@ -103,8 +103,8 @@ Real-time alert surface aggregated across all monitoring connectors.
 - Alert feed: severity-sorted (critical → high → medium → low)
 - Per-alert detail: service, fired time, metric value, triage status, oncall
 - Triage status lifecycle: pending → auto-triaged → investigating → escalated → resolved
-- "Debug with Anvay ✦" button → pre-filled orchestrator query with alert context
-- L1 Assist mode: Anvay surfaces root cause context; human decides action
+- "Debug with Anway ✦" button → pre-filled orchestrator query with alert context
+- L1 Assist mode: Anway surfaces root cause context; human decides action
 - Alert grouping by service and time window
 - Deduplication across connectors (same incident surfaced from both Datadog and PagerDuty = one entry)
 
@@ -117,13 +117,13 @@ Auto-assembled triage view when an incident is created (manually or via trigger)
 **Capabilities:**
 - Incident list: severity-filtered, active/investigating/resolved tabs
 - Per-incident war room:
-  - **Anvay hypothesis** — cross-source root cause analysis with confidence score
+  - **Anway hypothesis** — cross-source root cause analysis with confidence score
   - **Timeline strip** — time-ordered events: alert fired, deploy, metric spike, oncall ack, rollback
   - **Metrics panel** — 4 key metrics with sparklines, colored by severity
   - **Deploy panel** — last N deploys, culprit/suspect highlighted with red border
   - **PR panel** — related PRs, suspect PRs marked
   - **Runbook** — step-by-step remediation, collapsible
-- "Investigate with Anvay ✦" → orchestrator pre-loaded with incident context
+- "Investigate with Anway ✦" → orchestrator pre-loaded with incident context
 - Incident severity: critical / high / medium
 - Incident status lifecycle: active → investigating → resolved
 
@@ -161,8 +161,8 @@ Configurable triage policy for incoming alerts and signals.
 
 **Modes:**
 - **Bypass** — signals pass through unprocessed
-- **Monitor** — Anvay watches and logs, no action
-- **L1 Assist** — Anvay surfaces root cause context + recommended action to team; human decides
+- **Monitor** — Anway watches and logs, no action
+- **L1 Assist** — Anway surfaces root cause context + recommended action to team; human decides
 
 **Per-source configuration:**
 - Mode selection
@@ -171,7 +171,7 @@ Configurable triage policy for incoming alerts and signals.
 - Stats: volume, assisted count, escalated count, MTTR
 
 **L1 Assist contract:**  
-Anvay reads, triages, surfaces. Never resolves autonomously in V1. Human retains decision authority.
+Anway reads, triages, surfaces. Never resolves autonomously in V1. Human retains decision authority.
 
 ---
 
@@ -183,14 +183,14 @@ Horizontal stage flow covering the full development lifecycle of a feature.
 1. **PRD** — product requirements doc (Linear / Notion)
 2. **Tech Spec** — engineering spec (Notion / GitHub)
 3. **Test Cases** — test suite status (GitHub CI)
-4. **API Collection** — request collection (Anvay collection format)
+4. **API Collection** — request collection (Anway collection format)
 5. **Deploy** — deployment state (ArgoCD)
 6. **Metrics** — live production metrics (Datadog)
 
 **Per-stage:**
 - Status indicator (approved / review / partial / running / pending / failed / live)
 - Connector badge (Linear, Notion, GitHub CI, ArgoCD, Datadog)
-- AI panel: Anvay analyses stage, surfaces findings, answers questions in context
+- AI panel: Anway analyses stage, surfaces findings, answers questions in context
 
 **Agent chain for new features:**
 ```
@@ -214,7 +214,7 @@ Code review and editing surface connected to the entire organisational context.
 - **Findings panel** — AI-surfaced issues: severity, line reference, description
 - **Gate panel** — approval status, required reviewers, auto-approve threshold, confidence score
 - Context bar: connected to Linear + GitHub + Datadog + ArgoCD
-- "Ask Anvay" button for any finding
+- "Ask Anway" button for any finding
 - Configurable review policy per repo/service
 
 ---
@@ -245,7 +245,7 @@ Company-wide typed knowledge graph. Every entity in the org (services, repos, te
 | "What broke when we deployed?" | Deploy → DEPLOYED_TO → Service ← AFFECTS ← Incident |
 
 **Connector bootstrap (mandatory):**  
-Every connector registered in Anvay runs a bootstrap agent that crawls the connector and seeds the graph with entities and relationships. No connector ships without a bootstrap implementation. This is what makes existing codebase integration instant — connect GitHub → immediately know all repos, owners, and teams.
+Every connector registered in Anway runs a bootstrap agent that crawls the connector and seeds the graph with entities and relationships. No connector ships without a bootstrap implementation. This is what makes existing codebase integration instant — connect GitHub → immediately know all repos, owners, and teams.
 
 **Ever-evolving — event-driven updates:**  
 Graph updates on every connector event. New PR merged → update repo node, create commit entity. PagerDuty oncall rotation → update Team→ONCALL→Engineer edge. Ticket created → extract service mention, create Ticket→RELATES_TO→Service edge. No manual curation required.
@@ -284,10 +284,10 @@ Autonomy configuration and gate management per service/team.
 - Per-service / per-team overrides
 
 **Autonomy levels:**
-- L1 Assist — Anvay reads and suggests. Human does the action manually.
-- L2 Approve — Anvay generates + shows gate. Human confirms. Anvay executes. (V1 default for all writes)
-- L3 Supervise — Anvay executes, human can interrupt. Unlock per-service post-trust.
-- L4 Autonomous — Anvay executes within policy bounds, async audit only. Explicit unlock, never default.
+- L1 Assist — Anway reads and suggests. Human does the action manually.
+- L2 Approve — Anway generates + shows gate. Human confirms. Anway executes. (V1 default for all writes)
+- L3 Supervise — Anway executes, human can interrupt. Unlock per-service post-trust.
+- L4 Autonomous — Anway executes within policy bounds, async audit only. Explicit unlock, never default.
 
 ---
 
@@ -350,12 +350,12 @@ Scheduler fires job
 Built-in REST/GraphQL client for connector testing and collection management.
 
 **Capabilities:**
-- Collection browser (Anvay collection format)
+- Collection browser (Anway collection format)
 - Request builder: method, URL, headers, body, auth
 - Response viewer: status, body, headers, timing
 - Environment variables
 - Pre-request and post-response scripts (configurable)
-- "Ask Anvay" on any response — contextual analysis
+- "Ask Anway" on any response — contextual analysis
 
 ---
 
@@ -429,7 +429,7 @@ CLI (curated): { type: 'cli', binary: 'kubectl', name: 'k8s', allowedSubcommands
 
 **No per-service connector packages.** M2-T1/T2/T3/T4 (GitHub/Datadog/Linear/ArgoCD) are NOT separate packages. They are connector config entries registered against the generic adapters. The `connectors/` directory does not exist. The connector table in the DB is the source of truth.
 
-This means: any org can self-serve connectors for any MCP-compliant service (Linear, Notion, Stripe, Figma, etc.) or any tool with a CLI (kubectl, aws, gcloud, argocd, pd) without waiting for Anvay to ship an integration.
+This means: any org can self-serve connectors for any MCP-compliant service (Linear, Notion, Stripe, Figma, etc.) or any tool with a CLI (kubectl, aws, gcloud, argocd, pd) without waiting for Anway to ship an integration.
 
 ---
 
@@ -521,42 +521,42 @@ LLM provider and model selection for the orchestrator and specialist agents.
 | Web UI | Next.js 16, TypeScript, inline styles | App router, streaming SSE to browser |
 | BFF Gateway | Fastify, TypeScript | Auth, perimeter enforcement, request routing, team sync |
 | Agent Service | Python FastAPI | Heavy LLM inference, embedding, long-running jobs |
-| Agent Harness | `@anvay/agent`, TypeScript, Anthropic SDK | Orchestrator core, specialist agents, perimeter middleware |
+| Agent Harness | `@anway/agent`, TypeScript, Anthropic SDK | Orchestrator core, specialist agents, perimeter middleware |
 | Background Jobs | Trigger.dev (OSS, self-hosted) · BullMQ fallback | Event triggers, cron monitors, durable scheduling |
 | Database | PostgreSQL + pgvector | Entities, KB, audit log, relationships, semantic retrieval |
 | Cache | Redis | Session memory, hot KB entries, TTL-based eviction |
 | Event Bus | Internal (phase 1) → Kafka (when volume demands) | Connector events, trigger routing |
-| CLI | `anvay` CLI, TypeScript | Developer-facing, collection runner, local agent |
+| CLI | `anway` CLI, TypeScript | Developer-facing, collection runner, local agent |
 | Collection Runner / FSM | Go | High-throughput collection runner, workflow FSM, connector agents where TS throughput is a bottleneck |
 
 ### 5.2 Monorepo Layout
 
 ```
-anvay/
+anway/
 ├── apps/
 │   ├── web/              # Next.js 16 UI — app shell, views, streaming chat
 │   ├── gateway/          # Fastify BFF — auth, JWT, perimeter, proxy
 │   ├── agent-service/    # Python FastAPI — LLM inference, embedding, async jobs
-│   └── cli/              # `anvay` CLI — collection runner, local dev
+│   └── cli/              # `anway` CLI — collection runner, local dev
 │
 ├── packages/
-│   ├── agent/            # @anvay/agent — orchestrator harness, specialist agents
-│   ├── collection/       # @anvay/collection — collection format + runner
-│   ├── repo/             # @anvay/repo — codebase analysis, AST parsing
-│   ├── k8s/              # @anvay/k8s — cluster client
-│   ├── ui/               # @anvay/ui — shared React components
-│   └── types/            # @anvay/types — shared TypeScript types, DTOs
+│   ├── agent/            # @anway/agent — orchestrator harness, specialist agents
+│   ├── collection/       # @anway/collection — collection format + runner
+│   ├── repo/             # @anway/repo — codebase analysis, AST parsing
+│   ├── k8s/              # @anway/k8s — cluster client
+│   ├── ui/               # @anway/ui — shared React components
+│   └── types/            # @anway/types — shared TypeScript types, DTOs
 │
 ├── connectors/           # one package per connector
-│   ├── github/           # @anvay/connector-github
-│   ├── datadog/          # @anvay/connector-datadog
-│   ├── linear/           # @anvay/connector-linear
-│   ├── argocd/           # @anvay/connector-argocd
-│   ├── pagerduty/        # @anvay/connector-pagerduty
-│   ├── k8s/              # @anvay/connector-k8s
-│   ├── aws/              # @anvay/connector-aws
-│   ├── gcp/              # @anvay/connector-gcp
-│   └── azure/            # @anvay/connector-azure
+│   ├── github/           # @anway/connector-github
+│   ├── datadog/          # @anway/connector-datadog
+│   ├── linear/           # @anway/connector-linear
+│   ├── argocd/           # @anway/connector-argocd
+│   ├── pagerduty/        # @anway/connector-pagerduty
+│   ├── k8s/              # @anway/connector-k8s
+│   ├── aws/              # @anway/connector-aws
+│   ├── gcp/              # @anway/connector-gcp
+│   └── azure/            # @anway/connector-azure
 │
 ├── infra/
 │   ├── docker/           # Dockerfiles per service
@@ -581,12 +581,12 @@ anvay/
 
 ```
 Browser → [HTTPS] → Gateway (Fastify)
-                      ├── /api/chat → SSE stream → @anvay/agent orchestrator
+                      ├── /api/chat → SSE stream → @anway/agent orchestrator
                       ├── /api/connectors → connector registry
                       ├── /api/auth → JWT issue/refresh
                       └── /api/* → proxied to agent-service or direct DB
 
-Agent harness (@anvay/agent)
+Agent harness (@anway/agent)
   → direct Anthropic SDK (streaming)
   → connector calls (CLI subprocess / MCP tool call / SDK)
   → perimeter check middleware (before every tool result returns to LLM)
@@ -797,7 +797,7 @@ logger.info({ traceId, tenantId, action: "connector.read" }, "GitHub connector q
 
 ```typescript
 // Domain errors are typed, never strings
-class ConnectorAuthError extends AnvayError {
+class ConnectorAuthError extends AnwayError {
   readonly code = "CONNECTOR_AUTH_FAILED"
   constructor(readonly connectorId: string, cause?: Error) {
     super(`Connector ${connectorId} auth failed`, { cause })
@@ -805,7 +805,7 @@ class ConnectorAuthError extends AnvayError {
 }
 
 // Result type for operations that can fail without throwing
-type Result<T, E extends AnvayError = AnvayError> =
+type Result<T, E extends AnwayError = AnwayError> =
   | { ok: true;  value: T }
   | { ok: false; error: E }
 ```
@@ -1088,9 +1088,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: anvay_dev
-      POSTGRES_USER: anvay
-      POSTGRES_PASSWORD: anvay_dev_secret
+      POSTGRES_DB: anway_dev
+      POSTGRES_USER: anway
+      POSTGRES_PASSWORD: anway_dev_secret
     ports: ["5432:5432"]
     volumes: ["postgres_data:/var/lib/postgresql/data"]
 
@@ -1117,7 +1117,7 @@ services:
   triggerdotdev:
     image: ghcr.io/triggerdotdev/trigger.dev:latest
     environment:
-      DATABASE_URL: postgresql://anvay:anvay_dev_secret@postgres:5432/anvay_dev
+      DATABASE_URL: postgresql://anway:anway_dev_secret@postgres:5432/anway_dev
     ports: ["3002:3000"]
     depends_on: [postgres]
 ```
@@ -1134,7 +1134,7 @@ pnpm --filter agent-service dev  # python on :8000
 
 ### 7.2 Demo Stack (`docker-compose.demo.yml`)
 
-Brings up the **entire** Anvay stack plus simulated services in demo mode. Purpose: test real product capability end-to-end, not the prototype. Real LLM. Real data flow. Real agent execution.
+Brings up the **entire** Anway stack plus simulated services in demo mode. Purpose: test real product capability end-to-end, not the prototype. Real LLM. Real data flow. Real agent execution.
 
 ```yaml
 # docker-compose.demo.yml
@@ -1146,7 +1146,7 @@ services:
   prometheus:
   grafana:
 
-  # ─── Anvay Stack ────────────────────────────
+  # ─── Anway Stack ────────────────────────────
   gateway:
     build: ./apps/gateway
     environment:
@@ -1219,7 +1219,7 @@ services:
     #   T+2:00 — payments-api deploy (inject version bump)
     #   T+2:30 — error rate spike (inject fault)
     #   T+3:00 — alert fires (PagerDuty connector emits)
-    #   T+3:10 — Anvay auto-assembles war room
+    #   T+3:10 — Anway auto-assembles war room
     #   T+5:00 — rollback (inject via ArgoCD connector)
     build: ./infra/demo/scenario-runner
 ```
@@ -1229,7 +1229,7 @@ services:
 cp .env.demo.example .env.demo
 # Fill in ANTHROPIC_API_KEY (or OPENAI_API_KEY)
 docker compose -f docker-compose.demo.yml up
-# → http://localhost:3000  (full Anvay UI, real data, real LLM)
+# → http://localhost:3000  (full Anway UI, real data, real LLM)
 ```
 
 **Demo mode contract:**

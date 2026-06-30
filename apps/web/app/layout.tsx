@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Anvay",
+  title: "Anway",
   description: "Central nervous system of a software organisation",
 };
 

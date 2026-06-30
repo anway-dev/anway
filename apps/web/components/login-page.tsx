@@ -99,7 +99,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       <div style={{ width: 360, background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 8, padding: "32px 28px" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "#10b981", letterSpacing: 1 }}>Anvay</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#10b981", letterSpacing: 1 }}>Anway</div>
           <div style={{ fontSize: 11, color: "#555", marginTop: 4 }}>
             {methods.setupRequired ? "First-run setup" : "Software Intelligence Platform"}
           </div>

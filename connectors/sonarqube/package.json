@@ -1,5 +1,5 @@
 {
-  "name": "@anvay/connector-sonarqube",
+  "name": "@anway/connector-sonarqube",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -9,8 +9,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anvay/agent": "workspace:*",
-    "@anvay/types": "workspace:*"
+    "@anway/agent": "workspace:*",
+    "@anway/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.0.0",

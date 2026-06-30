@@ -1,4 +1,4 @@
-import type { SessionId } from '@anvay/types'
+import type { SessionId } from '@anway/types'
 import type { ISessionMemory, ConversationTurn, SessionContext, SessionMeta } from '../interfaces/memory.js'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { Redis } from 'ioredis'

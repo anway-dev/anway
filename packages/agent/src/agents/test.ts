@@ -1,6 +1,6 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { TechSpec } from './techspec.js'
 
 export interface TestFile { path: string; description: string; testCases: string[] }

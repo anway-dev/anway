@@ -1,6 +1,6 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface DeployPlan { service: string; environment: string; strategy: 'rolling' | 'blue_green' | 'canary'; preChecks: string[]; postChecks: string[]; rollbackTriggers: string[]; estimatedDuration: string; confidence: number }
 

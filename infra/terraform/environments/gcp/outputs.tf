@@ -8,17 +8,17 @@ output "cluster_endpoint" {
 }
 
 output "cloud_sql_private_ip" {
-  value     = google_sql_database_instance.anvay.private_ip_address
+  value     = google_sql_database_instance.anway.private_ip_address
   sensitive = true
 }
 
 output "redis_host" {
-  value     = google_redis_instance.anvay.host
+  value     = google_redis_instance.anway.host
   sensitive = true
 }
 
 output "app_namespace" {
-  value = module.anvay_app.namespace
+  value = module.anway_app.namespace
 }
 
 output "configure_kubectl" {

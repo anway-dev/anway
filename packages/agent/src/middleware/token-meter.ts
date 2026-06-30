@@ -1,4 +1,4 @@
-import type { Message } from '@anvay/types'
+import type { Message } from '@anway/types'
 
 export interface TokenBudget {
   readonly perQueryHardLimit: number

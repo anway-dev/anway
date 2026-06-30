@@ -1,6 +1,6 @@
-// Anvay E2E Test Suites — Playwright
+// Anway E2E Test Suites — Playwright
 // Install: pnpm add -D @playwright/test && npx playwright install chromium
-// Run:     npx playwright test apps/web/e2e/anvay.spec.ts --reporter=list
+// Run:     npx playwright test apps/web/e2e/anway.spec.ts --reporter=list
 //
 // Requires running stack: docker compose -f infra/docker-compose.yml up -d
 // Target: GATEWAY=http://localhost:8510, WEB=http://localhost:8500
@@ -40,7 +40,7 @@ test.describe('A: Health + Metrics', () => {
     const resp = await request.get(`${GATEWAY}/metrics`)
     expect(resp.status()).toBe(200)
     const text = await resp.text()
-    expect(text).toContain('anvay_gateway_http_request_duration_seconds')
+    expect(text).toContain('anway_gateway_http_request_duration_seconds')
   })
 })
 
@@ -240,8 +240,8 @@ test.describe('M: Metrics', () => {
     const after = await request.get(`${GATEWAY}/metrics`)
     const afterText = await after.text()
 
-    expect(beforeText).toContain('anvay_gateway')
-    expect(afterText).toContain('anvay_gateway')
+    expect(beforeText).toContain('anway_gateway')
+    expect(afterText).toContain('anway_gateway')
   })
 })
 

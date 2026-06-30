@@ -25,7 +25,7 @@ test.describe('Intake / Routing — UI', () => {
     await page.locator('text=L1 Assist').first().waitFor({ timeout: 8000 })
     await page.locator('text=L1 Assist').first().click()
     await expect(
-      page.locator('text=triage').or(page.locator('text=context')).or(page.locator('text=Anvay')).first()
+      page.locator('text=triage').or(page.locator('text=context')).or(page.locator('text=Anway')).first()
     ).toBeVisible({ timeout: 3000 })
   })
 })

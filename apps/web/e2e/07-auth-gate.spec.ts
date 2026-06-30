@@ -46,7 +46,7 @@ test.describe('Auth gate', () => {
     await page.goto('/login')
 
     // Fill and submit
-    await page.locator('input[type="email"]').first().fill('dev@anvay.local')
+    await page.locator('input[type="email"]').first().fill('dev@anway.local')
     await page.locator('input[pattern]').or(page.locator('input[placeholder*="00000000"]')).first()
       .fill('00000000-0000-0000-0000-000000000001')
     await page.locator('button[type="submit"]').first().click()
@@ -61,7 +61,7 @@ test.describe('Auth gate', () => {
 
   test('P1: POST /auth/token with valid email+tenantId returns JWT', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: 'dev@anvay.local', tenantId: '00000000-0000-0000-0000-000000000001' },
+      data: { email: 'dev@anway.local', tenantId: '00000000-0000-0000-0000-000000000001' },
     })
     // Accept 200 (success) or 404 (route not found — dev-token endpoint used instead)
     expect([200, 404]).toContain(resp.status())

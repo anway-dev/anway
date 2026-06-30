@@ -21,17 +21,17 @@ variable "pgbouncer_pool_size" {
 #   module "pgbouncer" {
 #     source    = "../../modules/pgbouncer-helm"
 #     count     = var.environment == "prod" ? 1 : 0
-#     namespace = module.anvay_app.namespace
-#     db_host   = aws_db_instance.anvay.address
+#     namespace = module.anway_app.namespace
+#     db_host   = aws_db_instance.anway.address
 #     db_port   = 5432
-#     db_name   = "anvay"
-#     db_user   = "anvay"
+#     db_name   = "anway"
+#     db_user   = "anway"
 #     db_password = var.postgres_password
 #     pool_size   = var.pgbouncer_pool_size
 #   }
 #
 # When PgBouncer is deployed, gateway DATABASE_URL must point to the PgBouncer
-# service endpoint (e.g. pgbouncer.anvay.svc:6432) instead of direct RDS.
+# service endpoint (e.g. pgbouncer.anway.svc:6432) instead of direct RDS.
 
 # Post-deploy checklist:
 # [ ] PgBouncer deployed and DATABASE_URL pointing to PgBouncer endpoint

@@ -17,5 +17,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx tsc --noEmit -p apps/gateway/tsconfig.json
       - run: npx tsc --noEmit -p apps/web/tsconfig.json
-      - run: docker build -f apps/gateway/Dockerfile . -t anvay-gateway:ci
-      - run: docker build -f apps/web/Dockerfile . -t anvay-web:ci
+      - run: docker build -f apps/gateway/Dockerfile . -t anway-gateway:ci
+      - run: docker build -f apps/web/Dockerfile . -t anway-web:ci

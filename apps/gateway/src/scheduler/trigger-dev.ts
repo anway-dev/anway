@@ -1,6 +1,6 @@
 // TriggerDevScheduler — primary scheduler per CLAUDE.md §11.
 // Requires a self-hosted Trigger.dev instance. Falls back to BullMQ when unavailable.
-import type { IScheduler, ScheduledJob } from '@anvay/agent'
+import type { IScheduler, ScheduledJob } from '@anway/agent'
 
 export class TriggerDevScheduler implements IScheduler {
   private jobs: ScheduledJob[] = []

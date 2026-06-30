@@ -1,4 +1,4 @@
-# Anvay Quick Start
+# Anway Quick Start
 
 ## 1. Start infra
 

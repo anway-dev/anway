@@ -1,6 +1,6 @@
-# Anvay Pilot Guide
+# Anway Pilot Guide
 
-Welcome to the Anvay pilot. This guide walks you through setting up the demo stack, connecting your first datasource, and running your first chat query — in under 15 minutes.
+Welcome to the Anway pilot. This guide walks you through setting up the demo stack, connecting your first datasource, and running your first chat query — in under 15 minutes.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ Welcome to the Anvay pilot. This guide walks you through setting up the demo sta
 ## Step 1 — Install
 
 ```bash
-git clone https://github.com/anvay/restol.git
+git clone https://github.com/anway/restol.git
 cd restol
 cp apps/gateway/.env.example apps/gateway/.env
 ```
@@ -60,7 +60,7 @@ curl http://localhost:4000/auth/oidc/status   # OIDC — {"configured":false} (D
 
 ## Step 3 — First Connector
 
-Anvay auto-discovers connectors from your infrastructure. The demo comes with Prometheus pre-configured.
+Anway auto-discovers connectors from your infrastructure. The demo comes with Prometheus pre-configured.
 
 ### Check existing connectors
 
@@ -72,7 +72,7 @@ Anvay auto-discovers connectors from your infrastructure. The demo comes with Pr
 
 1. Click **Chat** in the sidebar
 2. Type: `Register a Prometheus connector at http://localhost:9090`
-3. Anvay will register the connector and bootstrap it — extracting services, targets, and metrics
+3. Anway will register the connector and bootstrap it — extracting services, targets, and metrics
 
 ## Step 4 — First Chat Query
 
@@ -80,7 +80,7 @@ Anvay auto-discovers connectors from your infrastructure. The demo comes with Pr
    ```
    What services are running and are they healthy?
    ```
-2. Anvay queries the Knowledge Graph first, then targeted connector calls
+2. Anway queries the Knowledge Graph first, then targeted connector calls
 3. Response includes grounded data with source citations
 4. Stale data (older than freshness threshold) shows a re-sync warning
 
@@ -88,8 +88,8 @@ Anvay auto-discovers connectors from your infrastructure. The demo comes with Pr
 
 The demo includes a full alert pipeline:
 
-1. **Prometheus alert fires** → Alertmanager → Anvay webhook
-2. Anvay creates an incident, enriches context from graph + connectors
+1. **Prometheus alert fires** → Alertmanager → Anway webhook
+2. Anway creates an incident, enriches context from graph + connectors
 3. View in **Signals** tab (live alerts)
 4. View in **War Room** tab (incident timeline + triage context)
 
@@ -99,7 +99,7 @@ The demo includes a full alert pipeline:
 # Simulate an alert via webhook
 curl -X POST http://localhost:4000/api/events/incident \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer anvay-demo-webhook-token" \
+  -H "Authorization: Bearer anway-demo-webhook-token" \
   -d '{"title": "High error rate on payments-api", "severity": "critical"}'
 ```
 

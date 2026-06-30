@@ -17,115 +17,115 @@ importers:
 
   apps/gateway:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/cli-adapter':
+      '@anway/cli-adapter':
         specifier: workspace:*
         version: link:../../packages/cli-adapter
-      '@anvay/connector-argocd':
+      '@anway/connector-argocd':
         specifier: workspace:*
         version: link:../../connectors/argocd
-      '@anvay/connector-aws-cloudwatch':
+      '@anway/connector-aws-cloudwatch':
         specifier: workspace:*
         version: link:../../connectors/aws-cloudwatch
-      '@anvay/connector-aws-health':
+      '@anway/connector-aws-health':
         specifier: workspace:*
         version: link:../../connectors/aws-health
-      '@anvay/connector-azure-monitor':
+      '@anway/connector-azure-monitor':
         specifier: workspace:*
         version: link:../../connectors/azure-monitor
-      '@anvay/connector-circleci':
+      '@anway/connector-circleci':
         specifier: workspace:*
         version: link:../../connectors/circleci
-      '@anvay/connector-confluence':
+      '@anway/connector-confluence':
         specifier: workspace:*
         version: link:../../connectors/confluence
-      '@anvay/connector-coralogix':
+      '@anway/connector-coralogix':
         specifier: workspace:*
         version: link:../../connectors/coralogix
-      '@anvay/connector-datadog':
+      '@anway/connector-datadog':
         specifier: workspace:*
         version: link:../../connectors/datadog
-      '@anvay/connector-dynatrace':
+      '@anway/connector-dynatrace':
         specifier: workspace:*
         version: link:../../connectors/dynatrace
-      '@anvay/connector-eks':
+      '@anway/connector-eks':
         specifier: workspace:*
         version: link:../../connectors/eks
-      '@anvay/connector-elastic':
+      '@anway/connector-elastic':
         specifier: workspace:*
         version: link:../../connectors/elastic
-      '@anvay/connector-gcp-monitoring':
+      '@anway/connector-gcp-monitoring':
         specifier: workspace:*
         version: link:../../connectors/gcp-monitoring
-      '@anvay/connector-github':
+      '@anway/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
-      '@anvay/connector-gke':
+      '@anway/connector-gke':
         specifier: workspace:*
         version: link:../../connectors/gke
-      '@anvay/connector-grafana':
+      '@anway/connector-grafana':
         specifier: workspace:*
         version: link:../../connectors/grafana
-      '@anvay/connector-jenkins':
+      '@anway/connector-jenkins':
         specifier: workspace:*
         version: link:../../connectors/jenkins
-      '@anvay/connector-jira':
+      '@anway/connector-jira':
         specifier: workspace:*
         version: link:../../connectors/jira
-      '@anvay/connector-k8s':
+      '@anway/connector-k8s':
         specifier: workspace:*
         version: link:../../connectors/k8s
-      '@anvay/connector-launchdarkly':
+      '@anway/connector-launchdarkly':
         specifier: workspace:*
         version: link:../../connectors/launchdarkly
-      '@anvay/connector-linear':
+      '@anway/connector-linear':
         specifier: workspace:*
         version: link:../../connectors/linear
-      '@anvay/connector-loki':
+      '@anway/connector-loki':
         specifier: workspace:*
         version: link:../../connectors/loki
-      '@anvay/connector-newrelic':
+      '@anway/connector-newrelic':
         specifier: workspace:*
         version: link:../../connectors/newrelic
-      '@anvay/connector-notion':
+      '@anway/connector-notion':
         specifier: workspace:*
         version: link:../../connectors/notion
-      '@anvay/connector-opsgenie':
+      '@anway/connector-opsgenie':
         specifier: workspace:*
         version: link:../../connectors/opsgenie
-      '@anvay/connector-pagerduty':
+      '@anway/connector-pagerduty':
         specifier: workspace:*
         version: link:../../connectors/pagerduty
-      '@anvay/connector-prometheus':
+      '@anway/connector-prometheus':
         specifier: workspace:*
         version: link:../../connectors/prometheus
-      '@anvay/connector-sentry':
+      '@anway/connector-sentry':
         specifier: workspace:*
         version: link:../../connectors/sentry
-      '@anvay/connector-slack':
+      '@anway/connector-slack':
         specifier: workspace:*
         version: link:../../connectors/slack
-      '@anvay/connector-snyk':
+      '@anway/connector-snyk':
         specifier: workspace:*
         version: link:../../connectors/snyk
-      '@anvay/connector-sonarqube':
+      '@anway/connector-sonarqube':
         specifier: workspace:*
         version: link:../../connectors/sonarqube
-      '@anvay/connector-terraform':
+      '@anway/connector-terraform':
         specifier: workspace:*
         version: link:../../connectors/terraform
-      '@anvay/connector-vault':
+      '@anway/connector-vault':
         specifier: workspace:*
         version: link:../../connectors/vault
-      '@anvay/connector-vercel':
+      '@anway/connector-vercel':
         specifier: workspace:*
         version: link:../../connectors/vercel
-      '@anvay/mcp-adapter':
+      '@anway/mcp-adapter':
         specifier: workspace:*
         version: link:../../packages/mcp-adapter
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
       '@fastify/cookie':
@@ -265,10 +265,10 @@ importers:
 
   connectors/argocd:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -284,10 +284,10 @@ importers:
 
   connectors/aws-cloudwatch:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -300,10 +300,10 @@ importers:
 
   connectors/aws-health:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -316,10 +316,10 @@ importers:
 
   connectors/azure-monitor:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -332,10 +332,10 @@ importers:
 
   connectors/circleci:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -348,10 +348,10 @@ importers:
 
   connectors/confluence:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -364,10 +364,10 @@ importers:
 
   connectors/coralogix:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -380,10 +380,10 @@ importers:
 
   connectors/datadog:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -399,10 +399,10 @@ importers:
 
   connectors/dynatrace:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -415,10 +415,10 @@ importers:
 
   connectors/eks:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -431,10 +431,10 @@ importers:
 
   connectors/elastic:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -447,10 +447,10 @@ importers:
 
   connectors/gcp-monitoring:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -463,10 +463,10 @@ importers:
 
   connectors/github:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -482,10 +482,10 @@ importers:
 
   connectors/gke:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -498,10 +498,10 @@ importers:
 
   connectors/grafana:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -514,10 +514,10 @@ importers:
 
   connectors/jenkins:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -530,10 +530,10 @@ importers:
 
   connectors/jira:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -546,10 +546,10 @@ importers:
 
   connectors/k8s:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
       '@kubernetes/client-node':
@@ -565,10 +565,10 @@ importers:
 
   connectors/launchdarkly:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -581,10 +581,10 @@ importers:
 
   connectors/linear:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -600,10 +600,10 @@ importers:
 
   connectors/loki:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -616,10 +616,10 @@ importers:
 
   connectors/newrelic:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -632,10 +632,10 @@ importers:
 
   connectors/notion:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -648,10 +648,10 @@ importers:
 
   connectors/opsgenie:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -664,10 +664,10 @@ importers:
 
   connectors/pagerduty:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -680,10 +680,10 @@ importers:
 
   connectors/prometheus:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -696,10 +696,10 @@ importers:
 
   connectors/sentry:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -712,10 +712,10 @@ importers:
 
   connectors/slack:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -728,10 +728,10 @@ importers:
 
   connectors/snyk:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -744,10 +744,10 @@ importers:
 
   connectors/sonarqube:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -760,10 +760,10 @@ importers:
 
   connectors/terraform:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -776,10 +776,10 @@ importers:
 
   connectors/vault:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -792,10 +792,10 @@ importers:
 
   connectors/vercel:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../../packages/types
     devDependencies:
@@ -821,7 +821,7 @@ importers:
         specifier: ^4.77.0
         version: 4.104.0(ws@8.21.0)(zod@4.4.3)
     devDependencies:
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../types
       '@types/node':
@@ -836,10 +836,10 @@ importers:
 
   packages/cli-adapter:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
@@ -855,10 +855,10 @@ importers:
 
   packages/mcp-adapter:
     dependencies:
-      '@anvay/agent':
+      '@anway/agent':
         specifier: workspace:*
         version: link:../agent
-      '@anvay/types':
+      '@anway/types':
         specifier: workspace:*
         version: link:../types
       '@modelcontextprotocol/sdk':

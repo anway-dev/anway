@@ -1,4 +1,4 @@
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const TOOLS: ConnectorTool[] = [
   { definition: { name: 'get_cloud_metrics', description: 'Fetch cloud metrics', parameters: { type: 'object', properties: { resource: { type: 'string' }, metric: { type: 'string' }, window: { type: 'string' } }, required: ['resource', 'metric', 'window'] } }, execute: () => Promise.resolve({ points: [{ t: Date.now(), v: 0.5 }] }), write: false },

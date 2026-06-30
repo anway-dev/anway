@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // Mock SREAgent before importing the subscriber
-vi.mock('@anvay/agent', () => ({
+vi.mock('@anway/agent', () => ({
   ProviderFactory: {
     create: vi.fn(() => ({
       modelId: 'mock',
@@ -68,7 +68,7 @@ describe('incident-subscriber payload parsing', () => {
 
   it('parses incidentId key and calls setRootCause with correct ID', async () => {
     const { IncidentService } = await import('../services/incident.js')
-    const { SREAgent } = await import('@anvay/agent')
+    const { SREAgent } = await import('@anway/agent')
 
     const incidentService = new (IncidentService as any)()
     const kg = { addEpisode: vi.fn(), getFacts: vi.fn(), getEntity: vi.fn(), getRelationships: vi.fn(), search: vi.fn(), resolveContext: vi.fn(), resolveContextByName: vi.fn(), getEntityByExternalRef: vi.fn(), upsertEntity: vi.fn(), upsertRelationship: vi.fn(), markConnectorEntitiesStale: vi.fn(), deleteEntitiesByOrgPrefix: vi.fn() }

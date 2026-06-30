@@ -1,5 +1,5 @@
-import type { ConnectorCreds } from '@anvay/types'
-import type { IConnectorAgent, ConnectorTool } from '@anvay/agent'
+import type { ConnectorCreds } from '@anway/types'
+import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 
 const PD_API = 'https://api.pagerduty.com'
@@ -40,7 +40,7 @@ const TOOLS: ConnectorTool[] = [
       if (!token) throw new Error('PagerDuty API key not configured')
       const res = await fetch(`${PD_API}/incidents`, {
         method: 'POST',
-        headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anvay-bot@anvay.io' },
+        headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anway-bot@anway.io' },
         body: JSON.stringify({ incident: { type: 'incident', title: String(params.title ?? ''), service: { id: String(params.serviceId ?? ''), type: 'service_reference' }, urgency: params.severity || 'high' } }),
       })
       if (!res.ok) throw new Error(`PagerDuty create_incident failed: HTTP ${res.status}`)
@@ -59,7 +59,7 @@ const TOOLS: ConnectorTool[] = [
       if (!alertId) throw new Error('alertId is required')
       const res = await fetch(`${PD_API}/alerts/${alertId}`, {
         method: 'PUT',
-        headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anvay-bot@anvay.io' },
+        headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anway-bot@anway.io' },
         body: JSON.stringify({ alerts: [{ id: alertId, status: 'acknowledged' }] }),
       })
       if (!res.ok) throw new Error(`PagerDuty acknowledge_alert failed: HTTP ${res.status}`)

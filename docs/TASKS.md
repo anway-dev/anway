@@ -1,4 +1,4 @@
-# Anvay — SDE Task Board
+# Anway — SDE Task Board
 
 > **Agent instructions:** Read `docs/PRODUCT.md` before starting any task — it is the source of truth for all spec, interfaces, decisions, and non-negotiables. Every task below references the relevant PRODUCT.md section. Do not invent behaviour not described there.
 >
@@ -43,7 +43,7 @@
 
 **What to do:**
 - Create `infra/docker-compose.yml` with services: postgres (with pgvector extension), redis, otel-collector, prometheus, grafana
-- Postgres: init script enables `vector` extension, creates `anvay` database
+- Postgres: init script enables `vector` extension, creates `anway` database
 - Redis: no auth in dev, expose 6379
 - OTEL Collector: accepts OTLP gRPC (4317) + HTTP (4318), exports to Prometheus + Jaeger
 - Prometheus: scrapes OTEL collector, all app `/metrics` endpoints
@@ -75,14 +75,14 @@
 - Types for: `StreamEvent` (discriminated union: `text_delta | tool_call | tool_result | gate_required | done | error`)
 - Types for: `Message` (`role: user | assistant | system`, `content: string`)
 - `tsconfig.json` with `composite: true` for project references
-- Export from `package.json` as `@anvay/types`
+- Export from `package.json` as `@anway/types`
 
 **Ref:** PRODUCT.md §5.4 (IModelProvider interface), §6.2 (error handling)
 
 **Files:** `packages/types/src/index.ts`, `packages/types/package.json`, `packages/types/tsconfig.json`
 
 **Done when:**
-- `pnpm --filter @anvay/types build` succeeds
+- `pnpm --filter @anway/types build` succeeds
 - All branded types prevent `string` assignment without explicit cast
 - `Result` type enforces exhaustive handling in consuming code
 
@@ -109,7 +109,7 @@
 **Files:** `apps/gateway/prisma/schema.prisma`, `apps/gateway/prisma/migrations/`, `apps/gateway/prisma/seed.ts`
 
 **Done when:**
-- `pnpm --filter anvay-gateway prisma migrate dev` applies migration cleanly against running Postgres
+- `pnpm --filter anway-gateway prisma migrate dev` applies migration cleanly against running Postgres
 - RLS policies reject queries missing `app.tenant_id` context variable
 - Seed script creates demo tenant, user, one connector row
 
@@ -135,7 +135,7 @@
 **Files:** `apps/gateway/src/server.ts`, `apps/gateway/src/plugins/`, `apps/gateway/src/routes/health.ts`, `apps/gateway/src/routes/auth.ts`
 
 **Done when:**
-- `pnpm --filter anvay-gateway dev` starts without error
+- `pnpm --filter anway-gateway dev` starts without error
 - `GET /health` returns 200
 - `GET /metrics` returns valid Prometheus metrics
 - Logs appear as JSON with all required fields
@@ -229,7 +229,7 @@
   - `IEmbeddingProvider` interface: `embed(texts: string[]): Promise<number[][]>`
   - `InferenceOptions`: `model`, `temperature`, `maxTokens`, `stopSequences`
   - `ChatResponse`: `content`, `toolCalls`, `usage` (inputTokens, outputTokens)
-  - `StreamChunk`: discriminated union matching `StreamEvent` from `@anvay/types`
+  - `StreamChunk`: discriminated union matching `StreamEvent` from `@anway/types`
 - Create provider implementations in `packages/agent/src/providers/`:
   - `AnthropicProvider implements IModelProvider` — uses `@anthropic-ai/sdk`, maps to `IModelProvider` contract
   - `OpenAIProvider implements IModelProvider` — uses `openai` SDK, same contract
@@ -242,7 +242,7 @@
 **Files:** `packages/agent/src/interfaces/provider.ts`, `packages/agent/src/providers/anthropic.ts`, `packages/agent/src/providers/openai.ts`, `packages/agent/src/providers/ollama.ts`, `packages/agent/src/providers/factory.ts`
 
 **Done when:**
-- `pnpm --filter @anvay/agent typecheck` passes
+- `pnpm --filter @anway/agent typecheck` passes
 - All providers implement the full `IModelProvider` interface
 - No provider SDK import exists outside `packages/agent/src/providers/`
 - Unit test: mock `IModelProvider`, verify orchestrator calls `provider.stream()` not any SDK method directly
@@ -323,7 +323,7 @@
   - Wire `auditSink.append` on every tool call (allowed + blocked)
   - `runSession(orchestrator, input, ctx): AsyncIterator<StreamEvent>` — runs the agent loop, yields `StreamEvent` items
   - Intent classification: cheap model call first (classify query intent + role inference before routing to specialist)
-  - `StreamEvent` types from `@anvay/types` — no Mastra types leak to callers
+  - `StreamEvent` types from `@anway/types` — no Mastra types leak to callers
 - `createSpecialistAgent({ name, model: IModelProvider, tools, systemPrompt })` — thin Mastra agent wrapper, same middleware wired
 - `createGate({ condition, approvers, autoApproveThreshold })` — uses Mastra `waitForInput` primitive
 
@@ -721,7 +721,7 @@
 
 **What to do:**
 - Enable Apache AGE extension on Postgres: `CREATE EXTENSION IF NOT EXISTS age;`
-- Create AGE graph: `SELECT create_graph('anvay_org');`
+- Create AGE graph: `SELECT create_graph('anway_org');`
 - Define vertex labels (entity types) and edge labels (relationship types) matching CLAUDE.md "Software Intelligence Graph" schema
 - `packages/agent/src/kb/structural-graph.ts`:
   - `StructuralGraph` class — wraps AGE Cypher queries via Postgres driver

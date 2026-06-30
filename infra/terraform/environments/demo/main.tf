@@ -1,8 +1,8 @@
 locals {
   name = "${var.app_name}-demo"
 
-  db_user     = "anvay"
-  db_name     = "anvay"
+  db_user     = "anway"
+  db_name     = "anway"
   db_host     = "postgres"
   redis_host  = "redis"
   neo4j_host  = "neo4j"
@@ -14,7 +14,7 @@ locals {
 
 # ── Network ──────────────────────────────────────────────────────────────────
 
-resource "docker_network" "anvay" {
+resource "docker_network" "anway" {
   name = local.name
 }
 
@@ -66,7 +66,7 @@ resource "docker_container" "postgres" {
   image = docker_image.postgres.image_id
 
   networks_advanced {
-    name    = docker_network.anvay.name
+    name    = docker_network.anway.name
     aliases = ["postgres"]
   }
 
@@ -104,7 +104,7 @@ resource "docker_container" "redis" {
   image = docker_image.redis.image_id
 
   networks_advanced {
-    name    = docker_network.anvay.name
+    name    = docker_network.anway.name
     aliases = ["redis"]
   }
 
@@ -135,7 +135,7 @@ resource "docker_container" "neo4j" {
   image = docker_image.neo4j.image_id
 
   networks_advanced {
-    name    = docker_network.anvay.name
+    name    = docker_network.anway.name
     aliases = ["neo4j"]
   }
 
@@ -176,7 +176,7 @@ resource "docker_container" "gateway" {
   image = docker_image.gateway.image_id
 
   networks_advanced {
-    name    = docker_network.anvay.name
+    name    = docker_network.anway.name
     aliases = ["gateway"]
   }
 
@@ -192,7 +192,7 @@ resource "docker_container" "gateway" {
     "DATABASE_URL=${local.database_url}",
     "REDIS_URL=${local.redis_url}",
     "JWT_SECRET=${var.jwt_secret}",
-    "ANVAY_ENCRYPTION_KEY=${var.encryption_key}",
+    "ANWAY_ENCRYPTION_KEY=${var.encryption_key}",
     "NEO4J_URI=${local.neo4j_uri}",
     "NEO4J_USER=neo4j",
     "NEO4J_PASSWORD=${var.neo4j_password}",
@@ -214,7 +214,7 @@ resource "docker_container" "web" {
   image = docker_image.web.image_id
 
   networks_advanced {
-    name    = docker_network.anvay.name
+    name    = docker_network.anway.name
     aliases = ["web"]
   }
 
@@ -226,7 +226,7 @@ resource "docker_container" "web" {
   env = [
     "NODE_ENV=production",
     "GATEWAY_URL=http://gateway:4000",
-    "DEMO_EMAIL=admin@anvay.local",
+    "DEMO_EMAIL=admin@anway.local",
     "DEMO_TENANT_ID=00000000-0000-0000-0000-000000000001",
   ]
 

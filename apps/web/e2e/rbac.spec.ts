@@ -21,7 +21,7 @@ test.describe('RBAC — admin-only routes reject sre', () => {
   test('POST /api/access/users — sre returns 403', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/access/users`, {
       headers: { ...sreHeaders, 'Content-Type': 'application/json' },
-      data: { email: 'rbac-test@anvay.local', role: 'dev' },
+      data: { email: 'rbac-test@anway.local', role: 'dev' },
     })
     expect(resp.status()).toBe(403)
   })

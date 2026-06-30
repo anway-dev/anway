@@ -79,7 +79,7 @@ export function SettingsView() {
       {tab === "provider" && (
         <div>
           <p style={{ fontSize: "12px", color: "#888", marginBottom: "16px" }}>
-            Configure which AI model provider Anvay uses for query answering and analysis.
+            Configure which AI model provider Anway uses for query answering and analysis.
           </p>
           <ProviderConfig inline />
           {tokenUsage && (

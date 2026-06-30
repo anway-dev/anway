@@ -6,7 +6,7 @@ AGENTS_DIR="/Users/raj/workspace_code/ai-proj/restol/packages/agent/src/agents"
 cat > "$AGENTS_DIR/product.ts" << 'PRODUCT'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface UserStory {
   persona: string
@@ -59,7 +59,7 @@ PRODUCT
 cat > "$AGENTS_DIR/techspec.ts" << 'TECHSPEC'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { PRD } from './product.js'
 
 export interface Component { name: string; responsibility: string; technology: string }
@@ -101,7 +101,7 @@ TECHSPEC
 cat > "$AGENTS_DIR/bootstrap.ts" << 'BOOTSTRAP'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { TechSpec } from './techspec.js'
 
 export interface FileToCreate { path: string; description: string; template: string }
@@ -137,7 +137,7 @@ BOOTSTRAP
 cat > "$AGENTS_DIR/test.ts" << 'TEST'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 import type { TechSpec } from './techspec.js'
 
 export interface TestFile { path: string; description: string; testCases: string[] }
@@ -185,7 +185,7 @@ TEST
 cat > "$AGENTS_DIR/review.ts" << 'REVIEW'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface Finding { file: string; line?: number; severity: 'blocking' | 'high' | 'medium' | 'low'; description: string; suggestion: string }
 export interface ReviewFindings { summary: string; blocking: Finding[]; nonBlocking: Finding[]; testPlan: string[]; approvalRecommendation: 'approve' | 'approve_with_changes' | 'request_changes' }
@@ -220,7 +220,7 @@ REVIEW
 cat > "$AGENTS_DIR/deploy.ts" << 'DEPLOY'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface DeployPlan { service: string; environment: string; strategy: 'rolling' | 'blue_green' | 'canary'; preChecks: string[]; postChecks: string[]; rollbackTriggers: string[]; estimatedDuration: string; confidence: number }
 
@@ -254,7 +254,7 @@ DEPLOY
 cat > "$AGENTS_DIR/oncall.ts" << 'ONCALL'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface IncidentSummary { title: string; severity: string; startedAt: string; status: string }
 export interface ShiftBrief { summary: string; openIncidents: IncidentSummary[]; recentDeploys: string[]; watchItems: string[]; handoffNotes: string }
@@ -301,7 +301,7 @@ ONCALL
 cat > "$AGENTS_DIR/ba.ts" << 'BA'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
-import type { TenantId } from '@anvay/types'
+import type { TenantId } from '@anway/types'
 
 export interface MetricPoint { label: string; value: string | number; trend?: 'up' | 'down' | 'stable' }
 export interface AnalysisReport { query: string; summary: string; metrics: MetricPoint[]; insights: string[]; recommendations: string[] }

@@ -6,7 +6,7 @@ WORKDIR /app
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile --filter=anvay-web...
+RUN pnpm install --frozen-lockfile --filter=anway-web...
 
 # Build Next.js standalone output
 FROM base AS builder

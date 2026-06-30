@@ -2,11 +2,11 @@ replicaCount: 1
 
 image:
   gateway:
-    repository: anvay/gateway
+    repository: anway/gateway
     tag: latest
     pullPolicy: IfNotPresent
   web:
-    repository: anvay/web
+    repository: anway/web
     tag: latest
     pullPolicy: IfNotPresent
 
@@ -21,7 +21,7 @@ service:
 ingress:
   enabled: false
   className: nginx
-  host: anvay.example.com
+  host: anway.example.com
   tls: []
 
 env:

@@ -7,8 +7,8 @@
 # Uncomment and configure below when deploying to GCP.
 # Requires: credentials configured via GOOGLE_APPLICATION_CREDENTIALS env var or provider block.
 
-# resource "google_sql_database_instance" "anvay_primary" {
-#   name             = "anvay-postgres-primary"
+# resource "google_sql_database_instance" "anway_primary" {
+#   name             = "anway-postgres-primary"
 #   database_version = "POSTGRES_15"
 #   region           = var.gcp_region
 # 
@@ -26,11 +26,11 @@
 #   }
 # }
 # 
-# resource "google_sql_database_instance" "anvay_replica" {
-#   name                 = "anvay-postgres-replica"
+# resource "google_sql_database_instance" "anway_replica" {
+#   name                 = "anway-postgres-replica"
 #   database_version     = "POSTGRES_15"
 #   region               = var.gcp_replica_region
-#   master_instance_name = google_sql_database_instance.anvay_primary.name
+#   master_instance_name = google_sql_database_instance.anway_primary.name
 # 
 #   settings {
 #     tier      = var.db_instance_class
@@ -38,16 +38,16 @@
 #   }
 # }
 # 
-# resource "google_sql_database" "anvay_db" {
-#   name     = "anvay"
-#   instance = google_sql_database_instance.anvay_primary.name
+# resource "google_sql_database" "anway_db" {
+#   name     = "anway"
+#   instance = google_sql_database_instance.anway_primary.name
 # }
 # 
-# resource "google_sql_user" "anvay_user" {
+# resource "google_sql_user" "anway_user" {
 #   name     = var.db_username
-#   instance = google_sql_database_instance.anvay_primary.name
+#   instance = google_sql_database_instance.anway_primary.name
 #   password = var.db_password
 # }
 # 
-# output "db_writer_endpoint" { value = google_sql_database_instance.anvay_primary.public_ip_address }
-# output "db_reader_endpoint" { value = google_sql_database_instance.anvay_replica.public_ip_address }
+# output "db_writer_endpoint" { value = google_sql_database_instance.anway_primary.public_ip_address }
+# output "db_reader_endpoint" { value = google_sql_database_instance.anway_replica.public_ip_address }

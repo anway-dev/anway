@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: data.error ?? 'login failed' }, { status: resp.status })
     }
     const response = NextResponse.json({ ok: true })
-    response.cookies.set('anvay_token', data.token, {
+    response.cookies.set('anway_token', data.token, {
       httpOnly: true,
       secure: process.env['NODE_ENV'] === 'production',
       sameSite: 'strict',

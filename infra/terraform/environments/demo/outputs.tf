@@ -1,15 +1,15 @@
 output "web_url" {
   value       = "http://localhost:${var.web_host_port}"
-  description = "Anvay web UI URL"
+  description = "Anway web UI URL"
 }
 
 output "gateway_url" {
   value       = "http://localhost:${var.gateway_host_port}"
-  description = "Anvay gateway API URL"
+  description = "Anway gateway API URL"
 }
 
 output "database_url" {
-  value     = "postgresql://anvay:${var.postgres_password}@localhost:${var.postgres_host_port}/anvay"
+  value     = "postgresql://anway:${var.postgres_password}@localhost:${var.postgres_host_port}/anway"
   sensitive = true
 }
 
@@ -22,5 +22,5 @@ output "neo4j_url" {
 }
 
 output "network_name" {
-  value = docker_network.anvay.name
+  value = docker_network.anway.name
 }

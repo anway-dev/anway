@@ -1,6 +1,6 @@
 import { vi, beforeEach, afterEach } from 'vitest'
-import { describeConnectorConformance } from '@anvay/agent/testing'
-import type { IKnowledgeGraph } from '@anvay/agent'
+import { describeConnectorConformance } from '@anway/agent/testing'
+import type { IKnowledgeGraph } from '@anway/agent'
 import { CircleCIBootstrap } from './bootstrap.js'
 
 const MOCK_HOST = 'http://mock-circleci.local'
@@ -18,7 +18,7 @@ function mockResponse(url: string, _init?: RequestInit): Response {
   }
   if (u.includes('/project')) {
     return new Response(JSON.stringify([
-      { slug: 'gh/anvay/payments-api', vcs_url: 'https://github.com/anvay/payments-api' },
+      { slug: 'gh/anway/payments-api', vcs_url: 'https://github.com/anway/payments-api' },
     ]), { status: 200 })
   }
   return new Response('{}', { status: 404 })

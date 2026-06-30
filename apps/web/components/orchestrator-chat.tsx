@@ -178,7 +178,7 @@ function MessageBlock({ message, onApproveGate }: { message: Message; onApproveG
         <span style={{
           fontSize: "10px", color: "#10b981", fontWeight: 700,
           fontFamily: "monospace", letterSpacing: "0.08em",
-        }}>✦ ANVAY</span>
+        }}>✦ ANWAY</span>
         <span style={{ flex: 1, height: "1px", background: "transparent" }} />
         {message.confidence !== undefined && (
           <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
@@ -286,7 +286,7 @@ function EmptyState({ onScenario }: { onScenario: (s: ScenarioSuggestion) => voi
           boxShadow: "0 0 30px rgba(16,185,129,0.08), inset 0 0 20px rgba(16,185,129,0.03)",
         }}>✦</div>
         <div style={{ fontSize: "13px", fontWeight: 700, color: "#e5e5e5", marginBottom: "5px", fontFamily: "monospace", letterSpacing: "0.06em" }}>
-          ANVAY
+          ANWAY
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
           <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
@@ -404,9 +404,9 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
 
   // On mount: restore last session ID from localStorage and reload its turns from DB.
   useEffect(() => {
-    const stored = typeof window !== 'undefined' ? localStorage.getItem('anvay-session-id') : null;
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('anway-session-id') : null;
     const id = stored ?? `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    if (!stored) localStorage.setItem('anvay-session-id', id);
+    if (!stored) localStorage.setItem('anway-session-id', id);
     sessionIdRef.current = id;
     setActiveSessionId(id);
     // Restore turns from DB so messages are visible after navigation
@@ -447,7 +447,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
     if (isThinking) return;
     const newId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     sessionIdRef.current = newId;
-    localStorage.setItem('anvay-session-id', newId);
+    localStorage.setItem('anway-session-id', newId);
     setActiveSessionId(newId);
     setMessages([]);
     setLogLines([]);
@@ -485,7 +485,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
   async function loadSession(sessionId: string) {
     if (isThinking || sessionId === sessionIdRef.current) return;
     sessionIdRef.current = sessionId;
-    localStorage.setItem('anvay-session-id', sessionId);
+    localStorage.setItem('anway-session-id', sessionId);
     setActiveSessionId(sessionId);
     // Clear UI for loading state
     setMessages([]);
@@ -547,7 +547,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
       id: respId, role: "assistant", content: "", streaming: true,
     }]);
     setAgentStates([{ id: "orchestrator", name: "orchestrator", status: "running", detail: "analyzing", startDelay: 0, duration: 0, currentStatus: "running" }]);
-    pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "classifying intent", status: "running" });
+    pushLog({ actor: "ANWAY", actorColor: "#10b981", text: "classifying intent", status: "running" });
 
     try {
       const sessionId = sessionIdRef.current;
@@ -675,7 +675,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
             setConfidence(0.9);
             pushLog({ actor: "CONF", actorColor: "#10b981", text: "0.90", status: 'done' });
             pushLog({ actor: "AUDIT", actorColor: "#333", text: `tokens:${event.inputTokens + event.outputTokens} · logged`, status: 'info' });
-            pushLog({ actor: "ANVAY", actorColor: "#10b981", text: "complete", status: 'done' });
+            pushLog({ actor: "ANWAY", actorColor: "#10b981", text: "complete", status: 'done' });
             setFollowUps(['Show active blockers', 'View payments incident', 'What should I fix first?']);
           }
         }
@@ -742,9 +742,9 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
             animation: isThinking ? "pulse-dot 1.2s ease-in-out infinite" : "none",
             boxShadow: "0 0 5px #10b981",
           }} />
-          <span style={{ fontSize: "11px", fontWeight: 700, color: "#10b981", fontFamily: "monospace", letterSpacing: "0.1em" }}>ANVAY</span>
+          <span style={{ fontSize: "11px", fontWeight: 700, color: "#10b981", fontFamily: "monospace", letterSpacing: "0.1em" }}>ANWAY</span>
           <span style={{ fontSize: "10px", color: "#222", fontFamily: "monospace" }}>·</span>
-          <span style={{ fontSize: "10px", color: "#333", fontFamily: "monospace" }}>anvay</span>
+          <span style={{ fontSize: "10px", color: "#333", fontFamily: "monospace" }}>anway</span>
 
           {contextSource && (
             <div style={{
@@ -904,7 +904,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="ask anvay anything..."
+                placeholder="ask anway anything..."
                 disabled={isThinking}
                 style={{
                   flex: 1, background: "transparent", border: "none", outline: "none",

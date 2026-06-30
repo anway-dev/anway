@@ -13,7 +13,7 @@ import { encryptJson, decryptJson } from '../utils/crypto.js'
 // Restrict file access to these root directories
 const ALLOWED_ROOTS: string[] = [
   process.env['EDITOR_ROOT'] ?? path.resolve(process.cwd(), '../..'),
-  '/tmp/anvay-editor',
+  '/tmp/anway-editor',
 ]
 
 function isAllowedPath(target: string): boolean {
@@ -407,7 +407,7 @@ Return ONLY the Node.js test script, no explanation, no markdown.`,
 
         // Write test to temp file and execute
         const tmpDir = await import('node:os').then(m => m.tmpdir())
-        const tmpFile = path.join(tmpDir, `anvay-test-${Date.now()}.mjs`)
+        const tmpFile = path.join(tmpDir, `anway-test-${Date.now()}.mjs`)
         await writeFile(tmpFile, testCode, 'utf-8')
 
         await new Promise<void>((resolve) => {

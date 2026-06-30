@@ -5,7 +5,7 @@ test.describe('App shell', () => {
   test('P0: renders with logo and sidebar', async ({ page }) => {
     await setAuthCookie(page.context())
     await page.goto('/')
-    await expect(page.locator('text=anvay').first()).toBeVisible()
+    await expect(page.locator('text=anway').first()).toBeVisible()
     await expect(page.locator('text=Signals').first()).toBeVisible()
   })
 

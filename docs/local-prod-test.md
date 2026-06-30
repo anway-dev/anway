@@ -1,6 +1,6 @@
-# Anvay — Setup Guide
+# Anway — Setup Guide
 
-> Two paths: **Path A** runs Anvay locally via docker-compose against a minikube demo cloud. **Path B** deploys Anvay to a real Kubernetes cluster.
+> Two paths: **Path A** runs Anway locally via docker-compose against a minikube demo cloud. **Path B** deploys Anway to a real Kubernetes cluster.
 
 ---
 
@@ -42,7 +42,7 @@ helm version             # v3.14+
 
 ---
 
-## A2 — Start Anvay (docker-compose)
+## A2 — Start Anway (docker-compose)
 
 ### A2a. Create gateway env file
 
@@ -55,9 +55,9 @@ JWT_SECRET=local-dev-secret-change-me
 # At-rest encryption key for connector credentials (64 hex chars)
 ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000001
 
-# Alertmanager webhook — must match ANVAY_WEBHOOK_TOKEN in test-cloud-setup/.env.local
-ANVAY_WEBHOOK_TOKEN=anvay-demo-webhook-token
-ANVAY_WEBHOOK_TENANT=00000000-0000-0000-0000-000000000001
+# Alertmanager webhook — must match ANWAY_WEBHOOK_TOKEN in test-cloud-setup/.env.local
+ANWAY_WEBHOOK_TOKEN=anway-demo-webhook-token
+ANWAY_WEBHOOK_TENANT=00000000-0000-0000-0000-000000000001
 
 # CD connector key (used by deploy_trigger events from GitHub Actions / CI)
 CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
@@ -91,7 +91,7 @@ CONNECTOR_API_KEYS=local-cd-key:00000000-0000-0000-0000-000000000001
 WEB_URL=http://localhost:8500
 ```
 
-> Do not set `KUBECONFIG` — Anvay reads credentials from the K8s connector config after you register it.
+> Do not set `KUBECONFIG` — Anway reads credentials from the K8s connector config after you register it.
 
 ### A2b. Start core services
 
@@ -131,7 +131,7 @@ curl -s http://localhost:8510/health | python3 -m json.tool
 # { "status": "ok", "db": "ok" }
 ```
 
-Open `http://localhost:8500` — Anvay login page appears.
+Open `http://localhost:8500` — Anway login page appears.
 
 ---
 
@@ -148,7 +148,7 @@ Edit `.env.local`:
 
 ```bash
 JWT_SECRET=local-dev-secret-change-me
-ANVAY_WEBHOOK_TOKEN=anvay-demo-webhook-token
+ANWAY_WEBHOOK_TOKEN=anway-demo-webhook-token
 ```
 
 ```bash
@@ -200,7 +200,7 @@ First visit shows a setup form — enter your email + password to create the adm
 Subsequent logins use that email + password.
 
 **Option 2 — Demo Login (if `DEMO_MODE=true`):**
-Click **Try Demo** — signs a JWT for `admin@demo.anvay.dev`, no password needed.
+Click **Try Demo** — signs a JWT for `admin@demo.anway.dev`, no password needed.
 
 **Option 3 — SSO / OAuth:**
 Appears automatically when `OIDC_ISSUER_URL`, `GOOGLE_CLIENT_ID`, or `GITHUB_CLIENT_ID` is set.
@@ -213,8 +213,8 @@ KB graph is empty. All counts zero. Correct.
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Anvay web | `http://localhost:8500` | Set on first login (see A4) |
-| Anvay gateway | `http://localhost:8510` | — |
+| Anway web | `http://localhost:8500` | Set on first login (see A4) |
+| Anway gateway | `http://localhost:8510` | — |
 | Grafana | `http://localhost:3001` (browser) · `http://host.docker.internal:3001` (connector URL) | admin / admin |
 | Prometheus | `http://localhost:9090` (browser) · `http://host.docker.internal:9090` (connector URL) | — |
 | Alertmanager | `http://localhost:9093` (browser) · `http://host.docker.internal:9093` (connector URL) | — |
@@ -261,7 +261,7 @@ Click **Alertmanager** → Configure.
 | Field | Value |
 |-------|-------|
 | Endpoint URL | `http://host.docker.internal:9093` |
-| Webhook Token | `anvay-demo-webhook-token` |
+| Webhook Token | `anway-demo-webhook-token` |
 
 Save. No bootstrap needed — receive-only.
 
@@ -304,7 +304,7 @@ curl -X POST http://localhost:9093/api/v2/alerts \
   }]'
 ```
 
-Verify in Anvay:
+Verify in Anway:
 - **Signals** page → alert appears
 - **War Room** page → incident created, `order-service` linked
 
@@ -338,7 +338,7 @@ Go to **Pipelines** → gate appears → click **Approve** → deploy runs.
 
 Go to **Editor** → **▾** (top right) → **⎈ Service** tab.
 
-All K8s-bootstrapped services appear. Select one — Anvay loads the source tree.
+All K8s-bootstrapped services appear. Select one — Anway loads the source tree.
 
 **Add git credentials** — click **⬡** (git icon):
 - Provider: GitHub
@@ -370,7 +370,7 @@ All K8s-bootstrapped services appear. Select one — Anvay loads the source tree
 ## Teardown
 
 ```bash
-# Stop Anvay + infra
+# Stop Anway + infra
 docker compose -f infra/docker-compose.dev.yml down
 
 # Stop minikube
@@ -423,7 +423,7 @@ Callback URIs to register in Google/GitHub console:
 **Prometheus / Grafana / Alertmanager connector: "TypeError: fetch failed" or timeout:**
 The gateway runs inside Docker — `localhost` in connector URLs refers to the container, not your Mac. Use `host.docker.internal` instead (e.g. `http://host.docker.internal:9090`). Also ensure port-forwards are started with `--address 0.0.0.0` and macOS firewall allows `kubectl` to accept incoming connections.
 
-**Alert not reaching Anvay:**
+**Alert not reaching Anway:**
 `host.docker.internal` only resolves on Mac + Docker Desktop. On Linux use host IP from `ip route | grep default | awk '{print $3}'` in `test-cloud-setup/k8s/observability/prometheus/values-local.yaml`.
 
 **K8s bootstrap fails:**
@@ -458,54 +458,54 @@ brew install kubectl helm
 ## B2 — Configure Secrets
 
 ```bash
-kubectl create namespace anvay
+kubectl create namespace anway
 
-kubectl create secret generic anvay-secrets \
+kubectl create secret generic anway-secrets \
   --from-literal=JWT_SECRET=<strong-random-64-chars> \
   --from-literal=ENCRYPTION_KEY=<64-char-hex> \
-  --from-literal=DATABASE_URL=postgresql://user:pass@host:5432/anvay \
+  --from-literal=DATABASE_URL=postgresql://user:pass@host:5432/anway \
   --from-literal=REDIS_URL=redis://host:6379 \
   --from-literal=ANTHROPIC_API_KEY=sk-ant-...   `# optional — AI features` \
   --from-literal=CONNECTOR_API_KEYS=<key>:<tenantId> \
-  --from-literal=ANVAY_WEBHOOK_TOKEN=<random-token> \
-  --from-literal=ANVAY_WEBHOOK_TENANT=<tenant-uuid> \
-  -n anvay
+  --from-literal=ANWAY_WEBHOOK_TOKEN=<random-token> \
+  --from-literal=ANWAY_WEBHOOK_TENANT=<tenant-uuid> \
+  -n anway
 ```
 
 ## B3 — Deploy via Helm
 
-CI builds and pushes `anvay-gateway` and `anvay-web` images on every merge to `main`.
+CI builds and pushes `anway-gateway` and `anway-web` images on every merge to `main`.
 
 ```bash
-helm upgrade --install anvay infra/helm/anvay \
-  --namespace anvay \
-  --set image.gateway=<registry>/anvay-gateway:<tag> \
-  --set image.web=<registry>/anvay-web:<tag>
+helm upgrade --install anway infra/helm/anway \
+  --namespace anway \
+  --set image.gateway=<registry>/anway-gateway:<tag> \
+  --set image.web=<registry>/anway-web:<tag>
 ```
 
 ## B4 — Run Migrations + Seed
 
 ```bash
-kubectl exec -n anvay deploy/anvay-gateway -- \
+kubectl exec -n anway deploy/anway-gateway -- \
   sh -c "cd apps/gateway && pnpm prisma migrate deploy"
 
 # optional: seed demo data
-kubectl exec -n anvay deploy/anvay-gateway -- \
+kubectl exec -n anway deploy/anway-gateway -- \
   sh -c "cd apps/gateway && pnpm db:seed"
 ```
 
 ## B5 — Alertmanager Webhook
 
-In your Alertmanager config, add a receiver pointing to Anvay:
+In your Alertmanager config, add a receiver pointing to Anway:
 
 ```yaml
 receivers:
-  - name: anvay
+  - name: anway
     webhook_configs:
-      - url: https://<anvay-host>/api/events/alert
+      - url: https://<anway-host>/api/events/alert
         http_config:
           authorization:
-            credentials: <ANVAY_WEBHOOK_TOKEN>
+            credentials: <ANWAY_WEBHOOK_TOKEN>
 ```
 
-Then register the Alertmanager connector in Anvay UI with that same token.
+Then register the Alertmanager connector in Anway UI with that same token.

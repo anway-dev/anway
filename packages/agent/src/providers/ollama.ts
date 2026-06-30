@@ -7,7 +7,7 @@ import type {
   ToolCall,
   ToolDefinition,
 } from '../interfaces/provider.js'
-import type { Message } from '@anvay/types'
+import type { Message } from '@anway/types'
 
 const DEFAULT_MODEL = 'llama3.2'
 const DEFAULT_BASE_URL = 'http://localhost:11434/v1'

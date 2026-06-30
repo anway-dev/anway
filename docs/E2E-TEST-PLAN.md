@@ -1,4 +1,4 @@
-# Anvay — E2E Test Plan
+# Anway — E2E Test Plan
 
 Complete Playwright coverage. Every UI view, every API-wired interaction, every user-visible flow.
 No feature untested. No mock substituting for real behaviour.
@@ -43,7 +43,7 @@ No feature untested. No mock substituting for real behaviour.
 
 | Test | Type | Assert |
 |------|------|--------|
-| Chat view loads — input field present | UI | `textarea[placeholder*="anvay"]` or `input[placeholder*="anvay"]` visible |
+| Chat view loads — input field present | UI | `textarea[placeholder*="anway"]` or `input[placeholder*="anway"]` visible |
 | Chat view loads — send button present | UI | button with send icon/text visible |
 | Chat view loads — role badge shown | UI | text "dev" or "sre" visible in role area |
 | Scenario shortcut chips visible | UI | at least 3 quick-launch chips visible |
@@ -403,7 +403,7 @@ No feature untested. No mock substituting for real behaviour.
 ```typescript
 // e2e/fixtures.ts
 export const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
-export const DEMO_EMAIL  = 'dev@anvay.local'
+export const DEMO_EMAIL  = 'dev@anway.local'
 export const GATEWAY     = 'http://127.0.0.1:4000'
 
 export async function getToken(request): Promise<string> {
@@ -438,12 +438,12 @@ Run all: `ANTHROPIC_API_KEY=sk-… npx playwright test`
 
 | Spec | Status |
 |------|--------|
-| infra.spec.ts | ✅ Mostly covered in anvay.spec.ts — needs health/live/ready/startup, counter test |
+| infra.spec.ts | ✅ Mostly covered in anway.spec.ts — needs health/live/ready/startup, counter test |
 | chat.spec.ts | ⚠️ Exists — only input/button presence tested. All streaming + gate + @llm tests missing |
 | connectors.spec.ts | ⚠️ Exists — save error, bootstrap trigger, network request assertions missing |
-| incidents.spec.ts | ✅ CRUD covered in anvay.spec.ts — UI flow (click row → detail) missing |
+| incidents.spec.ts | ✅ CRUD covered in anway.spec.ts — UI flow (click row → detail) missing |
 | alerts.spec.ts | ⚠️ cert-alert-flow has webhook test — resolved status, deploy/pr events missing |
-| automations.spec.ts | ✅ CRUD in anvay.spec.ts — UI toggle, run history missing |
+| automations.spec.ts | ✅ CRUD in anway.spec.ts — UI toggle, run history missing |
 | audit.spec.ts | ⚠️ Exists — pagination test missing |
 | approvals.spec.ts | ❌ Not written — no test for approve/reject flow |
 | provider-config.spec.ts | ⚠️ Exists — save flow, model fetch, SSRF block tests missing |
@@ -459,5 +459,5 @@ Run all: `ANTHROPIC_API_KEY=sk-… npx playwright test`
 | settings.spec.ts | ❌ Not written |
 | intake.spec.ts | ❌ Not written |
 | navigation.spec.ts | ✅ Exists — scroll fix applied, covers all nav items |
-| security.spec.ts | ⚠️ Partially in anvay.spec.ts — SSRF URL block, cross-tenant, credential exposure missing |
-| graph-events.spec.ts | ⚠️ 401 in anvay.spec.ts — valid key + invalid payload missing |
+| security.spec.ts | ⚠️ Partially in anway.spec.ts — SSRF URL block, cross-tenant, credential exposure missing |
+| graph-events.spec.ts | ⚠️ 401 in anway.spec.ts — valid key + invalid payload missing |

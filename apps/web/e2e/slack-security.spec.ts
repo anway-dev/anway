@@ -12,7 +12,7 @@ test.describe('Slack commands — security', () => {
     // 503 = SLACK_SIGNING_SECRET not configured (fail-closed)
     // 401 = signing secret configured but no signature headers
     const resp = await request.post(`${GATEWAY}/api/slack/commands`, {
-      data: { command: '/anvay', text: 'approve gate-123' },
+      data: { command: '/anway', text: 'approve gate-123' },
     })
     expect([401, 503]).toContain(resp.status())
   })
@@ -25,7 +25,7 @@ test.describe('Slack commands — security', () => {
         'x-slack-signature': 'v0=invalidsignature',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      data: 'command=%2Fanvay&text=approve+gate-123',
+      data: 'command=%2Fanway&text=approve+gate-123',
     })
     // 503 = no signing secret; 401 = expired or invalid signature
     expect([401, 503]).toContain(resp.status())
@@ -39,7 +39,7 @@ test.describe('Slack commands — security', () => {
         'x-slack-signature': 'v0=0000000000000000000000000000000000000000000000000000000000000000',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      data: 'command=%2Fanvay&text=approve+gate-123',
+      data: 'command=%2Fanway&text=approve+gate-123',
     })
     expect([401, 503]).toContain(resp.status())
   })
@@ -51,7 +51,7 @@ test.describe('Slack commands — security', () => {
     const token = (await tokenResp.json() as { token: string }).token
     const resp = await request.post(`${GATEWAY}/api/slack/commands`, {
       headers: { Authorization: `Bearer ${token}` },
-      data: { command: '/anvay', text: 'approve gate-123' },
+      data: { command: '/anway', text: 'approve gate-123' },
     })
     // Must NOT be 200 — JWT should not bypass Slack signature
     expect(resp.status()).not.toBe(200)

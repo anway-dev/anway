@@ -17,8 +17,8 @@ terraform {
   }
 
   # backend "azurerm" {
-  #   resource_group_name  = "anvay-tfstate"
-  #   storage_account_name = "anvayterraformstate"
+  #   resource_group_name  = "anway-tfstate"
+  #   storage_account_name = "anwayterraformstate"
   #   container_name       = "tfstate"
   #   key                  = "prod.terraform.tfstate"
   # }
@@ -33,17 +33,17 @@ provider "azurerm" {
 }
 
 provider "kubernetes" {
-  host                   = azurerm_kubernetes_cluster.anvay.kube_config[0].host
-  client_certificate     = base64decode(azurerm_kubernetes_cluster.anvay.kube_config[0].client_certificate)
-  client_key             = base64decode(azurerm_kubernetes_cluster.anvay.kube_config[0].client_key)
-  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.anvay.kube_config[0].cluster_ca_certificate)
+  host                   = azurerm_kubernetes_cluster.anway.kube_config[0].host
+  client_certificate     = base64decode(azurerm_kubernetes_cluster.anway.kube_config[0].client_certificate)
+  client_key             = base64decode(azurerm_kubernetes_cluster.anway.kube_config[0].client_key)
+  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.anway.kube_config[0].cluster_ca_certificate)
 }
 
 provider "helm" {
   kubernetes {
-    host                   = azurerm_kubernetes_cluster.anvay.kube_config[0].host
-    client_certificate     = base64decode(azurerm_kubernetes_cluster.anvay.kube_config[0].client_certificate)
-    client_key             = base64decode(azurerm_kubernetes_cluster.anvay.kube_config[0].client_key)
-    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.anvay.kube_config[0].cluster_ca_certificate)
+    host                   = azurerm_kubernetes_cluster.anway.kube_config[0].host
+    client_certificate     = base64decode(azurerm_kubernetes_cluster.anway.kube_config[0].client_certificate)
+    client_key             = base64decode(azurerm_kubernetes_cluster.anway.kube_config[0].client_key)
+    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.anway.kube_config[0].cluster_ca_certificate)
   }
 }

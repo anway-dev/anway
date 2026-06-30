@@ -1,6 +1,6 @@
 variable "app_name" {
   type    = string
-  default = "anvay"
+  default = "anway"
 }
 
 variable "environment" {
@@ -23,23 +23,23 @@ variable "encryption_key" {
 variable "postgres_password" {
   type      = string
   sensitive = true
-  default   = "anvay"
+  default   = "anway"
 }
 
 variable "neo4j_password" {
   type      = string
   sensitive = true
-  default   = "anvaypassword"
+  default   = "anwaypassword"
 }
 
 variable "gateway_image" {
   type    = string
-  default = "anvay/gateway:latest"
+  default = "anway/gateway:latest"
 }
 
 variable "web_image" {
   type    = string
-  default = "anvay/web:latest"
+  default = "anway/web:latest"
 }
 
 # Host port mappings — can be overridden to avoid conflicts

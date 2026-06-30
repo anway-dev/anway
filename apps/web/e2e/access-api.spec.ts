@@ -29,7 +29,7 @@ test.describe('Access API — GET /api/access/users', () => {
     const devUser = body.find(u => u.id === DEV_USER_ID)
     expect(devUser, 'dev user must appear in list').toBeDefined()
     expect(devUser?.role).toBe('admin')
-    expect(devUser?.email).toBe('dev@anvay.local')
+    expect(devUser?.email).toBe('dev@anway.local')
   })
 })
 
@@ -123,7 +123,7 @@ test.describe('Access API — PUT /api/access/users/:id/perimeter', () => {
 test.describe('Access API — POST /api/access/users (provision)', () => {
   test('returns 401 without auth', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/access/users`, {
-      data: { email: 'e2e-test@anvay.local', role: 'dev' },
+      data: { email: 'e2e-test@anway.local', role: 'dev' },
     })
     expect(resp.status()).toBe(401)
   })
@@ -132,7 +132,7 @@ test.describe('Access API — POST /api/access/users (provision)', () => {
     const h = await authHeaders2(request)
     const resp = await request.post(`${GATEWAY}/api/access/users`, {
       headers: { ...h, 'Content-Type': 'application/json' },
-      data: { email: 'e2e-test@anvay.local', role: 'dev' },
+      data: { email: 'e2e-test@anway.local', role: 'dev' },
     })
     expect(resp.status()).toBe(403)
   })
@@ -150,14 +150,14 @@ test.describe('Access API — POST /api/access/users (provision)', () => {
     const h = await authHeaders(request)
     const resp = await request.post(`${GATEWAY}/api/access/users`, {
       headers: { ...h, 'Content-Type': 'application/json' },
-      data: { email: `e2e-${uniqueId('u')}@anvay.local`, role: 'superadmin' },
+      data: { email: `e2e-${uniqueId('u')}@anway.local`, role: 'superadmin' },
     })
     expect(resp.status()).toBe(400)
   })
 
   test('provisions new user and returns id', async ({ request }) => {
     const h = await authHeaders(request)
-    const email = `e2e-${uniqueId('prov')}@anvay.local`
+    const email = `e2e-${uniqueId('prov')}@anway.local`
     const resp = await request.post(`${GATEWAY}/api/access/users`, {
       headers: { ...h, 'Content-Type': 'application/json' },
       data: { email, role: 'dev' },
@@ -171,7 +171,7 @@ test.describe('Access API — POST /api/access/users (provision)', () => {
 
   test('provisioned user appears in user list', async ({ request }) => {
     const h = await authHeaders(request)
-    const email = `e2e-${uniqueId('list')}@anvay.local`
+    const email = `e2e-${uniqueId('list')}@anway.local`
     const createResp = await request.post(`${GATEWAY}/api/access/users`, {
       headers: { ...h, 'Content-Type': 'application/json' },
       data: { email, role: 'sre' },
@@ -217,7 +217,7 @@ test.describe('Access API — PATCH /api/access/users/:id/role', () => {
   test('updates role for provisioned user', async ({ request }) => {
     const h = await authHeaders(request)
     // Provision a user first
-    const email = `e2e-${uniqueId('role')}@anvay.local`
+    const email = `e2e-${uniqueId('role')}@anway.local`
     const createResp = await request.post(`${GATEWAY}/api/access/users`, {
       headers: { ...h, 'Content-Type': 'application/json' },
       data: { email, role: 'dev' },

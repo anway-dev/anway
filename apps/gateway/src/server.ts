@@ -27,7 +27,7 @@ import { startIncidentSubscriber } from './events/incident-subscriber.js'
 import { startAlertSubscriber } from './events/alert-subscriber.js'
 import { beginDraining, isDraining } from './lifecycle.js'
 import { startPipelineBootstrapSubscriber } from './pipeline-bootstrap.js'
-import type { IScheduler } from '@anvay/agent'
+import type { IScheduler } from '@anway/agent'
 
 const DEFAULT_REDIS_URL = 'redis://localhost:6379'
 const bootstrapLog = pino({ level: 'info' })

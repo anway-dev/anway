@@ -28,9 +28,9 @@ async function seedDemo() {
   `
 
   const user = await prisma.user.upsert({
-    where: { tenant_id_email: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anvay.dev' } },
+    where: { tenant_id_email: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anway.dev' } },
     update: {},
-    create: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anvay.dev', role: 'admin' },
+    create: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anway.dev', role: 'admin' },
   })
   log(`User: ${user.email}`)
 
@@ -119,7 +119,7 @@ async function seedDemo() {
       ('20000000-0000-0000-0000-000000000002'::uuid, ${DEMO_TENANT_ID}::uuid, 'auth-service-deploy',    'CI/CD pipeline for auth-service',   '[{"id":"build","name":"Build & Test"},{"id":"security-scan","name":"Security Scan"},{"id":"deploy-staging","name":"Deploy to Staging"},{"id":"integration-tests","name":"Integration Tests"},{"id":"deploy-prod","name":"Deploy to Production"}]'::jsonb, 'success', '{"service":"auth-service","triggered_by":"pr_merged","sha":"c8b3d44f"}'::jsonb),
       ('20000000-0000-0000-0000-000000000003'::uuid, ${DEMO_TENANT_ID}::uuid, 'platform-release',       'Weekly platform release train',     '[{"id":"changelog","name":"Changelog Generation"},{"id":"build-all","name":"Build All Services"},{"id":"smoke-tests","name":"Smoke Tests"},{"id":"canary-prod","name":"Canary Deploy"},{"id":"full-prod","name":"Full Production Rollout"}]'::jsonb,        'failed',  '{"version":"v1.14.0","triggered_by":"schedule"}'::jsonb),
       ('20000000-0000-0000-0000-000000000005'::uuid, ${DEMO_TENANT_ID}::uuid, 'checkout-service-deploy','CI/CD pipeline for checkout-service','[{"id":"build","name":"Build & Test"},{"id":"security-scan","name":"Security Scan"},{"id":"deploy-staging","name":"Deploy to Staging"},{"id":"integration-tests","name":"Integration Tests"},{"id":"deploy-prod","name":"Deploy to Production"}]'::jsonb, 'idle',    '{"service":"checkout-service","triggered_by":"manual"}'::jsonb),
-      ('40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid, 'anvay-self-deploy',      'Anvay deploys itself',              '[{"id":"build","label":"Build Images","type":"build"},{"id":"test","label":"Type Check + CI","type":"test"},{"id":"gate-staging","label":"Staging Gate","type":"gate"},{"id":"deploy-staging","label":"Deploy Staging","type":"deploy"},{"id":"monitor","label":"Monitor 10min","type":"monitor"},{"id":"gate-prod","label":"Production Gate","type":"gate"},{"id":"deploy-prod","label":"Deploy Production","type":"deploy"}]'::jsonb, 'running', '{"sha":"a4f21bc9","triggered_by":"pr_merged","service":"anvay"}'::jsonb)
+      ('40000000-0000-0000-0000-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid, 'anway-self-deploy',      'Anway deploys itself',              '[{"id":"build","label":"Build Images","type":"build"},{"id":"test","label":"Type Check + CI","type":"test"},{"id":"gate-staging","label":"Staging Gate","type":"gate"},{"id":"deploy-staging","label":"Deploy Staging","type":"deploy"},{"id":"monitor","label":"Monitor 10min","type":"monitor"},{"id":"gate-prod","label":"Production Gate","type":"gate"},{"id":"deploy-prod","label":"Deploy Production","type":"deploy"}]'::jsonb, 'running', '{"sha":"a4f21bc9","triggered_by":"pr_merged","service":"anway"}'::jsonb)
     ON CONFLICT (id) DO NOTHING
   `
   await prisma.$executeRaw`
@@ -139,7 +139,7 @@ async function seedDemo() {
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'smoke-tests',       'success','{"tests_passed":42,"tests_failed":0}'::jsonb,                                                                  now()-interval'6h'+interval'49m',now()-interval'6h'+interval'53m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'canary-prod',       'failed', '{"error":"canary error rate 8.2% exceeded threshold 2%","rolled_back":true}'::jsonb,                           now()-interval'6h'+interval'53m',now()-interval'6h'+interval'61m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'full-prod',         'pending','{}':jsonb,                                                                                                    NULL,NULL),
-      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'build',             'success','{"duration_ms":62000,"images":["anvay-gateway","anvay-web","anvay-agent-service"]}'::jsonb,                    now()-interval'28m',now()-interval'19m'),
+      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'build',             'success','{"duration_ms":62000,"images":["anway-gateway","anway-web","anway-agent-service"]}'::jsonb,                    now()-interval'28m',now()-interval'19m'),
       (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'test',              'running','{"tsc":"pass","packages":14,"gateway_tests":{"passed":62},"agent_tests":{"passed":93}}'::jsonb,               now()-interval'19m',NULL),
       (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'gate-staging',      'pending','{}':jsonb,NULL,NULL),
       (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-staging',    'pending','{}':jsonb,NULL,NULL),
@@ -151,11 +151,11 @@ async function seedDemo() {
 
   await prisma.$executeRaw`
     INSERT INTO trigger_rules (id, tenant_id, event_type, condition, actions, enabled) VALUES
-      ('10000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnvayPodCrashLooping"}'::jsonb,    '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"Pod crash loop detected"}]'::jsonb,true),
-      ('10000000-0000-0000-0000-000000000002'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnvayHighErrorRate"}'::jsonb,       '[{"type":"open_war_room","severity":"warning"},{"type":"surface_context","message":"Error rate spike — checking recent deploys"}]'::jsonb,true),
-      ('10000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnvayDBConnectionsHigh"}'::jsonb,   '[{"type":"surface_context","message":"DB connection saturation"},{"type":"notify_oncall"}]'::jsonb,true),
-      ('10000000-0000-0000-0000-000000000004'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnvayRedisMemoryHigh"}'::jsonb,     '[{"type":"surface_context","message":"Redis memory >85%"},{"type":"notify_oncall"}]'::jsonb,true),
-      ('10000000-0000-0000-0000-000000000005'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnvaySloBurnRateCritical"}'::jsonb, '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"SLO budget burning fast"},{"type":"escalate"}]'::jsonb,true)
+      ('10000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnwayPodCrashLooping"}'::jsonb,    '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"Pod crash loop detected"}]'::jsonb,true),
+      ('10000000-0000-0000-0000-000000000002'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnwayHighErrorRate"}'::jsonb,       '[{"type":"open_war_room","severity":"warning"},{"type":"surface_context","message":"Error rate spike — checking recent deploys"}]'::jsonb,true),
+      ('10000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnwayDBConnectionsHigh"}'::jsonb,   '[{"type":"surface_context","message":"DB connection saturation"},{"type":"notify_oncall"}]'::jsonb,true),
+      ('10000000-0000-0000-0000-000000000004'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnwayRedisMemoryHigh"}'::jsonb,     '[{"type":"surface_context","message":"Redis memory >85%"},{"type":"notify_oncall"}]'::jsonb,true),
+      ('10000000-0000-0000-0000-000000000005'::uuid,${DEMO_TENANT_ID}::uuid,'alert_fired','{"alertName":"AnwaySloBurnRateCritical"}'::jsonb, '[{"type":"open_war_room","severity":"critical"},{"type":"surface_context","message":"SLO budget burning fast"},{"type":"escalate"}]'::jsonb,true)
     ON CONFLICT (id) DO NOTHING
   `
   log('5 Trigger rules seeded.')

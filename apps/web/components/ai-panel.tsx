@@ -25,8 +25,8 @@ export function AiPanel({ node, action, onClose }: Props) {
     setStreaming(true);
 
     const prompt = action
-      ? `You are an AI assistant for the Anvay platform. The user is working on the "${node.label}" stage of their software lifecycle. They want to: ${action}. Provide a concise, helpful analysis.`
-      : `You are an AI assistant for the Anvay platform. Analyze the "${node.label}" stage (${node.connector ?? "no connector"}) and provide relevant insights.`;
+      ? `You are an AI assistant for the Anway platform. The user is working on the "${node.label}" stage of their software lifecycle. They want to: ${action}. Provide a concise, helpful analysis.`
+      : `You are an AI assistant for the Anway platform. Analyze the "${node.label}" stage (${node.connector ?? "no connector"}) and provide relevant insights.`;
 
     let aborted = false;
     const controller = new AbortController();
@@ -178,7 +178,7 @@ export function AiPanel({ node, action, onClose }: Props) {
         {chatHistory.map((msg, i) => (
           <div key={i} style={{ marginBottom: "12px" }}>
             <div style={{ fontSize: "10px", color: msg.role === "user" ? "#3b82f6" : "#8b5cf6", marginBottom: "4px", textTransform: "uppercase" }}>
-              {msg.role === "user" ? "You" : "✦ Anvay"}
+              {msg.role === "user" ? "You" : "✦ Anway"}
             </div>
             <div style={{ fontSize: "12px", color: "#d1d5db", lineHeight: "1.6", whiteSpace: "pre-wrap", background: msg.role === "user" ? "#1a1a1a" : "transparent", padding: msg.role === "user" ? "8px 10px" : "0", borderRadius: "6px" }}>
               {msg.text}

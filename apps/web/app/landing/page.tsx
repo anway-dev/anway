@@ -66,6 +66,10 @@ const TRUST_LEVELS = [
   { name: "L4 Autonomous", desc: "Anway executes within policy bounds. Unlock explicitly — never default.", active: false },
 ];
 
+function scrollTo(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 export default function LandingPage() {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const allConnectors = getAllConnectors();
@@ -75,7 +79,7 @@ export default function LandingPage() {
   return (
     <div style={{
       background: "#080808", color: "#e5e5e5", fontFamily: "system-ui, -apple-system, sans-serif",
-      minHeight: "100vh",
+      height: "100%", overflowY: "auto", scrollBehavior: "smooth",
     }}>
       {/* Section 1 — Nav */}
       <nav style={{
@@ -89,11 +93,12 @@ export default function LandingPage() {
         </div>
         <div style={{ display: "flex", gap: "32px" }}>
           {["features", "connectors", "roles", "trust"].map((s) => (
-            <a key={s} href={`#${s}`} style={{ color: "#888", fontSize: "14px", textDecoration: "none" }}
+            <button key={s} onClick={() => scrollTo(s)}
+              style={{ color: "#888", fontSize: "14px", textDecoration: "none", background: "none", border: "none", cursor: "pointer", padding: 0 }}
               onMouseEnter={(e) => { e.currentTarget.style.color = "#e5e5e5"; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = "#888"; }}>
               {s.charAt(0).toUpperCase() + s.slice(1)}
-            </a>
+            </button>
           ))}
         </div>
         <Link href="/" style={{
@@ -130,12 +135,12 @@ export default function LandingPage() {
           }}>
             Open Dashboard &rarr;
           </Link>
-          <a href="#how-it-works" style={{
+          <button onClick={() => scrollTo("how-it-works")} style={{
             border: "1px solid #2a2a2a", color: "#e5e5e5", padding: "14px 28px",
-            borderRadius: "6px", fontSize: "16px", textDecoration: "none",
+            borderRadius: "6px", fontSize: "16px", background: "none", cursor: "pointer",
           }}>
-            See how it works &darr;
-          </a>
+            See how it works ↓
+          </button>
         </div>
 
         {/* Terminal trace */}

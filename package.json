@@ -7,9 +7,11 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "smoke": "bash scripts/smoke-test.sh"
   },
   "devDependencies": {
+    "testcontainers": "^12.0.4",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
   },

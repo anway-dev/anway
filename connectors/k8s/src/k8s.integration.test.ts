@@ -19,7 +19,7 @@ describe.skipIf(skip)('k8s — integration (real API)', () => {
       'test',
       { apiKey: token! }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
   })
 
   it('agent tools are callable', async () => {

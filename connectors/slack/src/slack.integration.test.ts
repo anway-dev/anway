@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { startFixtureServer } from '@anway/agent'
+import { startFixtureServer, FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import type { FixtureRoute, FixtureServer } from '@anway/agent'
 import { SlackBootstrap } from './bootstrap.js'
 import { SlackAgent } from './agent.js'
@@ -11,9 +11,9 @@ class FakeKG {
 }
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'GET', path: '/api/conversations.list', status: 200, body: {'ok': True, 'channels': [{'id': 'C001', 'name': 'payments-alerts'}]} },
-  { method: 'GET', path: '/api/users.list', status: 200, body: {'ok': True, 'members': [{'id': 'U001', 'name': 'alice', 'real_name': 'Alice Smith'}]} },
-  { method: 'POST', path: '/api/chat.postMessage', status: 200, body: {'ok': True} }
+  { method: 'GET', path: '/api/conversations.list', status: 200, body: {'ok': true, 'channels': [{'id': 'C001', 'name': 'payments-alerts'}]} },
+  { method: 'GET', path: '/api/users.list', status: 200, body: {'ok': true, 'members': [{'id': 'U001', 'name': 'alice', 'real_name': 'Alice Smith'}]} },
+  { method: 'POST', path: '/api/chat.postMessage', status: 200, body: {'ok': true} }
 ]
 
 describe('slack — fixture HTTP server', () => {
@@ -30,7 +30,8 @@ describe('slack — fixture HTTP server', () => {
     const result = await new SlackBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { token: "fixture-token", baseUrl: fixture.baseUrl }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
+    expect(kg.entities.some(e => e.name === 'payments-alerts'), 'expected entity payments-alerts not extracted').toBe(true)
   })
 
   it('agent tools query fixture server', async () => {
@@ -38,12 +39,8 @@ describe('slack — fixture HTTP server', () => {
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
     const firstTool = tools[0]!
-    try {
-      const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-      expect(result).toBeDefined()
-    } catch {
-      // fixture may not match the tool's exact API shape — that's OK, server responded
-    }
+    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
+    expect(result).toBeDefined()
   })
 
   it('fixture server received at least one request', () => {

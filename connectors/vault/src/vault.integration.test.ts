@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import { VaultBootstrap } from './bootstrap.js'
 import { VaultAgent } from './agent.js'
 
@@ -29,7 +30,7 @@ describe('vault — integration (real Docker)', () => {
     const result = await new VaultBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "token": "dev-root-token" }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
   })
 
@@ -39,10 +40,7 @@ describe('vault — integration (real Docker)', () => {
     expect(tools.length).toBeGreaterThan(0)
     const firstTool = tools[0]!
     try {
-      const result = await firstTool.execute({}, { baseUrl }, token: 'dev-root-token')
+      const result = await firstTool.execute({}, { baseUrl, token: 'dev-root-token' }))
       expect(result).toBeDefined()
-    } catch {
-      // Fresh container may return empty/error — either is OK, tool did not crash
-    }
   })
 })

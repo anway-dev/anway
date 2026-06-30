@@ -2,8 +2,6 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-const NEWRELIC_API = (payload['baseUrl'] as string) ?? 'https://api.newrelic.com'
-
 export class NewRelicBootstrap implements IConnectorBootstrap {
   constructor(
     private readonly kg: IKnowledgeGraph,
@@ -12,8 +10,10 @@ export class NewRelicBootstrap implements IConnectorBootstrap {
   ) {}
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.newrelic.com'
+    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['NEW_RELIC_API_KEY']
     const apiKey = (payload['apiKey'] as string | undefined) ?? this.apiKey
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? NEWRELIC_API
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? baseUrl
     if (!apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['newrelic: no credentials configured'] }
     }

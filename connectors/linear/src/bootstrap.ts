@@ -2,10 +2,8 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-const LINEAR_API = (payload['baseUrl'] as string) ?? 'https://api.linear.app/graphql'
-
 async function graphqlQuery(token: string, query: string): Promise<Record<string, unknown>> {
-  const res = await fetch(LINEAR_API, {
+  const res = await fetch(baseUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ query }),
@@ -24,7 +22,9 @@ export class LinearBootstrap implements IConnectorBootstrap {
     private readonly apiKey?: string,
   ) {}
 
-  async bootstrap(tenantId: TenantId, _connectorId: string, _payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+  async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.linear.app/graphql'
+    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['baseUrl_KEY']
     if (!this.apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Linear bootstrap: no API key'] }
     }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import { GrafanaBootstrap } from './bootstrap.js'
 import { GrafanaAgent } from './agent.js'
 
@@ -29,7 +30,7 @@ describe('grafana — integration (real Docker)', () => {
     const result = await new GrafanaBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "token": "" }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
   })
 
@@ -41,8 +42,5 @@ describe('grafana — integration (real Docker)', () => {
     try {
       const result = await firstTool.execute({}, { baseUrl })
       expect(result).toBeDefined()
-    } catch {
-      // Fresh container may return empty/error — either is OK, tool did not crash
-    }
   })
 })

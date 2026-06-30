@@ -102,5 +102,5 @@ export { createGetIncidentContextTool } from './tools/incident-context.js'
 export type { IScheduler, ScheduledJob } from './scheduler/scheduler.js'
 
 // Testing
-export { startFixtureServer, describeConnectorConformance } from './testing/index.js'
+export { startFixtureServer, describeConnectorConformance, FakeKnowledgeGraph } from './testing/index.js'
 export type { FixtureRoute, FixtureServer } from './testing/index.js'

@@ -8,11 +8,11 @@ export class CoralogixBootstrap implements IConnectorBootstrap {
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
     const apiKey = (payload['apiKey'] as string | undefined) ?? (payload['token'] as string | undefined) ?? ''
     const region = (payload['region'] as string | undefined) ?? 'us1'
-    const domain = (payload['baseUrl'] as string) ?? `ng-api-http.${region}.coralogix.com`
+    const baseUrl = (payload['baseUrl'] as string) ?? `https://ng-api-http.${region}.coralogix.com`
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
 
     try {
-      const res = await fetch(`https://${domain}/api/v1/logs/get-applications`, {
+      const res = await fetch(`${baseUrl}/api/v1/logs/get-applications`, {
         method: 'POST', headers,
         body: JSON.stringify({}),
       })

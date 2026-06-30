@@ -1,137 +1,79 @@
 import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent'
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-const execFileAsync = promisify(execFile)
+
+interface GitHubRepo { id: number; name: string; full_name: string; language?: string; default_branch: string }
 
 export class GitHubBootstrap implements IConnectorBootstrap {
-  constructor(
-    private readonly kg: IKnowledgeGraph,
-    private readonly token: string,
-  ) {}
+  constructor(private readonly kg: IKnowledgeGraph) {}
 
-  async runGh<T>(args: string[]): Promise<T | null> {
-    try {
-      const result = await execFileAsync('gh', args, {
-        env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin', GH_TOKEN: this.token },
-        timeout: 15_000,
-      })
-      return JSON.parse(result.stdout) as T
-    } catch {
-      return null
-    }
+  private async fetchJson<T>(baseUrl: string, path: string, token: string): Promise<T> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' }
+    })
+    if (!res.ok) throw new Error(`GitHub API ${res.status}: ${path}`)
+    return res.json() as Promise<T>
   }
 
-  async fetchCODEOWNERS(org: string, repo: string): Promise<string | null> {
+  async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+    const token = (payload['token'] as string | undefined) ?? process.env['GH_TOKEN'] ?? process.env['GITHUB_TOKEN']
+    const org = (payload['org'] as string | undefined)
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.github.com'
+
+    if (!token) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['GitHub bootstrap: token required'] }
+    if (!org) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['GitHub bootstrap: org required'] }
+
     try {
-      const result = await execFileAsync('gh', ['api', `/repos/${org}/${repo}/contents/CODEOWNERS`, '--jq', '.content'], {
-        env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin', GH_TOKEN: this.token },
-        timeout: 10_000,
-      })
-      // execFileAsync throws on non-zero exit — no status check needed
-      return Buffer.from(result.stdout.trim(), 'base64').toString('utf-8')
-    } catch {
-      return null
-    }
-  }
+      let repos: GitHubRepo[] = []
+      // List repos for the org
+      for (let page = 1; page <= 5; page++) {
+        const pageRepos = await this.fetchJson<GitHubRepo[]>(baseUrl, `/orgs/${org}/repos?type=source&per_page=100&page=${page}`, token)
+        if (!Array.isArray(pageRepos) || pageRepos.length === 0) break
+        repos = repos.concat(pageRepos)
+        if (pageRepos.length < 100) break
+      }
 
-  async bootstrap(tenantId: TenantId, connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
-    const org = payload['org'] as string | undefined
-    if (!org) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
+      let entitiesUpserted = 0
+      for (const repo of repos) {
+        await this.kg.upsertEntity({
+          type: 'Repo',
+          name: repo.full_name,
+          metadata: {
+            source: 'github', org, language: repo.language ?? 'unknown',
+            defaultBranch: repo.default_branch,
+            connectorCoordinates: { github: { connectorType: 'github', resourceIds: { repo: repo.full_name, org }, resolvedAt: new Date().toISOString(), confidence: 1.0 } },
+          },
+        }, tenantId)
+        entitiesUpserted++
 
-    const repos = await this.runGh<Array<{ name: string; isFork: boolean; defaultBranchRef?: { name: string }; languages: { node: { name: string } }[] }>>([
-      'repo', 'list', org,
-      '--json', 'name,isFork,defaultBranchRef,languages',
-      '--source',
-      '--limit', '100',
-    ])
-    if (!repos) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
-
-    // Prune Repo entities seeded from this org that are no longer in the source repo list
-    const validRepoNames = repos.map(r => `${org}/${r.name}`)
-    await this.kg.deleteEntitiesByOrgPrefix('Repo', org, validRepoNames, tenantId).catch(() => 0)
-
-    let entitiesUpserted = 0
-    let relationshipsUpserted = 0
-
-    for (const repo of repos) {
-      // Upsert Repo entity
-      const repoId = await this.kg.upsertEntity({
-        type: 'Repo',
-        name: `${org}/${repo.name}`,
-        metadata: { defaultBranch: repo.defaultBranchRef?.name ?? 'main', org },
-      }, tenantId)
-      entitiesUpserted++
-
-      // Upsert Service entity (service name = repo name without org)
-      const svcId = await this.kg.upsertEntity({
-        type: 'Service',
-        name: repo.name,
-        metadata: { connectorCoordinates: { github: { resourceIds: { repo: `${org}/${repo.name}` } } } },
-      }, tenantId)
-      entitiesUpserted++
-
-      // Upsert Service→HOSTED_IN→Repo
-      await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'HOSTED_IN', toEntityId: repoId, metadata: {} }, tenantId)
-      relationshipsUpserted++
-
-      // Fetch CODEOWNERS
-      const codeowners = await this.fetchCODEOWNERS(org, repo.name)
-      if (!codeowners) continue
-
-      // Parse CODEOWNERS lines — extract @team and @user entries
-      const teamSet = new Set<string>()
-      const userSet = new Set<string>()
-      for (const line of codeowners.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue
-        // Skip file path component, extract owners
-        const parts = trimmed.split(/\s+/)
-        for (const p of parts) {
-          if (p.startsWith('@')) {
-            const name = p.slice(1)
-            if (name.includes('/')) teamSet.add(name)       // org/team-name
-            else userSet.add(name)                            // username
+        // Try to fetch CODEOWNERS
+        try {
+          const ownersResp = await this.fetchJson<{ content?: string; encoding?: string }>(baseUrl, `/repos/${org}/${repo.name}/contents/CODEOWNERS`, token)
+          if (ownersResp?.content && ownersResp?.encoding === 'base64') {
+            const decoded = Buffer.from(ownersResp.content, 'base64').toString('utf-8')
+            const teams = new Set<string>()
+            for (const line of decoded.split('\n')) {
+              const m = line.match(/^\S+\s+(@\S+)/)
+              if (m) {
+                const team = m[1]!.replace(/^@/, '')
+                teams.add(team)
+              }
+            }
+            for (const team of teams) {
+              await this.kg.upsertEntity({
+                type: 'Team', name: team,
+                metadata: { source: 'github', org, repo: repo.name },
+              }, tenantId)
+              entitiesUpserted++
+            }
           }
-        }
+        } catch { /* CODEOWNERS may not exist */ }
       }
 
-      for (const teamName of teamSet) {
-        const teamId = await this.kg.upsertEntity({
-          type: 'Team',
-          name: teamName,
-          metadata: { connectorCoordinates: { github: { resourceIds: { team: teamName } } } },
-        }, tenantId)
-        entitiesUpserted++
-        // Upsert Service→OWNED_BY→Team
-        await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'OWNED_BY', toEntityId: teamId, metadata: {} }, tenantId)
-        relationshipsUpserted++
-      }
-
-      for (const userName of userSet) {
-        const engId = await this.kg.upsertEntity({
-          type: 'Engineer',
-          name: userName,
-          metadata: {},
-        }, tenantId)
-        entitiesUpserted++
-        // Find the first team and create Engineer→MEMBER_OF→Team
-        if (teamSet.size > 0) {
-          const firstTeam = teamSet.values().next().value!
-          // Lookup team entity id — reuse team upsert from above
-          const teamId = await this.kg.upsertEntity({
-            type: 'Team',
-            name: firstTeam,
-            metadata: { connectorCoordinates: { github: { resourceIds: { team: firstTeam } } } },
-          }, tenantId)
-          entitiesUpserted++
-          await this.kg.upsertRelationship({ fromEntityId: engId, relType: 'MEMBER_OF', toEntityId: teamId, metadata: {} }, tenantId)
-          relationshipsUpserted++
-        }
-      }
+      const hints = [`GitHub bootstrap: ${repos.length} repos indexed`]
+      return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: hints }
+    } catch {
+      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['GitHub bootstrap: API call failed'] }
     }
-
-    return { entitiesUpserted, relationshipsUpserted, episodeHints: [`Bootstrapped ${repos.length} repos from ${org} with CODEOWNERS teams and users`] }
   }
 }

@@ -2,8 +2,6 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-const OPSGENIE_API = (payload['baseUrl'] as string) ?? 'https://api.opsgenie.com'
-
 export class OpsGenieBootstrap implements IConnectorBootstrap {
   constructor(
     private readonly kg: IKnowledgeGraph,
@@ -12,8 +10,10 @@ export class OpsGenieBootstrap implements IConnectorBootstrap {
   ) {}
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.opsgenie.com'
+    const apiKey = (payload['apiKey'] as string | undefined) ?? process.env['baseUrl_KEY']
     const apiKey = (payload['apiKey'] as string | undefined) ?? this.apiKey
-    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? OPSGENIE_API
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? this.baseUrl ?? baseUrl
     if (!apiKey) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['opsgenie: no credentials configured'] }
     }

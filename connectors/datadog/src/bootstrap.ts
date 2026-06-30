@@ -15,7 +15,8 @@ export class DatadogBootstrap implements IConnectorBootstrap {
     } catch { return null }
   }
 
-  async bootstrap(tenantId: TenantId, _connectorId: string, _payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+  async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
+    const baseUrl = (payload['baseUrl'] as string | undefined) ?? 'https://api.datadoghq.com'
     const apiKey = process.env['DD_API_KEY']
     const appKey = process.env['DD_APP_KEY']
     if (!apiKey || !appKey) {

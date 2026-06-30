@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import { PrometheusBootstrap } from './bootstrap.js'
 import { PrometheusAgent } from './agent.js'
 
@@ -29,7 +30,7 @@ describe('prometheus — integration (real Docker)', () => {
     const result = await new PrometheusBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { baseUrl }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
   })
 

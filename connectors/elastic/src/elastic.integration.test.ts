@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import { ElasticsearchBootstrap } from './bootstrap.js'
 import { ElasticAgent } from './agent.js'
 
@@ -29,7 +30,7 @@ describe('elastic — integration (real Docker)', () => {
     const result = await new ElasticsearchBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
   })
 
@@ -41,8 +42,5 @@ describe('elastic — integration (real Docker)', () => {
     try {
       const result = await firstTool.execute({}, { baseUrl })
       expect(result).toBeDefined()
-    } catch {
-      // Fresh container may return empty/error — either is OK, tool did not crash
-    }
   })
 })

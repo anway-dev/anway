@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { startFixtureServer } from '@anway/agent'
+import { startFixtureServer, FakeKnowledgeGraph as FakeKG } from '@anway/agent'
 import type { FixtureRoute, FixtureServer } from '@anway/agent'
 import { CoralogixBootstrap } from './bootstrap.js'
 import { CoralogixAgent } from './agent.js'
@@ -11,7 +11,9 @@ class FakeKG {
 }
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'POST', path: '/api/v1/dataprime/query', status: 200, body: {'result': {'results': []}, 'metadata': {'warnings': []}} },
+  { method: 'POST', path: '/api/v1/logs/get-applications', status: 200,
+    body: { applications: [{ name: 'payments-api' }, { name: 'auth-service' }] } }
+]}, 'metadata': {'warnings': []}} },
   { method: 'GET', path: '/api/v1/logs/statistics/applications', status: 200, body: {'data': [{'application': 'payments-api'}, {'application': 'auth-service'}]} }
 ]
 
@@ -29,7 +31,8 @@ describe('coralogix — fixture HTTP server', () => {
     const result = await new CoralogixBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { apiKey: "fixture-key", region: "us1", baseUrl: fixture.baseUrl }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
+    expect(kg.entities.some(e => e.name === 'payments-api'), 'expected entity payments-api not extracted').toBe(true)
   })
 
   it('agent tools query fixture server', async () => {
@@ -37,12 +40,8 @@ describe('coralogix — fixture HTTP server', () => {
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
     const firstTool = tools[0]!
-    try {
-      const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-      expect(result).toBeDefined()
-    } catch {
-      // fixture may not match the tool's exact API shape — that's OK, server responded
-    }
+    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
+    expect(result).toBeDefined()
   })
 
   it('fixture server received at least one request', () => {

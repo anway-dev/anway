@@ -92,7 +92,7 @@ export default function LandingPage() {
           <span style={{ color: "#10b981", fontSize: "20px", fontWeight: 700, letterSpacing: "-0.5px" }}>anway</span>
         </div>
         <div style={{ display: "flex", gap: "32px" }}>
-          {["features", "connectors", "roles", "trust"].map((s) => (
+          {["demo", "flow", "features", "connectors", "roles", "trust"].map((s) => (
             <button key={s} onClick={() => scrollTo(s)}
               style={{ color: "#888", fontSize: "14px", textDecoration: "none", background: "none", border: "none", cursor: "pointer", padding: 0 }}
               onMouseEnter={(e) => { e.currentTarget.style.color = "#e5e5e5"; }}
@@ -230,6 +230,59 @@ export default function LandingPage() {
           ))}
         </div>
       </section>
+
+      {/* Section 4b — Demo Video */}
+      <section id="demo" style={{ padding: "100px 48px", background: "#080808" }}>
+        <h2 style={{ fontSize: "32px", color: "#e5e5e5", textAlign: "center", marginBottom: "12px", fontWeight: 700 }}>
+          Watch how it works
+        </h2>
+        <p style={{ color: "#555", textAlign: "center", marginBottom: "64px" }}>
+          See Anway in action
+        </p>
+        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+          <div style={{ marginBottom: "16px", fontSize: "11px", color: "#555", textAlign: "center" }}>Product walkthrough · 3 min</div>
+          <div style={{ position: "relative", paddingBottom: "56.25%", background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "12px", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ width: "80px", height: "80px", borderRadius: "50%", background: "rgba(16,185,129,0.15)", border: "2px solid #10b981", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <span style={{ color: "#10b981", fontSize: "28px", marginLeft: "4px" }}>&#9654;</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Section 4c — Agentic Flow */}
+      <section id="agentic-flow" style={{ padding: "100px 48px", background: "#0a0a0a" }}>
+        <h2 style={{ fontSize: "32px", color: "#e5e5e5", textAlign: "center", marginBottom: "12px", fontWeight: 700 }}>
+          Agentic flow — graph-first intelligence
+        </h2>
+        <p style={{ color: "#555", textAlign: "center", marginBottom: "64px" }}>
+          Every query follows this path. Graph first, connectors second, user last.
+        </p>
+        <div style={{ maxWidth: "650px", margin: "0 auto", fontFamily: "monospace", fontSize: "13px" }}>
+          {[
+            { color: "#10b981", label: "User Query", sub: "Plain language question from chat" },
+            { color: "#10b981", label: "Orchestrator", sub: "Classifies intent · Resolves role · Enforces perimeter", highlight: false },
+            { color: "#10b981", label: "Knowledge Graph resolveContext()", sub: "Entity lookup → connector coordinates · Freshness-scored context block", highlight: true },
+            { color: "#10b981", label: "Parallel Specialist Agents", sub: "SRE Agent · GitHub Agent · Datadog Agent · K8s Agent ...", highlight: false },
+            { color: "#888", label: "Live Connectors (targeted, not scatter-gather)", sub: "github.getPRs({repo}) · datadog.getMetrics({svc}) · k8s.getPods({ns})", highlight: false },
+            { color: "#10b981", label: "Orchestrator synthesizes", sub: "Grounded response with source citations + confidence score", highlight: false },
+            { color: "#888", label: "User sees answer + optional confirm gate", sub: "Write actions require explicit approval (V1 trust principle)", highlight: false },
+          ].map((step, i) => (
+            <div key={step.label} style={{ display: "flex", alignItems: "flex-start", marginBottom: "8px" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "24px", flexShrink: 0 }}>
+                <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: step.color, marginTop: "6px" }} />
+                {i < 6 && <div style={{ width: "2px", flex: 1, background: "#1a1a1a", marginTop: "4px" }} />}
+              </div>
+              <div style={{ background: step.highlight ? "rgba(16,185,129,0.05)" : "#080808", border: step.highlight ? "1px solid #10b981" : "1px solid #1a1a1a", borderRadius: "6px", padding: "12px 16px", flex: 1, marginLeft: "8px" }}>
+                <div style={{ color: step.color, fontWeight: 600, marginBottom: "4px" }}>{step.label}</div>
+                <div style={{ color: "#555", fontSize: "11px" }}>{step.sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
 
       {/* Section 5 — Features */}
       <section id="features" style={{ padding: "100px 48px", background: "#080808" }}>

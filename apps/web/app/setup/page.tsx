@@ -3,22 +3,20 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-const GATEWAY = process.env['NEXT_PUBLIC_GATEWAY_URL'] ?? 'http://127.0.0.1:8510'
-
 export default function SetupPage() {
   const router = useRouter()
-  const [orgName, setOrgName] = useState('')
-  const [adminEmail, setAdminEmail] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
 
-  // If already initialized, redirect to login
   useEffect(() => {
-    fetch(`${GATEWAY}/api/setup/status`)
-      .then(r => r.ok ? r.json() as Promise<{ initialized: boolean }> : { initialized: false })
-      .then(s => {
-        if (s.initialized) router.replace('/login')
+    fetch('/api/auth/methods')
+      .then(r => r.ok ? r.json() as Promise<{ setupRequired: boolean }> : { setupRequired: false })
+      .then(m => {
+        if (!(m as { setupRequired: boolean }).setupRequired) router.replace('/login')
         else setChecking(false)
       })
       .catch(() => setChecking(false))
@@ -27,12 +25,14 @@ export default function SetupPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    if (password !== confirmPassword) { setError('passwords do not match'); return }
+    if (password.length < 8) { setError('password must be at least 8 characters'); return }
     setLoading(true)
     try {
-      const resp = await fetch(`${GATEWAY}/api/setup/init`, {
+      const resp = await fetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgName, adminEmail }),
+        body: JSON.stringify({ email, password }),
       })
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ error: 'Setup failed' }))
@@ -40,12 +40,6 @@ export default function SetupPage() {
         setLoading(false)
         return
       }
-      const { token } = await resp.json() as { token: string }
-      await fetch('/api/auth/set-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-      })
       router.push('/')
     } catch {
       setError('Gateway unreachable. Is the server running?')
@@ -62,80 +56,34 @@ export default function SetupPage() {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#080808', color: '#e5e5e5', fontFamily: 'system-ui, sans-serif',
-    }}>
-      <div style={{
-        width: '440px', padding: '40px', background: '#0a0a0a',
-        border: '1px solid #1a1a1a', borderRadius: '12px',
-      }}>
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>anway</div>
-          <div style={{ fontSize: '15px', fontWeight: 600, color: '#e5e5e5', marginBottom: '6px' }}>Set up your workspace</div>
-          <div style={{ fontSize: '12px', color: '#555' }}>First-time setup. Creates your organization and admin account.</div>
+    <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace' }}>
+      <div style={{ width: 360, background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8, padding: '32px 28px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#10b981', letterSpacing: 1 }}>Anway</div>
+          <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>First-run setup</div>
         </div>
-
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Organization Name</label>
-            <input
-              type="text"
-              value={orgName}
-              onChange={e => setOrgName(e.target.value)}
-              required
-              autoFocus
-              style={{
-                width: '100%', padding: '8px 12px', background: '#111', border: '1px solid #2a2a2a',
-                borderRadius: '6px', color: '#e5e5e5', fontSize: '13px', outline: 'none',
-              }}
-              placeholder="Acme Corp"
-            />
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: '#888', display: 'block', marginBottom: 4 }}>Admin email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus placeholder="you@company.com"
+              style={{ width: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 10px', color: '#e5e5e5', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
           </div>
-
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Admin Email</label>
-            <input
-              type="email"
-              value={adminEmail}
-              onChange={e => setAdminEmail(e.target.value)}
-              required
-              style={{
-                width: '100%', padding: '8px 12px', background: '#111', border: '1px solid #2a2a2a',
-                borderRadius: '6px', color: '#e5e5e5', fontSize: '13px', outline: 'none',
-              }}
-              placeholder="admin@yourorg.com"
-            />
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: '#888', display: 'block', marginBottom: 4 }}>Password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="Min 8 characters"
+              style={{ width: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 10px', color: '#e5e5e5', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
           </div>
-
-          {error && (
-            <div style={{
-              padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-              borderRadius: '6px', fontSize: '11px', color: '#ef4444', marginBottom: '16px',
-            }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || !orgName || !adminEmail}
-            style={{
-              width: '100%', padding: '10px',
-              background: loading || !orgName || !adminEmail ? '#0e3a28' : '#10b981',
-              border: 'none', borderRadius: '6px',
-              color: loading || !orgName || !adminEmail ? '#666' : '#080808',
-              fontSize: '13px', fontWeight: 600,
-              cursor: loading || !orgName || !adminEmail ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {loading ? 'Setting up…' : 'Create Workspace'}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 11, color: '#888', display: 'block', marginBottom: 4 }}>Confirm password</label>
+            <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required placeholder="••••••••"
+              style={{ width: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 10px', color: '#e5e5e5', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+          {error && <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 12 }}>{error}</div>}
+          <button type="submit" disabled={loading}
+            style={{ width: '100%', padding: '9px 0', background: '#10b981', border: 'none', borderRadius: 5, color: '#000', fontSize: 13, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}>
+            {loading ? 'Creating account…' : 'Create admin account'}
           </button>
         </form>
-
-        <div style={{ marginTop: '20px', padding: '12px', background: '#0e0e0e', border: '1px solid #1a1a1a', borderRadius: '6px', fontSize: '11px', color: '#555', fontFamily: 'monospace' }}>
-          This creates the first admin account. Additional users are provisioned via Access settings.
-        </div>
       </div>
     </div>
   )

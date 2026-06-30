@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
-import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent/testing'
 import { ConfluenceBootstrap } from './bootstrap.js'
 import { ConfluenceAgent } from './agent.js'
 import path from 'node:path'

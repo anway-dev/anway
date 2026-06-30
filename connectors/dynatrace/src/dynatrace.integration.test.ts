@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { startFixtureServer, FakeKnowledgeGraph as FakeKG } from '@anway/agent'
-import type { FixtureRoute, FixtureServer } from '@anway/agent'
+import { startFixtureServer, FakeKnowledgeGraph as FakeKG } from '@anway/agent/testing'
+import type { FixtureRoute, FixtureServer } from '@anway/agent/testing'
 import { DynatraceBootstrap } from './bootstrap.js'
 import { DynatraceAgent } from './agent.js'
 

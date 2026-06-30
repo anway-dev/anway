@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
-import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent/testing'
 import { PrometheusBootstrap } from './bootstrap.js'
 import { PrometheusAgent } from './agent.js'
 

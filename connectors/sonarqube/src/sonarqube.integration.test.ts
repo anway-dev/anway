@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
-import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent/testing'
 import { SonarQubeBootstrap } from './bootstrap.js'
 import { SonarqubeAgent } from './agent.js'
 

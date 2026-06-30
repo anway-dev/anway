@@ -11,8 +11,8 @@
       "types": "./dist/index.d.ts"
     },
     "./testing": {
-      "import": "./dist/testing/connector-conformance.js",
-      "types": "./dist/testing/connector-conformance.d.ts"
+      "import": "./dist/testing/index.js",
+      "types": "./dist/testing/index.d.ts"
     }
   },
   "scripts": {

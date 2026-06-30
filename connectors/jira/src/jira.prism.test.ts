@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { GenericContainer, Wait } from 'testcontainers'
-import { FakeKnowledgeGraph as FakeKG } from '@anway/agent'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent/testing'
 import { JiraBootstrap } from './bootstrap.js'
 import { JiraAgent } from './agent.js'
 import path from 'node:path'

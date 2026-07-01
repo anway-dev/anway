@@ -5,10 +5,11 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
 import { providerRegistry } from '@anway/agent'
-import { encryptJson } from '../utils/crypto.js'
+import { encryptJson, decryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
 import dns from 'node:dns/promises'
+import { CONNECTOR_CATALOG } from './connectors.js'
 
 let _settingsPub: import('redis').RedisClientType | null = null
 let _settingsPubPromise: Promise<import('redis').RedisClientType> | null = null
@@ -181,6 +182,33 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     'eks', 'gke', 'aks', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
     'alertmanager',
   ]
+
+  app.get<{ Params: { type: string } }>(
+    '/api/settings/connectors/:type', { preHandler: [app.authenticate, requireRole('admin')] },
+    async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
+      const { type } = request.params
+      const rows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ credentials_enc: string }>>`
+          SELECT credentials_enc FROM connector_config
+          WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid AND enabled = true LIMIT 1
+        `
+      ).catch(() => [])
+      if (rows.length === 0) return reply.code(404).send({ error: 'not configured' })
+      const creds = decryptJson<Record<string, unknown>>(rows[0]!.credentials_enc)
+      const catalogEntry = CONNECTOR_CATALOG.find(c => c.id === type)
+      const sensitiveKeys = new Set(
+        (catalogEntry?.configFields ?? [])
+          .filter(f => f.type === 'password' || f.type === 'secret')
+          .map(f => f.key)
+      )
+      const safe: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(creds)) {
+        if (!sensitiveKeys.has(k)) safe[k] = v
+      }
+      return { credentials: safe }
+    }
+  )
 
   app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(
     '/api/settings/connectors/:type', { preHandler: [app.authenticate, requireRole('admin')] }, async (request, reply) => {

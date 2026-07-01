@@ -1,77 +1,92 @@
 groups:
-  - name: anway
+  - name: anway-gateway
     interval: 30s
     rules:
-
-      - alert: AnwayPodCrashLooping
-        expr: |
-          kube_pod_container_status_waiting_reason{
-            reason="CrashLoopBackOff",
-            namespace=~"anway.*"
-          } > 0
-        for: 2m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: "Pod {{ $labels.pod }} is crash looping"
-          description: "Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} has been in CrashLoopBackOff for >2m."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#pod-oomkilled-or-crash-loop"
-
-      - alert: AnwayHighErrorRate
-        expr: |
-          rate(http_requests_total{namespace=~"anway.*",status=~"5.."}[5m])
-          /
-          rate(http_requests_total{namespace=~"anway.*"}[5m]) > 0.01
-        for: 5m
-        labels:
-          severity: warning
-          team: platform
-        annotations:
-          summary: "Anway error rate >1%"
-          description: "HTTP 5xx rate is {{ $value | humanizePercentage }} over the last 5m."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
-
-      - alert: AnwayDBConnectionsHigh
-        expr: pg_stat_database_numbackends{datname="anway"} > 80
-        for: 5m
-        labels:
-          severity: warning
-          team: platform
-        annotations:
-          summary: "Anway DB connections high ({{ $value }})"
-          description: "Postgres connections to anway DB exceed 80. PgBouncer or pool misconfiguration."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#db-connections-exhausted"
-
-      - alert: AnwayRedisMemoryHigh
-        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
-        for: 10m
-        labels:
-          severity: warning
-          team: platform
-        annotations:
-          summary: "Anway Redis memory high ({{ $value | humanizePercentage }})"
-          description: "Redis is using {{ $value | humanizePercentage }} of max memory. Risk of eviction."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#redis-memory-high"
-
-      - alert: AnwaySloBurnRateCritical
-        expr: anway_slo_burn_rate_1h > 2
-        for: 15m
-        labels:
-          severity: critical
-          team: platform
-        annotations:
-          summary: "SLO burn rate critical ({{ $value }}x)"
-          description: "Error budget burning at {{ $value }}x the safe rate. At this pace budget exhausts in {{ $value | humanizeDuration }}."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
 
       - alert: AnwayGatewayDown
         expr: absent(up{job="anway-gateway"}) or up{job="anway-gateway"} == 0
         for: 1m
         labels:
           severity: critical
+          service: anway-gateway
           team: platform
         annotations:
           summary: "Anway gateway is down"
-          description: "No gateway scrape target found or target reports down for >1 minute."
+          description: "No scrape from anway-gateway for >1m. Gateway process may have crashed."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+
+      - alert: AnwayOtelCollectorDown
+        expr: absent(up{job="otel-collector"}) or up{job="otel-collector"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          service: otel-collector
+          team: platform
+        annotations:
+          summary: "OpenTelemetry collector is down"
+          description: "No scrape from otel-collector for >1m. Telemetry pipeline broken."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+
+      - alert: AnwayGatewayHighErrorRate
+        expr: |
+          sum(rate(anway_gateway_http_requests_total{status_code=~"5.."}[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: anway-gateway
+          team: platform
+        annotations:
+          summary: "Anway gateway high 5xx error rate"
+          description: "Gateway returning >0.1 5xx errors/sec over last 5m."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
+
+      - alert: AnwayGatewayHighLatency
+        expr: |
+          histogram_quantile(0.99, sum(rate(anway_gateway_http_request_duration_seconds_bucket[5m])) by (le)) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: anway-gateway
+          team: platform
+        annotations:
+          summary: "Anway gateway P99 latency >5s"
+          description: "P99 HTTP latency is above 5s. Check for slow LLM calls or DB contention."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
+
+      - alert: AnwayGatewayHighMemory
+        expr: |
+          anway_gateway_nodejs_heap_size_used_bytes / anway_gateway_nodejs_heap_size_total_bytes > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          service: anway-gateway
+          team: platform
+        annotations:
+          summary: "Anway gateway heap >90%"
+          description: "Node.js heap is {{ $value | humanizePercentage }} full. Risk of OOM."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+
+      - alert: AnwayLLMHighLatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(anway_llm_call_duration_seconds_bucket[10m])) by (le, provider)) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: anway-gateway
+          team: platform
+        annotations:
+          summary: "LLM provider P95 latency >30s ({{ $labels.provider }})"
+          description: "LLM calls to {{ $labels.provider }} taking >30s at P95. Check provider status."
+          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+
+      - alert: AnwayConnectorSyncStale
+        expr: anway_connector_sync_lag_seconds > 3600
+        for: 10m
+        labels:
+          severity: warning
+          service: anway-gateway
+          team: platform
+        annotations:
+          summary: "Connector {{ $labels.connector_type }} sync lag >1h"
+          description: "No successful sync for {{ $labels.connector_type }} in over 1 hour. Graph may be stale."
           runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"

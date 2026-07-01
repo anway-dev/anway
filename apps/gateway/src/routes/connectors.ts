@@ -10,10 +10,10 @@ import { decryptJson } from '../utils/crypto.js'
 import { testK8sConnectivity } from '@anway/connector-k8s'
 import { createKnowledgeGraph } from '../kb/index.js'
 
-interface ConfigField { label: string; key: string; type: string; placeholder?: string }
-interface CatalogEntry { id: string; name: string; category: string; description: string; color: string; icon: string; capabilities: string[]; configFields: ConfigField[] }
+export interface ConfigField { label: string; key: string; type: string; placeholder?: string }
+export interface CatalogEntry { id: string; name: string; category: string; description: string; color: string; icon: string; capabilities: string[]; configFields: ConfigField[] }
 
-const CONNECTOR_CATALOG: CatalogEntry[] = [
+export const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "github", name: "GitHub", category: "Code & CI", description: "Repos, PRs, Actions, Issues", color: "#6e7681", icon: "GH", capabilities: ["code", "ci", "issues"], configFields: [{ label: "Personal Access Token", key: "token", type: "password" }, { label: "Organization", key: "org", type: "text" }] },
   { id: "linear", name: "Linear", category: "Issue Tracking", description: "Issues, projects, cycles", color: "#5e6ad2", icon: "LN", capabilities: ["issues", "roadmap"], configFields: [{ label: "API Key", key: "api_key", type: "password" }, { label: "Team ID", key: "team_id", type: "text" }] },
   { id: "datadog", name: "Datadog", category: "Observability", description: "Metrics, APM, logs, dashboards", color: "#7c3aed", icon: "DD", capabilities: ["metrics", "logs", "traces", "alerts"], configFields: [{ label: "API Key", key: "api_key", type: "password" }, { label: "App Key", key: "app_key", type: "password" }] },

@@ -9,7 +9,9 @@ import type { AgentPerimeter } from './perimeter/engine.js'
 import type { IGateSink } from './gate/gate.js'
 import { SREAgent, type IncidentContext } from './agents/sre.js'
 import { ConnectorAgent, groupToolsByConnector, selectConnectorTypes } from './agents/connector-agent.js'
-import type { AgentFinding, SpecialistContext } from './agents/connector-agent.js'
+import type { AgentFinding, ConnectorAgentConfig, SpecialistContext } from './agents/connector-agent.js'
+import { createPerimeterMiddleware } from './middleware/perimeter.js'
+import type { PerimeterCtx } from './middleware/perimeter.js'
 
 export interface ExecutableTool extends ToolDefinition {
   run(args: Record<string, unknown>): Promise<unknown>
@@ -421,9 +423,46 @@ export async function* runSession(
     ? AbortSignal.any([signal, agentAbort.signal])
     : agentAbort.signal
 
-  const agentRuns = selectedTypes.map(connType =>
-    new ConnectorAgent(connType, model, toolMap.get(connType) ?? [], config.perimeter).run(specialistCtx, agentSignal)
-  )
+  // Build perimeter context for ConnectorAgent audit + gate wiring
+  const perimeterCtx: PerimeterCtx = {
+    tenantId: ctx.tenantId,
+    userId: ctx.userId,
+    sessionId: ctx.sessionId,
+  }
+
+  const agentRuns = selectedTypes.map(connType => {
+    const agentConfig: ConnectorAgentConfig = {
+      agentType: connType,
+      model,
+      tools: toolMap.get(connType) ?? [],
+      perimeter: config.perimeter,
+      auditSink: config.auditSink,
+      perimeterCtx,
+      gateSink: config.gateSink,
+      gateTimeoutMs: config.gateTimeoutMs,
+      onGateEvent: (gateId, toolName, args) => {
+        // Yield gate_required SSE event — surfaced to client for approval
+        void (async () => {
+          // Gate events are yielded as findings via the audit/gate pipeline
+          // The ConnectorAgent polls internally; this callback is the signal to
+          // surface it to the client. We push a lightweight audit row.
+          await config.auditSink.append({
+            id: crypto.randomUUID(),
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            sessionId: ctx.sessionId,
+            eventType: 'gate_decision',
+            payload: { gateId, toolName, args, status: 'pending_approval' },
+            createdAt: new Date(),
+          }).catch(() => {})
+        })()
+        // TODO: once ConnectorAgent yields events instead of returning Promise<AgentFinding>,
+        // yield { type: 'gate_required', gateId, toolCallId: '', toolName, args } here.
+        // For now, the gate is handled inline inside ConnectorAgent.run().
+      },
+    }
+    return new ConnectorAgent(agentConfig).run(specialistCtx, agentSignal)
+  })
 
   const results = await Promise.allSettled(agentRuns)
   clearTimeout(agentTimeout)
@@ -586,13 +625,22 @@ async function* synthesisOnlyFallback(
       return
     }
   }
+  let inputTokens = 0
+  let outputTokens = 0
   try {
     for await (const chunk of model.stream(messages, [], { model: model.modelId, maxTokens: 2048, temperature: 0.2 })) {
-      if (chunk.type === 'text_delta') yield { type: 'text_delta' as const, content: chunk.content }
+      if (chunk.type === 'text_delta') {
+        yield { type: 'text_delta' as const, content: chunk.content }
+      } else if (chunk.type === 'done') {
+        inputTokens = chunk.inputTokens ?? 0
+        outputTokens = chunk.outputTokens ?? 0
+      }
     }
   } catch (e) {
     yield { type: 'error' as const, code: 'UPSTREAM_ERROR' as const, message: e instanceof Error ? e.message : String(e) }
+    yield { type: 'done' as const, inputTokens, outputTokens }
+    return
   }
-  yield { type: 'done' as const, inputTokens: 0, outputTokens: 0 }
+  yield { type: 'done' as const, inputTokens, outputTokens }
 }
 

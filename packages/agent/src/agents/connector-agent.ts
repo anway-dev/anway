@@ -2,6 +2,12 @@ import type { Message, ToolDefinition } from '../interfaces/provider.js'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { ExecutableTool } from '../orchestrator.js'
 import type { AgentPerimeter } from '../perimeter/engine.js'
+import type { IAuditSink } from '../interfaces/audit.js'
+import type { PerimeterCtx } from '../middleware/perimeter.js'
+import { createPerimeterMiddleware } from '../middleware/perimeter.js'
+import { isWriteAction, pollGate } from '../gate/gate.js'
+import type { IGateSink } from '../gate/gate.js'
+import { connectorIdFromTool } from '../tools/naming.js'
 
 // ---------------------------------------------------------------------------
 // AgentFinding — structured result returned by each connector agent.
@@ -33,6 +39,28 @@ export interface SpecialistContext {
   tenantId: string
   sessionId: string
   userId: string
+}
+
+// ---------------------------------------------------------------------------
+// ConnectorAgentConfig — all required params for gated, audited execution.
+// ---------------------------------------------------------------------------
+
+export interface ConnectorAgentConfig {
+  agentType: string
+  model: IModelProvider
+  tools: ExecutableTool[]
+  /** REQUIRED — perimeter is not optional. Fails closed if omitted. */
+  perimeter: AgentPerimeter
+  /** REQUIRED — every tool call (allowed or blocked) is audit-logged. */
+  auditSink: IAuditSink
+  /** REQUIRED — scoped tenant/user/session identifiers for audit events. */
+  perimeterCtx: PerimeterCtx
+  /** L2 gate sink for write actions. Omit to hard-block all writes (safe default). */
+  gateSink?: IGateSink | undefined
+  /** Gate poll timeout in ms (default: 30000). */
+  gateTimeoutMs?: number | undefined
+  /** Callback invoked when a gate event is created — orchestrator uses this to yield SSE events. */
+  onGateEvent?: ((gateId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -180,15 +208,38 @@ const AGENT_SYSTEM_PROMPTS: Record<string, string> = {
 // ConnectorAgent — mini non-streaming agentic loop.
 // Called by orchestrator in parallel. Returns structured AgentFinding.
 // Uses cheap model tier (henchman) — expensive model is for synthesis only.
+//
+// Every tool call goes through:
+//   1. Perimeter middleware — audit-logs allow/block
+//   2. Write-action gate — push → SSE gate_required → poll → execute/reject
 // ---------------------------------------------------------------------------
 
 export class ConnectorAgent {
-  constructor(
-    readonly agentType: string,
-    private model: IModelProvider,
-    private tools: ExecutableTool[],
-    private perimeter?: AgentPerimeter,
-  ) {}
+  readonly agentType: string
+  private model: IModelProvider
+  private tools: ExecutableTool[]
+  private perimeter: AgentPerimeter
+  private auditSink: IAuditSink
+  private perimeterCtx: PerimeterCtx
+  private gateSink: IGateSink | undefined
+  private gateTimeoutMs: number
+  private onGateEvent: ((gateId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+
+  constructor(config: ConnectorAgentConfig) {
+    if (!config.perimeter) throw new Error('ConnectorAgent: perimeter is required')
+    if (!config.auditSink) throw new Error('ConnectorAgent: auditSink is required')
+    if (!config.perimeterCtx) throw new Error('ConnectorAgent: perimeterCtx is required')
+
+    this.agentType = config.agentType
+    this.model = config.model
+    this.tools = config.tools
+    this.perimeter = config.perimeter
+    this.auditSink = config.auditSink
+    this.perimeterCtx = config.perimeterCtx
+    this.gateSink = config.gateSink
+    this.gateTimeoutMs = config.gateTimeoutMs ?? 30_000
+    this.onGateEvent = config.onGateEvent
+  }
 
   async run(ctx: SpecialistContext, signal?: AbortSignal): Promise<AgentFinding> {
     if (this.tools.length === 0) {
@@ -200,6 +251,9 @@ export class ConnectorAgent {
         confidence: 0,
       }
     }
+
+    // Perimeter middleware — every tool call is audit-logged (allowed or blocked).
+    const checkPerimeter = createPerimeterMiddleware(this.perimeter, this.auditSink, this.perimeterCtx)
 
     const systemPrompt =
       AGENT_SYSTEM_PROMPTS[this.agentType] ??
@@ -278,21 +332,88 @@ export class ConnectorAgent {
       for (const call of resp.toolCalls) {
         const tool = this.tools.find(t => t.name === call.name)
         let result: unknown
-        if (tool) {
-          try {
-            if (this.perimeter && !this.perimeter.allows({ name: call.name, args: call.args, id: call.id })) {
-              result = { error: `PERIMETER_BLOCKED: ${call.name} not permitted` }
-            } else {
-              result = await tool.run(call.args)
-              rawData[call.name] = result
-              toolsUsed.push(call.name)
-            }
-          } catch (e) {
-            result = { error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` }
-          }
-        } else {
+
+        if (!tool) {
           result = { error: `Tool "${call.name}" not available in ${this.agentType} agent` }
+          const resultStr = JSON.stringify(result)
+          resultMessages.push(this.model.formatToolResult(call.id, resultStr))
+          continue
         }
+
+        // --- Perimeter check (audit-logged, both allowed and blocked) ---
+        const perimResult = await checkPerimeter({ name: call.name, args: call.args, id: call.id })
+        if ('_tag' in perimResult && perimResult._tag === 'HardBlock') {
+          result = { error: `PERIMETER_BLOCKED: ${call.name} — ${perimResult.reason}` }
+          const resultStr = JSON.stringify(result)
+          resultMessages.push(this.model.formatToolResult(call.id, resultStr))
+          continue
+        }
+
+        // --- V1 L2 gate: every write action requires user approval ---
+        if (isWriteAction(call.name)) {
+          if (!this.gateSink) {
+            // Safe default: no gateSink → hard-block all writes
+            const blockMsg = `Write action "${call.name}" blocked: gate sink not configured (safe V1 default)`
+            await this.auditSink.append({
+              id: crypto.randomUUID(),
+              tenantId: this.perimeterCtx.tenantId,
+              userId: this.perimeterCtx.userId,
+              sessionId: this.perimeterCtx.sessionId,
+              eventType: 'tool_call_blocked',
+              payload: { toolName: call.name, args: call.args, reason: 'no_gate_sink', rule: 'v1_safe_default' },
+              createdAt: new Date(),
+            })
+            result = { error: blockMsg }
+            const resultStr = JSON.stringify(result)
+            resultMessages.push(this.model.formatToolResult(call.id, resultStr))
+            continue
+          }
+
+          const gateId = crypto.randomUUID()
+          await this.gateSink.push({
+            id: gateId,
+            toolCallId: call.id,
+            toolName: call.name,
+            args: call.args,
+            connectorId: connectorIdFromTool(call.name),
+            tenantId: this.perimeterCtx.tenantId,
+            userId: this.perimeterCtx.userId,
+            sessionId: this.perimeterCtx.sessionId,
+            createdAt: new Date(),
+          })
+
+          // Notify orchestrator so it can yield a gate_required SSE event
+          this.onGateEvent?.(gateId, call.name, call.args)
+
+          const decision = await pollGate(this.gateSink, gateId, this.gateTimeoutMs)
+
+          if (decision._tag !== 'approved') {
+            await this.auditSink.append({
+              id: crypto.randomUUID(),
+              tenantId: this.perimeterCtx.tenantId,
+              userId: this.perimeterCtx.userId,
+              sessionId: this.perimeterCtx.sessionId,
+              eventType: 'tool_call_blocked',
+              payload: { gateId, toolName: call.name, decision: decision._tag, reason: decision._tag === 'rejected' ? 'User rejected' : 'Gate timed out' },
+              createdAt: new Date(),
+            })
+            const blockMsg = `Write action "${call.name}" ${decision._tag === 'rejected' ? 'rejected by user' : 'timed out'}`
+            result = { error: blockMsg }
+            const resultStr = JSON.stringify(result)
+            resultMessages.push(this.model.formatToolResult(call.id, resultStr))
+            continue
+          }
+        }
+
+        // --- Execute tool ---
+        try {
+          result = await tool.run(call.args)
+          rawData[call.name] = result
+          toolsUsed.push(call.name)
+        } catch (e) {
+          result = { error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` }
+        }
+
         const resultStr = typeof result === 'string' ? result : JSON.stringify(result)
         const truncated = resultStr.length > 6000
           ? resultStr.slice(0, 6000) + `\n[truncated — ${resultStr.length - 6000} chars omitted. Use targeted queries.]`

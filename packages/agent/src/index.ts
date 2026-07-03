@@ -44,9 +44,9 @@ export { createTokenMeterMiddleware } from './middleware/token-meter.js'
 export type { OrchestratorConfig, Orchestrator, ExecutableTool } from './orchestrator.js'
 export { createOrchestrator, runSession } from './orchestrator.js'
 
-// Specialist agent
-export type { SpecialistAgentConfig, SpecialistAgent } from './specialist-agent.js'
-export { createSpecialistAgent } from './specialist-agent.js'
+// ConnectorAgent — primary production agent loop with gate + perimeter + audit
+export { ConnectorAgent, groupToolsByConnector, selectConnectorTypes } from './agents/connector-agent.js'
+export type { AgentFinding, SpecialistContext, ConnectorAgentConfig } from './agents/connector-agent.js'
 
 // Gate (L2 Approve — V1 trust principle)
 export type { IGateSink, GateEvent, GateDecision } from './gate/gate.js'

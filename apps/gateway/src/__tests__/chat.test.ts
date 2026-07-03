@@ -231,18 +231,41 @@ describe('runSession — streaming and audit', () => {
     expect(doneEvent).toMatchObject({ type: 'done', inputTokens: 42, outputTokens: 17 })
   })
 
-  it('hard-blocks tool calls outside perimeter and emits audit entry', async () => {
+  it('perimeter-blocked tool calls are audited as tool_call_blocked in ConnectorAgent', async () => {
     const auditSink = new InMemoryAuditSink()
-    // Provider emits a tool call — perimeter has no connectors so it will be blocked
-    const provider = makeMockProvider([
-      {
-        type: 'tool_call',
-        toolName: 'github.list_prs',
-        toolCallId: 'tc1',
-        args: { resource: 'org/repo' },
+    const toolName = 'github__list_prs'
+
+    // Provider whose chat() returns a tool call for ConnectorAgent
+    let chatCalls = 0
+    const provider: IModelProvider = {
+      modelId: 'mock-model',
+      cheapModelId: 'mock-model-cheap',
+      async chat(msgs: Message[], tools: ToolDefinition[], _opts: InferenceOptions): Promise<ChatResponse> {
+        // Intent classification (no tools in args)
+        if (tools.length === 0) {
+          return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } }
+        }
+        chatCalls++
+        if (chatCalls === 1) {
+          return {
+            content: '',
+            toolCalls: [{ id: 'call-1', name: toolName, args: { resource: 'org/repo' } }],
+            usage: { inputTokens: 20, outputTokens: 5 },
+          }
+        }
+        return { content: 'Summary.', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
       },
-      { type: 'done', inputTokens: 10, outputTokens: 5 },
-    ])
+      async *stream(_msgs: Message[], _tools: ToolDefinition[], _opts: InferenceOptions): AsyncGenerator<StreamChunk> {
+        yield { type: 'text_delta' as const, content: 'Synthesis.' }
+        yield { type: 'done' as const, inputTokens: 30, outputTokens: 15 }
+      },
+      formatToolResult(_toolCallId: string, result: unknown): Message {
+        return { role: 'user', content: JSON.stringify(result) }
+      },
+      formatToolCall(_toolCalls: ToolCall[]): Message {
+        return { role: 'assistant', content: '' }
+      },
+    }
 
     // Empty perimeter — no connectors allowed
     const perimeter = AgentPerimeter.resolveCapabilities(
@@ -250,9 +273,16 @@ describe('runSession — streaming and audit', () => {
       [],
     )
 
+    const execTool = {
+      name: toolName,
+      description: 'List PRs',
+      parameters: {},
+      async run() { return 'should not execute' },
+    }
+
     const orchestrator = createOrchestrator({
       model: provider,
-      tools: [],
+      tools: [execTool],
       perimeter,
       auditSink,
       sessionMemory: new InMemoryTestMemory(),
@@ -272,11 +302,7 @@ describe('runSession — streaming and audit', () => {
       events.push(event)
     }
 
-    // Hard block should produce an error event
-    const errorEvents = events.filter((e) => e.type === 'error')
-    expect(errorEvents.length).toBeGreaterThan(0)
-
-    // tool_call_blocked must appear in audit log
+    // Perimeter blocks happen inside ConnectorAgent and are audit-logged
     const blocked = auditSink.events.filter((e) => e.eventType === 'tool_call_blocked')
     expect(blocked.length).toBeGreaterThan(0)
   })

@@ -9,6 +9,7 @@ import type { UserPerimeter, ConnectorManifest } from './perimeter/engine.js'
 import type { TokenBudget } from './middleware/token-meter.js'
 import { createOrchestrator, runSession } from './orchestrator.js'
 import type { ExecutableTool } from './orchestrator.js'
+import { InMemoryGateSink } from './gate/in-memory-gate-sink.js'
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -361,6 +362,263 @@ describe('runSession', () => {
     const findings = events.filter(e => e.type === 'agent_finding')
     expect(findings.length).toBeGreaterThan(0)
   })
+
+// ---------------------------------------------------------------------------
+// T1 tests — L2 gate + audited perimeter enforcement on every tool call
+// ---------------------------------------------------------------------------
+
+function makeWriteConnectorPerimeter(): AgentPerimeter {
+  const userPerimeter: UserPerimeter = {
+    userId: UserId('test-user'),
+    connectors: [{ connectorId: 'write-connector', read: ['*'], write: ['*'] }],
+  }
+  const manifests: ConnectorManifest[] = [
+    {
+      connectorId: 'write-connector',
+      mode: 'read-write',
+      capabilities: { read: ['*'], write: ['*'] },
+    },
+  ]
+  return new AgentPerimeter(userPerimeter, manifests)
+}
+
+/** Provider whose chat() returns a single tool call then a summary — for ConnectorAgent tests */
+function makeChatToolProvider(toolName: string, args?: Record<string, unknown>): IModelProvider {
+  let callCount = 0
+  return {
+    modelId: 'mock-chat-model',
+    cheapModelId: 'mock-chat-model-cheap',
+    async chat(messages, tools, _opts): Promise<ChatResponse> {
+      // Intent classification call (no tools)
+      if (tools.length === 0) {
+        return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 3, outputTokens: 3 } }
+      }
+      callCount++
+      if (callCount === 1) {
+        return {
+          content: '',
+          toolCalls: [{ id: `call-${toolName}-1`, name: toolName, args: args ?? { resource: 'test-connector/x' } }],
+          usage: { inputTokens: 20, outputTokens: 5 },
+        }
+      }
+      return {
+        content: `${toolName}: completed.`,
+        toolCalls: [],
+        usage: { inputTokens: 15, outputTokens: 8 },
+      }
+    },
+    async *stream(_messages, _tools, _opts) {
+      yield { type: 'text_delta' as const, content: 'Synthesis.' }
+      yield { type: 'done' as const, inputTokens: 10, outputTokens: 5 }
+    },
+    formatToolCall(toolCalls): Message {
+      return { role: 'assistant' as const, content: JSON.stringify(toolCalls) }
+    },
+    formatToolResult(toolCallId: string, result: unknown): Message {
+      return { role: 'user' as const, content: JSON.stringify(result) }
+    },
+  }
+}
+
+/** Provider whose chat() returns a write-tool call, then a summary */
+function makeWriteToolChatProvider(toolName: string): IModelProvider {
+  let callCount = 0
+  return {
+    modelId: 'mock-write-model',
+    cheapModelId: 'mock-write-model-cheap',
+    async chat(messages, tools, _opts): Promise<ChatResponse> {
+      // Intent classification call (no tools)
+      if (tools.length === 0) {
+        return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 3, outputTokens: 3 } }
+      }
+      callCount++
+      if (callCount === 1) {
+        return {
+          content: '',
+          toolCalls: [{ id: 'call-write-001', name: toolName, args: { resource: 'write-connector/service-x' } }],
+          usage: { inputTokens: 20, outputTokens: 5 },
+        }
+      }
+      return {
+        content: 'Write action result summary.',
+        toolCalls: [],
+        usage: { inputTokens: 15, outputTokens: 8 },
+      }
+    },
+    async *stream(_messages, _tools, _opts) {
+      yield { type: 'text_delta' as const, content: 'Synthesis after write action.' }
+      yield { type: 'done' as const, inputTokens: 30, outputTokens: 15 }
+    },
+    formatToolCall(toolCalls): Message {
+      return { role: 'assistant' as const, content: JSON.stringify(toolCalls) }
+    },
+    formatToolResult(toolCallId: string, result: unknown): Message {
+      return { role: 'user' as const, content: JSON.stringify(result) }
+    },
+  }
+}
+
+describe('T1 — L2 gate + audited perimeter', () => {
+  // T1.3 — Perimeter-blocked call audited as tool_call_blocked
+  it('perimeter-blocked tool call is audited as tool_call_blocked', async () => {
+    const toolName = 'blocked-connector.read_data'
+    const auditSink = new InMemoryAuditSink()
+    const execTool: ExecutableTool = {
+      name: toolName,
+      description: 'Should be blocked',
+      parameters: {},
+      async run() { return 'should not execute' },
+    }
+    const orch = createOrchestrator({
+      model: makeChatToolProvider(toolName),
+      tools: [execTool],
+      perimeter: makeRestrictedPerimeter(),
+      auditSink,
+      sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
+    })
+    await collectEvents(runSession(orch, 'Trigger blocked tool', makeCtx()))
+    const blockedEvents = auditSink.events.filter(e => e.eventType === 'tool_call_blocked')
+    expect(blockedEvents.length).toBeGreaterThan(0)
+    expect(blockedEvents[0]!.payload['toolName']).toBe(toolName)
+  })
+
+  // T1.4 — Perimeter-allowed call audited as tool_call_allowed
+  it('perimeter-allowed tool call is audited as tool_call_allowed', async () => {
+    const toolName = 'test-connector.read_data'
+    const auditSink = new InMemoryAuditSink()
+    const execTool: ExecutableTool = {
+      name: toolName,
+      description: 'Allowed read tool',
+      parameters: {},
+      async run() { return { data: 'result' } },
+    }
+    const orch = createOrchestrator({
+      model: makeChatToolProvider(toolName),
+      tools: [execTool],
+      perimeter: makePermissivePerimeter(),
+      auditSink,
+      sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
+    })
+    await collectEvents(runSession(orch, 'Use allowed tool', makeCtx()))
+    const allowedEvents = auditSink.events.filter(e => e.eventType === 'tool_call_allowed')
+    expect(allowedEvents.length).toBeGreaterThan(0)
+    expect(allowedEvents[0]!.payload['toolName']).toBe(toolName)
+  })
+
+  // T1.1 — Write-tool without gateSink → hard-blocked
+  it('write action is hard-blocked when no gateSink is configured', async () => {
+    const toolName = 'write-connector.restart_service'
+    const auditSink = new InMemoryAuditSink()
+    const execTool: ExecutableTool = {
+      name: toolName,
+      description: 'Restarts a service (write)',
+      parameters: {},
+      async run() { return 'should not execute — no gate' },
+    }
+    const orch = createOrchestrator({
+      model: makeWriteToolChatProvider(toolName),
+      tools: [execTool],
+      perimeter: makeWriteConnectorPerimeter(),
+      auditSink,
+      sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
+      // gateSink intentionally omitted — safe default: block all writes
+    })
+    await collectEvents(runSession(orch, 'Restart service', makeCtx()))
+    const blockedEvents = auditSink.events.filter(e =>
+      e.eventType === 'tool_call_blocked' && (e.payload['reason'] === 'no_gate_sink' || e.payload['rule'] === 'v1_safe_default')
+    )
+    expect(blockedEvents.length).toBeGreaterThan(0)
+  })
+
+  // T1.1b — Write-tool with gateSink → gate_required flow, tool executes on approval
+  it('write action with gateSink pushes gate event and executes on approval', async () => {
+    const toolName = 'write-connector.restart_service'
+    const auditSink = new InMemoryAuditSink()
+    const gateSink = new InMemoryGateSink()
+    let toolExecuted = false
+    const execTool: ExecutableTool = {
+      name: toolName,
+      description: 'Restarts a service (write)',
+      parameters: {},
+      async run() { toolExecuted = true; return { status: 'restarted' } },
+    }
+
+    const orch = createOrchestrator({
+      model: makeWriteToolChatProvider(toolName),
+      tools: [execTool],
+      perimeter: makeWriteConnectorPerimeter(),
+      auditSink,
+      sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
+      gateSink,
+      gateTimeoutMs: 5000,
+    })
+
+    // Pre-approve the gate — pollGate will resolve immediately
+    const originalPush = gateSink.push.bind(gateSink)
+    let capturedGateId = ''
+    gateSink.push = async (event) => {
+      capturedGateId = await originalPush(event)
+      // Auto-approve so pollGate returns 'approved'
+      await gateSink.record(capturedGateId, 'approved', 'test-user')
+      return capturedGateId
+    }
+
+    await collectEvents(runSession(orch, 'Restart service', makeCtx()))
+
+    // Tool should have executed since gate was pre-approved
+    expect(toolExecuted).toBe(true)
+    // Gate decision audit event should exist
+    const gateEvents = auditSink.events.filter(e => e.eventType === 'gate_decision')
+    expect(gateEvents.length).toBeGreaterThan(0)
+  })
+
+  // T1.2 — Rejected gate decision → tool not executed, tool_call_blocked audited
+  it('rejected gate decision blocks write and audits tool_call_blocked', async () => {
+    const toolName = 'write-connector.restart_service'
+    const auditSink = new InMemoryAuditSink()
+    const gateSink = new InMemoryGateSink()
+    let toolExecuted = false
+    const execTool: ExecutableTool = {
+      name: toolName,
+      description: 'Restarts a service (write)',
+      parameters: {},
+      async run() { toolExecuted = true; return 'should not execute' },
+    }
+
+    const orch = createOrchestrator({
+      model: makeWriteToolChatProvider(toolName),
+      tools: [execTool],
+      perimeter: makeWriteConnectorPerimeter(),
+      auditSink,
+      sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
+      gateSink,
+      gateTimeoutMs: 5000,
+    })
+
+    // Pre-reject the gate
+    const originalPush = gateSink.push.bind(gateSink)
+    gateSink.push = async (event) => {
+      const gateId = await originalPush(event)
+      await gateSink.record(gateId, 'rejected', 'test-user')
+      return gateId
+    }
+
+    await collectEvents(runSession(orch, 'Restart service', makeCtx()))
+
+    // Tool should NOT have executed
+    expect(toolExecuted).toBe(false)
+    // Audit should show a blocked event for the rejected gate
+    const blockedEvents = auditSink.events.filter(e =>
+      e.eventType === 'tool_call_blocked' && e.payload['decision'] === 'rejected'
+    )
+    expect(blockedEvents.length).toBeGreaterThan(0)
+  })
+})
 
   // P5 — multi-agent: emits agent_finding events and synthesis text
   it('multi-agent: emits agent_finding events and synthesis text', async () => {

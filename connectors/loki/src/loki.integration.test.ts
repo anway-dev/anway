@@ -20,6 +20,16 @@ describe('loki — integration (real Docker)', () => {
   afterAll(async () => { await container?.stop() })
 
   it('bootstrap runs without throwing', async () => {
+    // Seed log entries so bootstrap has labels to discover
+    const now = Date.now() * 1_000_000 // nanoseconds
+    await fetch(`${baseUrl}/loki/api/v1/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        streams: [{ stream: { service_name: 'payments-api', job: 'payments-api-prod' }, values: [[String(now), 'INFO: service started']] }]
+      }),
+    }).catch(() => null)
+
     const kg = new FakeKG()
     const result = await new LokiBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl }

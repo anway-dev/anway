@@ -21,6 +21,15 @@ describe('jenkins — integration (real Docker)', () => {
   afterAll(async () => { await container?.stop() })
 
   it('bootstrap runs without throwing', async () => {
+    // Create a test freestyle job so bootstrap has something to discover.
+    // Jenkins with -Djenkins.install.runSetupWizard=false accepts API calls.
+    const auth = Buffer.from('admin:admin').toString('base64')
+    await fetch(`${baseUrl}/createItem?name=test-job`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/xml' },
+      body: '<project><builders/><publishers/><buildWrappers/></project>',
+    }).catch(() => null)
+
     const kg = new FakeKG()
     const result = await new JenkinsBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "user": "admin", "apiToken": "admin" }

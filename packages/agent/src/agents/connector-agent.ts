@@ -8,6 +8,8 @@ import { createPerimeterMiddleware } from '../middleware/perimeter.js'
 import { isWriteAction, pollGate } from '../gate/gate.js'
 import type { IGateSink } from '../gate/gate.js'
 import { connectorIdFromTool } from '../tools/naming.js'
+import { createTokenMeterMiddleware } from '../middleware/token-meter.js'
+import type { TokenBudget } from '../middleware/token-meter.js'
 
 // ---------------------------------------------------------------------------
 // AgentFinding — structured result returned by each connector agent.
@@ -61,6 +63,8 @@ export interface ConnectorAgentConfig {
   gateTimeoutMs?: number | undefined
   /** Callback invoked when a gate event is created — orchestrator uses this to yield SSE events. */
   onGateEvent?: ((gateId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+  /** Token budget for metering all model calls in this agent. Shared across all agents. */
+  budget?: TokenBudget | undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +228,7 @@ export class ConnectorAgent {
   private gateSink: IGateSink | undefined
   private gateTimeoutMs: number
   private onGateEvent: ((gateId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+  private budget: TokenBudget | undefined
 
   constructor(config: ConnectorAgentConfig) {
     if (!config.perimeter) throw new Error('ConnectorAgent: perimeter is required')
@@ -239,6 +244,7 @@ export class ConnectorAgent {
     this.gateSink = config.gateSink
     this.gateTimeoutMs = config.gateTimeoutMs ?? 30_000
     this.onGateEvent = config.onGateEvent
+    this.budget = config.budget
   }
 
   async run(ctx: SpecialistContext, signal?: AbortSignal): Promise<AgentFinding> {
@@ -290,6 +296,25 @@ export class ConnectorAgent {
     const MAX_STEPS = 5
 
     for (let step = 0; step < MAX_STEPS; step++) {
+      // Token metering — block before reaching the LLM if budget exceeded
+      if (this.budget) {
+        const estimatedTokens = Math.ceil(JSON.stringify(messages).length / 4) + 2000
+        const checkTokens = createTokenMeterMiddleware(this.budget)
+        const tokenCheck = await checkTokens({ estimatedTokens, messages, model: this.model.cheapModelId })
+        if ('_tag' in tokenCheck && tokenCheck._tag === 'TokenHardBlock') {
+          return {
+            agentType: this.agentType,
+            toolsUsed,
+            rawData,
+            summary: `Token limit exceeded: ${tokenCheck.reason}`,
+            confidence: 0,
+            error: 'TOKEN_LIMIT_EXCEEDED',
+            inputTokens: agentInputTokens,
+            outputTokens: agentOutputTokens,
+          }
+        }
+      }
+
       let resp: Awaited<ReturnType<typeof this.model.chat>>
       try {
         resp = await this.model.chat(messages, toolDefs, {
@@ -313,6 +338,13 @@ export class ConnectorAgent {
 
       agentInputTokens += resp.usage?.inputTokens ?? 0
       agentOutputTokens += resp.usage?.outputTokens ?? 0
+      // Increment shared budget immediately so concurrent agents see each other's spend
+      if (this.budget) {
+        const usedThisCall = (resp.usage?.inputTokens ?? 0) + (resp.usage?.outputTokens ?? 0)
+        this.budget.sessionUsed += usedThisCall
+        this.budget.tenantDailyUsed += usedThisCall
+        this.budget.tenantMonthlyUsed += usedThisCall
+      }
 
       // No tool calls → agent produced final summary
       if (!resp.toolCalls || resp.toolCalls.length === 0) {

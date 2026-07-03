@@ -178,6 +178,14 @@ export async function* runSession(
       { role: 'system', content: INTENT_SYSTEM_PROMPT },
       { role: 'user', content: input },
     ]
+    // Token check before intent classification
+    const intentEstimatedTokens = Math.ceil(JSON.stringify(intentMessages).length / 4) + 100
+    const intentTokenCheck = await checkTokens({ estimatedTokens: intentEstimatedTokens, messages: intentMessages, model: cheapModel })
+    if ('_tag' in intentTokenCheck && intentTokenCheck._tag === 'TokenHardBlock') {
+      yield makeError('TOKEN_LIMIT_EXCEEDED', intentTokenCheck.reason)
+      return
+    }
+
     let intentResp: Awaited<ReturnType<typeof model.chat>> | null = null
     intentResp = await model.chat(intentMessages, [], {
       model: cheapModel,
@@ -185,6 +193,10 @@ export async function* runSession(
       temperature: 0,
       ...(signal ? { signal } : {}),
     })
+    // Increment budget immediately after intent classification
+    budget.sessionUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
+    budget.tenantDailyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
+    budget.tenantMonthlyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
     const parsed = JSON.parse(intentResp.content) as { intent?: unknown }
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
   } catch (err) {
@@ -260,10 +272,23 @@ export async function* runSession(
         'Respond with ONLY the service name, or empty string if query is about an infrastructure alert with no specific service.'
       : 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.'
 
-    const entityResp = await model.chat([
+    // Token check before entity extraction
+    const entityExtractMsgs: Message[] = [
       { role: 'system', content: entityExtractPrompt },
       { role: 'user', content: input },
-    ], [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+    ]
+    const entityEstimatedTokens = Math.ceil(JSON.stringify(entityExtractMsgs).length / 4) + 30
+    const entityTokenCheck = await checkTokens({ estimatedTokens: entityEstimatedTokens, messages: entityExtractMsgs, model: cheapModel })
+    if ('_tag' in entityTokenCheck && entityTokenCheck._tag === 'TokenHardBlock') {
+      yield makeError('TOKEN_LIMIT_EXCEEDED', entityTokenCheck.reason)
+      return
+    }
+
+    const entityResp = await model.chat(entityExtractMsgs, [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+    // Increment budget immediately
+    budget.sessionUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
+    budget.tenantDailyUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
+    budget.tenantMonthlyUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
     const entityName = entityResp.content.trim()
 
     if (entityName) {
@@ -444,6 +469,7 @@ const context = resolvedAgentContext
       perimeterCtx,
       gateSink: config.gateSink,
       gateTimeoutMs: config.gateTimeoutMs,
+      budget,
       onGateEvent: (gateId, toolName, args) => {
         // Yield gate_required SSE event — surfaced to client for approval
         void (async () => {

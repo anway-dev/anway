@@ -56,37 +56,31 @@ describe('GET /metrics', () => {
   })
 })
 
-describe('POST /auth/token', () => {
-  it('returns JWT or auth error with valid body', async () => {
+describe('POST /api/auth/login', () => {
+  it('returns 401 with valid body but unknown credentials', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/auth/token',
-      payload: { email: 'test@example.com', tenantId: '00000000-0000-0000-0000-000000000001' },
+      url: '/api/auth/login',
+      payload: { email: 'nonexistent@example.com', password: 'wrong', tenantId: '00000000-0000-0000-0000-000000000001' },
     })
-    // 200 when tenant+user exist; 400/401 when DB unavailable or data missing
-    expect([200, 400, 401]).toContain(response.statusCode)
-    if (response.statusCode === 200) {
-      const body = JSON.parse(response.body) as { token: string; expiresIn: string }
-      expect(typeof body.token).toBe('string')
-      expect(body.token.split('.').length).toBe(3)
-      expect(body.expiresIn).toBe('24h')
-    }
-  })
-
-  it('returns 400 when tenantId is missing', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/auth/token',
-      payload: { email: 'test@example.com' },
-    })
-    expect(response.statusCode).toBe(400)
+    // 401 when credentials don't match; 400 when DB unavailable
+    expect([401, 400]).toContain(response.statusCode)
   })
 
   it('returns 400 when email is missing', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/auth/token',
-      payload: { tenantId: 'tenant-abc-123' },
+      url: '/api/auth/login',
+      payload: { password: 'test' },
+    })
+    expect(response.statusCode).toBe(400)
+  })
+
+  it('returns 400 when password is missing', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'test@example.com' },
     })
     expect(response.statusCode).toBe(400)
   })
@@ -94,7 +88,7 @@ describe('POST /auth/token', () => {
   it('returns 400 with empty body', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/auth/token',
+      url: '/api/auth/login',
       payload: {},
     })
     expect(response.statusCode).toBe(400)

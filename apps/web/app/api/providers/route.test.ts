@@ -16,13 +16,14 @@ describe("GET /api/providers", () => {
     delete process.env.OPENAI_API_KEY;
   });
 
-  it("returns all six providers", async () => {
+  it("returns all seven providers", async () => {
     const res = await GET();
     const data = await res.json() as { providers: { id: string; configured: boolean }[] };
-    expect(data.providers).toHaveLength(6);
+    expect(data.providers).toHaveLength(7);
     const ids = data.providers.map((p) => p.id);
     expect(ids).toContain("anthropic");
     expect(ids).toContain("openai");
+    expect(ids).toContain("deepseek");
     expect(ids).toContain("groq");
     expect(ids).toContain("mistral");
     expect(ids).toContain("ollama");

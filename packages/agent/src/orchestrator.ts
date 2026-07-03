@@ -241,6 +241,10 @@ export async function* runSession(
   // Knowledge Graph context injection — mandatory first step per CLAUDE.md
   let graphContext = '## GRAPH CONTEXT — lookup failed. Do NOT call connector tools. Ask user which service to investigate.'
   let groundingSources: GroundingSource[] = []
+  // Hoisted to function scope — avoids bug where second resolveContextByName
+  // re-resolves a UUID by name-ILIKE (both failure modes: UUID never matches,
+  // and empty string matches every row).
+  let resolvedAgentContext: Awaited<ReturnType<typeof config.knowledgeGraph.resolveContextByName>> = null
 
   const isAlertInvestigation = classifiedIntent === 'incident_triage' ||
     /alert|incident|firing|outage|error.?rate|latency|spike|investigate/i.test(input)
@@ -263,7 +267,8 @@ export async function* runSession(
     const entityName = entityResp.content.trim()
 
     if (entityName) {
-      const context = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 1)
+      resolvedAgentContext = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 1)
+const context = resolvedAgentContext
       if (!context?.primaryEntity) {
         await config.auditSink.append({
           id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
@@ -391,18 +396,17 @@ export async function* runSession(
     return
   }
 
-  // Flatten graph-resolved coordinates for SpecialistContext
+  // Flatten graph-resolved coordinates for SpecialistContext.
+  // Uses the already-resolved agent context (from entity resolution above),
+  // NOT a second resolveContextByName call that would re-resolve a UUID by
+  // name-ILIKE (T5 bug: UUID never matches → {}; empty string matches all).
   const coordinates: Record<string, string> = {}
-  try {
-    const context = await config.knowledgeGraph.resolveContextByName(
-      ctx.contextEntityId ?? '', ctx.tenantId, 1,
-    ).catch(() => null)
-    if (context?.connectorCoordinates) {
-      for (const coords of Object.values(context.connectorCoordinates)) {
-        Object.assign(coordinates, coords.resourceIds)
-      }
+  const context = resolvedAgentContext
+  if (context?.connectorCoordinates) {
+    for (const coords of Object.values(context.connectorCoordinates)) {
+      Object.assign(coordinates, coords.resourceIds)
     }
-  } catch { /* non-blocking */ }
+  }
 
   const specialistCtx: SpecialistContext = {
     task: input,

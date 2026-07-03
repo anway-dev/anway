@@ -24,12 +24,14 @@ class ProviderManifestRegistry {
     if (!manifest) throw new AppError('VALIDATION_ERROR', `Unknown provider: ${config.type}`)
     if (manifest.factory) return manifest.factory(config)
     if (manifest.openAICompatible) {
+      // Spread entire config — preserves cheapModel + any future fields.
+      // The explicit pick-and-cast previously dropped cheapModel for all
+      // OpenAI-compatible providers (groq/mistral/deepseek/lmstudio).
+      const resolvedBaseURL = config.baseURL ?? manifest.defaultBaseUrl
       return new OpenAIProvider({
-        type: config.type,
-        apiKey: config.apiKey,
-        baseURL: config.baseURL ?? manifest.defaultBaseUrl,
-        defaultModel: config.defaultModel,
-      } as ProviderConfig)
+        ...config,
+        ...(resolvedBaseURL ? { baseURL: resolvedBaseURL } : {}),
+      })
     }
     throw new AppError('VALIDATION_ERROR', `Provider ${config.type} has no factory and is not OpenAI-compatible`)
   }

@@ -289,6 +289,8 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
+    // Defense in depth: empty/whitespace input would match every row via ILIKE '%%'
+    if (!name || name.trim().length === 0) return null
     const rows = await this.query<{ id: string }>(
       `SELECT id FROM entities WHERE tenant_id = $1::uuid AND name ILIKE $2 ORDER BY metadata->>'confidence' DESC LIMIT 1`,
       [tenantId, `%${name}%`],

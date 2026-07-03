@@ -1,6 +1,5 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
-import { PreviewBanner } from "@/components/preview-banner"
 import { FreshnessBadge } from "@/components/freshness-badge"
 import { useState, useEffect } from "react";
 
@@ -268,7 +267,6 @@ export function CloudView({ onTriggerOrchestrator, onGoToConnectors }: {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#080808" }}>
-      <PreviewBanner />
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         {/* Left: provider selector */}
         <div style={{ width: "220px", flexShrink: 0, background: "#0a0a0a", borderRight: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>

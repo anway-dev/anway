@@ -204,8 +204,13 @@ function makeLokiTools(creds: Record<string, unknown>): ExecutableTool[] {
 function makeGrafanaTools(creds: Record<string, unknown>): ExecutableTool[] {
   const baseUrl = String(creds['baseUrl'] ?? creds['url'] ?? 'http://localhost:3000')
   const token = creds['token'] as string | undefined
-  const password = String(creds['password'] ?? 'admin')
-  const authHeader = token ? `Bearer ${token}` : `Basic ${Buffer.from(`admin:${password}`).toString('base64')}`
+  const user = String(creds['user'] ?? creds['username'] ?? '')
+  const password = creds['password'] as string | undefined
+  if (!token && (!user || !password)) {
+    // Require explicit credentials — no admin:admin default fallback
+    throw new Error('Grafana connector requires a token or user+password — no default credentials')
+  }
+  const authHeader = token ? `Bearer ${token}` : `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
   return [
     {
       name: 'grafana__dashboards',
@@ -288,7 +293,8 @@ function makeGitHubTools(creds: Record<string, unknown>): ExecutableTool[] {
       },
       run: async (args: Record<string, unknown>) => {
         try {
-          const owner = org || 'anway-demo'
+          if (!org) return { error: 'github org not configured — set org in connector credentials' }
+          const owner = org
           const state = String(args['state'] ?? 'open')
           const url = `${apiBase}/repos/${owner}/${args['repo']}/pulls?state=${state}&limit=20`
           const resp = await fetch(url, { headers: { Authorization: authHeader, Accept: 'application/json' } })

@@ -238,10 +238,10 @@ export function EditorView() {
       setLanguage(data.language ?? "javascript");
       setActiveFile({ name: "server.js", path: mainFile, isDir: false, depth: 1, active: true });
     } else {
-      // Fallback to demo code if path not accessible
-      setFileContent(DEMO_FALLBACK_CODE);
-      setFilename("payments-api/server.js");
-      setLanguage("javascript");
+      // Gateway unreachable — show explicit error, not fake code
+      setFileContent('// Error: Gateway unreachable — cannot load source files.\n// Check that the gateway service is running and accessible.');
+      setFilename("error.txt");
+      setLanguage("text");
     }
     setState("writing");
   }
@@ -1197,37 +1197,3 @@ export function EditorView() {
   );
 }
 
-// ── Demo fallback — shown when gateway is unreachable ──────────────────────────
-
-const DEMO_FALLBACK_CODE = `const express = require('express');
-const app = express();
-app.use(express.json());
-
-const PORT = 3010;
-const SERVICE = 'payments-api';
-let errorRate = 0.15;  // BUG: intentional chaos injection
-let inSpike = false;
-let reqSuccess = 0, reqError = 0;
-
-// Spike error rate every ~90s for 20s
-setInterval(() => {
-  if (!inSpike) {
-    inSpike = true;
-    errorRate = 0.6;  // BUG: 60% error rate during spike
-    setTimeout(() => { errorRate = 0.15; inSpike = false; }, 20000);
-  }
-}, 90000 + Math.random() * 30000);
-
-app.get('/health', (_req, res) => { reqSuccess++; res.json({ status: 'ok', service: SERVICE }); });
-
-app.post('/pay', (req, res) => {
-  if (Math.random() < errorRate) {  // BUG: random failures
-    reqError++;
-    return res.status(500).json({ error: 'payment_failed' });
-  }
-  reqSuccess++;
-  res.json({ status: 'ok', transactionId: Math.random().toString(36).slice(2) });  // BUG: weak ID
-});
-
-app.listen(PORT, () => console.log(JSON.stringify({ level: 'info', service: SERVICE, msg: 'started', port: PORT })));
-`.trim();

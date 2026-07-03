@@ -13,7 +13,7 @@ groups:
         annotations:
           summary: "Anway gateway is down"
           description: "No scrape from anway-gateway for >1m. Gateway process may have crashed."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md"
 
       - alert: AnwayOtelCollectorDown
         expr: absent(up{job="otel-collector"}) or up{job="otel-collector"} == 0
@@ -25,7 +25,7 @@ groups:
         annotations:
           summary: "OpenTelemetry collector is down"
           description: "No scrape from otel-collector for >1m. Telemetry pipeline broken."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md"
 
       - alert: AnwayGatewayHighErrorRate
         expr: |
@@ -38,7 +38,7 @@ groups:
         annotations:
           summary: "Anway gateway high 5xx error rate"
           description: "Gateway returning >0.1 5xx errors/sec over last 5m."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
 
       - alert: AnwayGatewayHighLatency
         expr: |
@@ -51,7 +51,7 @@ groups:
         annotations:
           summary: "Anway gateway P99 latency >5s"
           description: "P99 HTTP latency is above 5s. Check for slow LLM calls or DB contention."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md#high-error-rate"
 
       - alert: AnwayGatewayHighMemory
         expr: |
@@ -64,7 +64,7 @@ groups:
         annotations:
           summary: "Anway gateway heap >90%"
           description: "Node.js heap is {{ $value | humanizePercentage }} full. Risk of OOM."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md"
 
       - alert: AnwayLLMHighLatency
         expr: |
@@ -77,7 +77,7 @@ groups:
         annotations:
           summary: "LLM provider P95 latency >30s ({{ $labels.provider }})"
           description: "LLM calls to {{ $labels.provider }} taking >30s at P95. Check provider status."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md"
 
       - alert: AnwayConnectorSyncStale
         expr: anway_connector_sync_lag_seconds > 3600
@@ -89,4 +89,4 @@ groups:
         annotations:
           summary: "Connector {{ $labels.connector_type }} sync lag >1h"
           description: "No successful sync for {{ $labels.connector_type }} in over 1 hour. Graph may be stale."
-          runbook: "https://github.com/YOUR_ORG/anway/blob/main/docs/RUNBOOK.md"
+          runbook: "https://github.com/rgplvr/anway/blob/main/docs/RUNBOOK.md"

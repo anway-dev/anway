@@ -7,8 +7,10 @@ import { SentryAgent } from './agent.js'
 
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/api/0/organizations/', status: 200, body: [{'slug': 'acme', 'name': 'Acme Corp'}] },
+  { method: 'GET', path: '/api/0/organizations/acme/projects/', status: 200, body: [{'id': '1', 'slug': 'payments-api', 'name': 'payments-api'}] },
   { method: 'GET', path: '/api/0/projects/', status: 200, body: [{'id': '1', 'slug': 'payments-api', 'name': 'payments-api'}] },
-  { method: 'GET', path: '/api/0/issues/', status: 200, body: [{'id': '1', 'title': 'TypeError: cannot read property'}] }
+  { method: 'GET', path: '/api/0/issues/', status: 200, body: [{'id': '1', 'title': 'TypeError: cannot read property'}] },
+  { method: 'GET', path: '/api/0/projects/acme/payments-api/issues/', status: 200, body: [{'id': '1', 'title': 'TypeError: cannot read property'}] }
 ]
 
 describe('sentry — fixture HTTP server', () => {

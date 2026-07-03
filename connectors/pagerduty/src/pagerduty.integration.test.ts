@@ -6,6 +6,8 @@ import { PagerdutyAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
+  { method: 'GET', path: '/users', status: 200, body: {'users': [{'id': 'U1', 'name': 'Alice', 'email': 'alice@test.com'}]} },
+  { method: 'GET', path: '/teams', status: 200, body: {'teams': [{'id': 'T1', 'name': 'Platform', 'summary': 'Platform team'}]} },
   { method: 'GET', path: '/services', status: 200, body: {'services': [{'id': 'SVC-1', 'name': 'payments-api'}]} },
   { method: 'GET', path: '/incidents', status: 200, body: {'incidents': [{'id': 'INC-1', 'title': 'payments down', 'status': 'triggered'}]} },
   { method: 'GET', path: '/schedules', status: 200, body: {'schedules': []} },

@@ -15,7 +15,7 @@ export interface TriggerRule {
 }
 
 export interface TriggerAction {
-  type: 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook' | 'notify_channel' | 'escalate' | 'block_deploy_gate'
+  type: 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook' | 'notify_channel' | 'escalate' | 'block_deploy_gate' | 'open_war_room'
   params: Record<string, unknown>
 }
 

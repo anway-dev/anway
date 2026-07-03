@@ -6,6 +6,12 @@ import { getMemoryGateSink } from './memory-gate-fallback.js'
 import { UUID_RE } from '../utils/validators.js'
 import { gateDecisionsTotal } from '../metrics.js'
 import { requireRole } from '../plugins/rbac.js'
+import { executeTriggerAction } from '../triggers/actions.js'
+
+const TRIGGER_ACTION_TYPES = new Set([
+  'notify_oncall', 'create_incident', 'run_runbook', 'notify_channel',
+  'escalate', 'block_deploy_gate', 'open_war_room', 'surface_context',
+])
 
 const redisUrl = process.env['REDIS_URL']
 const gateSink = redisUrl ? new RedisGateSink(redisUrl) : null
@@ -72,13 +78,13 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       const { decision } = request.body
       const { sub: userId, tenantId } = request.user as { sub: string; tenantId: string }
 
-      // SoD: look up gate owner before Redis/in-memory split — applies to both paths
+      // SoD: look up gate owner + tool info before Redis/in-memory split — applies to both paths
       const gateRows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ user_id: string }>>`
-          SELECT user_id FROM gate_events
+        tx.$queryRaw<Array<{ user_id: string; tool_name: string; tool_args: Record<string, unknown> | null }>>`
+          SELECT user_id, tool_name, tool_args FROM gate_events
           WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending' LIMIT 1
         `
-      ).catch(() => [] as Array<{ user_id: string }>)
+      ).catch(() => [] as Array<{ user_id: string; tool_name: string; tool_args: Record<string, unknown> | null }>)
 
       if (redisUrl) {
         // Redis path requires a gate_events row
@@ -126,6 +132,27 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       }
 
       gateDecisionsTotal.inc({ decision })
+
+      // If the gate was approved AND this is a trigger action, dispatch to executor
+      if (decision === 'approved' && gateRows.length > 0) {
+        const toolName = gateRows[0]!.tool_name
+        if (TRIGGER_ACTION_TYPES.has(toolName)) {
+          const toolArgs = (gateRows[0]!.tool_args ?? {}) as Record<string, unknown>
+          void executeTriggerAction(tenantId, {
+            type: toolName as 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook' | 'notify_channel' | 'escalate' | 'block_deploy_gate' | 'open_war_room',
+            params: toolArgs,
+          }).then((result) => {
+            if (result.ok) {
+              request.log.info({ gateId, action: toolName, result }, 'trigger_action_executed')
+            } else {
+              request.log.warn({ gateId, action: toolName, result }, 'trigger_action_failed')
+            }
+          }).catch((err) => {
+            request.log.error({ err, gateId, action: toolName }, 'trigger_action_dispatch_error')
+          })
+        }
+      }
+
       return { ok: true, gateId, decision }
     },
   )

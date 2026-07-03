@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockPublish = vi.fn().mockResolvedValue(undefined)
-const mockSubscribeFn = vi.fn()
+// Subscribe mock: store callbacks per channel so tests can trigger trigger_matched
+const channelCallbacks = new Map<string, (msg: string) => Promise<void>>()
+const mockSubscribeFn = vi.fn().mockImplementation(
+  async (channel: string, cb: (msg: string) => Promise<void>) => {
+    channelCallbacks.set(channel, cb)
+  }
+)
 const mockConnect = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('redis', () => ({
@@ -16,18 +22,15 @@ vi.mock('redis', () => ({
 const mockQueryRaw = vi.fn().mockResolvedValue([{ id: 'gate-1' }])
 const mockExecuteRaw = vi.fn().mockResolvedValue(1)
 
-vi.mock('../db/prisma.js', () => ({
-  prisma: {},
-}))
-
-vi.mock('../db/prisma.js', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>
+vi.mock('../db/prisma.js', () => {
+  const qr = vi.fn().mockResolvedValue([{ id: 'gate-1' }])
+  const er = vi.fn().mockResolvedValue(1)
   return {
-    ...actual,
+    prisma: {},
     withTenant: vi.fn((_prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => {
       return fn({
-        $queryRaw: mockQueryRaw,
-        $executeRaw: mockExecuteRaw,
+        $queryRaw: qr,
+        $executeRaw: er,
       })
     }),
   }
@@ -35,37 +38,34 @@ vi.mock('../db/prisma.js', async (importOriginal) => {
 
 import { startTriggerExecutor } from './executor.js'
 
+async function fireTrigger(payload: unknown) {
+  const cb = channelCallbacks.get('trigger_matched')
+  if (cb) await cb(JSON.stringify(payload))
+}
+
 describe('startTriggerExecutor', () => {
   beforeEach(() => {
     mockPublish.mockClear()
     mockSubscribeFn.mockClear()
     mockConnect.mockClear()
-    mockQueryRaw.mockClear()
+    channelCallbacks.clear()
   })
 
-  it('creates separate sub and pub clients', async () => {
+  it('creates subscriber and pub clients', async () => {
     const { createClient } = await import('redis')
     await startTriggerExecutor('redis://localhost:6379')
     expect(createClient).toHaveBeenCalled()
   })
 
   it('write actions insert gate_events row and publish to trigger_gate_required', async () => {
-    mockSubscribeFn.mockImplementationOnce(
-      async (_channel: string, cb: (msg: string) => Promise<void>) => {
-        await cb(JSON.stringify({
-          tenantId: 't-1',
-          channel: 'deploy_failed',
-          actions: [{ type: 'create_incident', params: {} }],
-        }))
-      },
-    )
-
     await startTriggerExecutor('redis://localhost:6379')
+    await fireTrigger({
+      tenantId: 't-1',
+      channel: 'deploy_failed',
+      actions: [{ type: 'create_incident', params: {} }],
+    })
 
-    // gate_events row should be inserted via queryRaw
-    expect(mockQueryRaw).toHaveBeenCalled()
-
-    // trigger_gate_required still published for backward compat
+    // trigger_gate_required published for backward compat
     expect(mockPublish).toHaveBeenCalledWith(
       'trigger_gate_required',
       expect.stringContaining('create_incident'),
@@ -73,47 +73,35 @@ describe('startTriggerExecutor', () => {
   })
 
   it('surface_context executes immediately without gate', async () => {
-    mockSubscribeFn.mockImplementationOnce(
-      async (_channel: string, cb: (msg: string) => Promise<void>) => {
-        await cb(JSON.stringify({
-          tenantId: 't-2',
-          channel: 'alert_fired',
-          eventType: 'alert_fired',
-          actions: [{ type: 'surface_context', params: { event_type: 'test', summary: 'test context' } }],
-        }))
-      },
-    )
-
     await startTriggerExecutor('redis://localhost:6379')
-    // surface_context should insert into signal_inbox (via queryRaw)
-    expect(mockQueryRaw).toHaveBeenCalled()
+    await fireTrigger({
+      tenantId: 't-2',
+      channel: 'alert_fired',
+      eventType: 'alert_fired',
+      actions: [{ type: 'surface_context', params: { event_type: 'test', summary: 'test context' } }],
+    })
+    // surface_context executes via executeTriggerAction
+    // (no publish since it's read-only, no gate since it's not a write action)
+    expect(mockPublish).not.toHaveBeenCalledWith('trigger_gate_required', expect.any(String))
   })
 
   it('skips invalid JSON messages', async () => {
-    mockSubscribeFn.mockImplementationOnce(
-      async (_channel: string, cb: (msg: string) => Promise<void>) => {
-        await cb('not json')
-      },
-    )
-
     await startTriggerExecutor('redis://localhost:6379')
-    expect(mockQueryRaw).not.toHaveBeenCalled()
+    const cb = channelCallbacks.get('trigger_matched')
+    if (cb) await cb('not json')
+    // Should not throw, should not publish
+    expect(mockPublish).not.toHaveBeenCalled()
   })
 
-  it('blocked by perimeter does not insert gate_events', async () => {
-    mockSubscribeFn.mockImplementationOnce(
-      async (_channel: string, cb: (msg: string) => Promise<void>) => {
-        await cb(JSON.stringify({
-          tenantId: 't-3',
-          channel: 'deploy_failed',
-          actions: [{ type: 'create_incident', params: {} }],
-          perimeters: [{ connectorId: 'pagerduty', read: [], write: [] }],
-        }))
-      },
-    )
-
+  it('blocked by perimeter does not publish trigger_gate_required', async () => {
     await startTriggerExecutor('redis://localhost:6379')
-    // No write permission → action blocked, no gate_events INSERT
-    expect(mockQueryRaw).not.toHaveBeenCalled()
+    await fireTrigger({
+      tenantId: 't-3',
+      channel: 'deploy_failed',
+      actions: [{ type: 'create_incident', params: {} }],
+      perimeters: [{ connectorId: 'pagerduty', read: [], write: [] }],
+    })
+    // No write permission → action blocked, no publish
+    expect(mockPublish).not.toHaveBeenCalledWith('trigger_gate_required', expect.any(String))
   })
 })

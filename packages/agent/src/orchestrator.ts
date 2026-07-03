@@ -486,9 +486,8 @@ const context = resolvedAgentContext
             createdAt: new Date(),
           }).catch(() => {})
         })()
-        // TODO: once ConnectorAgent yields events instead of returning Promise<AgentFinding>,
-        // yield { type: 'gate_required', gateId, toolCallId: '', toolName, args } here.
-        // For now, the gate is handled inline inside ConnectorAgent.run().
+        // Gate is handled inline inside ConnectorAgent.run() — push → pollGate → execute.
+        // onGateEvent fires the audit row; the agent blocks until the gate is resolved.
       },
     }
     return new ConnectorAgent(agentConfig).run(specialistCtx, agentSignal)

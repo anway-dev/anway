@@ -133,6 +133,15 @@ export async function gateDecideRoutes(app: FastifyInstance) {
 
       gateDecisionsTotal.inc({ decision })
 
+      // Audit every gate decision so the Audit view shows who approved/rejected what
+      void withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw`
+          INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
+                  'gate_decision', ${JSON.stringify({ gateId, decision, mode: redisUrl ? 'manual' : 'in-memory', toolName: gateRows[0]?.tool_name })}::jsonb, NOW())
+        `
+      ).catch((err) => { request.log.warn({ err, gateId }, 'gate.decision audit write failed') })
+
       // If the gate was approved AND this is a trigger action, dispatch to executor
       if (decision === 'approved' && gateRows.length > 0) {
         const toolName = gateRows[0]!.tool_name

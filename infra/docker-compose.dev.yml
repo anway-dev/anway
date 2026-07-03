@@ -148,7 +148,9 @@ services:
   gateway:
     image: node:22
     working_dir: /app
-    # Installs pnpm, runs workspace install, then starts gateway in hot-reload dev mode
+    # IMPORTANT: tsx watch only watches gateway source — connector package changes
+# need manual rebuild: pnpm build:connectors → then docker compose restart gateway
+# Installs pnpm, runs workspace install, then starts gateway in hot-reload dev mode
     command: >-
       sh -c "npm install -g pnpm@9.15.4 --quiet &&
              pnpm install &&

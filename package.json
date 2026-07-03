@@ -8,7 +8,8 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "smoke": "bash scripts/smoke-test.sh"
+    "smoke": "bash scripts/smoke-test.sh",
+    "build:connectors": "pnpm --filter './connectors/**' build"
   },
   "devDependencies": {
     "testcontainers": "^12.0.4",

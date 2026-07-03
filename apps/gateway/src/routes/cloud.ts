@@ -122,6 +122,20 @@ export async function cloudRoutes(app: FastifyInstance) {
       }
     })
 
-    return { providers: allProviders, resources, security, config: [] }
+    // Populate config from cloud connector entity metadata (not hardcoded empty)
+    const configFindings = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ name: string; metadata: Record<string, unknown> }>>`
+        SELECT name, metadata FROM entities
+        WHERE tenant_id = ${tenantId}::uuid AND type IN ('Finding', 'Config')
+        ORDER BY name LIMIT 50
+      `
+    ).catch(() => [] as Array<{ name: string; metadata: Record<string, unknown> }>)
+    const config = configFindings.map(c => ({
+      service: (c.metadata?.service as string) ?? c.name,
+      severity: (c.metadata?.severity as string) ?? 'medium',
+      finding: typeof c.metadata?.finding === 'string' ? c.metadata.finding : c.name,
+    }))
+
+    return { providers: allProviders, resources, security, config }
   })
 }

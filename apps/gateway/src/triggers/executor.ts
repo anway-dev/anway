@@ -22,6 +22,15 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
   const sub = createClient({ url: redisUrl })
   await sub.connect()
 
+  // Subscribe to trigger_gate_required so it has a consumer — gate_events rows are
+  // already inserted by the publisher above; this subscriber acknowledges + logs.
+  await sub.subscribe('trigger_gate_required', async (message) => {
+    try {
+      const data = JSON.parse(message) as { tenantId: string; gateId: string; action?: { type: string }; createdAt?: string }
+      log.info({ gateId: data.gateId, actionType: data.action?.type, tenantId: data.tenantId }, 'trigger_gate_required received — gate awaiting approval in UI')
+    } catch { /* ignore malformed messages */ }
+  })
+
   await sub.subscribe('trigger_matched', async (message) => {
     let payload: {
       tenantId: string

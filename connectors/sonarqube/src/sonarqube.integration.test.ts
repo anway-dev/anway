@@ -12,10 +12,10 @@ describe('sonarqube — integration (real Docker)', () => {
   beforeAll(async () => {
     container = await new GenericContainer('sonarqube:25.5.0.107428-community')
       .withExposedPorts(9000)
-      .withWaitStrategy(Wait.forHttp("/api/system/status", 9000))
+      .withWaitStrategy(Wait.forHttp("/api/system/status", 9000).withStartupTimeout(120_000))
       .start()
     baseUrl = `http://${container.getHost()}:${container.getMappedPort(9000)}`
-  }, 90_000)
+  }, 180_000)
 
   afterAll(async () => { await container?.stop() })
 

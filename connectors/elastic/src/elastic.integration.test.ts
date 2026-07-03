@@ -21,6 +21,15 @@ describe('elastic — integration (real Docker)', () => {
   afterAll(async () => { await container?.stop() })
 
   it('bootstrap runs without throwing', async () => {
+    // Seed a test index so bootstrap has something to discover
+    await fetch(`${baseUrl}/test-index`, { method: 'PUT' }).catch(() => null)
+    // Index a document
+    await fetch(`${baseUrl}/test-index/_doc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service: 'payments-api', message: 'test' }),
+    }).catch(() => null)
+
     const kg = new FakeKG()
     const result = await new ElasticsearchBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "user": "elastic", "password": "test" }

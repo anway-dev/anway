@@ -574,26 +574,13 @@ export async function pipelineRoutes(app: FastifyInstance) {
               break
             }
 
-            // DEMO: no real build infra configured
-            sse({ type: 'status', message: '[DEMO] Build stage (set DOCKER_REGISTRY or GITHUB_TOKEN to enable real builds)' })
-            await new Promise(r => setTimeout(r, 500))
-            const fakeSha = gitSha !== 'latest' ? gitSha : Math.random().toString(36).slice(2, 9)
-            for (const line of [
-              `[DEMO] docker build apps/gateway -t <registry>/anway-gateway:${fakeSha}`,
-              `[DEMO] docker build apps/web -t <registry>/anway-web:${fakeSha}`,
-              `[DEMO] ✓ Images built and pushed (${fakeSha})`,
-            ]) {
-              await new Promise(r => setTimeout(r, 300))
-              sse({ type: 'log', line })
-            }
-            await withTenant(prisma, tenantId, (tx) =>
-              tx.$queryRaw`
-                UPDATE pipelines SET metadata = metadata || ${JSON.stringify({ imageTag: fakeSha })}::jsonb WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
-              `
-            ).catch(() => null)
-            const buildSummary = `[DEMO] Build complete (${fakeSha})`
-            await finishRun('done', { summary: buildSummary, gitSha: fakeSha, demo: true })
-            sse({ type: 'done', output: { summary: buildSummary } })
+            // No real build infra configured — fail explicitly instead of fabricating success
+            sse({ type: 'status', message: 'Build failed: DOCKER_REGISTRY and GITHUB_TOKEN not configured — cannot build' })
+            const errMsg = 'DOCKER_REGISTRY and GITHUB_TOKEN not configured — cannot build images'
+            await finishRun('failed', { summary: errMsg, gitSha })
+            sse({ type: 'error', message: errMsg })
+            // Abort the pipeline so subsequent stages don't run on a failed build
+            return reply.raw.end()
             break
           }
 
@@ -682,21 +669,11 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const { path: kubeconfig, cleanup: kubeconfigCleanup } = await resolveKubeconfigPath(tenantId)
 
             if (!kubeconfig) {
-              // DEMO: no KUBECONFIG / K8s connector — emit simulation output
-              sse({ type: 'status', message: `[DEMO] Deploying to ${helmNamespace} (register K8s connector to enable real deploy)` })
-              await new Promise(r => setTimeout(r, 400))
-              for (const line of [
-                `[DEMO] helm upgrade --install ${helmRelease} ${helmChart} --namespace ${helmNamespace}`,
-                `[DEMO]   --set gateway.image.tag=${imageTag}`,
-                `[DEMO]   --set web.image.tag=${imageTag}`,
-                '[DEMO] Release "anway" has been upgraded. Happy Helming!',
-              ]) {
-                await new Promise(r => setTimeout(r, 300))
-                sse({ type: 'log', line })
-              }
-              const deploySummary = `[DEMO] Deployed ${imageTag} to ${helmNamespace}`
-              await finishRun('done', { summary: deploySummary, imageTag, namespace: helmNamespace, demo: true })
-              sse({ type: 'done', output: { summary: deploySummary } })
+              // No K8s connector — fail explicitly instead of fabricating success
+              sse({ type: 'status', message: 'Deploy failed: no KUBECONFIG — register a K8s/eks/gke connector to enable real deploys' })
+              await finishRun('failed', { summary: 'No KUBECONFIG configured — cannot deploy', imageTag })
+              sse({ type: 'error', message: 'No KUBECONFIG configured — cannot deploy' })
+              return reply.raw.end()
               break
             }
 
@@ -813,17 +790,13 @@ export async function pipelineRoutes(app: FastifyInstance) {
               monitorDetails = [pollOk ? `OK ${healthUrl} healthy` : `FAIL ${healthUrl} failed after 12 attempts`]
               sse({ type: 'log', line: monitorDetails[0]! })
             } else {
-              // DEMO: query real metrics from DB instead
-              sse({ type: 'log', line: '[DEMO] Polling metrics (set KUBECONFIG for real K8s checks)' })
+              // No KUBECONFIG — query entity DB for lightweight service-status check
+              sse({ type: 'log', line: 'Monitor stage: no KUBECONFIG configured — checking service entities from DB' })
               const metrics = await withTenant(prisma, tenantId, (tx) =>
                 tx.$queryRaw<Array<{ name: string }>>`SELECT name FROM entities WHERE type = 'Service' LIMIT 3`
               ).catch(() => [])
-              sse({ type: 'log', line: '→ Checking error rate… 0.1% — OK' })
-              await new Promise(r => setTimeout(r, 300))
-              sse({ type: 'log', line: '→ Checking p99 latency… 84ms — OK' })
-              await new Promise(r => setTimeout(r, 300))
-              sse({ type: 'log', line: `→ Pod health: ${metrics.length > 0 ? `${metrics.length} services tracked` : '3/3 Ready'}` })
-              monitorDetails = ['[DEMO] monitoring complete']
+              sse({ type: 'log', line: `→ Service entities tracked: ${metrics.length}` })
+              monitorDetails = [`${metrics.length} service entities found — set KUBECONFIG for real metrics`]
             }
 
             const monitorSummary = monitorOk

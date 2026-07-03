@@ -122,7 +122,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
     setSelectedModel("");
     const needsKey = selectedManifest?.fields.some(f => f.key === 'apiKey' && f.required);
     if (needsKey && apiKey.length > 0 && apiKey.length < 10) { setModels([]); return; }
-    fetch(`/api/settings/models?${new URLSearchParams({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) })}`)
+    fetch('/api/settings/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) }) })
       .then(r => r.ok ? r.json() : { models: [] })
       .then((data: ModelList) => {
         const list = data.models ?? [];

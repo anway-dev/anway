@@ -277,13 +277,9 @@ export async function chatRoutes(app: FastifyInstance) {
   let sessionMemory: ISessionMemory = inMemoryStore
 
   const redisUrl = process.env['REDIS_URL']
-  if (redisUrl) {
-    try {
-      sessionMemory = MemoryFactory.create({ type: 'redis', redisUrl })
-    } catch (err) {
-      app.log.warn({ err }, 'Redis session memory init failed, using in-memory fallback')
-    }
-  }
+  // Defer Redis memory creation until after provider is resolved so we can
+  // pass summariseProvider (cheap-tier model) for real session summarization.
+  let deferredRedisInit: (() => void) | null = null
 
   app.post<{ Body: ChatBody }>('/api/chat', {
     preHandler: [app.authenticate],
@@ -491,6 +487,17 @@ export async function chatRoutes(app: FastifyInstance) {
     }
 
     const provider = ProviderFactory.create(providerConfig)
+    // Initialize Redis session memory now that provider (summariseProvider) is available.
+    // Previously created without summariseProvider → long-session summaries degraded
+    // to the literal string '[Summary of N earlier turns]'.
+    if (redisUrl) {
+      try {
+        sessionMemory = MemoryFactory.create({ type: 'redis', redisUrl, summariseProvider: provider })
+      } catch (err) {
+        app.log.warn({ err }, 'Redis session memory init failed, using in-memory fallback')
+      }
+    }
+
     const auditSink = new PostgresAuditSink(prisma, (err) => {
       request.log.error({ err }, 'audit write failed')
     })

@@ -898,6 +898,8 @@ This is the graph that lets an SRE agent answer "ticket #1234 → which service 
 
 **Storage: Apache AGE on Postgres** (already in stack, zero new service). AGE brings Cypher to Postgres via an extension. Handles org-scale graphs (100-1000 services) comfortably. Swap to KùzuDB only when traversal benchmarks as bottleneck.
 
+**Accepted deviation (2026-07-03):** The current `StructuralGraph` implementation (`packages/agent/src/kb/structural-graph.ts`) uses plain Postgres relational tables with recursive CTEs for traversal rather than Apache AGE/Cypher. The implementation is tenant-safe and functionally complete — entities and relationships are stored relationally, `resolveContext` traverses via recursive CTE, and the `IKnowledgeGraph` interface is unchanged. Apache AGE was deferred because: (1) the AGE Postgres extension requires superuser privileges not available in all managed Postgres environments; (2) the relational implementation satisfies all current query patterns with acceptable performance at initial scale; (3) the `IKnowledgeGraph` interface isolates callers — swapping to AGE requires changing only `structural-graph.ts`, no agent or route code. Migration trigger: when recursive-CTE traversal benchmarks above 100ms for a 1000-service graph, add the AGE extension and implement the Cypher traversal backend behind the same interface.
+
 ---
 
 #### Layer 2 — Episodic Graph (Graphiti + Apache AGE)

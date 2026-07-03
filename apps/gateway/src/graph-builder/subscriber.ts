@@ -84,7 +84,6 @@ async function writeKnowledgeEntries(tid: string, providerConfig: ProviderConfig
             tx.$executeRaw`
               INSERT INTO kb_entries (tenant_id, source, content, embedding, fetched_at, ttl_seconds, freshness_score)
               VALUES (${tid}::uuid, ${contentHash}, ${content}, ${vectorLiteral}::vector, NOW(), ${ttl}, 1.0)
-              ON CONFLICT DO NOTHING
             `
           ).catch(() => 0)
           if (Number(inserted) > 0) written++

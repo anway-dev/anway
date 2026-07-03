@@ -22,7 +22,7 @@ describe('circleci — fixture HTTP server', () => {
   it('bootstrap extracts entities from fixture', async () => {
     const kg = new FakeKG()
     const result = await new CircleCIBootstrap(kg).bootstrap(
-      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { token: "fixture-token", baseUrl: fixture.baseUrl }
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { apiToken: "fixture-token", baseUrl: fixture.baseUrl }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(kg.entities.some(e => e.name === 'payments'), 'expected entity payments not extracted').toBe(true)

@@ -22,7 +22,7 @@ describe('jira — fixture HTTP server', () => {
   it('bootstrap extracts entities from fixture', async () => {
     const kg = new FakeKG()
     const result = await new JiraBootstrap(kg).bootstrap(
-      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { host: fixture.baseUrl, email: "test@test.com", token: "fixture-token" }
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { baseUrl: fixture.baseUrl, email: "test@test.com", token: "fixture-token" }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(kg.entities.some(e => e.name === 'Payments'), 'expected entity Payments not extracted').toBe(true)

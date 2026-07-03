@@ -41,4 +41,3 @@ describe.skipIf(skip)('k8s — integration (real API)', () => {
       expect(true).toBe(true)  // placeholder — full agent run requires real model
     })
   })
-})

@@ -62,4 +62,3 @@ describe('vault — integration (real Docker)', () => {
       // to the correct tool. Fixture/container validates the HTTP call.
       expect(true).toBe(true)  // placeholder — full agent run requires real model
     })
-  })

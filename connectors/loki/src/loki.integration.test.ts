@@ -33,7 +33,6 @@ describe('loki — integration (real Docker)', () => {
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
     const firstTool = tools[0]!
-    try {
       const result = await firstTool.execute({}, { baseUrl })
       expect(result).toBeDefined()
   })

@@ -7,9 +7,9 @@ import { CoralogixAgent } from './agent.js'
 
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'POST', path: '/api/v1/logs/get-applications', status: 200,
-    body: { applications: [{ name: 'payments-api' }, { name: 'auth-service' }] } }
-]}, 'metadata': {'warnings': []}} },
-  { method: 'GET', path: '/api/v1/logs/statistics/applications', status: 200, body: {'data': [{'application': 'payments-api'}, {'application': 'auth-service'}]} }
+    body: { applications: [{ name: 'payments-api' }, { name: 'auth-service' }] } },
+  { method: 'GET', path: '/api/v1/logs/statistics/applications', status: 200,
+    body: { data: [{ application: 'payments-api' }, { application: 'auth-service' }] } }
 ]
 
 describe('coralogix — fixture HTTP server', () => {

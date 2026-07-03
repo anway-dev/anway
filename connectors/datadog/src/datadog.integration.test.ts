@@ -60,4 +60,3 @@ describe('datadog — fixture HTTP server', () => {
       expect(true).toBe(true)  // placeholder — full agent run requires real model
     })
   })
-})

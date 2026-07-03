@@ -18,6 +18,9 @@ const envSchema = z.object({
   DATADOG_APP_KEY: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
+  ANWAY_ENCRYPTION_KEY: z.string().min(1, 'ANWAY_ENCRYPTION_KEY is required for connector credential encryption'),
+  ANWAY_WEBHOOK_TOKEN: z.string().optional(),
+  ANWAY_WEBHOOK_TENANT: z.string().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

@@ -75,13 +75,16 @@ services:
       - "8510:4000"
     environment:
       NODE_ENV: production
-      PORT: 8510
+      PORT: 4000
       HOST: 0.0.0.0
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       NEO4J_URI: ${NEO4J_URI}
       AGENT_SERVICE_URL: http://agent-service:8000
+      ANWAY_ENCRYPTION_KEY: ${ANWAY_ENCRYPTION_KEY}
+      ANWAY_WEBHOOK_TOKEN: ${ANWAY_WEBHOOK_TOKEN}
+      ANWAY_WEBHOOK_TENANT: ${ANWAY_WEBHOOK_TENANT}
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,8 +103,6 @@ services:
     environment:
       NODE_ENV: production
       GATEWAY_URL: http://gateway:8510
-      DEMO_EMAIL: admin@anway.local
-      DEMO_TENANT_ID: 00000000-0000-0000-0000-000000000001
     depends_on:
       - gateway
     restart: unless-stopped

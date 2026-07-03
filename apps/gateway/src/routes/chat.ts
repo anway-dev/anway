@@ -441,6 +441,10 @@ export async function chatRoutes(app: FastifyInstance) {
     // allowlist in the perimeter. register_connector is a write action and
     // still goes through the L2 gate; its admin-role check lives in the tool.
     const registrationTools = makeRegistrationTools(tenantId, (role as AgentRole) ?? 'dev')
+    // Deploy tools (trigger_pipeline, approve_gate) are bare-named harness tools.
+    // They must be in the builtins allowlist or the perimeter hard-blocks them.
+    // T1's gate logic ensures writes are L2-gated once reachable.
+    const deployToolNames = ['trigger_pipeline', 'approve_gate']
     const perimeter = AgentPerimeter.resolveCapabilities(
       userPerimeter,
       manifests,
@@ -449,6 +453,8 @@ export async function chatRoutes(app: FastifyInstance) {
         // Native connector tool names are registered here as safety fallback
         // in addition to the connector__action scope check in engine.ts
         ...nativeConnectorTools.map((t) => t.name),
+        // Deploy tools — reachable from chat per CLAUDE.md system prompt
+        ...deployToolNames,
       ],
     )
 

@@ -25,6 +25,11 @@ export type AuditEventType =
   | 'gate_policy.upsert'
   | 'monitor.delete'
   | 'incident.delete'
+  | 'agent_finding'
+  | 'synthesis_complete'
+  | 'query_started'
+  | 'trigger_action_executed'
+  | 'trigger_action_failed'
 
 export interface AuditEvent {
   readonly id: string

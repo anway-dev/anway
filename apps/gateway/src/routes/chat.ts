@@ -25,7 +25,7 @@ import { TenantId, UserId, SessionId } from '@anway/types'
 import type { AgentRole } from '@anway/types'
 import type { PrismaClient } from '@prisma/client'
 import { prisma } from '../db/client.js'
-import { StructuralGraph } from '@anway/agent'
+import { createKnowledgeGraph } from '../kb/index.js'
 import type { IKnowledgeGraph } from '@anway/agent'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { withTenant } from '../db/prisma.js'
@@ -504,10 +504,10 @@ export async function chatRoutes(app: FastifyInstance) {
       undefined, // per_session_token_limit not in tenants table — env only
     )
 
-    const knowledgeGraph: IKnowledgeGraph = new StructuralGraph(
-      (sql: string, params?: unknown[]) =>
-        withTenant(prisma, tenantId, (tx) => tx.$queryRawUnsafe(sql, ...(params ?? []))),
-    )
+    // Use createKnowledgeGraph factory — selects HybridKnowledgeGraph (structural + episodic)
+    // when AGENT_SERVICE_URL is set, plain StructuralGraph otherwise. Previously bypassed
+    // episodic/temporal reasoning entirely by constructing StructuralGraph directly.
+    const knowledgeGraph: IKnowledgeGraph = createKnowledgeGraph(TenantId(tenantId))
     const connectorTools = await getToolsForTenant(prisma, tenantId)
     const deployTools = makeDeployTools(tenantId, userId, provider, knowledgeGraph)
     const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools]
@@ -592,7 +592,7 @@ export async function chatRoutes(app: FastifyInstance) {
           tenantId: TenantId(tenantId),
           userId: UserId(userId),
           sessionId: SessionId(sessionId),
-          eventType: 'query_started' as any,
+          eventType: 'query_started',
           payload: {
             query,
             authRole: role,

@@ -510,7 +510,7 @@ const context = resolvedAgentContext
         confidence: result.value.confidence,
         toolsUsed: result.value.toolsUsed,
       }
-      auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'agent_finding' as any, payload: { agentType: connType, confidence: result.value.confidence, toolsUsed: result.value.toolsUsed }, createdAt: new Date() }).catch(() => {})
+      auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'agent_finding', payload: { agentType: connType, confidence: result.value.confidence, toolsUsed: result.value.toolsUsed }, createdAt: new Date() }).catch(() => {})
     } else {
       const errFinding: AgentFinding = {
         agentType: connType, toolsUsed: [], rawData: {},
@@ -573,7 +573,7 @@ const context = resolvedAgentContext
   budget.sessionUsed += inputTokens + outputTokens
   budget.tenantDailyUsed += inputTokens + outputTokens
   budget.tenantMonthlyUsed += inputTokens + outputTokens
-  auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'synthesis_complete' as any, payload: { inputTokens, outputTokens, agentCount: findings.length }, createdAt: new Date() }).catch(() => {})
+  auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'synthesis_complete', payload: { inputTokens, outputTokens, agentCount: findings.length }, createdAt: new Date() }).catch(() => {})
 
   // Persist assistant turn summary
   await sessionMemory.append(ctx.sessionId, {

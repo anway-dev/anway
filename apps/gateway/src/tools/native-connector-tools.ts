@@ -67,8 +67,13 @@ function makePrometheusTools(creds: Record<string, unknown>): ExecutableTool[] {
         required: ['query'],
       },
       run: async (args: Record<string, unknown>) => {
+        const query = String(args['query'] ?? '')
+        // Block wildcard/universal queries (T11)
+        if (/\{\s*\}/.test(query) || /=~"\.\+"/.test(query) || /=~"\.\*"/.test(query) || /__name__=~/.test(query)) {
+          return { error: 'wildcard selector forbidden — use graph coordinates' }
+        }
         try {
-          const resp = await fetch(`${baseUrl}/api/v1/query?query=${encodeURIComponent(String(args['query']))}`)
+          const resp = await fetch(`${baseUrl}/api/v1/query?query=${encodeURIComponent(query)}`)
           return await resp.json()
         } catch (e) { return { error: String(e) } }
       },
@@ -162,12 +167,17 @@ function makeLokiTools(creds: Record<string, unknown>): ExecutableTool[] {
         required: ['query'],
       },
       run: async (args: Record<string, unknown>) => {
+        const query = String(args['query'] ?? '')
+        // Block wildcard/universal LogQL queries (T11)
+        if (/\{\s*\}/.test(query) || /=~".\+"/.test(query)) {
+          return { error: 'wildcard selector forbidden — use graph coordinates' }
+        }
         try {
           const now = Math.floor(Date.now() / 1000)
           const since = String(args['since'] ?? '1h')
           const start = now - parseDurationSec(since)
           const params = new URLSearchParams({
-            query: String(args['query']),
+            query,
             start: String(start * 1e9),
             end: String(now * 1e9),
             limit: String(args['limit'] ?? 50),
@@ -210,8 +220,13 @@ function makeGrafanaTools(creds: Record<string, unknown>): ExecutableTool[] {
         required: ['query'],
       },
       run: async (args: Record<string, unknown>) => {
+        const rawQuery = String(args['query'] ?? '').trim()
+        // Block empty or wildcard grafana search (T11)
+        if (!rawQuery || rawQuery === '*') {
+          return { error: 'wildcard selector forbidden — use graph coordinates' }
+        }
         try {
-          const q = encodeURIComponent(String(args['query'] ?? ''))
+          const q = encodeURIComponent(rawQuery)
           const resp = await fetch(`${baseUrl}/api/search?query=${q}&type=dash-db`, {
             headers: { Authorization: authHeader },
           })

@@ -56,4 +56,3 @@ describe('grafana — integration (real Docker)', () => {
       expect(true).toBe(true)  // placeholder — full agent run requires real model
     })
   })
-})

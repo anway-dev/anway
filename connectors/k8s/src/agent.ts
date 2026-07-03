@@ -68,6 +68,24 @@ const TOOLS: ConnectorTool[] = [
     },
     write: true,
   },
+  {
+    definition: { name: 'scale_deployment', description: 'Scale a deployment to N replicas', parameters: { type: 'object', properties: { deployment: { type: 'string' }, replicas: { type: 'number' }, namespace: { type: 'string', optional: true } }, required: ['deployment', 'replicas'] } },
+    execute: async (params, creds) => {
+      const ns = params.namespace as string ?? 'default'
+      const replicas = Number(params.replicas ?? 1)
+      const r = kubectl(['scale', '--replicas', String(replicas), `deployment/${String(params.deployment)}`, '-n', ns], creds)
+      return { ok: r.status === 0, output: r.stdout || (r.status !== 0 ? 'kubectl scale failed' : ''), replicas }
+    },
+    write: true,
+  },
+  {
+    definition: { name: 'cordon_node', description: 'Cordon a Kubernetes node', parameters: { type: 'object', properties: { node: { type: 'string' } }, required: ['node'] } },
+    execute: async (params, creds) => {
+      const r = kubectl(['cordon', String(params.node)], creds)
+      return { ok: r.status === 0, output: r.stdout || (r.status !== 0 ? 'kubectl cordon failed' : '') }
+    },
+    write: true,
+  },
 ]
 
 export class K8sAgent implements IConnectorAgent {

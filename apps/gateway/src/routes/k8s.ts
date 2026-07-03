@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify'
+import { spawnSync } from 'node:child_process'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
+import { effectiveCredentials } from '../utils/credentials.js'
 
 const K8S_CONNECTOR_TYPES = ['k8s', 'eks', 'gke']
 
@@ -10,6 +12,76 @@ interface EntityRow {
   name: string
   type: string
   metadata: Record<string, unknown>
+}
+
+// ---------------------------------------------------------------------------
+// kubectl helper — mirrors K8sAgent's kubectl() function
+// ---------------------------------------------------------------------------
+function kubectl(args: string[], creds: Record<string, unknown>): { stdout: string; status: number | null } {
+  const kubeconfig = typeof creds.kubeconfig === 'string' ? creds.kubeconfig : undefined
+  const fullArgs = kubeconfig ? ['--kubeconfig', kubeconfig, ...args] : args
+  const result = spawnSync('kubectl', fullArgs, { encoding: 'utf-8', timeout: 30_000 })
+  return { stdout: result.stdout ?? '', status: result.status }
+}
+
+async function loadK8sCredentials(tenantId: string): Promise<Record<string, unknown>> {
+  const rows = await withTenant(prisma, tenantId, (tx) =>
+    tx.$queryRaw<{ credentials_enc: string | null; connector_type: string }[]>`
+      SELECT credentials_enc, connector_type FROM connector_config
+      WHERE tenant_id = ${tenantId}::uuid AND connector_type = ANY(${K8S_CONNECTOR_TYPES}::text[])
+        AND enabled = true
+      LIMIT 1
+    `
+  ).catch(() => [] as { credentials_enc: string | null; connector_type: string }[])
+
+  if (rows.length === 0) return {}
+  return effectiveCredentials(rows[0] as Parameters<typeof effectiveCredentials>[0])
+}
+
+// ---------------------------------------------------------------------------
+// Gate atomic-consume — copies terraform.ts:124-150 reference pattern
+// ---------------------------------------------------------------------------
+async function consumeGate(
+  gateId: string,
+  tenantId: string,
+  applierId: string,
+  namespace: string,
+): Promise<boolean> {
+  const sentinel = '00000000-0000-0000-0000-000000000000'
+  const consumed = await withTenant(prisma, tenantId, (tx) =>
+    tx.$executeRaw`
+      UPDATE gate_events
+      SET status = 'consumed', decided_at = COALESCE(decided_at, NOW())
+      WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
+        AND status = 'approved'
+        AND created_at > NOW() - INTERVAL '24 hours'
+        AND tool_args->>'namespace' = ${namespace}
+        AND decided_by IS NOT NULL
+        AND decided_by <> ${sentinel}::uuid
+        AND decided_by <> ${applierId}::uuid
+    `
+  ).catch(() => 0)
+
+  return Number(consumed) > 0
+}
+
+async function auditK8sAction(
+  tenantId: string,
+  userId: string,
+  action: string,
+  outcome: string,
+  target: string,
+): Promise<void> {
+  try {
+    await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw`
+        INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
+                'write_action_executed',
+                ${JSON.stringify({ action, outcome, target })}::jsonb, NOW())
+      `
+    )
+  } catch { /* audit best-effort */ }
 }
 
 export async function k8sRoutes(app: FastifyInstance) {
@@ -142,14 +214,17 @@ export async function k8sRoutes(app: FastifyInstance) {
     }
   })
 
-  // K8s write actions — all gated behind sre/admin role
+  // K8s write actions — all gated behind sre/admin role with atomic gate-consume pattern
   // POST /api/k8s/pods/:namespace/:name/restart
-  app.post<{ Params: { namespace: string; name: string } }>(
+  app.post<{ Params: { namespace: string; name: string }; Body: { gateId?: string } }>(
     '/api/k8s/pods/:namespace/:name/restart',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
+      const { gateId } = request.body
+
+      // Perimeter check (non-admin)
       if (user.role !== 'admin') {
         let perimeterQueryFailed = false
         const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
@@ -166,17 +241,44 @@ export async function k8sRoutes(app: FastifyInstance) {
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }
-      return reply.code(501).send({ ok: false, status: 'not_implemented', message: 'K8s write actions require connector wiring' })
+
+      // Gate atomic-consume — must have an approved gateId
+      if (!gateId) {
+        return reply.code(403).send({ error: 'gate approval required before restart' })
+      }
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace)
+      if (!gateOk) {
+        return reply.code(403).send({ error: 'gate approval required before restart' })
+      }
+
+      // Execute kubectl restart
+      const creds = await loadK8sCredentials(user.tenantId)
+      const result = kubectl(['rollout', 'restart', 'deployment', name, '-n', namespace], creds)
+      const ok = result.status === 0
+
+      await auditK8sAction(user.tenantId, user.sub, 'k8s.restart', ok ? 'success' : 'failure', `${namespace}/${name}`)
+
+      if (ok) {
+        return reply.send({ ok: true, action: 'restart', deployment: name, namespace, output: result.stdout })
+      }
+      return reply.code(500).send({ ok: false, error: 'kubectl rollout restart failed', output: result.stdout })
     },
   )
 
   // POST /api/k8s/deployments/:namespace/:name/scale
-  app.post<{ Params: { namespace: string; name: string }; Body: { replicas: number } }>(
+  app.post<{ Params: { namespace: string; name: string }; Body: { replicas: number; gateId?: string } }>(
     '/api/k8s/deployments/:namespace/:name/scale',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
+      const { replicas, gateId } = request.body
+
+      if (typeof replicas !== 'number' || replicas < 0) {
+        return reply.code(400).send({ error: 'replicas must be a non-negative number' })
+      }
+
+      // Perimeter check (non-admin)
       if (user.role !== 'admin') {
         let perimeterQueryFailed = false
         const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
@@ -193,21 +295,39 @@ export async function k8sRoutes(app: FastifyInstance) {
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }
-      const { replicas } = request.body
-      if (typeof replicas !== 'number' || replicas < 0) {
-        return reply.code(400).send({ error: 'replicas must be a non-negative number' })
+
+      // Gate atomic-consume
+      if (!gateId) {
+        return reply.code(403).send({ error: 'gate approval required before scale' })
       }
-      return reply.code(501).send({ ok: false, status: 'not_implemented', message: 'K8s write actions require connector wiring' })
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace)
+      if (!gateOk) {
+        return reply.code(403).send({ error: 'gate approval required before scale' })
+      }
+
+      // Execute kubectl scale
+      const creds = await loadK8sCredentials(user.tenantId)
+      const result = kubectl(['scale', '--replicas', String(replicas), `deployment/${name}`, '-n', namespace], creds)
+      const ok = result.status === 0
+
+      await auditK8sAction(user.tenantId, user.sub, 'k8s.scale', ok ? 'success' : 'failure', `${namespace}/${name}→${replicas}`)
+
+      if (ok) {
+        return reply.send({ ok: true, action: 'scale', deployment: name, namespace, replicas, output: result.stdout })
+      }
+      return reply.code(500).send({ ok: false, error: 'kubectl scale failed', output: result.stdout })
     },
   )
 
   // POST /api/k8s/nodes/:name/cordon
-  app.post<{ Params: { name: string } }>(
+  app.post<{ Params: { name: string }; Body: { gateId?: string } }>(
     '/api/k8s/nodes/:name/cordon',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { name } = request.params
+      const { gateId } = request.body
+
       // Enforce write perimeter for non-admin users — node name treated as scope
       if (user.role !== 'admin') {
         let perimeterQueryFailed = false
@@ -225,7 +345,41 @@ export async function k8sRoutes(app: FastifyInstance) {
           return reply.code(403).send({ error: 'node not in your perimeter' })
         }
       }
-      return reply.code(501).send({ ok: false, status: 'not_implemented', message: 'K8s write actions require connector wiring' })
+
+      // Gate atomic-consume — uses node name as scope for the gate tool_args match
+      if (!gateId) {
+        return reply.code(403).send({ error: 'gate approval required before cordon' })
+      }
+      const sentinel = '00000000-0000-0000-0000-000000000000'
+      const consumed = await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE gate_events
+          SET status = 'consumed', decided_at = COALESCE(decided_at, NOW())
+          WHERE id = ${gateId}::uuid AND tenant_id = ${user.tenantId}::uuid
+            AND status = 'approved'
+            AND created_at > NOW() - INTERVAL '24 hours'
+            AND tool_name IN ('cordon_node', 'k8s.cordon')
+            AND decided_by IS NOT NULL
+            AND decided_by <> ${sentinel}::uuid
+            AND decided_by <> ${user.sub}::uuid
+        `
+      ).catch(() => 0)
+
+      if (Number(consumed) === 0) {
+        return reply.code(403).send({ error: 'gate approval required before cordon' })
+      }
+
+      // Execute kubectl cordon
+      const creds = await loadK8sCredentials(user.tenantId)
+      const result = kubectl(['cordon', name], creds)
+      const ok = result.status === 0
+
+      await auditK8sAction(user.tenantId, user.sub, 'k8s.cordon', ok ? 'success' : 'failure', name)
+
+      if (ok) {
+        return reply.send({ ok: true, action: 'cordon', node: name, output: result.stdout })
+      }
+      return reply.code(500).send({ ok: false, error: 'kubectl cordon failed', output: result.stdout })
     },
   )
 }

@@ -50,6 +50,17 @@ vi.mock('@anway/agent', () => ({
   },
 }))
 
+// Mock new T14 connector bootstrap packages — not yet built to dist
+vi.mock('@anway/connector-aws-health', () => ({
+  AwsHealthBootstrap: vi.fn(function (this: Record<string, unknown>) { return this }),
+}))
+vi.mock('@anway/connector-azure-monitor', () => ({
+  AzureMonitorBootstrap: vi.fn(function (this: Record<string, unknown>) { return this }),
+}))
+vi.mock('@anway/connector-gcp-monitoring', () => ({
+  GcpMonitoringBootstrap: vi.fn(function (this: Record<string, unknown>) { return this }),
+}))
+
 import { startGraphBuilderSubscriber } from './subscriber.js'
 
 describe('startGraphBuilderSubscriber', () => {

@@ -38,7 +38,24 @@ import { TerraformBootstrap } from '@anway/connector-terraform'
 import { VaultBootstrap } from '@anway/connector-vault'
 import { VercelBootstrap } from '@anway/connector-vercel'
 import { AwsCloudwatchBootstrap } from '@anway/connector-aws-cloudwatch'
+import { AwsHealthBootstrap } from '@anway/connector-aws-health'
+import { AzureMonitorBootstrap } from '@anway/connector-azure-monitor'
+import { GcpMonitoringBootstrap } from '@anway/connector-gcp-monitoring'
 // (avoid build-time dependency on packages that may not have dist/ built)
+
+// Alertmanager is a native connector (no separate package) — bootstrap inline
+import type { TenantId as TID } from '@anway/types'
+class AlertmanagerBootstrapImpl implements IConnectorBootstrap {
+  constructor(private readonly kg: IKnowledgeGraph) {}
+  async bootstrap(tenantId: TID, connectorId: string, _payload: Record<string, unknown>) {
+    const entityId = await this.kg.upsertEntity({
+      tenantId, type: 'Alert', name: 'alertmanager-active',
+      metadata: { source: 'alertmanager', connectorId, status: 'active' },
+    })
+    return { entitiesUpserted: entityId ? 1 : 0, relationshipsUpserted: 0, episodeHints: ['Alertmanager connector bootstrapped'] }
+  }
+}
+
 import { UUID_RE } from '../utils/validators.js'
 import { decryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
@@ -105,13 +122,15 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   return null
 }
 
-function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string): Map<string, IConnectorBootstrap> {
+async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string): Promise<Map<string, IConnectorBootstrap>> {
   const reg = new Map<string, IConnectorBootstrap>()
   // Tier 1 — fully operational
-  void connectorCredential(tid, 'github', 'GH_TOKEN').then(t => reg.set('github', new GitHubBootstrap(kg, t)))
+  const ghToken = await connectorCredential(tid, 'github', 'GH_TOKEN')
+  reg.set('github', new GitHubBootstrap(kg, ghToken))
   reg.set('argocd', new ArgocdBootstrap(kg))
   reg.set('datadog', new DatadogBootstrap(kg))
-  void connectorCredential(tid, 'linear', 'LINEAR_API_KEY').then(t => reg.set('linear', new LinearBootstrap(kg, t)))
+  const linearToken = await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')
+  reg.set('linear', new LinearBootstrap(kg, linearToken))
   reg.set('prometheus', new PrometheusBootstrap(kg))
   reg.set('loki', new LokiBootstrap(kg))
   reg.set('k8s', new KubernetesBootstrap(kg))
@@ -140,6 +159,11 @@ function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid
   reg.set('vault', new VaultBootstrap(kg))
   reg.set('vercel', new VercelBootstrap(kg))
   reg.set('aws-cloudwatch', new AwsCloudwatchBootstrap(kg))
+  // Cloud monitoring — previously missing bootstraps (T14)
+  reg.set('aws-health', new AwsHealthBootstrap(kg))
+  reg.set('azure-monitor', new AzureMonitorBootstrap(kg))
+  reg.set('gcp-monitoring', new GcpMonitoringBootstrap(kg))
+  reg.set('alertmanager', new AlertmanagerBootstrapImpl(kg))
   return reg
 }
 
@@ -181,12 +205,18 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       const provider = ProviderFactory.create(providerConfig)
       const kg = createKnowledgeGraph(tid as TenantId)
 
+      // Invalidate bootstrap registry cache on connector lifecycle events so
+      // credential changes propagate. Previously frozen forever after first build.
+      if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
+        registryCache.delete(tid)
+      }
+
       if (!registryCache.has(tid)) {
         if (registryCache.size >= MAX_REGISTRY_CACHE) {
           const k = registryCache.keys().next().value
           if (k !== undefined) registryCache.delete(k)
         }
-        registryCache.set(tid, buildBootstrapRegistry(kg, tid))
+        registryCache.set(tid, await buildBootstrapRegistry(kg, tid))
       }
       const bootstrapRegistry = registryCache.get(tid)!
       const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub)
@@ -360,7 +390,7 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
         const k = registryCache.keys().next().value
         if (k !== undefined) registryCache.delete(k)
       }
-      registryCache.set(tid, buildBootstrapRegistry(kg, tid))
+      registryCache.set(tid, await buildBootstrapRegistry(kg, tid))
     }
     const bootstrapRegistry = registryCache.get(tid)!
     const pub = createClient({

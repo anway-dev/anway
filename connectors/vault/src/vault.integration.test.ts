@@ -21,10 +21,17 @@ describe('vault — integration (real Docker)', () => {
   afterAll(async () => { await container?.stop() })
 
   it('bootstrap runs without throwing', async () => {
+    // Seed a KV-v2 secret engine so there's something to discover
+    await fetch(`${baseUrl}/v1/sys/mounts/kv-test`, {
+      method: 'POST',
+      headers: { 'X-Vault-Token': 'dev-root-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'kv-v2' }),
+    }).catch(() => null)
     const kg = new FakeKG()
     const result = await new VaultBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "token": "dev-root-token" }
     )
+    // Vault dev server has cubbyhole/ by default + kv-test we just mounted
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
   })

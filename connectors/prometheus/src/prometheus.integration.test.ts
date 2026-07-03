@@ -20,12 +20,24 @@ describe('prometheus — integration (real Docker)', () => {
 
   afterAll(async () => { await container?.stop() })
 
-  it('bootstrap extracts ≥0 entities (fresh prometheus, no scrape targets)', async () => {
+  it('bootstrap extracts entities from fresh prometheus (self-scrape target)', async () => {
+    // Prometheus ships with a baked-in self-scrape target (job: prometheus).
+    // Target discovery may not be ready immediately after /-/ready — poll until
+    // activeTargets appears, then bootstrap should find it.
+    for (let i = 0; i < 10; i++) {
+      try {
+        const resp = await fetch(`${baseUrl}/api/v1/targets?state=active`)
+        const data = await resp.json() as { data?: { activeTargets?: unknown[] } }
+        if ((data?.data?.activeTargets?.length ?? 0) > 0) break
+      } catch { /* retry */ }
+      await new Promise(r => setTimeout(r, 2000))
+    }
+
     const kg = new FakeKG()
     const result = await new PrometheusBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { baseUrl }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
   })
 

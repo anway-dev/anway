@@ -25,6 +25,7 @@ describe('snyk — fixture HTTP server', () => {
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { token: "fixture-token", baseUrl: fixture.baseUrl }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
+    expect(kg.entities.some(e => e.name === 'payments-api'), 'expected project payments-api not extracted').toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

@@ -6,6 +6,7 @@ import { OpsgenieAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
+  { method: 'GET', path: '/v2/teams', status: 200, body: {'data': [{'id': 'team-1', 'name': 'Platform'}]} },
   { method: 'GET', path: '/v2/schedules', status: 200, body: {'data': [{'id': 'sch-1', 'name': 'Primary On-Call'}]} },
   { method: 'GET', path: '/v2/alerts', status: 200, body: {'data': [{'id': 'alert-1', 'message': 'payments-api down', 'status': 'open'}]} }
 ]

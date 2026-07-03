@@ -6,7 +6,7 @@ import { JiraAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'GET', path: '/rest/api/3/project', status: 200, body: [{'id': '10001', 'key': 'PAY', 'name': 'Payments'}] },
+  { method: 'GET', path: '/rest/api/3/project/search', status: 200, body: {'values': [{'id': '10001', 'key': 'PAY', 'name': 'Payments'}]} },
   { method: 'GET', path: '/rest/api/3/search', status: 200, body: {'issues': [{'id': '1', 'key': 'PAY-1', 'fields': {'summary': 'Bug in checkout', 'status': {'name': 'In Progress'}}}], 'total': 1} }
 ]
 

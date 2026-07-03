@@ -6,7 +6,7 @@ import { NewrelicAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'POST', path: '/graphql', status: 200, body: {'data': {'actor': {'entitySearch': {'results': {'entities': [{'guid': 'abc', 'name': 'payments-api', 'type': 'APPLICATION'}]}}}}} }
+  { method: 'GET', path: '/v2/applications.json', status: 200, body: {'applications': [{'id': 1, 'name': 'payments-api', 'language': 'nodejs', 'health_status': 'green'}]} }
 ]
 
 describe('newrelic — fixture HTTP server', () => {

@@ -11,8 +11,15 @@ export class VaultBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { 'X-Vault-Token': token }
 
     try {
-      const res = await fetch(`${baseUrl}/v1/sys/mounts`, { headers })
-      if (!res.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Vault bootstrap: connection failed'] }
+      // Vault dev containers can return health OK before the root token is fully
+      // provisioned. Retry the mounts call a few times to avoid false failures.
+      let res: Response | null = null
+      for (let attempt = 0; attempt < 5; attempt++) {
+        res = await fetch(`${baseUrl}/v1/sys/mounts`, { headers })
+        if (res.ok) break
+        await new Promise(r => setTimeout(r, 1000))
+      }
+      if (!res || !res.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Vault bootstrap: connection failed'] }
       const mounts = await res.json() as Record<string, { type: string; description?: string }>
       let entitiesUpserted = 0
       for (const [path, info] of Object.entries(mounts)) {

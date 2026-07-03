@@ -7,7 +7,7 @@ import { ConfluenceAgent } from './agent.js'
 
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/wiki/rest/api/space', status: 200, body: {'results': [{'key': 'PAY', 'name': 'Payments Team'}]} },
-  { method: 'GET', path: '/wiki/rest/api/content', status: 200, body: {'results': [{'id': '123', 'title': 'Runbook: payments-api', 'type': 'page'}]} }
+  { method: 'GET', path: '/wiki/rest/api/space/PAY/content', status: 200, body: {'results': [{'id': '123', 'title': 'Runbook: payments-api', 'type': 'page'}]} }
 ]
 
 describe('confluence — fixture HTTP server', () => {
@@ -25,7 +25,8 @@ describe('confluence — fixture HTTP server', () => {
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { baseUrl: fixture.baseUrl, email: "test@test.com", apiToken: "fixture-token" }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
-    expect(kg.entities.some(e => e.name === 'Payments Team'), 'expected entity Payments Team not extracted').toBe(true)
+    // Bootstrap creates Doc entities from page titles, not Space entities
+    expect(kg.entities.some(e => e.name === 'Runbook: payments-api'), 'expected doc not extracted').toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

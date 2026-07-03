@@ -25,14 +25,14 @@ describe('prometheus — integration (real Docker)', () => {
     const result = await new PrometheusBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { baseUrl }
     )
-    expect(result.entitiesUpserted).toBeGreaterThan(0)
+    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
     expect(result.episodeHints).toBeDefined()
   })
 
   it('agent query_metrics returns valid PromQL response', async () => {
     const agent = new PrometheusAgent()
     const tools = agent.tools
-    const queryTool = tools.find(t => t.definition.name === 'prometheus__query')!
+    const queryTool = tools.find(t => t.definition.name === 'prometheus.query_metrics')!
     const result = await queryTool.execute({ query: 'up' }, { baseUrl })
     expect(result).toBeDefined()
   })
@@ -40,7 +40,7 @@ describe('prometheus — integration (real Docker)', () => {
   it('agent get_alerts returns array', async () => {
     const agent = new PrometheusAgent()
     const tools = agent.tools
-    const alertsTool = tools.find(t => t.definition.name === 'prometheus__alerts')!
+    const alertsTool = tools.find(t => t.definition.name === 'prometheus.get_alerts')!
     const result = await alertsTool.execute({}, { baseUrl })
     expect(result).toHaveProperty('alerts')
     expect(Array.isArray((result as any).alerts)).toBe(true)

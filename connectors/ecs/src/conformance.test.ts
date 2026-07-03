@@ -10,11 +10,20 @@ describe('ecs conformance', () => {
     expect(agent.connectorType).toBe('ecs')
   })
 
-  it('bootstrap returns valid result', async () => {
+  it('agent tools have valid definitions', () => {
+    const agent = new EcsAgent()
+    for (const tool of agent.tools) {
+      expect(tool.definition.name).toBeTruthy()
+      expect(tool.definition.description).toBeTruthy()
+      expect(tool.definition.parameters).toBeDefined()
+    }
+  })
+
+  it('bootstrap runs without throwing', async () => {
     const kg = new FakeKnowledgeGraph()
     const result = await new EcsBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-conn', { cluster: 'test', services: ['test-svc'] }
     )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
+    expect(result.entitiesUpserted).toBeGreaterThan(0)
   })
 })

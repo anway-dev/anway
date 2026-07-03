@@ -504,15 +504,20 @@ VITEST_PACKAGES=(
   @anway/connector-datadog @anway/connector-terraform @anway/connector-dynatrace
   @anway/connector-loki @anway/connector-vercel @anway/connector-elastic
   @anway/connector-k8s @anway/connector-argocd @anway/connector-launchdarkly
-)
-NO_TEST_SCRIPT_PACKAGES=(
   @anway/connector-azure-monitor @anway/connector-aws-cloudwatch
   @anway/connector-aws-health @anway/connector-gke @anway/connector-eks
   @anway/connector-gcp-monitoring
 )
 
-for pkg in "${NO_TEST_SCRIPT_PACKAGES[@]}"; do
-  bad "$pkg: package.json has NO \"test\" script at all (0 test coverage) — command 'pnpm --filter $pkg test' does not exist"
+# Live check — do not hardcode a static "known missing" list, it goes stale the moment a task adds the script.
+for dir in connectors/*/; do
+  pkg_json="${dir}package.json"
+  [ -f "$pkg_json" ] || continue
+  pkg_name="$(grep -o '"name": *"[^"]*"' "$pkg_json" | head -1 | sed 's/.*"name": *"\(.*\)"/\1/')"
+  [ -n "$pkg_name" ] || continue
+  if ! grep -q '"test":' "$pkg_json"; then
+    bad "$pkg_name: package.json has NO \"test\" script at all (0 test coverage) — command 'pnpm --filter $pkg_name test' does not exist"
+  fi
 done
 
 if [ "$RUN_UNIT_TESTS" = "1" ]; then

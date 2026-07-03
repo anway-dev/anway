@@ -313,11 +313,11 @@ else
   skp "GET /api/gate/pending authenticated check — no token"
 fi
 
-n="$(sed -n '444,453p' apps/gateway/src/routes/chat.ts | grep -c deployTools)"
+n="$(grep -c "'trigger_pipeline', 'approve_gate'" apps/gateway/src/routes/chat.ts)"
 if [ "$n" -gt 0 ]; then
-  ok "apps/gateway/src/routes/chat.ts:444-453: deployTools included in perimeter builtins allowlist"
+  ok "apps/gateway/src/routes/chat.ts: deploy tool names (trigger_pipeline/approve_gate) included in perimeter builtins allowlist"
 else
-  bad "apps/gateway/src/routes/chat.ts:444-453: deployTools NOT in the perimeter builtins allowlist — trigger_pipeline/approve_gate are bare-named and hard-blocked by AgentPerimeter.allows() for every chat session (T8)"
+  bad "apps/gateway/src/routes/chat.ts: deploy tool names NOT found in the perimeter builtins allowlist — trigger_pipeline/approve_gate are bare-named and hard-blocked by AgentPerimeter.allows() for every chat session (T8)"
 fi
 
 # =====================================================================
@@ -565,11 +565,12 @@ fi
 # =====================================================================
 hdr "Section 12 — Env/secrets discipline"
 
-n="$(grep -c 'apiKey ? { apiKey }' apps/web/components/provider-config.tsx)"
-if [ "$n" -eq 0 ]; then
-  ok "provider-config.tsx: API key not appended to a GET querystring"
+url_has_query="$(grep -c "'/api/settings/models?" apps/web/components/provider-config.tsx)"
+uses_post="$(grep -c "method: 'POST'" apps/web/components/provider-config.tsx)"
+if [ "$url_has_query" -eq 0 ] && [ "$uses_post" -gt 0 ]; then
+  ok "provider-config.tsx: API key sent via POST body, not a GET querystring"
 else
-  bad "apps/web/components/provider-config.tsx:125: API key sent as a GET querystring param to /api/settings/models (browser history / request log exposure) (T16)"
+  bad "apps/web/components/provider-config.tsx: API key sent as a GET querystring param to /api/settings/models (browser history / request log exposure) (T16)"
 fi
 
 n="$(grep -rn 'localStorage.setItem' apps/web/components apps/web/app --include='*.tsx' 2>/dev/null | grep -iE 'apikey|api_key|secret' | wc -l | tr -d ' ')"

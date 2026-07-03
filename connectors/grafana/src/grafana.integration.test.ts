@@ -23,7 +23,7 @@ describe('grafana — integration (real Docker)', () => {
   it('bootstrap runs without throwing', async () => {
     const kg = new FakeKG()
     const result = await new GrafanaBootstrap(kg).bootstrap(
-      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "token": "" }
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "token": "fixture-token" }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()

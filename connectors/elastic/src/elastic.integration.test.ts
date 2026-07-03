@@ -23,7 +23,7 @@ describe('elastic — integration (real Docker)', () => {
   it('bootstrap runs without throwing', async () => {
     const kg = new FakeKG()
     const result = await new ElasticsearchBootstrap(kg).bootstrap(
-      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl }
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "user": "elastic", "password": "test" }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()

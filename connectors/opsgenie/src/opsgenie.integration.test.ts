@@ -8,7 +8,7 @@ import { OpsgenieAgent } from './agent.js'
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/v2/teams', status: 200, body: {'data': [{'id': 'team-1', 'name': 'Platform'}]} },
   { method: 'GET', path: '/v2/schedules', status: 200, body: {'data': [{'id': 'sch-1', 'name': 'Primary On-Call'}]} },
-  { method: 'GET', path: '/v2/schedules/sch-1/on-calls', status: 200, body: {'data': [{'user': {'name': 'Alice'}, 'schedule': {'name': 'Primary'}}]} },
+  { method: 'GET', path: '/v2/schedules/sch-1/on-calls', status: 200, body: {'data': [{'onCallRecipients': ['Alice']}]} },
   { method: 'GET', path: '/v2/alerts', status: 200, body: {'data': [{'id': 'alert-1', 'message': 'payments-api down', 'status': 'open'}]} }
 ]
 
@@ -27,7 +27,9 @@ describe('opsgenie — fixture HTTP server', () => {
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { apiKey: "fixture-key", baseUrl: fixture.baseUrl }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
-    expect(kg.entities.some(e => e.name === 'Primary On-Call'), 'expected entity Primary On-Call not extracted').toBe(true)
+    // Bootstrap creates Team entities from /v2/teams and Engineer entities from on-call recipients
+    expect(kg.entities.some(e => e.name === 'Platform'), 'expected team Platform not extracted').toBe(true)
+    expect(kg.entities.some(e => e.name === 'Alice'), 'expected engineer Alice not extracted').toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

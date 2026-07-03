@@ -62,6 +62,8 @@ async function writeKnowledgeEntries(tid: string, providerConfig: ProviderConfig
         ORDER BY name LIMIT 200
       `
     ).catch(() => [] as Array<{ name: string; type: string; metadata: Record<string, unknown> }>)
+    let written = 0
+    let skipped = 0
     for (const entity of serviceEntities) {
       try {
         const content = `${entity.type}: ${entity.name} — ${JSON.stringify(entity.metadata ?? {})}`
@@ -72,23 +74,30 @@ async function writeKnowledgeEntries(tid: string, providerConfig: ProviderConfig
             WHERE tenant_id = ${tid}::uuid AND source = ${contentHash}
           `
         ).catch(() => [{ count: 0n }] as Array<{ count: bigint }>)
-        if (Number(existing[0]?.count ?? 0n) > 0) continue
+        if (Number(existing[0]?.count ?? 0n) > 0) { skipped++; continue }
         const vecs = await embedder.embed([content])
         const vec = vecs[0]
         if (vec && vec.length > 0) {
           const vectorLiteral = `[${vec.join(',')}]`
           const ttl = eventType === 'pr_merged' || eventType === 'deploy_completed' ? 300 : 7200
-          await withTenant(prisma, tid, (tx) =>
-            tx.$queryRaw`
+          const inserted = await withTenant(prisma, tid, (tx) =>
+            tx.$executeRaw`
               INSERT INTO kb_entries (tenant_id, source, content, embedding, fetched_at, ttl_seconds, freshness_score)
               VALUES (${tid}::uuid, ${contentHash}, ${content}, ${vectorLiteral}::vector, NOW(), ${ttl}, 1.0)
               ON CONFLICT DO NOTHING
             `
-          ).catch(() => { /* non-blocking */ })
+          ).catch(() => 0)
+          if (Number(inserted) > 0) written++
         }
-      } catch { /* skip individual entity on embed failure */ }
+      } catch (err) {
+        skipped++
+        log?.warn({ err, entity: entity.name }, 'kb_entries: embed/write failed for entity — skipping')
+      }
     }
-  } catch { /* non-blocking */ }
+    log?.info({ eventType, written, skipped, total: serviceEntities.length }, 'kb_entries: write cycle complete')
+  } catch (err) {
+    log?.error({ err, eventType }, 'kb_entries: write cycle failed')
+  }
 }
 
 class AlertmanagerBootstrapImpl implements IConnectorBootstrap {

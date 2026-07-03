@@ -44,10 +44,15 @@ export class OpenAIEmbeddingProvider implements IEmbeddingProvider {
 // OllamaEmbeddingProvider — calls /api/embeddings on local Ollama
 // ---------------------------------------------------------------------------
 export class OllamaEmbeddingProvider implements IEmbeddingProvider {
+  private readonly baseURL: string
+
   constructor(
-    private readonly baseURL = 'http://localhost:11434',
+    baseURL = 'http://localhost:11434',
     private readonly model = 'nomic-embed-text',
-  ) {}
+  ) {
+    // Strip /v1 suffix — Ollama native API is at /api/embeddings, not /v1/api/embeddings
+    this.baseURL = baseURL.replace(/\/v1\/?$/, '')
+  }
 
   async embed(texts: string[]): Promise<number[][]> {
     const url = `${this.baseURL}/api/embeddings`

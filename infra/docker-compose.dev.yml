@@ -52,6 +52,10 @@ services:
       - --web.enable-lifecycle
     ports:
       - "8530:9090"
+    # NOTE: after any change to prometheus volumes or command args, the container
+    # MUST be force-recreated (not just restarted). Docker compose `up -d` alone
+    # does not recreate existing containers with new volume mounts.
+    #   docker compose -f infra/docker-compose.dev.yml up -d --force-recreate prometheus
     volumes:
       - ./prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro

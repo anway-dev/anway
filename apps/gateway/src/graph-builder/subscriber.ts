@@ -38,6 +38,7 @@ import { TerraformBootstrap } from '@anway/connector-terraform'
 import { VaultBootstrap } from '@anway/connector-vault'
 import { VercelBootstrap } from '@anway/connector-vercel'
 import { AwsCloudwatchBootstrap } from '@anway/connector-aws-cloudwatch'
+import { EcsBootstrap } from '@anway/connector-ecs'
 import { AwsHealthBootstrap } from '@anway/connector-aws-health'
 import { AzureMonitorBootstrap } from '@anway/connector-azure-monitor'
 import { GcpMonitoringBootstrap } from '@anway/connector-gcp-monitoring'
@@ -207,6 +208,7 @@ async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph
   reg.set('vault', new VaultBootstrap(kg))
   reg.set('vercel', new VercelBootstrap(kg))
   reg.set('aws-cloudwatch', new AwsCloudwatchBootstrap(kg))
+  reg.set('ecs', new EcsBootstrap(kg))  // T27
   // Cloud monitoring — previously missing bootstraps (T14)
   reg.set('aws-health', new AwsHealthBootstrap(kg))
   reg.set('azure-monitor', new AzureMonitorBootstrap(kg))

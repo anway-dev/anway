@@ -13,6 +13,7 @@ import { ConfluenceAgent } from '@anway/connector-confluence'
 import { CoralogixAgent } from '@anway/connector-coralogix'
 import { DatadogAgent } from '@anway/connector-datadog'
 import { DynatraceAgent } from '@anway/connector-dynatrace'
+import { EcsAgent } from '@anway/connector-ecs'
 import { EksAgent } from '@anway/connector-eks'
 import { ElasticAgent } from '@anway/connector-elastic'
 import { GcpMonitoringAgent } from '@anway/connector-gcp-monitoring'
@@ -358,6 +359,7 @@ export async function getNativeConnectorTools(
       case 'coralogix':       tools.push(...adaptConnectorAgent(new CoralogixAgent(), creds as ConnectorCreds)); break
       case 'datadog':         tools.push(...adaptConnectorAgent(new DatadogAgent(), creds as ConnectorCreds)); break
       case 'dynatrace':       tools.push(...adaptConnectorAgent(new DynatraceAgent(), creds as ConnectorCreds)); break
+      case 'ecs':             tools.push(...adaptConnectorAgent(new EcsAgent(), creds as ConnectorCreds)); break
       case 'eks':             tools.push(...adaptConnectorAgent(new EksAgent(), creds as ConnectorCreds)); break
       case 'elastic':         tools.push(...adaptConnectorAgent(new ElasticAgent(), creds as ConnectorCreds)); break
       case 'gcp-monitoring':  tools.push(...adaptConnectorAgent(new GcpMonitoringAgent(), creds as ConnectorCreds)); break

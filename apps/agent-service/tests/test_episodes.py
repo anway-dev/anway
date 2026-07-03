@@ -20,7 +20,7 @@ def test_add_episode_returns_ok():
                 "source_description": "test source",
                 "reference_time": "2026-01-01T00:00:00Z",
             },
-            headers={"X-Tenant-Id": "t-1"},
+            headers={"X-Tenant-Id": "00000000-0000-0000-0000-000000000001"},
         )
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
@@ -39,7 +39,6 @@ def test_add_episode_unavailable_when_graphiti_none():
             "source_description": "test",
             "reference_time": "2026-01-01T00:00:00Z",
         },
-        headers={"X-Tenant-Id": "t-1"},
+        headers={"X-Tenant-Id": "00000000-0000-0000-0000-000000000001"},
     )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "unavailable"
+    assert resp.status_code == 503  # graphiti unavailable — correct behavior

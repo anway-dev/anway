@@ -53,6 +53,9 @@ importers:
       '@anway/connector-dynatrace':
         specifier: workspace:*
         version: link:../../connectors/dynatrace
+      '@anway/connector-ecs':
+        specifier: workspace:*
+        version: link:../../connectors/ecs
       '@anway/connector-eks':
         specifier: workspace:*
         version: link:../../connectors/eks
@@ -440,6 +443,9 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
 
   connectors/eks:
     dependencies:

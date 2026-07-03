@@ -26,6 +26,7 @@
     "@anway/connector-coralogix": "workspace:*",
     "@anway/connector-datadog": "workspace:*",
     "@anway/connector-dynatrace": "workspace:*",
+    "@anway/connector-ecs": "workspace:*",
     "@anway/connector-eks": "workspace:*",
     "@anway/connector-elastic": "workspace:*",
     "@anway/connector-gcp-monitoring": "workspace:*",

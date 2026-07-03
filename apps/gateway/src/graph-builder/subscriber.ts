@@ -49,10 +49,11 @@ import type { TenantId as TID } from '@anway/types'
 // T26 — kb_entries write path: composes Service entity content, embeds it,
 // and INSERTs INTO kb_entries for pgvector semantic search.
 let providerConfigForEmbedding: ProviderConfig | null = null
-async function writeKnowledgeEntries(tid: string, providerConfig: ProviderConfig | null, eventType: string): Promise<void> {
-  if (!providerConfig) return
+async function writeKnowledgeEntries(tid: string, providerConfig: ProviderConfig | null, eventType: string, log?: SubscriberLogger): Promise<void> {
+  if (!providerConfig) { log?.warn({ eventType }, 'kb_entries: no provider config — skipping'); return }
   const embedder = ProviderFactory.createEmbedder(providerConfig)
-  if (!embedder) return
+  if (!embedder) { log?.warn({ eventType }, 'kb_entries: no embedder — skipping'); return }
+  log?.info({ eventType }, 'kb_entries: writing knowledge entries')
   try {
     const serviceEntities = await withTenant(prisma, tid, (tx) =>
       tx.$queryRaw<Array<{ name: string; type: string; metadata: Record<string, unknown> }>>`
@@ -309,7 +310,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
 
         // T26: Write kb_entries for Service entities after bootstrap/event.
         // Composes entity content → embeds → INSERT INTO kb_entries for pgvector search.
-        await writeKnowledgeEntries(tid, providerConfig, event.type)
+        await writeKnowledgeEntries(tid, providerConfig, event.type, log)
 
         if (isBootstrapEvent) {
           const connectorType = eventConnectorType

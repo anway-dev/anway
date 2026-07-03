@@ -3,6 +3,7 @@ from .routes import episodes, facts
 from .config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 
 app = FastAPI(title="Anway Agent Service")
+app.state.graphiti = None  # Initialized so patch.object has a target regardless of startup lifecycle
 
 @app.on_event("startup")
 async def startup():

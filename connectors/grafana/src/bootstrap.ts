@@ -22,7 +22,7 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { Authorization: authHeader, 'Content-Type': 'application/json' }
 
     let entitiesUpserted = 0
-
+    try {
     // Fetch dashboards
     const dashResp = await fetch(`${baseUrl}/api/search?type=dash-db&limit=100`, { headers })
     const dashboards = dashResp.ok ? await dashResp.json() as Array<{ uid: string; title: string }> : []
@@ -77,6 +77,9 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
       entitiesUpserted,
       relationshipsUpserted: 0,
       episodeHints: [`Grafana: ${dashboards.length} dashboards, ${alertRules.length} alert rules, ${datasources.length} datasources indexed`],
+    }
+    } catch {
+      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Grafana bootstrap: connection failed'] }
     }
   }
 }

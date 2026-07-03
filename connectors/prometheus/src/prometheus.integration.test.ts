@@ -39,7 +39,7 @@ describe('prometheus — integration (real Docker)', () => {
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
-  })
+  }, 30_000)
 
   it('agent query_metrics returns valid PromQL response', async () => {
     const agent = new PrometheusAgent()

@@ -6,7 +6,7 @@ import { LinearAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'POST', path: '/graphql', status: 200, body: {'data': {'teams': {'nodes': [{'id': 'team-1', 'name': 'Payments', 'key': 'PAY'}]}, 'issues': {'nodes': [{'id': 'issue-1', 'title': 'API timeout', 'state': {'name': 'In Progress'}}]}}} }
+  { method: 'POST', path: '/', status: 200, body: {'data': {'teams': {'nodes': [{'id': 'team-1', 'name': 'Payments', 'key': 'PAY'}]}, 'issues': {'nodes': [{'id': 'issue-1', 'title': 'API timeout', 'state': {'name': 'In Progress'}}]}}} }
 ]
 
 describe('linear — fixture HTTP server', () => {

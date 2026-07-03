@@ -21,6 +21,14 @@ describe('grafana — integration (real Docker)', () => {
   afterAll(async () => { await container?.stop() })
 
   it('bootstrap runs without throwing', async () => {
+    // Seed a test dashboard so bootstrap has something to discover.
+    // Grafana anonymous auth is enabled (Admin role) — API accepts unauthenticated writes.
+    await fetch(`${baseUrl}/api/dashboards/db`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dashboard: { title: 'Test Dashboard', uid: 'test-dash', panels: [] }, overwrite: true }),
+    }).catch(() => null)
+
     const kg = new FakeKG()
     const result = await new GrafanaBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { "baseUrl": baseUrl, "token": "fixture-token" }

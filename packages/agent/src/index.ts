@@ -34,6 +34,7 @@ export type { TokenBudget, ModelCallRequest, TokenHardBlock, TokenLimitType } fr
 export { ProviderFactory } from './providers/factory.js'
 export { providerRegistry } from './providers/registry.js'
 export type { ProviderManifest, ProviderField } from './interfaces/provider.js'
+export { OpenAIEmbeddingProvider, OllamaEmbeddingProvider } from './providers/embeddings.js'
 export { RedisSessionMemory } from './memory/redis-session.js'
 export { MemoryFactory } from './memory/factory.js'
 export { createPerimeterMiddleware } from './middleware/perimeter.js'

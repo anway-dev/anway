@@ -514,7 +514,10 @@ export async function chatRoutes(app: FastifyInstance) {
     // Use createKnowledgeGraph factory — selects HybridKnowledgeGraph (structural + episodic)
     // when AGENT_SERVICE_URL is set, plain StructuralGraph otherwise. Previously bypassed
     // episodic/temporal reasoning entirely by constructing StructuralGraph directly.
-    const knowledgeGraph: IKnowledgeGraph = createKnowledgeGraph(TenantId(tenantId))
+    // Create embedder from the same provider config used for LLM inference.
+    // Enables pgvector semantic search in StructuralGraph when kb_entries are populated.
+    const embedder = ProviderFactory.createEmbedder(providerConfig)
+    const knowledgeGraph: IKnowledgeGraph = createKnowledgeGraph(TenantId(tenantId), embedder ?? undefined)
     const connectorTools = await getToolsForTenant(prisma, tenantId)
     const deployTools = makeDeployTools(tenantId, userId, provider, knowledgeGraph)
     const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools]

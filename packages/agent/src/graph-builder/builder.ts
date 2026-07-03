@@ -49,6 +49,21 @@ export class GraphBuilderAgent {
           await this.onConnectorRemoved(event); break
         case 'connector_reconnected':
           await this.onConnectorReconnected(event as GraphEvent & { type: 'connector_reconnected' }); break
+        // T17 — missing lifecycle event handlers
+        case 'project_created':
+          await this.onProjectCreated(event as unknown as { type: 'project_created'; tenantId: string; projectId: string; name: string; teamId?: string }); break
+        case 'repo_created':
+          await this.onRepoCreated(event as unknown as { type: 'repo_created'; tenantId: string; repoId: string; name: string; language?: string; org?: string }); break
+        case 'namespace_created':
+          await this.onNamespaceCreated(event as unknown as { type: 'namespace_created'; tenantId: string; name: string; services?: string[] }); break
+        case 'resource_added':
+          await this.onResourceAdded(event as unknown as { type: 'resource_added'; tenantId: string; resourceId: string; resourceType: string; tags?: Record<string, string>; service?: string; team?: string }); break
+        case 'team_changed':
+          await this.onTeamChanged(event as unknown as { type: 'team_changed'; tenantId: string; teamId: string; name: string; members?: string[]; slackChannel?: string }); break
+        case 'oncall_rotation':
+          await this.onOncallRotation(event as unknown as { type: 'oncall_rotation'; tenantId: string; teamId: string; engineerId: string; engineerName?: string; validFrom: string; validTo?: string }); break
+        case 'connector_capability_changed':
+          await this.onConnectorCapabilityChanged(event as unknown as { type: 'connector_capability_changed'; tenantId: string; connectorId: string; connectorType: string }); break
       }
       // Emit graph:updated after successful handling
       await this.redisPublisher?.publish('graph:updated', JSON.stringify({
@@ -374,5 +389,65 @@ export class GraphBuilderAgent {
     })
     const name = resp.content.trim()
     return name.length > 0 ? name : null
+  }
+
+  // -- T17: missing lifecycle event handlers ---------------------------------
+
+  // -- T17: missing lifecycle event handlers ---------------------------------
+
+  private async onProjectCreated(event: { tenantId: string; projectId: string; name: string; teamId?: string }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    await this.kg.upsertEntity({ type: 'Project', name: event.name, metadata: { projectId: event.projectId, teamId: event.teamId } }, tid)
+  }
+
+  private async onRepoCreated(event: { tenantId: string; repoId: string; name: string; language?: string; org?: string }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    await this.kg.upsertEntity({ type: 'Repo', name: event.name, metadata: { repoId: event.repoId, language: event.language, org: event.org } }, tid)
+  }
+
+  private async onNamespaceCreated(event: { tenantId: string; name: string; services?: string[] }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    const entityId = await this.kg.upsertEntity({ type: 'Namespace', name: event.name, metadata: {} }, tid)
+    if (entityId && event.services) {
+      for (const svc of event.services) {
+        const svcId = await this.kg.upsertEntity({ type: 'Service', name: svc, metadata: { namespace: event.name } }, tid)
+        if (svcId) await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'HOSTED_IN', toEntityId: entityId }, tid)
+      }
+    }
+  }
+
+  private async onResourceAdded(event: { tenantId: string; resourceId: string; resourceType: string; tags?: Record<string, string>; service?: string; team?: string }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    const entityId = await this.kg.upsertEntity({ type: 'Resource', name: event.resourceId, metadata: { resourceType: event.resourceType, tags: event.tags ?? {}, service: event.service, team: event.team } }, tid)
+    if (entityId && event.service) {
+      const svcId = await this.kg.upsertEntity({ type: 'Service', name: event.service, metadata: {} }, tid)
+      if (svcId) await this.kg.upsertRelationship({ fromEntityId: entityId, relType: 'HOSTED_IN', toEntityId: svcId }, tid)
+    }
+  }
+
+  private async onTeamChanged(event: { tenantId: string; teamId: string; name: string; members?: string[]; slackChannel?: string }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    const teamId = await this.kg.upsertEntity({ type: 'Team', name: event.name, metadata: { teamId: event.teamId, slackChannel: event.slackChannel } }, tid)
+    if (teamId && event.members) {
+      for (const member of event.members) {
+        const engId = await this.kg.upsertEntity({ type: 'Engineer', name: member, metadata: {} }, tid)
+        if (engId) await this.kg.upsertRelationship({ fromEntityId: engId, relType: 'MEMBER_OF', toEntityId: teamId }, tid)
+      }
+    }
+  }
+
+  private async onOncallRotation(event: { tenantId: string; teamId: string; engineerId: string; engineerName?: string; validFrom: string; validTo?: string }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    const teamEntityId = await this.kg.upsertEntity({ type: 'Team', name: event.teamId, metadata: {} }, tid)
+    const engEntityId = await this.kg.upsertEntity({ type: 'Engineer', name: event.engineerName ?? event.engineerId, metadata: { engineerId: event.engineerId } }, tid)
+    if (teamEntityId && engEntityId) {
+      await this.kg.upsertRelationship({ fromEntityId: teamEntityId, relType: 'ONCALL', toEntityId: engEntityId, metadata: { validFrom: event.validFrom, validTo: event.validTo } }, tid)
+    }
+  }
+
+  private async onConnectorCapabilityChanged(event: { tenantId: string; connectorId: string; connectorType: string }): Promise<void> {
+    const tid = this.tid(event.tenantId)
+    await this.kg.markConnectorEntitiesStale(event.connectorType, tid)
+    await this.kg.addEpisode({ tenantId: tid, source: 'connector_capability_changed', text: `Connector ${event.connectorType} capability changed — entities marked stale for re-index`, timestamp: new Date() })
   }
 }

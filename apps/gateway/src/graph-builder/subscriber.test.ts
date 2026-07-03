@@ -90,11 +90,11 @@ describe('startGraphBuilderSubscriber', () => {
     for (const k of cleared) { if (prev[k] !== undefined) process.env[k] = prev[k] }
   })
 
-  it('subscribes to all 7 graph event channels plus kb:stale', async () => {
+  it('subscribes to all 14 graph event channels plus kb:stale', async () => {
     process.env['ANTHROPIC_API_KEY'] = 'test-key'
     await startGraphBuilderSubscriber('redis://localhost:6379', mockLog as any)
 
-    expect(mockSubscribe).toHaveBeenCalledTimes(8)
+    expect(mockSubscribe).toHaveBeenCalledTimes(15)
     const channels = mockSubscribe.mock.calls.map((c: unknown[]) => c[0])
     expect(channels).toContain('pr_merged')
     expect(channels).toContain('deploy_completed')
@@ -103,6 +103,13 @@ describe('startGraphBuilderSubscriber', () => {
     expect(channels).toContain('connector_registered')
     expect(channels).toContain('connector_removed')
     expect(channels).toContain('connector_reconnected')
+    expect(channels).toContain('project_created')
+    expect(channels).toContain('repo_created')
+    expect(channels).toContain('namespace_created')
+    expect(channels).toContain('resource_added')
+    expect(channels).toContain('team_changed')
+    expect(channels).toContain('oncall_rotation')
+    expect(channels).toContain('connector_capability_changed')
     expect(channels).toContain('kb:stale')
     expect(mockLog.info).toHaveBeenCalled()
   })

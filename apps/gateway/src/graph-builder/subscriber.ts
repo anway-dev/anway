@@ -85,6 +85,10 @@ const GRAPH_EVENT_CHANNELS = [
   'pr_merged', 'deploy_completed', 'incident_created',
   'ticket_created', 'connector_registered', 'connector_removed',
   'connector_reconnected',
+  // T17 — missing lifecycle channels
+  'project_created', 'repo_created', 'namespace_created',
+  'resource_added', 'team_changed', 'oncall_rotation',
+  'connector_capability_changed',
 ]
 
 const MAX_REGISTRY_CACHE = 200

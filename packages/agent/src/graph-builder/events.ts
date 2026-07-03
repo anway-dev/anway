@@ -12,6 +12,13 @@ export type GraphEvent =
   | DeployCompleted
   | DeployTrigger
   | TicketCreated
+  | ProjectCreated
+  | RepoCreated
+  | NamespaceCreated
+  | ResourceAdded
+  | TeamChanged
+  | OncallRotation
+  | ConnectorCapabilityChanged
 
 export interface ConnectorRegistered {
   type: 'connector_registered'
@@ -84,4 +91,67 @@ export interface TicketCreated {
   title: string
   description: string
   labels: string[]
+}
+
+// T17 — previously missing lifecycle event types
+export interface ProjectCreated {
+  type: 'project_created'
+  tenantId: string
+  projectId: string
+  name: string
+  teamId?: string
+}
+
+export interface RepoCreated {
+  type: 'repo_created'
+  tenantId: string
+  repoId: string
+  name: string
+  language?: string
+  org?: string
+}
+
+export interface NamespaceCreated {
+  type: 'namespace_created'
+  tenantId: string
+  name: string
+  services?: string[]
+}
+
+export interface ResourceAdded {
+  type: 'resource_added'
+  tenantId: string
+  resourceId: string
+  resourceType: string
+  tags?: Record<string, string>
+  service?: string
+  team?: string
+}
+
+export interface TeamChanged {
+  type: 'team_changed'
+  tenantId: string
+  teamId: string
+  name: string
+  members?: string[]
+  slackChannel?: string
+}
+
+export interface OncallRotation {
+  type: 'oncall_rotation'
+  tenantId: string
+  teamId: string
+  engineerId: string
+  engineerName?: string
+  validFrom: string
+  validTo?: string
+}
+
+export interface ConnectorCapabilityChanged {
+  type: 'connector_capability_changed'
+  tenantId: string
+  connectorId: string
+  connectorType: string
+  previousManifest?: Record<string, unknown>
+  newManifest?: Record<string, unknown>
 }

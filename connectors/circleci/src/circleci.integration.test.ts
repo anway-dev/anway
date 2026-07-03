@@ -6,8 +6,8 @@ import { CircleciAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'GET', path: '/api/v2/me', status: 200, body: {'login': 'test-user', 'id': 'user-1'} },
-  { method: 'GET', path: '/api/v2/pipeline', status: 200, body: {'items': [{'id': 'pipe-1', 'project_slug': 'gh/acme/payments', 'state': 'created'}]} }
+  { method: 'GET', path: '/me', status: 200, body: {'login': 'test-user', 'id': 'user-1'} },
+  { method: 'GET', path: '/pipeline', status: 200, body: {'items': [{'id': 'pipe-1', 'project_slug': 'gh/acme/payments', 'state': 'created'}]} }
 ]
 
 describe('circleci — fixture HTTP server', () => {

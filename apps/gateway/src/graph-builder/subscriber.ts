@@ -45,6 +45,50 @@ import { GcpMonitoringBootstrap } from '@anway/connector-gcp-monitoring'
 
 // Alertmanager is a native connector (no separate package) — bootstrap inline
 import type { TenantId as TID } from '@anway/types'
+// T26 — kb_entries write path: composes Service entity content, embeds it,
+// and INSERTs INTO kb_entries for pgvector semantic search.
+let providerConfigForEmbedding: ProviderConfig | null = null
+async function writeKnowledgeEntries(tid: string, providerConfig: ProviderConfig | null, eventType: string): Promise<void> {
+  if (!providerConfig) return
+  const embedder = ProviderFactory.createEmbedder(providerConfig)
+  if (!embedder) return
+  try {
+    const serviceEntities = await withTenant(prisma, tid, (tx) =>
+      tx.$queryRaw<Array<{ name: string; type: string; metadata: Record<string, unknown> }>>`
+        SELECT name, type, metadata FROM entities
+        WHERE tenant_id = ${tid}::uuid AND type = 'Service'
+        ORDER BY name LIMIT 200
+      `
+    ).catch(() => [] as Array<{ name: string; type: string; metadata: Record<string, unknown> }>)
+    for (const entity of serviceEntities) {
+      try {
+        const content = `${entity.type}: ${entity.name} — ${JSON.stringify(entity.metadata ?? {})}`
+        const contentHash = Buffer.from(content).toString('base64').slice(0, 32)
+        const existing = await withTenant(prisma, tid, (tx) =>
+          tx.$queryRaw<Array<{ count: bigint }>>`
+            SELECT COUNT(*) as count FROM kb_entries
+            WHERE tenant_id = ${tid}::uuid AND source = ${contentHash}
+          `
+        ).catch(() => [{ count: 0n }] as Array<{ count: bigint }>)
+        if (Number(existing[0]?.count ?? 0n) > 0) continue
+        const vecs = await embedder.embed([content])
+        const vec = vecs[0]
+        if (vec && vec.length > 0) {
+          const vectorLiteral = `[${vec.join(',')}]`
+          const ttl = eventType === 'pr_merged' || eventType === 'deploy_completed' ? 300 : 7200
+          await withTenant(prisma, tid, (tx) =>
+            tx.$queryRaw`
+              INSERT INTO kb_entries (tenant_id, source, content, embedding, fetched_at, ttl_seconds, freshness_score)
+              VALUES (${tid}::uuid, ${contentHash}, ${content}, ${vectorLiteral}::vector, NOW(), ${ttl}, 1.0)
+              ON CONFLICT DO NOTHING
+            `
+          ).catch(() => { /* non-blocking */ })
+        }
+      } catch { /* skip individual entity on embed failure */ }
+    }
+  } catch { /* non-blocking */ }
+}
+
 class AlertmanagerBootstrapImpl implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
   async bootstrap(tenantId: TID, connectorId: string, _payload: Record<string, unknown>) {
@@ -202,6 +246,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       const eventConnectorType = (event as { connectorType?: string }).connectorType
 
       const providerConfig = await resolveProviderConfig(tid)
+      providerConfigForEmbedding = providerConfig  // T26: for kb_entries write path
       if (!providerConfig) {
         log.warn({ tenantId: tid }, 'GraphBuilderSubscriber: no LLM provider configured — skipping')
         return
@@ -259,6 +304,11 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       }
       try {
         await agent.handle(event)
+
+        // T26: Write kb_entries for Service entities after bootstrap/event.
+        // Composes entity content → embeds → INSERT INTO kb_entries for pgvector search.
+        await writeKnowledgeEntries(tid, providerConfig, event.type)
+
         if (isBootstrapEvent) {
           const connectorType = eventConnectorType
           if (connectorType) {
@@ -382,6 +432,7 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
     const tid = event.tenantId
 
     const providerConfig = await resolveProviderConfig(tid)
+    providerConfigForEmbedding = providerConfig  // T26: for kb_entries write path
     if (!providerConfig) {
       log.warn({ tenantId: tid }, 'GraphWorker: no LLM provider configured — skipping')
       return

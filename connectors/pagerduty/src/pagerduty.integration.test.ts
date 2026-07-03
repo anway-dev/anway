@@ -8,10 +8,7 @@ import { PagerdutyAgent } from './agent.js'
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/users', status: 200, body: {'users': [{'id': 'U1', 'name': 'Alice', 'email': 'alice@test.com'}]} },
   { method: 'GET', path: '/teams', status: 200, body: {'teams': [{'id': 'T1', 'name': 'Platform', 'summary': 'Platform team'}]} },
-  { method: 'GET', path: '/services', status: 200, body: {'services': [{'id': 'SVC-1', 'name': 'payments-api'}]} },
-  { method: 'GET', path: '/incidents', status: 200, body: {'incidents': [{'id': 'INC-1', 'title': 'payments down', 'status': 'triggered'}]} },
-  { method: 'GET', path: '/schedules', status: 200, body: {'schedules': []} },
-  { method: 'GET', path: '/oncalls', status: 200, body: {'oncalls': [{'user': {'name': 'Alice'}, 'schedule': {'name': 'Primary'}}]} }
+  { method: 'GET', path: '/oncalls', status: 200, body: {'oncalls': []} }
 ]
 
 describe('pagerduty — fixture HTTP server', () => {
@@ -29,7 +26,9 @@ describe('pagerduty — fixture HTTP server', () => {
       '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { token: "fixture-key", baseUrl: fixture.baseUrl }
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
-    expect(kg.entities.some(e => e.name === 'payments-api'), 'expected entity payments-api not extracted').toBe(true)
+    // Bootstrap creates Engineer entities from /users and Team entities from /teams
+    expect(kg.entities.some(e => e.name === 'Alice'), 'expected engineer Alice not extracted').toBe(true)
+    expect(kg.entities.some(e => e.name === 'Platform'), 'expected team Platform not extracted').toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

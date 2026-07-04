@@ -3,7 +3,33 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 
 const TOOLS: ConnectorTool[] = [
-  { definition: { name: 'get_channel_history', description: 'Get channel messages', parameters: { type: 'object', properties: { channel: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['channel'] } }, execute: () => Promise.resolve({ messages: [{ user:'U123',text:'Deploy complete',ts:'1234567890.123' }] }), write: false },
+  {
+    definition: {
+      name: 'get_channel_history',
+      description: 'Get channel messages',
+      parameters: {
+        type: 'object',
+        properties: { channel: { type: 'string' }, limit: { type: 'number', optional: true } },
+        required: ['channel'],
+      },
+    },
+    execute: async (params, creds) => {
+      const token = (creds as ConnectorCreds).apiKey
+      if (!token) throw new Error('Slack API key not configured')
+      const baseUrl = typeof creds.baseUrl === 'string' ? creds.baseUrl : 'https://slack.com'
+      const channel = encodeURIComponent(String(params.channel))
+      const limit = typeof params.limit === 'number' ? params.limit : 20
+      const url = `${baseUrl}/api/conversations.history?channel=${channel}&limit=${limit}`
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error(`Slack conversations.history failed: HTTP ${res.status}`)
+      const json = await res.json() as { ok: boolean; messages?: Array<{ type?: string; user?: string; text?: string; ts?: string }>; error?: string }
+      if (!json.ok) throw new Error('Slack conversations.history failed: ' + (json.error ?? 'unknown error'))
+      return { messages: json.messages ?? [] }
+    },
+    write: false,
+  },
   {
     definition: { name: 'post_message', description: 'Post a message to channel', parameters: { type: 'object', properties: { channel: { type: 'string' }, text: { type: 'string' } }, required: ['channel', 'text'] } },
     execute: async (params, creds) => {

@@ -267,6 +267,25 @@ function getRedisBudget(): RedisClientType | null {
 // Module-level singletons — one per gateway process
 const inMemoryStore = new InMemorySessionMemory()
 
+// buildNativeConnectorScopes converts raw DB rows into ConnectorScope entries for the
+// perimeter. Applies user_perimeters overrides when a row matches the connector_type;
+// defaults to read:['*'] otherwise. Write is always [] (V1 read-only-via-chat posture).
+// Extracted as a pure function so the T82 fix is independently testable without a
+// Fastify route/DB harness.
+export function buildNativeConnectorScopes(
+  nativeConnectorRows: { connector_type: string }[],
+  userPerimeterRows: { connector_name: string; read_scopes: string[]; write_scopes: string[] }[],
+): ConnectorScope[] {
+  return nativeConnectorRows.map((nc) => {
+    const userOverride = userPerimeterRows.find(r => r.connector_name === nc.connector_type)
+    return {
+      connectorId: nc.connector_type,
+      read: userOverride ? userOverride.read_scopes : ['*'],
+      write: [], // V1 read-only-via-chat posture — write always denied for native connectors
+    }
+  })
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   // Production requires Redis — in-memory is dev-only
   if (process.env['NODE_ENV'] === 'production' && !process.env['REDIS_URL']) {
@@ -398,14 +417,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     // Add native connector scopes so perimeter allows their tools.
     // Apply user_perimeters overrides if configured — same pattern as dbConnectors above.
-    for (const nc of nativeConnectorRows) {
-      const userOverride = userPerimeterRows.find(r => r.connector_name === nc.connector_type)
-      connectorScopes.push({
-        connectorId: nc.connector_type,
-        read: userOverride ? userOverride.read_scopes : ['*'],
-        write: [], // V1 read-only-via-chat posture — write always denied for native connectors
-      })
-    }
+    connectorScopes.push(...buildNativeConnectorScopes(nativeConnectorRows, userPerimeterRows))
 
     const userPerimeter: UserPerimeter = {
       userId: UserId(userId),

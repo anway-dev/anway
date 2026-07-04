@@ -60,10 +60,15 @@ test.describe('CERT A: Health', () => {
 
 // ---------------------------------------------------------------------------
 test.describe('CERT B: Auth', () => {
-  test('B.1 POST /auth/token issues JWT for valid tenant', async ({ request }) => {
-    const r = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT },
-    })
+  // Rewritten from a fictional POST /auth/token route (never implemented —
+  // real gateway routes are /api/auth/demo, /api/auth/login, /api/auth/setup)
+  // to the real demo-login endpoint. Using an unauthenticated arbitrary-
+  // tenant/email token-mint route would be a cross-tenant auth bypass behind
+  // a boolean flag — rejected per security review. The real /api/auth/demo
+  // endpoint achieves the same practical purpose (a valid JWT for the fixed
+  // demo tenant) safely, since it's pinned to one tenant/email, not parametrized.
+  test('B.1 POST /api/auth/demo issues JWT for the demo tenant', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/auth/demo`)
     expect(r.status()).toBe(200)
     const body = await r.json() as { token?: string }
     expect(body.token, 'token must be issued').toBeTruthy()
@@ -870,11 +875,20 @@ test.describe('CERT Z: auth boundaries and tenant isolation', () => {
     expect(r.status()).toBe(401)
   })
 
-  test('Z.2 POST /auth/token with non-existent tenantId returns 400', async ({ request }) => {
-    const r = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: 'nobody@nowhere.com', tenantId: '00000000-0000-0000-0000-000000000099' },
+  // Rewritten from the fictional /auth/token route to the real
+  // /api/auth/login endpoint. Real behavior: a non-existent tenant+email
+  // combo returns 401 "invalid credentials", not a distinguishing 400 — this
+  // is the correct security property (avoids revealing whether a tenant/user
+  // exists vs. the password was wrong), not a gap.
+  test('Z.2 POST /api/auth/login with non-existent tenantId+email returns 401', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/auth/login`, {
+      data: {
+        email: 'nobody@nowhere.com',
+        password: 'irrelevant',
+        tenantId: '00000000-0000-0000-0000-000000000099',
+      },
     })
-    expect(r.status()).toBe(400)
+    expect(r.status()).toBe(401)
     const body = await r.json() as Record<string, unknown>
     expect(typeof body['error']).toBe('string')
   })
@@ -1917,10 +1931,14 @@ test.describe('CERT AW: auth edge cases', () => {
     expect(body.tenantId, 'tenantId must be the demo tenant').toBe(DEMO_TENANT)
   })
 
-  test('AW.2 POST /auth/token with missing email returns 400', async ({ request }) => {
-    const r = await request.post(`${GATEWAY}/auth/token`, {
+  // Rewritten from the fictional /auth/token route to the real
+  // /api/auth/login endpoint. Fastify's own JSON-schema body validation
+  // (required: ['email', 'password']) rejects a missing email with 400
+  // before the handler runs.
+  test('AW.2 POST /api/auth/login with missing email returns 400', async ({ request }) => {
+    const r = await request.post(`${GATEWAY}/api/auth/login`, {
       headers: { 'Content-Type': 'application/json' },
-      data: { tenantId: DEMO_TENANT },
+      data: { password: 'irrelevant', tenantId: DEMO_TENANT },
     })
     expect(r.status(), 'missing email must return 400').toBe(400)
   })

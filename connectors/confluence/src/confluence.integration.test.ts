@@ -5,9 +5,57 @@ import { ConfluenceBootstrap } from './bootstrap.js'
 import { ConfluenceAgent } from './agent.js'
 
 
+const searchFixture = {
+  results: [
+    {
+      id: 'p-100',
+      title: 'Runbook: payments-api',
+      type: 'page',
+      _links: { webui: '/wiki/spaces/PAY/pages/100/Runbook-payments-api' },
+      version: { when: '2026-07-01T14:30:00.000Z' },
+    },
+    {
+      id: 'p-101',
+      title: 'Architecture Overview',
+      type: 'page',
+      _links: { webui: '/wiki/spaces/ENG/pages/101/Architecture-Overview' },
+      version: { when: '2026-06-28T09:15:00.000Z' },
+    },
+    {
+      id: 'p-102',
+      title: 'Incident Post-Mortem: checkout-outage',
+      type: 'page',
+      _links: { webui: '/wiki/spaces/SRE/pages/102/Incident-Post-Mortem' },
+      version: { when: '2026-07-03T22:00:00.000Z' },
+    },
+  ],
+  _links: { base: 'https://test.atlassian.net/wiki' },
+}
+
+const emptySearchFixture = {
+  results: [],
+  _links: { base: 'https://test.atlassian.net/wiki' },
+}
+
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'GET', path: '/wiki/rest/api/space', status: 200, body: {'results': [{'key': 'PAY', 'name': 'Payments Team'}]} },
-  { method: 'GET', path: '/wiki/rest/api/space/PAY/content', status: 200, body: {'results': [{'id': '123', 'title': 'Runbook: payments-api', 'type': 'page'}]} }
+  {
+    method: 'GET',
+    path: '/wiki/rest/api/space',
+    status: 200,
+    body: { results: [{ key: 'PAY', name: 'Payments Team' }] },
+  },
+  {
+    method: 'GET',
+    path: '/wiki/rest/api/space/PAY/content',
+    status: 200,
+    body: { results: [{ id: '123', title: 'Runbook: payments-api', type: 'page' }] },
+  },
+  {
+    method: 'GET',
+    path: '/wiki/rest/api/content/search',
+    status: 200,
+    body: searchFixture,
+  },
 ]
 
 describe('confluence — fixture HTTP server', () => {
@@ -19,44 +67,93 @@ describe('confluence — fixture HTTP server', () => {
 
   afterAll(async () => { await fixture.close() })
 
+  // ── bootstrap ──────────────────────────────────────────────────────
+
   it('bootstrap extracts entities from fixture', async () => {
     const kg = new FakeKG()
     const result = await new ConfluenceBootstrap(kg).bootstrap(
-      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { baseUrl: fixture.baseUrl, email: "test@test.com", apiToken: "fixture-token" }
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector',
+      { baseUrl: fixture.baseUrl, email: 'test@test.com', apiToken: 'fixture-token' },
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
-    // Bootstrap creates Doc entities from page titles, not Space entities
     expect(kg.entities.some(e => e.name === 'Runbook: payments-api'), 'expected doc not extracted').toBe(true)
   })
 
-  it('agent tools query fixture server', async () => {
+  // ── search_pages — happy path ──────────────────────────────────────
+
+  it('search_pages returns real parsed data from fixture', async () => {
     const agent = new ConfluenceAgent()
-    const tools = agent.tools
-    expect(tools.length).toBeGreaterThan(0)
-    const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
+    expect(tool).toBeDefined()
+    expect(tool.write).toBe(false)
+
+    const result = await tool.execute(
+      { query: 'payments' },
+      { baseUrl: fixture.baseUrl, email: 'test@test.com', apiToken: 'fixture-token' },
+    ) as { pages: Array<{ id: string; title: string; url: string; updatedAt: string }> }
+
+    expect(result.pages).toHaveLength(3)
+
+    // First result: Runbook page
+    expect(result.pages[0]!.id).toBe('p-100')
+    expect(result.pages[0]!.title).toBe('Runbook: payments-api')
+    expect(result.pages[0]!.url).toContain('/wiki/spaces/PAY/pages/100/Runbook-payments-api')
+    expect(result.pages[0]!.updatedAt).toBe('2026-07-01T14:30:00.000Z')
+
+    // Second result: Architecture page
+    expect(result.pages[1]!.id).toBe('p-101')
+    expect(result.pages[1]!.title).toBe('Architecture Overview')
+    expect(result.pages[1]!.url).toContain('/wiki/spaces/ENG/pages/101/Architecture-Overview')
+
+    // Third result: Incident post-mortem
+    expect(result.pages[2]!.id).toBe('p-102')
+    expect(result.pages[2]!.title).toBe('Incident Post-Mortem: checkout-outage')
+    expect(result.pages[2]!.updatedAt).toBe('2026-07-03T22:00:00.000Z')
   })
 
-  it('fixture server received at least one request', () => {
-    expect(fixture.receivedRequests.length).toBeGreaterThan(0)
+  it('search_pages URL includes CQL-encoded query', async () => {
+    const agent = new ConfluenceAgent()
+    const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
+
+    await tool.execute(
+      { query: 'checkout' },
+      { baseUrl: fixture.baseUrl, email: 'test@test.com', apiToken: 'fixture-token' },
+    )
+
+    const searchReqs = fixture.receivedRequests.filter(r => r.path.includes('/wiki/rest/api/content/search'))
+    expect(searchReqs.length).toBeGreaterThan(0)
+    const cqlReq = searchReqs.find(r => r.path.includes('cql='))
+    expect(cqlReq, 'expected CQL query param in search URL').toBeDefined()
+    expect(cqlReq!.path).toContain('text~')
+  })
+
+  // ── search_pages — error path / empty on failure ───────────────────
+
+  it('search_pages returns empty on missing creds', async () => {
+    const agent = new ConfluenceAgent()
+    const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
+
+    const result = await tool.execute({ query: 'payments' }, {}) as { pages: unknown[] }
+    expect(result.pages).toEqual([])
+  })
+
+  it('search_pages returns empty when query is blank', async () => {
+    const agent = new ConfluenceAgent()
+    const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
+
+    const result = await tool.execute(
+      { query: '   ' },
+      { baseUrl: fixture.baseUrl, email: 'test@test.com', apiToken: 'fixture-token' },
+    ) as { pages: unknown[] }
+    expect(result.pages).toEqual([])
+  })
+
+  // ── fixture server audit ───────────────────────────────────────────
+
+  it('fixture server received bootstrap + search requests', () => {
+    const paths = fixture.receivedRequests.map(r => r.path.split('?')[0]!)
+    expect(paths.some(p => p === '/wiki/rest/api/space'), 'expected /wiki/rest/api/space call').toBe(true)
+    expect(paths.some(p => p.includes('/wiki/rest/api/space/PAY/content')), 'expected /wiki/rest/api/space/PAY/content call').toBe(true)
+    expect(paths.some(p => p === '/wiki/rest/api/content/search'), 'expected /wiki/rest/api/content/search call').toBe(true)
   })
 })
-
-
-  describe('confluence — orchestration (specialist agent)', () => {
-    it('specialist agent routes user query to tool and returns grounded response', async () => {
-      // Requires a real LLM provider. Skip if none configured.
-      const providerType = process.env['ANTHROPIC_API_KEY'] ? 'anthropic'
-        : process.env['OPENAI_API_KEY'] ? 'openai'
-        : process.env['OLLAMA_ENDPOINT'] ? 'ollama'
-        : null
-      if (!providerType) {
-        console.log('Skipping orchestration test — no model provider configured')
-        return
-      }
-      // Orchestration test: verify the agent harness routes "What Confluence spaces exist?"
-      // to the correct tool. Fixture/container validates the HTTP call.
-      expect(true).toBe(true)  // placeholder — full agent run requires real model
-    })
-  })

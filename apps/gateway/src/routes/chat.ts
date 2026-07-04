@@ -396,9 +396,15 @@ export async function chatRoutes(app: FastifyInstance) {
       }
     }
 
-    // Add native connector scopes so perimeter allows their tools
+    // Add native connector scopes so perimeter allows their tools.
+    // Apply user_perimeters overrides if configured — same pattern as dbConnectors above.
     for (const nc of nativeConnectorRows) {
-      connectorScopes.push({ connectorId: nc.connector_type, read: ['*'], write: [] })
+      const userOverride = userPerimeterRows.find(r => r.connector_name === nc.connector_type)
+      connectorScopes.push({
+        connectorId: nc.connector_type,
+        read: userOverride ? userOverride.read_scopes : ['*'],
+        write: [], // V1 read-only-via-chat posture — write always denied for native connectors
+      })
     }
 
     const userPerimeter: UserPerimeter = {

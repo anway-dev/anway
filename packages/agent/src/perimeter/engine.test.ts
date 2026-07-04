@@ -117,3 +117,41 @@ describe('AgentPerimeter builtin tools (bare names, no connector prefix)', () =>
     expect(withBuiltins.allows(makeCall('linear.list_issues'))).toBe(false)
   })
 })
+
+describe('AgentPerimeter — native connector restricted read scope (user_perimeters override)', () => {
+  const k8sManifest: ConnectorManifest = {
+    connectorId: 'k8s',
+    mode: 'read',
+    capabilities: { read: ['*'], write: [] },
+  }
+
+  it('allows read with resource matching restricted scope', () => {
+    // Simulates a user_perimeters row restricting k8s to namespace/staging
+    const restricted: UserPerimeter = {
+      userId,
+      connectors: [{ connectorId: 'k8s', read: ['namespace/staging/*'], write: [] }],
+    }
+    const p = AgentPerimeter.resolveCapabilities(restricted, [k8sManifest])
+    expect(p.allows(makeCall('k8s.get_pod', 'namespace/staging/pod-x'))).toBe(true)
+  })
+
+  it('blocks read with resource outside restricted scope', () => {
+    const restricted: UserPerimeter = {
+      userId,
+      connectors: [{ connectorId: 'k8s', read: ['namespace/staging/*'], write: [] }],
+    }
+    const p = AgentPerimeter.resolveCapabilities(restricted, [k8sManifest])
+    expect(p.allows(makeCall('k8s.get_pod', 'namespace/prod/pod-y'))).toBe(false)
+  })
+
+  it('defaults to read: [*] when no user_perimeters row exists (preserve-current-behavior)', () => {
+    // No user_perimeters override → read: ['*'] — unrestricted
+    const defaultOpen: UserPerimeter = {
+      userId,
+      connectors: [{ connectorId: 'k8s', read: ['*'], write: [] }],
+    }
+    const p = AgentPerimeter.resolveCapabilities(defaultOpen, [k8sManifest])
+    expect(p.allows(makeCall('k8s.get_pod', 'namespace/prod/pod-y'))).toBe(true)
+    expect(p.allows(makeCall('k8s.get_pod', 'any/namespace/pod-z'))).toBe(true)
+  })
+})

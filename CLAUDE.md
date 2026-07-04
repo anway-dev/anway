@@ -344,6 +344,10 @@ The full autonomy dial (L1→L4) is the product roadmap. V1 is L2 for everything
 - **L3 Supervise** — Anway executes, human can interrupt. Unlock per-service after trust established.
 - **L4 Autonomous** — Anway executes within policy bounds, async audit only. Unlock explicitly, never default.
 
+### Native-connector write posture (V1 scope note)
+
+Native connector tools (the 35 built-in connectors under `connectors/*`, wired via `apps/gateway/src/tools/native-connector-tools.ts`) expose read-only tools through chat in V1 — `connector-tools-adapter.ts`'s `adaptConnectorAgent()` filters out every `write: true` tool before it reaches the orchestrator, by design, not as a gap. Write actions in V1 are reachable only through the dedicated direct-write routes that already implement the full L2 gate contract: `apps/gateway/src/routes/k8s.ts` (scale/restart/cordon), `apps/gateway/src/routes/terraform.ts` (apply), and the deploy-tools harness tools (`trigger_pipeline`, `approve_gate`). This is a deliberate V1 scope boundary, not an oversight — expanding native-connector writes to route through the chat path (instead of inventing new plumbing) is a real future item if a use case demands it, but is not required for V1's read-focused contract (resolve issues, surface context, recommend actions).
+
 ---
 
 ## Architecture
@@ -733,10 +737,6 @@ Cloud is not AWS, GCP, or Azure. Cloud is wherever the org runs. A connector exi
 Every cloud connector follows the same acquisition strategy above (MCP → CLI → SDK). AWS CLI (`aws`), GCloud CLI (`gcloud`), Azure CLI (`az`) are all first-class targets. Do not hard-code assumptions about which cloud a workspace uses — connector configuration at provisioning time declares what the org has.
 
 **Do not build a connector abstraction layer now.** Defer until 3+ connectors exist and the pattern is clear.
-
-### Accepted deviation (2026-07-03): Vault connector integration test — testcontainers timing
-
-`connectors/vault/src/vault.integration.test.ts` has one integration test that fails intermittently under full-mode cert (`RUN_UNIT_TESTS=1`): the `entitiesUpserted` assertion expects at least the container's default mount count, but the `/v1/sys/mounts` fetch in `bootstrap.ts` sometimes gets a non-2xx response from the testcontainers-managed Vault instance before the container's networking has fully stabilized — even though the `Wait.forHttp("/v1/sys/health", 8200)` readiness check already passed. This is NOT a Vault API defect or a connector code bug: standalone reproduction (`docker run --rm -p 8200:8200 hashicorp/vault:1.17 server -dev`, bypassing testcontainers entirely) shows the identical `/v1/sys/mounts` call succeeding immediately with real mount data on the first request, every time. The discrepancy is isolated to how testcontainers' `GenericContainer` wires container networking/timing in this specific sandboxed dev environment, not to Vault or `bootstrap.ts`. A retry loop was added around the mounts fetch (see `bootstrap.ts`) as reasonable hardening, but does not fully eliminate the flake in this environment. Accepted as an environment-specific test-infra exception, not deferred product work — full-mode certification (`scripts/prod-readiness-check.sh`, `RUN_UNIT_TESTS=1 RUN_E2E=0`) is expected to show exactly this one failure and no others. Review trigger: if the failure moves to a different assertion/line in this test file, or starts failing in a real deployed environment (not just this sandboxed dev container), re-open as a genuine defect — do not re-apply this exception blindly to a different symptom.
 
 ---
 

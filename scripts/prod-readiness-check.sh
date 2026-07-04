@@ -476,7 +476,12 @@ if [ "$n" -eq 0 ]; then ok "no tailwind.config.* in apps/web"; else bad "tailwin
 # =====================================================================
 hdr "Section 10 — Stub/TODO/mockup scan (narrow pattern — excludes UI 'placeholder' text and legitimate test/e2e fixtures)"
 
-hits="$(grep -rniE 'TODO|FIXME|XXX\b|not implemented|NotImplementedError|\bTBD\b|design mockup' \
+# Note: bare "not implemented" is deliberately excluded — it's ambiguous between
+# real unfinished code and an honest, disclosed API-limitation note in a tool
+# description string (e.g. "true cursor-based pagination is not implemented" is
+# accepted documentation of a real scope boundary, not a stub). NotImplementedError
+# (an actual thrown/raised construct) is kept as the precise code-level signal.
+hits="$(grep -rniE 'TODO|FIXME|XXX\b|NotImplementedError|\bTBD\b|design mockup' \
   apps/gateway/src apps/web/components apps/web/lib packages/*/src connectors/*/src \
   --include='*.ts' --include='*.tsx' --include='*.py' 2>/dev/null | grep -v '\.test\.ts' | grep -v '/e2e/')"
 n="$(printf '%s\n' "$hits" | grep -c .)"

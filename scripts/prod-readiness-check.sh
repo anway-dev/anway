@@ -39,6 +39,20 @@ WEBHOOK_TOKEN="anway-demo-webhook-token"          # apps/gateway/.env ANWAY_WEBH
 DEMO_TENANT="00000000-0000-0000-0000-000000000001" # apps/gateway/.env ANWAY_WEBHOOK_TENANT (verbatim)
 PG_USER="anway"
 PG_DB="anway_dev"                                  # infra/docker-compose.dev.yml postgres.environment.POSTGRES_DB
+# If /api/auth/setup was already completed by a prior admin on this stack (the
+# common case — setup is one-time, blocked once any users.password_hash is set),
+# the defaults below won't have a matching login and the 6 auth-gated checks in
+# this script SKIP rather than run for real. To get a reproducible working
+# credential without wiping shared state, reset an EXISTING admin's password
+# directly (bcryptjs cost 12, matching apps/gateway/src/routes/auth.ts's own
+# hashing) and pass it in via env vars:
+#
+#   node -e "require('bcryptjs').hash('YourNewPassword123!', 12).then(h => console.log(h))"
+#   PGPASSWORD=anway_dev_secret psql -h 127.0.0.1 -U anway -d anway_dev -c \
+#     "UPDATE users SET password_hash = '<hash-from-above>' WHERE email = '<existing-admin-email>';"
+#   CERT_EMAIL=<existing-admin-email> CERT_PASSWORD='YourNewPassword123!' bash scripts/prod-readiness-check.sh
+#
+# Find an existing admin email first: SELECT email FROM users WHERE password_hash IS NOT NULL;
 CERT_EMAIL="${CERT_EMAIL:-prod-readiness-cert@anway.local}"
 CERT_PASSWORD="${CERT_PASSWORD:-ProdReadinessCert!2026x}"
 RUN_UNIT_TESTS="${RUN_UNIT_TESTS:-1}"

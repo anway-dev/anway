@@ -579,7 +579,17 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const errMsg = 'DOCKER_REGISTRY and GITHUB_TOKEN not configured — cannot build images'
             await finishRun('failed', { summary: errMsg, gitSha })
             sse({ type: 'error', message: errMsg })
-            // Abort the pipeline so subsequent stages don't run on a failed build
+            // Abort the pipeline so subsequent stages don't run on a failed build.
+            // sse() fans out via Redis pub/sub (fire-and-forget publish) when
+            // REDIS_URL is set — give the round-trip a moment to land before
+            // ending the stream, or this terminal frame is silently dropped.
+            // NOTE: 150ms is an empirical mitigation for typical local Redis
+            // latency, not a guarantee — it can still race under load, network
+            // jitter, or a slower environment. If this ever flakes, replace
+            // with an ack-based mechanism (e.g. await pub.publish's resolved
+            // subscriber count, or a dedicated ack channel) rather than a
+            // longer guess.
+            await new Promise(r => setTimeout(r, 150))
             return reply.raw.end()
             break
           }
@@ -669,10 +679,20 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const { path: kubeconfig, cleanup: kubeconfigCleanup } = await resolveKubeconfigPath(tenantId)
 
             if (!kubeconfig) {
-              // No K8s connector — fail explicitly instead of fabricating success
+              // No K8s connector — fail explicitly instead of fabricating success.
+              // sse() fans out via Redis pub/sub (fire-and-forget publish) when
+              // REDIS_URL is set — give the round-trip a moment to land before
+              // ending the stream, or this terminal frame is silently dropped.
+              // NOTE: 150ms is an empirical mitigation for typical local Redis
+              // latency, not a guarantee — it can still race under load, network
+              // jitter, or a slower environment. If this ever flakes, replace
+              // with an ack-based mechanism (e.g. await pub.publish's resolved
+              // subscriber count, or a dedicated ack channel) rather than a
+              // longer guess.
               sse({ type: 'status', message: 'Deploy failed: no KUBECONFIG — register a K8s/eks/gke connector to enable real deploys' })
               await finishRun('failed', { summary: 'No KUBECONFIG configured — cannot deploy', imageTag })
               sse({ type: 'error', message: 'No KUBECONFIG configured — cannot deploy' })
+              await new Promise(r => setTimeout(r, 150))
               return reply.raw.end()
               break
             }
@@ -924,8 +944,15 @@ export async function pipelineRoutes(app: FastifyInstance) {
         await finishRun('failed', { error: String(err) })
         sse({ type: 'error', message: String(err) })
       } finally {
-        // Flush terminal frame directly before Redis teardown to prevent drop
-        reply.raw.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+        // Some stage branches above (e.g. build/deploy with missing config)
+        // already call `return reply.raw.end()` before falling through to this
+        // finally block. Writing/ending again on an already-ended stream throws
+        // ERR_STREAM_WRITE_AFTER_END as an uncaught exception and crashes the
+        // whole gateway process — guard on writableEnded first.
+        if (!reply.raw.writableEnded) {
+          // Flush terminal frame directly before Redis teardown to prevent drop
+          reply.raw.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+        }
         await cleanRedis()
         releaseSlot()
         if (runId) activeRunChildren.delete(runId)
@@ -933,7 +960,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
       // Give Redis pub/sub time to deliver the final SSE event before closing
       await new Promise(r => setTimeout(r, 150))
-      reply.raw.end()
+      if (!reply.raw.writableEnded) reply.raw.end()
       } finally {
         releaseSlot()
       }

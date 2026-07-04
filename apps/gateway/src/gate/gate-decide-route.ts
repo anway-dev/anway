@@ -13,6 +13,28 @@ const TRIGGER_ACTION_TYPES = new Set([
   'escalate', 'block_deploy_gate', 'open_war_room', 'surface_context',
 ])
 
+/**
+ * Resolve a representative connector id for a manually-created gate
+ * (POST /api/gate). Same intent as executor.ts's actionTypeToConnector but
+ * covers the broader verb set admins pass here (deploy/restart_pod/scale/
+ * cordon/terraform.apply/...) since this route has no upstream tool-call
+ * context to read a real connectorId from (unlike RedisGateSink.push, which
+ * receives event.connectorId from the orchestrator's tool-call metadata).
+ */
+export function resolveConnectorId(action: string, scope?: string): string {
+  if (scope && scope !== '*') return scope
+  const a = action.toLowerCase()
+  if (a.startsWith('terraform')) return 'terraform'
+  if (a === 'deploy' || a.startsWith('deploy.') || a === 'trigger_pipeline' || a === 'approve_gate') return 'argocd'
+  if (a === 'restart' || a === 'restart_pod' || a === 'scale' || a === 'cordon' || a.startsWith('k8s.')) return 'k8s'
+  if (a === 'notify_oncall' || a === 'escalate') return 'pagerduty'
+  if (a === 'notify_channel') return 'slack'
+  if (a === 'block_deploy_gate') return 'argocd'
+  const dot = a.indexOf('.')
+  if (dot > 0) return a.slice(0, dot)
+  return 'system'
+}
+
 const redisUrl = process.env['REDIS_URL']
 const gateSink = redisUrl ? new RedisGateSink(redisUrl) : null
 
@@ -214,18 +236,19 @@ export async function gateDecideRoutes(app: FastifyInstance) {
       }
 
       const systemSentinel = '00000000-0000-0000-0000-000000000000'
+      const connectorId = resolveConnectorId(action, scope)
       const row = await withTenant(prisma, tenantId, (tx) =>
         autoApproved
           ? tx.$queryRaw<Array<{ id: string }>>`
               INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at, decided_by, decided_at)
               VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
-                      ${action}, ${toolArgs}::jsonb, 'test', ${status}::text, NOW(), ${systemSentinel}::uuid, NOW())
+                      ${action}, ${toolArgs}::jsonb, ${connectorId}, ${status}::text, NOW(), ${systemSentinel}::uuid, NOW())
               RETURNING id
             `
           : tx.$queryRaw<Array<{ id: string }>>`
               INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
               VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
-                      ${action}, ${toolArgs}::jsonb, 'test', ${status}::text, NOW())
+                      ${action}, ${toolArgs}::jsonb, ${connectorId}, ${status}::text, NOW())
               RETURNING id
             `
       )

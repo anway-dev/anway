@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GcpMonitoringAgent } from './agent.js'
+import { GcpMonitoringBootstrap } from './bootstrap.js'
+import { FakeKnowledgeGraph } from '@anway/agent/testing'
 
 // ---------------------------------------------------------------------------
 // Realistic gcloud CLI JSON fixtures
@@ -615,5 +617,103 @@ describe('GcpMonitoringAgent — tool tests (mocked execFile, argv array)', () =
       const args = execFile.mock.calls[0]![1] as string[]
       expect(args).not.toContain('--project')
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bootstrap tests — real gcloud CLI calls (no fake placeholder entities)
+// ---------------------------------------------------------------------------
+describe('GcpMonitoringBootstrap — bootstrap tests (mocked execFile + fetch)', () => {
+  beforeEach(() => {
+    execFile.mockReset()
+    mockFetch.mockReset()
+  })
+
+  it('upserts Alert entities from real alert policies list + service health events', async () => {
+    // 1st execFile: monitoring policies list → 2 policies
+    mockStdoutOnce(POLICIES_OUTPUT)
+    // 2nd execFile: gcloud auth print-access-token
+    execFile.mockImplementationOnce(
+      (_file: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        cb(null, { stdout: 'fake-token\n', stderr: '' })
+      },
+    )
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => HEALTH_EVENTS_OUTPUT,
+    })
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new GcpMonitoringBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      { project_id: 'my-project' },
+    )
+
+    expect(result.entitiesUpserted).toBe(2 + HEALTH_EVENTS_OUTPUT.events.length)
+    expect(result.episodeHints[0]).toContain('2 alert policies discovered')
+    expect(result.episodeHints[1]).toContain(`${HEALTH_EVENTS_OUTPUT.events.length} service health events discovered`)
+  })
+
+  it('returns zero entities gracefully when policies list fails', async () => {
+    mockErrorOnce('gcloud: command not found')
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new GcpMonitoringBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      {},
+    )
+
+    expect(result.entitiesUpserted).toBe(0)
+    expect(result.episodeHints[0]).toContain('no data')
+  })
+
+  it('skips service health events when no project_id provided', async () => {
+    mockStdout(POLICIES_OUTPUT)
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new GcpMonitoringBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      {},
+    )
+
+    expect(result.entitiesUpserted).toBe(2)
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.episodeHints).toContain('No project_id provided — service health events not queried.')
+  })
+
+  it('marks disabled policies with low severity and disabled status', async () => {
+    mockStdoutOnce(POLICIES_OUTPUT)
+    execFile.mockImplementationOnce(
+      (_file: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        cb(new Error('no token'), { stdout: '', stderr: '' })
+      },
+    )
+
+    const kg = new FakeKnowledgeGraph()
+    await new GcpMonitoringBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      { project_id: 'my-project' },
+    )
+
+    const disabled = kg.entities.find(e => e.name === 'Memory Usage Alert')
+    expect(disabled?.metadata?.['status']).toBe('disabled')
+    expect(disabled?.metadata?.['severity']).toBe('low')
+  })
+
+  it('handles both policies list and service health failing', async () => {
+    mockError('command not found')
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new GcpMonitoringBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      { project_id: 'my-project' },
+    )
+
+    expect(result.entitiesUpserted).toBe(0)
   })
 })

@@ -222,7 +222,7 @@ export async function k8sRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
-      const { gateId } = request.body
+      const { gateId } = request.body ?? {}
 
       // Perimeter check (non-admin)
       if (user.role !== 'admin') {
@@ -272,7 +272,7 @@ export async function k8sRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { namespace, name } = request.params
-      const { replicas, gateId } = request.body
+      const { replicas, gateId } = request.body ?? {}
 
       if (typeof replicas !== 'number' || replicas < 0) {
         return reply.code(400).send({ error: 'replicas must be a non-negative number' })
@@ -326,7 +326,7 @@ export async function k8sRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { name } = request.params
-      const { gateId } = request.body
+      const { gateId } = request.body ?? {}
 
       // Enforce write perimeter for non-admin users — node name treated as scope
       if (user.role !== 'admin') {

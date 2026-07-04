@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { AzureMonitorAgent } from './agent.js'
+import { AzureMonitorBootstrap } from './bootstrap.js'
+import { FakeKnowledgeGraph } from '@anway/agent/testing'
 
 // ---------------------------------------------------------------------------
 // Realistic Azure CLI JSON fixtures
@@ -666,5 +668,118 @@ describe('AzureMonitorAgent — tool tests (mocked execFile, argv array)', () =>
       expect(callEnv.env!['AZURE_CLIENT_SECRET']).toBeUndefined()
       expect(callEnv.env!['AZURE_TENANT_ID']).toBeUndefined()
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bootstrap tests — real az CLI calls (no fake placeholder entities)
+// ---------------------------------------------------------------------------
+function mockStdoutOnce(json: unknown): void {
+  execFile.mockImplementationOnce(
+    (_file: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+      cb(null, { stdout: JSON.stringify(json), stderr: '' })
+    },
+  )
+}
+
+function mockErrorOnce(message: string): void {
+  execFile.mockImplementationOnce(
+    (_file: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+      cb(new Error(message), { stdout: '', stderr: message })
+    },
+  )
+}
+
+describe('AzureMonitorBootstrap — bootstrap tests (mocked execFile)', () => {
+  beforeEach(() => { execFile.mockReset() })
+
+  it('upserts Alert entities from real metric alert rules + service health events', async () => {
+    mockStdoutOnce(ALERTS_OUTPUT)     // 1st az call: monitor metrics alert list
+    mockStdoutOnce(HEALTH_EVENTS_OUTPUT) // 2nd az call: rest GET ResourceHealth events
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new AzureMonitorBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      creds(),
+    )
+
+    expect(result.entitiesUpserted).toBe(ALERTS_OUTPUT.length + HEALTH_EVENTS_OUTPUT.value.length)
+    expect(result.episodeHints[0]).toContain(`${ALERTS_OUTPUT.length} metric alert rules discovered`)
+    expect(result.episodeHints[1]).toContain(`${HEALTH_EVENTS_OUTPUT.value.length} service health events discovered`)
+  })
+
+  it('returns zero entities gracefully when metrics alert list fails', async () => {
+    mockErrorOnce('az: command not found')
+    mockStdoutOnce(HEALTH_EMPTY_OUTPUT)
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new AzureMonitorBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      creds(),
+    )
+
+    expect(result.episodeHints[0]).toContain('no data')
+  })
+
+  it('skips service health events when no subscriptionId provided', async () => {
+    mockStdout(ALERTS_OUTPUT)
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new AzureMonitorBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      { clientId: 'x', clientSecret: 'y', tenantId: 'z' }, // no subscriptionId
+    )
+
+    expect(result.entitiesUpserted).toBe(ALERTS_OUTPUT.length)
+    expect(result.episodeHints).toContain('No subscriptionId provided — service health events not queried.')
+  })
+
+  it('marks disabled alert rules with low severity and disabled status', async () => {
+    mockStdoutOnce(ALERTS_OUTPUT)
+    mockStdoutOnce(HEALTH_EMPTY_OUTPUT)
+
+    const kg = new FakeKnowledgeGraph()
+    await new AzureMonitorBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      creds(),
+    )
+
+    const disabled = kg.entities.find(e => e.name === 'Memory-low')
+    expect(disabled?.metadata?.['status']).toBe('disabled')
+    expect(disabled?.metadata?.['severity']).toBe('low')
+  })
+
+  it('handles both alert list and service health failing', async () => {
+    mockError('command not found')
+
+    const kg = new FakeKnowledgeGraph()
+    const result = await new AzureMonitorBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      creds(),
+    )
+
+    expect(result.entitiesUpserted).toBe(0)
+  })
+
+  it('accepts snake_case cred keys', async () => {
+    mockStdoutOnce(ALERTS_EMPTY_OUTPUT)
+    mockStdoutOnce(HEALTH_EMPTY_OUTPUT)
+
+    const kg = new FakeKnowledgeGraph()
+    await new AzureMonitorBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      { client_id: 'snake-id', client_secret: 'snake-secret', tenant_id: 'snake-tenant', subscription_id: 'snake-sub' },
+    )
+
+    const callEnv = execFile.mock.calls[0]![2] as { env?: Record<string, string> }
+    expect(callEnv.env!['AZURE_CLIENT_ID']).toBe('snake-id')
+    expect(callEnv.env!['AZURE_CLIENT_SECRET']).toBe('snake-secret')
+    expect(callEnv.env!['AZURE_TENANT_ID']).toBe('snake-tenant')
   })
 })

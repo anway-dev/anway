@@ -18,13 +18,20 @@ async function seedDemo() {
     VALUES (${DEMO_TENANT_ID}::uuid, 'Acme Corp (Demo)', 'demo', 'tier2', 10000000, 10)
     ON CONFLICT (id) DO NOTHING
   `
+  // Conflict target must match the real unique constraint —
+  // environments_tenant_name on (tenant_id, name), not id. Migration
+  // 0033_env_aware already auto-seeds 'staging'/'preprod' for every existing
+  // tenant with a random UUID; if this insert conflicted on id (always a
+  // fresh match against these hardcoded literals) it would never collide
+  // with that migration-seeded row and would hard-fail with a unique
+  // violation on (tenant_id, name) instead of no-op'ing.
   await prisma.$executeRaw`
     INSERT INTO environments (id, tenant_id, name, label, color, sort_order)
     VALUES
       ('00000000-0000-0000-0001-000000000001'::uuid, ${DEMO_TENANT_ID}::uuid, 'staging', 'Staging',        '#3b82f6', 0),
       ('00000000-0000-0000-0001-000000000002'::uuid, ${DEMO_TENANT_ID}::uuid, 'preprod', 'Pre-production', '#f59e0b', 1),
       ('00000000-0000-0000-0001-000000000003'::uuid, ${DEMO_TENANT_ID}::uuid, 'prod',    'Production',     '#10b981', 2)
-    ON CONFLICT (id) DO NOTHING
+    ON CONFLICT (tenant_id, name) DO NOTHING
   `
 
   const user = await prisma.user.upsert({
@@ -33,6 +40,18 @@ async function seedDemo() {
     create: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anway.dev', role: 'admin' },
   })
   log(`User: ${user.email}`)
+
+  // Second demo user — id is fixed because e2e/99-certification.spec.ts (CERT K,
+  // U, AQ, AS sections) hardcodes '00000000-0000-0000-0000-000000000002' as a
+  // target for perimeter GET/PUT checks. ON CONFLICT (id) is safe here (unlike
+  // the environments insert above): id is the only identifying literal any
+  // seeding path ever uses for this row, so there's no other insert path that
+  // could create the same (tenant_id, email) under a different id.
+  await prisma.$executeRaw`
+    INSERT INTO users (id, tenant_id, email, role)
+    VALUES ('00000000-0000-0000-0000-000000000002'::uuid, ${DEMO_TENANT_ID}::uuid, 'cert-user2@demo.anway.dev', 'dev')
+    ON CONFLICT (id) DO NOTHING
+  `
 
   await prisma.connector.createMany({
     skipDuplicates: true,
@@ -127,8 +146,8 @@ async function seedDemo() {
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'build',             'success','{"duration_ms":42300,"tests_passed":847,"tests_failed":0}'::jsonb,                                             now()-interval'18m',now()-interval'11m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'security-scan',     'success','{"vulnerabilities":0,"advisories":2,"scan_tool":"trivy"}'::jsonb,                                              now()-interval'11m',now()-interval'8m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-staging',    'success','{"pods_updated":3,"rollout_duration_ms":38000}'::jsonb,                                                        now()-interval'8m', now()-interval'3m'),
-      (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'integration-tests', 'running','{}':jsonb,                                                                                                    now()-interval'3m', NULL),
-      (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-prod',       'pending','{}':jsonb,                                                                                                    NULL,NULL),
+      (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'integration-tests', 'running','{}'::jsonb,                                                                                                    now()-interval'3m', NULL),
+      (gen_random_uuid(),'20000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-prod',       'pending','{}'::jsonb,                                                                                                    NULL,NULL),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000002'::uuid,${DEMO_TENANT_ID}::uuid,'build',             'success','{"duration_ms":31200,"tests_passed":612,"tests_failed":0}'::jsonb,                                             now()-interval'3h',now()-interval'3h'+interval'8m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000002'::uuid,${DEMO_TENANT_ID}::uuid,'security-scan',     'success','{"vulnerabilities":0,"advisories":0,"scan_tool":"trivy"}'::jsonb,                                              now()-interval'3h'+interval'8m',now()-interval'3h'+interval'11m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000002'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-staging',    'success','{"pods_updated":2,"rollout_duration_ms":22000}'::jsonb,                                                        now()-interval'3h'+interval'11m',now()-interval'3h'+interval'18m'),
@@ -138,14 +157,14 @@ async function seedDemo() {
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'build-all',         'success','{"services_built":8,"duration_ms":284000}'::jsonb,                                                             now()-interval'6h'+interval'2m',now()-interval'6h'+interval'49m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'smoke-tests',       'success','{"tests_passed":42,"tests_failed":0}'::jsonb,                                                                  now()-interval'6h'+interval'49m',now()-interval'6h'+interval'53m'),
       (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'canary-prod',       'failed', '{"error":"canary error rate 8.2% exceeded threshold 2%","rolled_back":true}'::jsonb,                           now()-interval'6h'+interval'53m',now()-interval'6h'+interval'61m'),
-      (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'full-prod',         'pending','{}':jsonb,                                                                                                    NULL,NULL),
+      (gen_random_uuid(),'20000000-0000-0000-0000-000000000003'::uuid,${DEMO_TENANT_ID}::uuid,'full-prod',         'pending','{}'::jsonb,                                                                                                    NULL,NULL),
       (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'build',             'success','{"duration_ms":62000,"images":["anway-gateway","anway-web","anway-agent-service"]}'::jsonb,                    now()-interval'28m',now()-interval'19m'),
       (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'test',              'running','{"tsc":"pass","packages":14,"gateway_tests":{"passed":62},"agent_tests":{"passed":93}}'::jsonb,               now()-interval'19m',NULL),
-      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'gate-staging',      'pending','{}':jsonb,NULL,NULL),
-      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-staging',    'pending','{}':jsonb,NULL,NULL),
-      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'monitor',           'pending','{}':jsonb,NULL,NULL),
-      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'gate-prod',         'pending','{}':jsonb,NULL,NULL),
-      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-prod',       'pending','{}':jsonb,NULL,NULL)
+      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'gate-staging',      'pending','{}'::jsonb,NULL,NULL),
+      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-staging',    'pending','{}'::jsonb,NULL,NULL),
+      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'monitor',           'pending','{}'::jsonb,NULL,NULL),
+      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'gate-prod',         'pending','{}'::jsonb,NULL,NULL),
+      (gen_random_uuid(),'40000000-0000-0000-0000-000000000001'::uuid,${DEMO_TENANT_ID}::uuid,'deploy-prod',       'pending','{}'::jsonb,NULL,NULL)
   `
   log('5 Pipelines + stage runs seeded.')
 

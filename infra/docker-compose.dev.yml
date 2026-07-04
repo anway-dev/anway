@@ -166,6 +166,8 @@ services:
       # Docker → host Ollama. Overrides the localhost-only .env default which
       # resolves to the container's own loopback when running in Docker.
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/v1
+      # Dev-only demo login (POST /api/auth/demo) — required by apps/web/e2e/fixtures.ts
+      DEMO_MODE: "true"
     ports:
       - "8510:8510"
     volumes:

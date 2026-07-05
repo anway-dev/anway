@@ -38,7 +38,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3100'
       const escapedService = String(params.service).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/"/g, '\\"')
-      const q = encodeURIComponent(`{container_name=~".*${escapedService}.*"}`)
+      const q = encodeURIComponent(`{container=~".*${escapedService}.*"}`)
       try {
         const res = await fetch(`${base}/loki/api/v1/query_range?query=count_over_time(${q}[1m])&limit=1`)
         if (!res.ok) return { points: [] }

@@ -10,14 +10,17 @@ export class LokiBootstrap implements IConnectorBootstrap {
     let services: string[]
     try {
       const res = await fetch(`${baseUrl}/loki/api/v1/label/service_name/values`)
-      if (!res.ok) {
+      // A 200 with no/empty `data` is the common case (this Loki setup has no
+      // service_name label at all — confirmed live: {"status":"success"} with
+      // no data field), not just a non-200 — must fall back on empty too.
+      const data = res.ok ? await res.json() as { data?: string[] } : undefined
+      if (data?.data?.length) {
+        services = data.data
+      } else {
         const res2 = await fetch(`${baseUrl}/loki/api/v1/label/job/values`)
         if (!res2.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }
-        const data2 = await res2.json() as { data: string[] }
+        const data2 = await res2.json() as { data?: string[] }
         services = data2.data ?? []
-      } else {
-        const data = await res.json() as { data: string[] }
-        services = data.data ?? []
       }
     } catch {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: [] }

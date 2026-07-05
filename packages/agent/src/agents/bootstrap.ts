@@ -1,6 +1,7 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import { extractJson } from './extract-json.js'
 import type { TechSpec } from './techspec.js'
 
 export interface FileToCreate { path: string; description: string; template: string }
@@ -27,6 +28,6 @@ export class BootstrapAgent {
       { role: 'user', content: `Service: ${spec.title}\nArchitecture: ${spec.architecture}\nComponents: ${spec.components.map(c => c.name).join(', ')}\nStack: ${langExtraction.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as BootstrapPlan } catch { return { service: spec.title, files: [], commands: [], prDescription: '' } }
+    try { return extractJson<BootstrapPlan>(result.content) } catch { return { service: spec.title, files: [], commands: [], prDescription: '' } }
   }
 }

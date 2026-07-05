@@ -2,6 +2,7 @@ import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
 import type { PRD } from './product.js'
+import { extractJson } from './extract-json.js'
 
 export interface Component { name: string; responsibility: string; technology: string }
 export interface APIChange { method: string; path: string; description: string; breaking: boolean }
@@ -33,6 +34,6 @@ export class TechSpecAgent {
       { role: 'user', content: `PRD title: ${prd.title}\nGoals: ${prd.goals.join(', ')}\nExisting: ${extracted.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as TechSpec } catch { return { title: prd.title, overview: '', architecture: '', components: [], dataModel: '', apiChanges: [], securityConsiderations: [], testPlan: '', rolloutPlan: '', estimatedComplexity: 'medium' } }
+    try { return extractJson<TechSpec>(result.content) } catch { return { title: prd.title, overview: '', architecture: '', components: [], dataModel: '', apiChanges: [], securityConsiderations: [], testPlan: '', rolloutPlan: '', estimatedComplexity: 'medium' } }
   }
 }

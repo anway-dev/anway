@@ -404,11 +404,14 @@ test.describe('CERT I: UI — real data, no mock fallbacks', () => {
     // Login redirect requires demo stack auth (OIDC/session endpoint). Skip in dev
     // to avoid cascading to I.3+ via serial mode. scripts/certify.sh sets CERT_MODE=true.
     test.skip(!process.env['CERT_MODE'], 'I.2 skipped: login flow requires demo stack — run via scripts/certify.sh')
+    // components/login-page.tsx's real local-auth form is email + password only —
+    // there is no tenant-id text field in this version's UI. The one-click "Try
+    // Demo" button (POST /api/auth/demo -> POST /api/auth/set-token -> navigate to
+    // "/") is the real, currently-shipped UI login flow and is what this test
+    // exercises — not a fabricated form shape.
     await page.goto(`${WEB}/login`)
-    await page.locator('input[type="email"]').fill(DEMO_EMAIL)
-    await page.locator('input[type="text"]').fill(DEMO_TENANT)
-    await page.locator('button[type="submit"]').click()
-    // 30s: first navigation after submit compiles the app shell in dev mode
+    await page.locator('text=Try Demo').first().click()
+    // 30s: first navigation after login compiles the app shell in dev mode
     await expect(page).not.toHaveURL(/\/login/, { timeout: 30000 })
   })
 
@@ -715,7 +718,12 @@ test.describe('CERT R: lifecycle', () => {
 test.describe('CERT S: LLM round-trip', () => {
   test('S.1 POST /api/chat returns tokens from LLM containing the reply', async ({ request }) => {
     test.skip(!process.env['CERT_MODE'], 'S: LLM round-trip requires demo stack LLM provider — run via scripts/certify.sh')
-    test.setTimeout(90_000)
+    // 90s wasn't enough against a small local Ollama model: the orchestrator does
+    // intent classification (1 model call) then the actual chat reply (a 2nd
+    // model call), and each is CPU-bound and slow on a 3B model — bump to match
+    // the 180s allowance already used elsewhere in this file for similarly
+    // multi-call LLM round-trips.
+    test.setTimeout(180_000)
     const h = await authHeaders(request)
     const resp = await request.post(`${GATEWAY}/api/chat`, {
       headers: { ...h, 'Content-Type': 'application/json' },
@@ -1389,7 +1397,7 @@ test.describe('CERT AI: automations — negative paths and disable behavior', ()
 test.describe('CERT AJ: lifecycle — gate enforcement and artifact completeness', () => {
   test('AJ.1 TechSpec creation on unapproved PRD returns 404', async ({ request }) => {
     test.skip(!process.env['CERT_MODE'], 'AJ.1: PRD creation needs LLM provider — run via scripts/certify.sh')
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     const h = await authHeaders(request)
 
     // Create PRD — do NOT approve it
@@ -1482,7 +1490,10 @@ test.describe('CERT AL: session multi-turn', () => {
 
   test('AL.1 two consecutive chats in same session produce 2 turns', async ({ request }) => {
     test.skip(!process.env['CERT_MODE'], 'AL: LLM chat required — run via scripts/certify.sh')
-    test.setTimeout(180_000)
+    // 2 full chat round-trips (each: intent classification + chat generation =
+    // 2 model calls) against a small local Ollama model — 180s wasn't enough
+    // for both turns sequentially.
+    test.setTimeout(300_000)
     const h = await authHeaders(request)
     sessionId = uniqueId('cert-al')
 
@@ -2337,7 +2348,8 @@ test.describe('CERT BD: Chat session context retention evals', () => {
 
   test('BD.1 model retains a code word from the previous turn', async ({ request }) => {
     test.skip(!process.env['CERT_MODE'], 'BD: LLM session context eval requires demo stack — run via scripts/certify.sh')
-    test.setTimeout(180_000)
+    // 2 sequential chat round-trips against a small local Ollama model.
+    test.setTimeout(300_000)
     const h = await authHeaders(request)
     bdSessionId = uniqueId('cert-bd')
 
@@ -2504,7 +2516,7 @@ test.describe('CERT BH: Editor analyze (ReviewAgent / code review)', () => {
   // so these tests pass in both LLM and no-LLM environments.
 
   test('BH.1 POST /api/editor/analyze with valid code returns 200 + findings + done events', async ({ request }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     const h = await authHeaders(request)
     const sampleCode = `function divide(a, b) {\n  return a / b;\n}\nmodule.exports = { divide };\n`
     const r = await request.post(`${GATEWAY}/api/editor/analyze`, {
@@ -2519,7 +2531,7 @@ test.describe('CERT BH: Editor analyze (ReviewAgent / code review)', () => {
   })
 
   test('BH.2 findings event contains an array', async ({ request }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     const h = await authHeaders(request)
     const sampleCode = `const x = eval(userInput);\nconst pass = "hardcoded123";\n`
     const r = await request.post(`${GATEWAY}/api/editor/analyze`, {

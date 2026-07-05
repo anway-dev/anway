@@ -1,6 +1,7 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import { extractJson } from './extract-json.js'
 
 export interface UserStory {
   persona: string
@@ -44,6 +45,6 @@ export class ProductAgent {
       { role: 'user', content: `Feature request: ${featureRequest}\nExtracted: ${extraction.content}\n${graphBlock}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as PRD } catch { return { title: featureRequest, problem: '', goals: [], nonGoals: [], userStories: [], successMetrics: [], openQuestions: [] } }
+    try { return extractJson<PRD>(result.content) } catch { return { title: featureRequest, problem: '', goals: [], nonGoals: [], userStories: [], successMetrics: [], openQuestions: [] } }
   }
 }

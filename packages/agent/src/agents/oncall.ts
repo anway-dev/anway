@@ -1,6 +1,7 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import { extractJson } from './extract-json.js'
 
 export interface IncidentSummary { title: string; severity: string; startedAt: string; status: string }
 export interface ShiftBrief { summary: string; openIncidents: IncidentSummary[]; recentDeploys: string[]; watchItems: string[]; handoffNotes: string }
@@ -26,7 +27,7 @@ export class OncallAgent {
       { role: 'user', content: `Team: ${teamName}\nActivity: ${extraction.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 
-    try { return JSON.parse(result.content) as ShiftBrief } catch { return { summary: '', openIncidents: [], recentDeploys: [], watchItems: [], handoffNotes: '' } }
+    try { return extractJson<ShiftBrief>(result.content) } catch { return { summary: '', openIncidents: [], recentDeploys: [], watchItems: [], handoffNotes: '' } }
   }
 
   async investigateAlert(alertTitle: string, tenantId: TenantId): Promise<string> {

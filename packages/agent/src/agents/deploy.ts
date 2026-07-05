@@ -1,6 +1,7 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import { extractJson } from './extract-json.js'
 
 export interface DeployPlan { service: string; environment: string; strategy: 'rolling' | 'blue_green' | 'canary'; preChecks: string[]; postChecks: string[]; rollbackTriggers: string[]; estimatedDuration: string; confidence: number }
 
@@ -25,6 +26,6 @@ export class DeployAgent {
       { role: 'user', content: `Service: ${service}\nEnv: ${env}\nSHA: ${sha}\nHistory: ${history.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as DeployPlan } catch { return { service, environment: env, strategy: 'rolling', preChecks: [], postChecks: [], rollbackTriggers: [], estimatedDuration: '10m', confidence: 0.5 } }
+    try { return extractJson<DeployPlan>(result.content) } catch { return { service, environment: env, strategy: 'rolling', preChecks: [], postChecks: [], rollbackTriggers: [], estimatedDuration: '10m', confidence: 0.5 } }
   }
 }

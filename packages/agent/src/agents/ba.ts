@@ -1,6 +1,7 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import { extractJson } from './extract-json.js'
 
 export interface MetricPoint { label: string; value: string | number; trend?: 'up' | 'down' | 'stable' }
 export interface AnalysisReport { query: string; summary: string; metrics: MetricPoint[]; insights: string[]; recommendations: string[] }
@@ -26,6 +27,6 @@ export class BAAgent {
       { role: 'user', content: `Query: ${query}\nType: ${classification.content}\n${graphContext ? `Context: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.slice(0, 5).map(e => e.name).join(', ')}` : ''}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 
-    try { return JSON.parse(result.content) as AnalysisReport } catch { return { query, summary: '', metrics: [], insights: [], recommendations: [] } }
+    try { return extractJson<AnalysisReport>(result.content) } catch { return { query, summary: '', metrics: [], insights: [], recommendations: [] } }
   }
 }

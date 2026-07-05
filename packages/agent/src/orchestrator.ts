@@ -3,6 +3,7 @@ import type { IAuditSink } from './interfaces/audit.js'
 import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
 import type { IModelProvider, ToolDefinition } from './interfaces/provider.js'
 import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
+import { extractJson } from './agents/extract-json.js'
 import { createTokenMeterMiddleware } from './middleware/token-meter.js'
 import type { TokenBudget } from './middleware/token-meter.js'
 import type { AgentPerimeter } from './perimeter/engine.js'
@@ -197,7 +198,7 @@ export async function* runSession(
     budget.sessionUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
     budget.tenantDailyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
     budget.tenantMonthlyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
-    const parsed = JSON.parse(intentResp.content) as { intent?: unknown }
+    const parsed = extractJson<{ intent?: unknown }>(intentResp.content)
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
   } catch (err) {
     auditSink.append({

@@ -1,0 +1,62 @@
+# Real bug found live: building with no .dockerignore at the repo root sent
+# an 8.9GB+ (and climbing) build context — every node_modules across every
+# workspace package, plus .git history — because the pipeline.ts build stage
+# correctly builds with context = repo root (Docker can't otherwise reach
+# sibling packages/connectors a Dockerfile COPYs from), but nothing was
+# excluding the huge, irrelevant directories from that context.
+
+# Dependencies — reinstalled fresh inside the image via `pnpm install`
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Build outputs — rebuilt fresh inside the image via `pnpm build`
+#
+# Confirmed live root cause of a second real bug: Docker's .dockerignore
+# matching (unlike .gitignore) does NOT apply a bare pattern like
+# "*.tsbuildinfo" at every depth — it only matches at the context root unless
+# prefixed with "**/". A leftover packages/agent/tsconfig.tsbuildinfo (and
+# packages/types/tsconfig.tsbuildinfo) — untracked, host-local artifacts from
+# local `tsc --build` runs — survived into the image, and `tsc --build`
+# trusted its "up to date" bookkeeping over the actual (nonexistent, since
+# dist/ IS correctly excluded) build output, silently no-op'ing the real
+# compile. Every recursive pattern below now has an explicit **/ form.
+dist/
+**/dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# VCS
+.git/
+.github/
+
+# Env files — never bake secrets into an image layer
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+**/*.log
+
+# Turbo / test artifacts
+.turbo/
+**/.turbo/
+coverage/
+**/coverage/
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Infra — not needed inside app images
+infra/

@@ -19,6 +19,10 @@ function awsEnv(creds: Record<string, unknown>): NodeJS.ProcessEnv {
     (creds['region'] as string) ??
     process.env['AWS_DEFAULT_REGION'] ??
     'us-east-1'
+  // Optional endpoint override (e.g. LocalStack) — aws CLI v2.13+ reads this
+  // natively, no argv changes needed. Absent in production; only set for
+  // local/test environments pointing at an AWS-API-compatible emulator.
+  if (creds['endpointUrl']) env['AWS_ENDPOINT_URL'] = String(creds['endpointUrl'])
   return env
 }
 

@@ -152,7 +152,11 @@ services:
 # need manual rebuild: pnpm build:connectors → then docker compose restart gateway
 # Installs pnpm, runs workspace install, then starts gateway in hot-reload dev mode
     command: >-
-      sh -c "npm install -g pnpm@9.15.4 --quiet &&
+      sh -c "apt-get update -qq && apt-get install -y -qq docker.io curl >/dev/null &&
+             curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null &&
+             curl -fsSLo /usr/local/bin/kubectl https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl &&
+             chmod +x /usr/local/bin/kubectl &&
+             npm install -g pnpm@9.15.4 --quiet &&
              pnpm install &&
              pnpm --filter anway-gateway dev"
     environment:
@@ -168,6 +172,13 @@ services:
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/v1
       # Dev-only demo login (POST /api/auth/demo) — required by apps/web/e2e/fixtures.ts
       DEMO_MODE: "true"
+      # Deploy Agent build stage — real registry to enable actual `docker build`
+      # + `docker push` (Strategy B in pipeline.ts). Points at the host's
+      # localhost:5000 via the mounted docker socket below (commands run
+      # against the host daemon, so "localhost" here is the host's, not the
+      # container's). Local-dev-only; a real deploy would point at a real
+      # registry (ECR/GCR/ghcr.io) instead.
+      DOCKER_REGISTRY: localhost:5000
     ports:
       - "8510:8510"
     volumes:
@@ -175,6 +186,10 @@ services:
       # Isolated named volumes — gateway never shares with web to avoid broken symlinks
       - gateway_nm:/app/apps/gateway/node_modules
       - gateway_root_nm:/app/node_modules
+      # Docker-outside-of-Docker — lets the gateway's spawned `docker build`/
+      # `docker push` (pipeline.ts build stage) talk to the host's real Docker
+      # daemon instead of needing its own nested daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
       # K8s connector: mount kubeconfig + minikube certs at same host path so cert
       # file references in kubeconfig resolve inside the container.
       # create_host_path: true — safe on machines without minikube (creates empty dir).

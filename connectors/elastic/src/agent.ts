@@ -191,38 +191,57 @@ const TOOLS: ConnectorTool[] = [
         : null
 
       try {
-        const res = await fetch(`${c.baseUrl}/_watcher/watch`, {
-          method: 'GET',
+        // There is no "list all watches" REST verb in the real Watcher API —
+        // GET /_watcher/watch is not a valid endpoint (405, only GET
+        // /_watcher/watch/{id} for a single watch by id exists). The real,
+        // documented way to enumerate watches is to search Watcher's own
+        // system index, .watches, directly. Confirmed against a live
+        // Elasticsearch 8.15 instance with a trial license (Watcher requires
+        // at least trial/basic-plus licensing — a non-compliant license
+        // returns a 403 security_exception, handled as a normal empty result
+        // below like any other non-2xx response).
+        // POST, not GET — Node's fetch (unlike curl) rejects a GET request
+        // with a body per the Fetch spec ("Request with GET/HEAD method
+        // cannot have body"). Elasticsearch's _search endpoint accepts POST
+        // with a body identically to GET+body, so POST is correct here.
+        const res = await fetch(`${c.baseUrl}/.watches/_search`, {
+          method: 'POST',
           headers: c.headers,
+          body: JSON.stringify({ size: 100 }),
         })
         if (!res.ok) return { alerts: [] }
 
         const data = (await res.json()) as {
-          watches?: Array<{
-            _id: string
-            status?: {
-              state?: string
-              last_triggered?: string
-              last_execution?: { successful?: boolean; timestamp?: string }
-            }
-            metadata?: { name?: string; severity?: string }
-            actions?: Record<string, unknown>
-          }>
+          hits?: {
+            hits?: Array<{
+              _id: string
+              _source?: {
+                metadata?: { name?: string; severity?: string }
+                actions?: Record<string, unknown>
+                status?: {
+                  state?: { active?: boolean; timestamp?: string }
+                  actions?: Record<string, { last_execution?: { successful?: boolean; timestamp?: string } }>
+                }
+              }
+            }>
+          }
         }
 
-        const watches = data.watches ?? []
+        const hits = data.hits?.hits ?? []
 
-        const alerts = watches
-          .map(w => {
-            const state = w.status?.state ?? 'unknown'
-            const hasActions = w.actions != null && Object.keys(w.actions).length > 0
-            const lastExecFailed = w.status?.last_execution?.successful === false
-            const title = w.metadata?.name ?? w._id
+        const alerts = hits
+          .map(hit => {
+            const src = hit._source ?? {}
+            const active = src.status?.state?.active ?? false
+            const hasActions = src.actions != null && Object.keys(src.actions).length > 0
+            const actionExecs = Object.values(src.status?.actions ?? {})
+            const lastExecFailed = actionExecs.some(a => a.last_execution?.successful === false)
+            const title = src.metadata?.name ?? hit._id
 
             // Derive severity
             let severity: string
-            if (w.metadata?.severity) {
-              severity = w.metadata.severity.toLowerCase()
+            if (src.metadata?.severity) {
+              severity = src.metadata.severity.toLowerCase()
             } else if (hasActions && lastExecFailed) {
               severity = 'critical'
             } else if (hasActions) {
@@ -231,25 +250,14 @@ const TOOLS: ConnectorTool[] = [
               severity = 'info'
             }
 
-            // Derive status from watch state
-            let status: string
-            switch (state) {
-              case 'active':
-              case 'executed':
-                status = 'firing'
-                break
-              case 'inactive':
-                status = 'resolved'
-                break
-              default:
-                status = state
-            }
+            // Derive status from watch active state
+            const status = active ? 'firing' : 'resolved'
 
-            const firedAt = w.status?.last_triggered
-              ?? w.status?.last_execution?.timestamp
+            const firedAt = src.status?.state?.timestamp
+              ?? actionExecs.find(a => a.last_execution?.timestamp)?.last_execution?.timestamp
               ?? new Date().toISOString()
 
-            return { id: w._id, title, severity, status, firedAt }
+            return { id: hit._id, title, severity, status, firedAt }
           })
           .filter(a => {
             if (serviceFilter && !a.title.toLowerCase().includes(serviceFilter) && !a.id.toLowerCase().includes(serviceFilter)) return false

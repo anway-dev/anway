@@ -9,6 +9,22 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: {{ .Release.Name }}-dns-egress
+spec:
+  # deny-all above blocks DNS too (podSelector: {} covers every pod) — without
+  # this, no pod can resolve any in-cluster or external hostname.
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: {{ .Release.Name }}-gateway-egress
 spec:
   podSelector:
@@ -22,3 +38,93 @@ spec:
     - port: 7687   # neo4j
     - port: 443    # external APIs
     - port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-gateway-ingress
+spec:
+  # deny-all above blocks all ingress by default — web pod (and kubectl port-forward /
+  # ingress controller) must be explicitly allowed to reach the gateway service.
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}-gateway
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: {{ .Release.Name }}-web
+    - namespaceSelector: {}   # allow ingress-controller / same-namespace tooling
+    ports:
+    - port: 4000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-web-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}-web
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: {{ .Release.Name }}-gateway
+    ports:
+    - port: 4000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-web-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}-web
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - port: 3000
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}-postgres
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: {{ .Release.Name }}-gateway
+    ports:
+    - port: 5432
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-redis-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}-redis
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: {{ .Release.Name }}-gateway
+    ports:
+    - port: 6379
+{{- end }}

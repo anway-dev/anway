@@ -29,8 +29,8 @@ const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
 
 function buildTestApp() {
   const app = Fastify({ logger: false })
-  app.decorate('authenticate', vi.fn(async (req: Record<string, unknown>) => {
-    ;(req as { user: Record<string, string> }).user = {
+  app.decorate('authenticate', vi.fn(async (req: any) => {
+    req.user = {
       tenantId: 'test-tenant',
       sub: 'test-user',
       role: 'admin',

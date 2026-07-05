@@ -103,9 +103,9 @@ class AlertmanagerBootstrapImpl implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
   async bootstrap(tenantId: TID, connectorId: string, _payload: Record<string, unknown>) {
     const entityId = await this.kg.upsertEntity({
-      tenantId, type: 'Alert', name: 'alertmanager-active',
+      type: 'Alert', name: 'alertmanager-active',
       metadata: { source: 'alertmanager', connectorId, status: 'active' },
-    })
+    }, tenantId)
     return { entitiesUpserted: entityId ? 1 : 0, relationshipsUpserted: 0, episodeHints: ['Alertmanager connector bootstrapped'] }
   }
 }
@@ -183,8 +183,7 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
 async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string): Promise<Map<string, IConnectorBootstrap>> {
   const reg = new Map<string, IConnectorBootstrap>()
   // Tier 1 — fully operational
-  const ghToken = await connectorCredential(tid, 'github', 'GH_TOKEN')
-  reg.set('github', new GitHubBootstrap(kg, ghToken))
+  reg.set('github', new GitHubBootstrap(kg))
   reg.set('argocd', new ArgocdBootstrap(kg))
   reg.set('datadog', new DatadogBootstrap(kg))
   const linearToken = await connectorCredential(tid, 'linear', 'LINEAR_API_KEY')

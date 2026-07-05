@@ -372,6 +372,28 @@ describe('AwsHealthAgent — tool tests (mocked execFile, argv array)', () => {
       expect(callEnv.env!['AWS_SESSION_TOKEN']).toBe('FwoGZX...')
     })
 
+    it('sets AWS_ENDPOINT_URL when endpointUrl provided (LocalStack override)', async () => {
+      mockExecFileStdout({ MetricAlarms: [] })
+
+      const agent = new AwsHealthAgent()
+      const tool = agent.tools.find(t => t.definition.name === 'get_alarms')!
+      await tool.execute({}, creds({ endpointUrl: 'http://localhost:4566' }))
+
+      const callEnv = execFile.mock.calls[0]![2] as { env?: Record<string, string> }
+      expect(callEnv.env!['AWS_ENDPOINT_URL']).toBe('http://localhost:4566')
+    })
+
+    it('omits AWS_ENDPOINT_URL when not provided (real AWS in production)', async () => {
+      mockExecFileStdout({ MetricAlarms: [] })
+
+      const agent = new AwsHealthAgent()
+      const tool = agent.tools.find(t => t.definition.name === 'get_alarms')!
+      await tool.execute({}, creds())
+
+      const callEnv = execFile.mock.calls[0]![2] as { env?: Record<string, string> }
+      expect(callEnv.env!['AWS_ENDPOINT_URL']).toBeUndefined()
+    })
+
     it('defaults region to us-east-1 when not provided', async () => {
       mockExecFileStdout({ MetricAlarms: [] })
 

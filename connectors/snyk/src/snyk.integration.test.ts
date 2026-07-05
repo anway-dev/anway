@@ -118,7 +118,10 @@ describe('snyk — fixture HTTP server', () => {
 
     // Verify connectorCoordinates stored on a snyk entity
     const payments = kg.entities.find(e => e.name === 'payments-api')!
-    expect(payments.metadata?.connectorCoordinates?.snyk?.resourceIds).toMatchObject({
+    const coordinates = payments.metadata as {
+      connectorCoordinates?: { snyk?: { resourceIds?: Record<string, string> } }
+    }
+    expect(coordinates.connectorCoordinates?.snyk?.resourceIds).toMatchObject({
       orgId: 'org-1',
       projectId: 'proj-1',
     })
@@ -338,8 +341,12 @@ describe('snyk — fixture HTTP server', () => {
   it('get_vulnerabilities has correct schema', () => {
     const agent = new SnykAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_vulnerabilities')!
-    expect(tool.definition.parameters.required).toContain('project')
-    expect(tool.definition.parameters.properties.project.type).toBe('string')
+    const params = tool.definition.parameters as {
+      required?: string[]
+      properties: Record<string, { type: string }>
+    }
+    expect(params.required).toContain('project')
+    expect(params.properties.project.type).toBe('string')
     expect(tool.write).toBe(false)
   })
 })

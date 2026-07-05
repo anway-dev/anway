@@ -4,11 +4,16 @@ image:
   gateway:
     repository: anway/gateway
     tag: latest
-    pullPolicy: IfNotPresent
+    # IfNotPresent + a mutable "latest" tag means a redeploy of the same tag is
+    # silently a no-op on any node that already pulled it once — confirmed
+    # live: after pushing a fixed image, the pod kept running the stale one.
+    # Always is correct as long as the tag stays mutable; switch back to
+    # IfNotPresent only if/when the pipeline starts using immutable per-build tags.
+    pullPolicy: Always
   web:
     repository: anway/web
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
 
 service:
   gateway:
@@ -22,17 +27,36 @@ ingress:
   enabled: false
   className: nginx
   host: anway.example.com
+  clusterIssuer: letsencrypt-prod
   tls: []
 
-env:
-  jwtSecret: ""
-  encryptionKey: ""
-  databaseUrl: ""
-  redisUrl: ""
-  ollamaEndpoint: ""
+serviceAccount:
+  annotations: {}
+
+gateway:
+  service:
+    port: 4000
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    HOST: "0.0.0.0"
+    PORT: "4000"
+    CORS_ORIGIN: "*"
+  secrets:
+    JWT_SECRET: ""
+    DATABASE_URL: ""
+    REDIS_URL: ""
+    ANWAY_ENCRYPTION_KEY: ""
+    ANTHROPIC_API_KEY: ""
+    OPENAI_API_KEY: ""
+
+web:
+  env:
+    GATEWAY_URL: ""   # defaults to in-cluster gateway service DNS if unset — see web-deployment.yaml
 
 postgres:
   enabled: true
+  password: anway_dev_secret
   storageSize: 10Gi
 
 redis:

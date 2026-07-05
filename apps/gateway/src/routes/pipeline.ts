@@ -13,9 +13,38 @@ import type { FastifyLoggerInstance } from 'fastify'
 import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// Repo-relative paths below (docker build context, tsconfig, helm chart) are
+// resolved against this, not process.cwd() — the real runtime cwd when
+// running via `pnpm --filter anway-gateway dev` is apps/gateway/, not the
+// repo root, which silently broke every one of these spawn calls (confirmed
+// live: docker build failed with "path apps/gateway not found").
+const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', '..')
+
+// A kubeconfig captured on the host (e.g. from `orbstack`/`kind`/`minikube`,
+// which expose the API server on the host's loopback) is unusable as-is from
+// inside this gateway's own container — 127.0.0.1/localhost there means the
+// container itself, not the host. Rewrite to a hostname that's actually
+// reachable AND present in the API server's TLS cert SAN list from inside a
+// container (confirmed live: helm failed with "dial tcp 127.0.0.1:26443:
+// connect: connection refused" until this rewrite was added).
+// host.docker.internal resolves but is NOT in OrbStack's cert SAN (would fail
+// TLS verification); k8s.orb.local is OrbStack's own in-container-safe name
+// and IS in the SAN list. Other local-cluster tooling (kind, minikube, Docker
+// Desktop's k8s) would need their own equivalent — this only covers OrbStack,
+// the environment this gateway actually runs in.
+function rewriteKubeconfigForContainer(kubeconfig: string): string {
+  if (!existsSync('/.dockerenv')) return kubeconfig
+  return kubeconfig.replace(
+    /(server:\s*https?:\/\/)(127\.0\.0\.1|localhost)(:)/g,
+    '$1k8s.orb.local$3',
+  )
+}
 
 /**
  * Resolve a kubeconfig path for the tenant's K8s or EKS connector.
@@ -35,7 +64,7 @@ async function resolveKubeconfigPath(tenantId: string): Promise<{ path: string; 
       const kubeconfig = creds['kubeconfig'] as string | undefined
       if (kubeconfig && kubeconfig.trimStart().startsWith('apiVersion')) {
         const tmp = join(tmpdir(), `anway-k8s-${tenantId}-${Date.now()}.yaml`)
-        writeFileSync(tmp, kubeconfig, { mode: 0o600 })
+        writeFileSync(tmp, rewriteKubeconfigForContainer(kubeconfig), { mode: 0o600 })
         return { path: tmp, cleanup: () => { try { unlinkSync(tmp) } catch {} } }
       }
       if (kubeconfig) {
@@ -537,10 +566,18 @@ export async function pipelineRoutes(app: FastifyInstance) {
               const webImage = `${registry}/anway-web:${gitSha}`
               sse({ type: 'status', message: `Building images for ${gitSha}…` })
 
-              for (const [context, image] of [['apps/gateway', gatewayImage], ['apps/web', webImage]] as const) {
-                sse({ type: 'log', line: `→ docker build ${context} -t ${image}` })
+              for (const [appDir, image] of [['apps/gateway', gatewayImage], ['apps/web', webImage]] as const) {
+                // Build context must be the repo root, not the app subdirectory —
+                // both Dockerfiles COPY sibling workspace packages (packages/*,
+                // connectors/*) that live outside apps/gateway or apps/web, which
+                // Docker cannot reach if the context is scoped to that subdirectory
+                // (confirmed live: "connectors/argocd/package.json: not found" once
+                // the context path itself was resolving correctly). Only the
+                // Dockerfile's own path stays scoped to the app subdirectory.
+                sse({ type: 'log', line: `→ docker build . -f ${appDir}/Dockerfile -t ${image}` })
                 await new Promise<void>((resolve, reject) => {
-                  const child = trackChild(spawn('docker', ['build', context, '-t', image, '-f', `${context}/Dockerfile`], {
+                  const child = trackChild(spawn('docker', ['build', '.', '-t', image, '-f', `${appDir}/Dockerfile`], {
+                    cwd: REPO_ROOT,
                     stdio: ['ignore', 'pipe', 'pipe'],
                   }))
                   child.stdout!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
@@ -607,6 +644,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
               const result = await new Promise<{ code: number; output: string }>((resolve) => {
                 let out = ''
                 const child = trackChild(spawn('npx', ['tsc', '--noEmit', '-p', tsconfig], {
+                  cwd: REPO_ROOT,
                   stdio: ['ignore', 'pipe', 'pipe'],
                 }))
                 child.stdout!.on('data', (d: Buffer) => { out += d.toString() })
@@ -699,24 +737,42 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
             sse({ type: 'status', message: `Deploying ${imageTag} to ${helmNamespace}…` })
 
+            // ANWAY_ENCRYPTION_KEY is required at gateway boot (zod-validated, throws
+            // if empty) — forward this environment's real key so the deployed pod
+            // doesn't crash-loop. JWT_SECRET must be >=32 chars in production
+            // (assertSecureJwtSecret) — this environment's dev default
+            // ("dev-secret-change-in-production") is only 31 chars and fails that
+            // check under NODE_ENV=production, so generate a secure one instead of
+            // forwarding a value that's guaranteed to crash-loop the pod (confirmed
+            // live: "Production requires ... JWT_SECRET >=32 chars").
+            const encryptionKey = process.env['ANWAY_ENCRYPTION_KEY'] ?? ''
+            const rawJwtSecret = process.env['JWT_SECRET'] ?? ''
+            const jwtSecret = rawJwtSecret.length >= 32 ? rawJwtSecret : randomBytes(32).toString('base64')
+            if (!encryptionKey) {
+              sse({ type: 'status', message: 'Warning: ANWAY_ENCRYPTION_KEY not set in this environment — deployed gateway will crash-loop unless HELM_SET_ANWAY_ENCRYPTION_KEY is provided separately' })
+            }
+
             const helmArgs = [
               'upgrade', '--install', helmRelease, helmChart,
               '--namespace', helmNamespace,
               '--create-namespace',
               '--wait',
               '--timeout', '10m',
-              '--set', `gateway.image.tag=${imageTag}`,
-              '--set', `web.image.tag=${imageTag}`,
+              '--set', `image.gateway.tag=${imageTag}`,
+              '--set', `image.web.tag=${imageTag}`,
               ...(registry ? [
-                '--set', `gateway.image.repository=${registry}/anway-gateway`,
-                '--set', `web.image.repository=${registry}/anway-web`,
+                '--set', `image.gateway.repository=${registry}/anway-gateway`,
+                '--set', `image.web.repository=${registry}/anway-web`,
               ] : []),
+              ...(encryptionKey ? ['--set-string', `gateway.secrets.ANWAY_ENCRYPTION_KEY=${encryptionKey}`] : []),
+              ...(jwtSecret ? ['--set-string', `gateway.secrets.JWT_SECRET=${jwtSecret}`] : []),
             ]
 
             sse({ type: 'log', line: `→ helm ${helmArgs.join(' ')}` })
 
             await new Promise<void>((resolve, reject) => {
               const child = trackChild(spawn('helm', helmArgs, {
+                cwd: REPO_ROOT,
                 env: { ...process.env, KUBECONFIG: kubeconfig },
                 stdio: ['ignore', 'pipe', 'pipe'],
               }))
@@ -738,12 +794,37 @@ export async function pipelineRoutes(app: FastifyInstance) {
             // Run prisma migrate after deploy
             sse({ type: 'log', line: '→ Running database migrations…' })
             await new Promise<void>((resolve) => {
+              const migratePodName = `migrate-${Date.now()}`
+              const migrateImage = `${registry ? `${registry}/anway-gateway` : 'anway-gateway'}:${imageTag}`
+              // kubectl run's generated pod carries no DATABASE_URL and no
+              // `app: {release}-gateway` label — without both, this job fails
+              // (confirmed live: "Environment variable not found: DATABASE_URL")
+              // and, once fixed, would still be blocked by the default-deny
+              // NetworkPolicy's egress rule, which is scoped to that label.
+              // --overrides reuses the exact same secret/configmap the real
+              // gateway deployment reads via envFrom, and borrows its label so
+              // this ad-hoc pod inherits the same egress allow-rule to postgres.
+              const overrides = {
+                apiVersion: 'v1',
+                metadata: { labels: { app: `${helmRelease}-gateway` } },
+                spec: {
+                  containers: [{
+                    name: migratePodName,
+                    image: migrateImage,
+                    command: ['npx', 'prisma', 'migrate', 'deploy'],
+                    envFrom: [
+                      { secretRef: { name: `${helmRelease}-gateway-secrets` } },
+                      { configMapRef: { name: `${helmRelease}-gateway-config` } },
+                    ],
+                  }],
+                },
+              }
               const child = trackChild(spawn('kubectl', [
-                'run', `migrate-${Date.now()}`,
-                '--image', `${registry ? `${registry}/anway-gateway` : 'anway-gateway'}:${imageTag}`,
+                'run', migratePodName,
+                '--image', migrateImage,
                 '--namespace', helmNamespace,
                 '--restart=Never', '--rm', '--attach',
-                '--', 'npx', 'prisma', 'migrate', 'deploy',
+                '--overrides', JSON.stringify(overrides),
               ], {
                 env: { ...process.env, KUBECONFIG: kubeconfig },
                 stdio: ['ignore', 'pipe', 'pipe'],

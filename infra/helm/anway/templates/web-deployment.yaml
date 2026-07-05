@@ -20,6 +20,9 @@ spec:
           imagePullPolicy: {{ .Values.image.web.pullPolicy }}
           ports:
             - containerPort: 3000
+          env:
+            - name: GATEWAY_URL
+              value: {{ .Values.web.env.GATEWAY_URL | default (printf "http://%s-gateway:%d" .Release.Name (.Values.gateway.service.port | int)) | quote }}
           resources:
             requests:
               cpu: "100m"

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { FakeKnowledgeGraph as FakeKG } from '@anway/agent/testing'
 import { KubernetesBootstrap } from './bootstrap.js'
 import { K8sAgent } from './agent.js'
 

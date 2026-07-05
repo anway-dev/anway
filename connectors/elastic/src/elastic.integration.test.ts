@@ -42,49 +42,63 @@ const metricsAggEmptyFixture = {
   },
 }
 
-// get_alerts — Watcher watches (GET /_watcher/watch)
+// get_alerts — Watcher watches (POST /.watches/_search — confirmed against a
+// live Elasticsearch 8.15 instance with a trial license: GET /_watcher/watch
+// is not a valid endpoint (405), and Node's fetch rejects GET+body per the
+// Fetch spec anyway. Real shape is a standard _search hits.hits[] response
+// where each hit's _id is the watch id and _source holds metadata/actions/
+// status.state.active + per-action status.actions.<name>.last_execution.)
 const watcherWatchesFixture = {
-  watches: [
-    {
-      _id: 'high_error_rate_payments',
-      status: {
-        state: 'executed',
-        last_triggered: '2026-07-04T10:30:00.000Z',
-        last_execution: { successful: true, timestamp: '2026-07-04T10:30:01.000Z' },
+  hits: {
+    hits: [
+      {
+        _id: 'high_error_rate_payments',
+        _source: {
+          metadata: { name: 'High Error Rate — payments-api', severity: 'critical' },
+          actions: { notify_slack: { throttle_period: '5m' } },
+          status: {
+            state: { active: true, timestamp: '2026-07-04T10:30:00.000Z' },
+            actions: { notify_slack: { last_execution: { successful: true, timestamp: '2026-07-04T10:30:01.000Z' } } },
+          },
+        },
       },
-      metadata: { name: 'High Error Rate — payments-api', severity: 'critical' },
-      actions: { notify_slack: { throttle_period: '5m' } },
-    },
-    {
-      _id: 'disk_watermark_warning',
-      status: {
-        state: 'active',
-        last_triggered: '2026-07-04T11:00:00.000Z',
-        last_execution: { successful: true, timestamp: '2026-07-04T11:00:00.500Z' },
+      {
+        _id: 'disk_watermark_warning',
+        _source: {
+          actions: { notify_slack: {} },
+          status: {
+            state: { active: true, timestamp: '2026-07-04T11:00:00.000Z' },
+            actions: { notify_slack: { last_execution: { successful: true, timestamp: '2026-07-04T11:00:00.500Z' } } },
+          },
+        },
       },
-      actions: { notify_slack: {} },
-    },
-    {
-      _id: 'inactive_legacy_watch',
-      status: {
-        state: 'inactive',
-        last_execution: { successful: true, timestamp: '2026-06-15T08:00:00.000Z' },
+      {
+        _id: 'inactive_legacy_watch',
+        _source: {
+          status: {
+            state: { active: false, timestamp: '2026-06-15T08:00:00.000Z' },
+          },
+        },
       },
-    },
-    {
-      _id: 'failed_checkout_watch',
-      status: {
-        state: 'executed',
-        last_triggered: '2026-07-04T10:48:00.000Z',
-        last_execution: { successful: false, timestamp: '2026-07-04T10:48:01.000Z' },
+      {
+        _id: 'failed_checkout_watch',
+        _source: {
+          actions: { notify_pagerduty: {}, log_error: {} },
+          status: {
+            state: { active: true, timestamp: '2026-07-04T10:48:00.000Z' },
+            actions: {
+              notify_pagerduty: { last_execution: { successful: false, timestamp: '2026-07-04T10:48:01.000Z' } },
+              log_error: { last_execution: { successful: false, timestamp: '2026-07-04T10:48:01.000Z' } },
+            },
+          },
+        },
       },
-      actions: { notify_pagerduty: {}, log_error: {} },
-    },
-  ],
+    ],
+  },
 }
 
 // get_alerts — empty watches
-const watcherWatchesEmptyFixture = { watches: [] }
+const watcherWatchesEmptyFixture = { hits: { hits: [] } }
 
 // get_logs — POST /logs-*/_search hits
 const logSearchFixture = {
@@ -150,8 +164,8 @@ const fixtureRoutes: FixtureRoute[] = [
   // get_metrics — POST /metrics-*/_search (prefix match with *)
   { method: 'POST', path: '/metrics-*', status: 200, body: metricsAggFixture },
 
-  // get_alerts — GET /_watcher/watch
-  { method: 'GET', path: '/_watcher/watch', status: 200, body: watcherWatchesFixture },
+  // get_alerts — POST /.watches/_search
+  { method: 'POST', path: '/.watches/_search', status: 200, body: watcherWatchesFixture },
 
   // get_logs — POST /logs-*/_search (prefix match with *)
   { method: 'POST', path: '/logs-*', status: 200, body: logSearchFixture },
@@ -160,8 +174,8 @@ const fixtureRoutes: FixtureRoute[] = [
   { method: 'POST', path: '/nonexistent-metrics-*/_search', status: 404, body: esErrorFixture },
   { method: 'POST', path: '/nonexistent-logs-*/_search', status: 404, body: esErrorFixture },
 
-  // Watcher disabled / not available
-  { method: 'GET', path: '/no-watcher/_watcher/watch', status: 404, body: esErrorFixture },
+  // Watcher disabled / not available (e.g. non-compliant license)
+  { method: 'POST', path: '/no-watcher/.watches/_search', status: 404, body: esErrorFixture },
 ]
 
 describe('elastic — fixture HTTP server', () => {
@@ -239,12 +253,19 @@ describe('elastic — fixture HTTP server', () => {
   })
 
   it('get_metrics returns empty on missing creds', async () => {
+    // extractCreds() never returns null — it defaults baseUrl to the real
+    // localhost:9200 and allows an unauthenticated request (a legitimate,
+    // real Elasticsearch deployment mode). "Missing creds" only produces an
+    // empty result because that connection fails — so it must point at an
+    // explicitly unreachable host, not rely on nothing real listening on the
+    // default port (which breaks this test on any machine actually running
+    // a local, unauthenticated Elasticsearch instance).
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
 
     const result = await tool.execute(
       { service: 'payments-api', window: '1h' },
-      {},
+      { baseUrl: 'http://127.0.0.1:1' },
     ) as { points: unknown[]; unit: string }
 
     expect(result.points).toEqual([])
@@ -327,10 +348,12 @@ describe('elastic — fixture HTTP server', () => {
   })
 
   it('get_alerts returns empty on missing creds', async () => {
+    // See the equivalent get_metrics comment above — must point at an
+    // explicitly unreachable host, not rely on the real default port.
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
 
-    const result = await tool.execute({}, {}) as { alerts: unknown[] }
+    const result = await tool.execute({}, { baseUrl: 'http://127.0.0.1:1' }) as { alerts: unknown[] }
     expect(result.alerts).toEqual([])
   })
 
@@ -368,12 +391,14 @@ describe('elastic — fixture HTTP server', () => {
   })
 
   it('get_logs returns empty on missing creds', async () => {
+    // See the equivalent get_metrics comment above — must point at an
+    // explicitly unreachable host, not rely on the real default port.
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
     const result = await tool.execute(
       { service: 'gateway', query: 'error' },
-      {},
+      { baseUrl: 'http://127.0.0.1:1' },
     ) as { lines: unknown[] }
 
     expect(result.lines).toEqual([])
@@ -429,7 +454,7 @@ describe('elastic — fixture HTTP server', () => {
 
     // Verify the Authorization header was Bearer
     const alertRequests = fixture.receivedRequests.filter(r =>
-      r.method === 'GET' && r.path === '/_watcher/watch'
+      r.method === 'POST' && r.path === '/.watches/_search'
     )
     const lastReq = alertRequests[alertRequests.length - 1]!
     const authHeader = lastReq.headers['authorization'] as string | undefined
@@ -494,8 +519,8 @@ describe('elastic — fixture HTTP server', () => {
 
     // get_alerts
     expect(
-      paths.filter(p => p === 'GET /_watcher/watch').length,
-      'expected GET /_watcher/watch calls',
+      paths.filter(p => p === 'POST /.watches/_search').length,
+      'expected POST /.watches/_search calls',
     ).toBeGreaterThan(0)
 
     // get_logs

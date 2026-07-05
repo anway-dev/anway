@@ -127,7 +127,7 @@ describe('jenkins — fixture HTTP server', () => {
     const result = await tool.execute(
       { pipeline: 'deploy-payments' },
       { baseUrl: fixture.baseUrl, user: 'admin', apiToken: 'test-token' },
-    ) as { builds: Array<{ id: string; number: number; status: string; duration: number; startedAt: string }> }
+    ) as { builds: Array<{ id: string; number: number; status: string; duration: number; startedAt: string; sha: string }> }
 
     expect(result.builds).toHaveLength(4)
     expect(result.builds[0].id).toBe('b-42')

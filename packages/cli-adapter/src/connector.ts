@@ -177,10 +177,15 @@ export class CliConnector {
     return tool.run(args ?? {})
   }
 
-  /** Health check: binary --version */
-  async health(): Promise<{ status: string; lastChecked: Date }> {
+  /**
+   * Health check: runs `binary --version` by default. Not every CLI
+   * supports that flag (confirmed live: `kubectl --version` exits 1 with
+   * "unknown flag" — kubectl uses the `version` subcommand instead), so
+   * callers wrapping such a binary should pass `versionArgs` to override.
+   */
+  async health(versionArgs: string[] = ['--version']): Promise<{ status: string; lastChecked: Date }> {
     try {
-      await this.execWithTimeout(['--version'], 5000)
+      await this.execWithTimeout(versionArgs, 5000)
       return { status: 'healthy', lastChecked: new Date() }
     } catch {
       return { status: 'unhealthy', lastChecked: new Date() }

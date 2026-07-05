@@ -58,7 +58,11 @@ export function parseHelpOutput(
     const match = trimmed.match(/^(\s{2,})(\S+.*?)(\s{2,}(.*?))?$/)
     if (!match) continue
 
-    const name = match[2]?.trim()
+    // Some CLIs (gh) format their own help text with a trailing colon after
+    // the subcommand name ("auth:", "browse:") — that's help-text
+    // punctuation, not part of the real command; confirmed live: `gh auth:`
+    // is not a valid invocation, `gh auth` is.
+    const name = match[2]?.trim().replace(/:$/, '')
     const description = match[4]?.trim() ?? ''
 
     // Skip flags

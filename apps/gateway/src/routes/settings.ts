@@ -165,12 +165,14 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
   app.get('/api/settings/connectors', { preHandler: [app.authenticate] }, async (request) => {
     const { tenantId } = request.user as { tenantId: string }
     const configs = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<{ connector_type: string; enabled: boolean; bootstrapped_at: Date | null }[]>`
-        SELECT connector_type AS connector_type, enabled, bootstrapped_at
-        FROM connector_config WHERE tenant_id = ${tenantId}::uuid ORDER BY connector_type
+      tx.$queryRaw<{ connector_type: string; instance_name: string; enabled: boolean; bootstrapped_at: Date | null }[]>`
+        SELECT connector_type AS connector_type, instance_name, enabled, bootstrapped_at
+        FROM connector_config WHERE tenant_id = ${tenantId}::uuid ORDER BY connector_type, instance_name
       `
     ).catch(() => [])
-    return configs.map(c => ({ connectorType: c.connector_type, enabled: c.enabled, bootstrappedAt: c.bootstrapped_at }))
+    // instanceName included so multiple mcp/cli rows of the same type are
+    // individually identifiable in the list, not indistinguishable duplicates.
+    return configs.map(c => ({ connectorType: c.connector_type, instanceName: c.instance_name, enabled: c.enabled, bootstrappedAt: c.bootstrapped_at }))
   })
 
   const KNOWN_CONNECTORS = [
@@ -187,15 +189,19 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     'mcp', 'cli',
   ]
 
-  app.get<{ Params: { type: string } }>(
+  app.get<{ Params: { type: string }; Querystring: { instanceName?: string } }>(
     '/api/settings/connectors/:type', { preHandler: [app.authenticate, requireRole('admin')] },
     async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { type } = request.params
+      // instanceName required to disambiguate for multi-instance types
+      // (mcp/cli); defaults to type for singleton connectors, matching
+      // their instance_name = connector_type backfill.
+      const instanceName = request.query.instanceName?.trim() || type
       const rows = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<Array<{ credentials_enc: string }>>`
           SELECT credentials_enc FROM connector_config
-          WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid AND enabled = true LIMIT 1
+          WHERE connector_type = ${type} AND instance_name = ${instanceName} AND tenant_id = ${tenantId}::uuid AND enabled = true LIMIT 1
         `
       ).catch(() => [])
       if (rows.length === 0) return reply.code(404).send({ error: 'not configured' })

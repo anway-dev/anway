@@ -187,6 +187,44 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   return null
 }
 
+// Persists an MCP/CLI connector's classified tool→role map into its own
+// capability_manifest.allowedTools — so the perimeter (chat.ts + engine.ts)
+// can enforce that only reviewed/classified tools are ever callable for
+// that specific instance, and so re-bootstrap doesn't re-pay a model call
+// once a mapping is known (checked by McpConnectorBootstrap/
+// CliConnectorBootstrap via payload['toolRoleMap'] before reclassifying).
+// GraphBuilderAgent itself has no DB access (only IKnowledgeGraph), so this
+// runs here, in the one layer that does.
+function persistToolRoleMapIfPresent(
+  tid: string,
+  connectorId: string,
+  connectorType: string,
+  result: { metadata?: Record<string, unknown> },
+  log?: SubscriberLogger,
+): void {
+  if (connectorType !== 'mcp' && connectorType !== 'cli') return
+  if (!UUID_RE.test(connectorId)) return
+  const roleMap = result.metadata?.['toolRoleMap'] as { discovery?: string; search?: string; get?: string; write?: string[] } | undefined
+  if (!roleMap) return
+  // Write-role tools are included here too — allowedTools only governs
+  // "was this tool ever reviewed/classified at all," not read-vs-write.
+  // The actual write gate is the connector's mode/write-scope check in
+  // engine.ts's allows(), same as every native connector.
+  const allowedTools = [roleMap.discovery, roleMap.search, roleMap.get, ...(roleMap.write ?? [])].filter((t): t is string => !!t)
+  if (allowedTools.length === 0) return
+  // Store both: allowedTools (flat list) is what engine.ts's per-tool check
+  // reads; toolRoleMap (structured, preserves which one is "discovery")
+  // is what the bootstrap reads back on the next reconnect to skip paying
+  // for reclassification again.
+  void withTenant(prisma, tid, (tx) =>
+    tx.$executeRaw`
+      UPDATE connector_config
+      SET capability_manifest = COALESCE(capability_manifest, '{}'::jsonb) || ${JSON.stringify({ allowedTools, toolRoleMap: roleMap })}::jsonb
+      WHERE tenant_id = ${tid}::uuid AND id = ${connectorId}::uuid
+    `
+  ).catch((err: Error) => log?.warn?.({ err, connectorId, connectorType }, 'failed to persist toolRoleMap to capability_manifest'))
+}
+
 async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string, provider?: ReturnType<typeof ProviderFactory.create>): Promise<Map<string, IConnectorBootstrap>> {
   const reg = new Map<string, IConnectorBootstrap>()
   // Tier 1 — fully operational
@@ -289,7 +327,8 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         registryCache.set(tid, await buildBootstrapRegistry(kg, tid, provider))
       }
       const bootstrapRegistry = registryCache.get(tid)!
-      const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub)
+      const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub,
+        (connectorId, connectorType, result) => persistToolRoleMapIfPresent(tid, connectorId, connectorType, result, log))
 
       // Connector lifecycle events re-published internally (e.g. kb:stale) carry no
       // payload — load stored credentials so bootstrap reaches the right endpoint.
@@ -304,26 +343,37 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
           // passing the bare type string as connectorId.
           const rows = eventConnectorId && UUID_RE.test(eventConnectorId)
             ? await withTenant(prisma, tid, (tx) =>
-                tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-                  SELECT credentials_enc FROM connector_config
+                tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown>; capability_manifest: Record<string, unknown> | null }>>`
+                  SELECT credentials_enc, capability_manifest FROM connector_config
                   WHERE tenant_id = ${tid}::uuid AND id = ${eventConnectorId}::uuid AND enabled = true
                 `
               ).catch(() => [])
             : await withTenant(prisma, tid, (tx) =>
-                tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-                  SELECT credentials_enc FROM connector_config
+                tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown>; capability_manifest: Record<string, unknown> | null }>>`
+                  SELECT credentials_enc, capability_manifest FROM connector_config
                   WHERE tenant_id = ${tid}::uuid AND connector_type = ${eventConnectorType} AND enabled = true
                 `
               ).catch(() => [])
           const creds = effectiveCredentials(rows[0])
+          // Re-attach a previously-classified toolRoleMap (mcp/cli) so a
+          // reconnect doesn't re-pay a model call to reclassify tools it
+          // already knows about.
+          const storedRoleMap = rows[0]?.capability_manifest?.['toolRoleMap']
+          if (storedRoleMap) creds['toolRoleMap'] = storedRoleMap
           if (Object.keys(creds).length > 0) (event as { payload?: Record<string, unknown> }).payload = creds
         }
       }
 
-      // Distributed lock — only one container bootstraps per connector per tenant
+      // Distributed lock — only one container bootstraps per connector per tenant.
+      // Keyed by connectorId (the real connector_config row UUID), not
+      // connector_type — every caller that clears this lock (settings.ts,
+      // connectors.ts, boot-scan.ts) does so by connectorId, and keying by
+      // type alone would also serialize unrelated instances of the same
+      // multi-instance type (mcp/cli) behind one shared lock.
       let lockKey: string | null = null
       if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
-        lockKey = `graph:bootstrap:lock:${tid}:${eventConnectorType}`
+        const eventConnectorId = (event as { connectorId?: string }).connectorId ?? eventConnectorType
+        lockKey = `graph:bootstrap:lock:${tid}:${eventConnectorId}`
         const acquired = await graphPub.set(lockKey, '1', { NX: true, EX: 60 })
         if (!acquired) {
           log.info({ lockKey }, 'GraphBuilderSubscriber: bootstrap lock held by another instance — skipping')
@@ -333,6 +383,11 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       }
       const K8S_TYPES = new Set(['k8s', 'eks', 'gke', 'aks'])
       const isBootstrapEvent = event.type === 'connector_registered' || event.type === 'connector_reconnected'
+      // Real connector_config row UUID for this event, when available — every
+      // status/summary write below must key on this, not connector_type alone,
+      // or a second instance of a multi-instance type (mcp/cli) clobbers the
+      // first's bootstrapped_at/last_bootstrap_summary.
+      const eventConnectorId = (event as { connectorId?: string }).connectorId
       if (isBootstrapEvent && eventConnectorType) {
         appendAuditEvent({ tenantId: tid, action: 'connector.bootstrap_started', resource: eventConnectorType, outcome: 'success', metadata: { connectorType: eventConnectorType, message: 'Bootstrap started' } }).catch(() => {})
       }
@@ -349,12 +404,19 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
             // Preserve existing namespace_filter across rebootstrap
             let existingFilter: string[] | null = null
             try {
-              const prevRows = await withTenant(prisma, tid, (tx) =>
-                tx.$queryRaw<{ last_bootstrap_summary: Record<string, unknown> | null }[]>`
-                  SELECT last_bootstrap_summary FROM connector_config
-                  WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
-                `
-              )
+              const prevRows = eventConnectorId && UUID_RE.test(eventConnectorId)
+                ? await withTenant(prisma, tid, (tx) =>
+                    tx.$queryRaw<{ last_bootstrap_summary: Record<string, unknown> | null }[]>`
+                      SELECT last_bootstrap_summary FROM connector_config
+                      WHERE tenant_id = ${tid}::uuid AND id = ${eventConnectorId}::uuid
+                    `
+                  )
+                : await withTenant(prisma, tid, (tx) =>
+                    tx.$queryRaw<{ last_bootstrap_summary: Record<string, unknown> | null }[]>`
+                      SELECT last_bootstrap_summary FROM connector_config
+                      WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
+                    `
+                  )
               const prev = prevRows[0]?.last_bootstrap_summary
               if (prev && Array.isArray(prev['namespace_filter'])) {
                 existingFilter = prev['namespace_filter'] as string[]
@@ -378,13 +440,23 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
             if (discoveredNamespaces !== undefined) summary['namespaces'] = discoveredNamespaces
             if (existingFilter !== null) summary['namespace_filter'] = existingFilter
 
-            void withTenant(prisma, tid, (tx) =>
-              tx.$executeRaw`
-                UPDATE connector_config
-                SET bootstrapped_at = NOW(),
-                    last_bootstrap_summary = ${JSON.stringify(summary)}::jsonb
-                WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
-              `
+            void (eventConnectorId && UUID_RE.test(eventConnectorId)
+              ? withTenant(prisma, tid, (tx) =>
+                  tx.$executeRaw`
+                    UPDATE connector_config
+                    SET bootstrapped_at = NOW(),
+                        last_bootstrap_summary = ${JSON.stringify(summary)}::jsonb
+                    WHERE tenant_id = ${tid}::uuid AND id = ${eventConnectorId}::uuid
+                  `
+                )
+              : withTenant(prisma, tid, (tx) =>
+                  tx.$executeRaw`
+                    UPDATE connector_config
+                    SET bootstrapped_at = NOW(),
+                        last_bootstrap_summary = ${JSON.stringify(summary)}::jsonb
+                    WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
+                  `
+                )
             ).catch((err: Error) => log.warn({ err, connectorType, tenantId: tid }, 'failed to write bootstrapped_at'))
 
             const nsCount = discoveredNamespaces?.length
@@ -408,12 +480,20 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         if (isBootstrapEvent) {
           const connectorType = eventConnectorType
           if (connectorType) {
-            void withTenant(prisma, tid, (tx) =>
-              tx.$executeRaw`
-                UPDATE connector_config
-                SET last_bootstrap_summary = ${JSON.stringify({ status: 'error', error: String(err), at: new Date().toISOString() })}::jsonb
-                WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
-              `
+            const errSummary = JSON.stringify({ status: 'error', error: String(err), at: new Date().toISOString() })
+            void (eventConnectorId && UUID_RE.test(eventConnectorId)
+              ? withTenant(prisma, tid, (tx) =>
+                  tx.$executeRaw`
+                    UPDATE connector_config SET last_bootstrap_summary = ${errSummary}::jsonb
+                    WHERE tenant_id = ${tid}::uuid AND id = ${eventConnectorId}::uuid
+                  `
+                )
+              : withTenant(prisma, tid, (tx) =>
+                  tx.$executeRaw`
+                    UPDATE connector_config SET last_bootstrap_summary = ${errSummary}::jsonb
+                    WHERE tenant_id = ${tid}::uuid AND connector_type = ${connectorType}
+                  `
+                )
             ).catch(() => {})
 
             appendAuditEvent({
@@ -434,17 +514,20 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       const { sources } = JSON.parse(message) as { count: number; sources: string[] }
       if (!Array.isArray(sources)) return
       for (const source of sources) {
-        // Re-bootstrap every tenant that has this connector enabled — not just the default tenant
-        const rows = await prisma.$queryRaw<Array<{ tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-          SELECT tenant_id, credentials_enc FROM connector_config
+        // Re-bootstrap every tenant that has this connector enabled — not just
+        // the default tenant. Re-sweeps EVERY row of this type per tenant now
+        // (not just one) — a multi-instance type (mcp/cli) has multiple real
+        // rows to individually re-bootstrap, each with its own connectorId.
+        const rows = await prisma.$queryRaw<Array<{ id: string; tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>>`
+          SELECT id, tenant_id, credentials_enc FROM connector_config
           WHERE connector_type = ${source} AND enabled = true
-        `.catch(() => [] as Array<{ tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>)
+        `.catch(() => [] as Array<{ id: string; tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>)
         for (const row of rows) {
           await graphPub.publish('connector_reconnected', JSON.stringify({
             type: 'connector_reconnected',
             tenantId: row.tenant_id,
             connectorType: source,
-            connectorId: source,
+            connectorId: row.id,
             payload: effectiveCredentials(row),
             at: new Date().toISOString(),
           })).catch(() => {})
@@ -479,7 +562,7 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
         const k = registryCache.keys().next().value
         if (k !== undefined) registryCache.delete(k)
       }
-      registryCache.set(tid, await buildBootstrapRegistry(kg, tid))
+      registryCache.set(tid, await buildBootstrapRegistry(kg, tid, provider))
     }
     const bootstrapRegistry = registryCache.get(tid)!
     const pub = createClient({
@@ -490,7 +573,8 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
     })
     pub.on('error', (err: Error) => log.error({ err }, 'Redis graph-worker pub error — will reconnect'))
     await pub.connect()
-    const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, pub)
+    const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, pub,
+      (connectorId, connectorType, result) => persistToolRoleMapIfPresent(tid, connectorId, connectorType, result, log))
 
     try {
       await agent.handle(event)

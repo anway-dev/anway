@@ -101,16 +101,19 @@ export async function connectorsRoutes(app: FastifyInstance) {
   })
 
   // T9: Bootstrap status
-  app.get<{ Params: { type: string } }>('/api/connectors/:type/bootstrap-status', {
+  // instanceName disambiguates for multi-instance types (mcp/cli); defaults
+  // to type for singleton connectors.
+  app.get<{ Params: { type: string }; Querystring: { instanceName?: string } }>('/api/connectors/:type/bootstrap-status', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
     if (!KNOWN_CONNECTORS.has(type)) return reply.code(400).send({ error: `unknown connector type: ${type}` })
+    const instanceName = request.query.instanceName?.trim() || type
     const row = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<{ bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }[]>`
         SELECT bootstrapped_at AS bootstrapped_at, last_bootstrap_summary AS last_bootstrap_summary
-        FROM connector_config WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+        FROM connector_config WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type} AND instance_name = ${instanceName}
       `
     ).catch(() => [])
     if (row.length === 0) return { bootstrapped: false }
@@ -157,18 +160,21 @@ export async function connectorsRoutes(app: FastifyInstance) {
   )
 
   // BB1: Connector health/status — polls live connector endpoint
-  app.get<{ Params: { type: string } }>('/api/connectors/:type/status', {
+  // instanceName disambiguates for multi-instance types (mcp/cli); defaults
+  // to type for singleton connectors.
+  app.get<{ Params: { type: string }; Querystring: { instanceName?: string } }>('/api/connectors/:type/status', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
     const { type } = request.params
     if (!KNOWN_CONNECTORS.has(type)) return reply.code(400).send({ error: `unknown connector type: ${type}` })
+    const instanceName = request.query.instanceName?.trim() || type
 
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ enabled: boolean; bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }>>`
         SELECT enabled, bootstrapped_at, last_bootstrap_summary
         FROM connector_config
-        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type} AND instance_name = ${instanceName}
       `
     ).catch(() => [] as Array<{ enabled: boolean; bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }>)
 
@@ -183,7 +189,7 @@ export async function connectorsRoutes(app: FastifyInstance) {
     })
   })
 
-  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','alertmanager','pagerduty','k8s','eks','gke','aks','aws-cloudwatch'])
+  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','alertmanager','pagerduty','k8s','eks','gke','aks','aws-cloudwatch','mcp','cli'])
 const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
 
   // T9: Trigger bootstrap
@@ -473,7 +479,9 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
   )
 
   // POST /api/connectors/:type/reconnect — triggers re-bootstrap
-  app.post<{ Params: { type: string } }>('/api/connectors/:type/reconnect', {
+  // instanceName selects which registered instance for multi-instance types
+  // (mcp/cli) — same pattern as the /bootstrap route above.
+  app.post<{ Params: { type: string }; Querystring: { instanceName?: string } }>('/api/connectors/:type/reconnect', {
     preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
@@ -481,24 +489,26 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
     if (!VALID_BOOTSTRAP_TYPES.has(type)) {
       return reply.code(400).send({ error: `unknown connector type: ${type}` })
     }
+    const instanceName = request.query.instanceName?.trim() || type
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ credentials_enc: string }>>`
-        SELECT credentials_enc FROM connector_config
-        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+      tx.$queryRaw<Array<{ id: string; credentials_enc: string }>>`
+        SELECT id, credentials_enc FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type} AND instance_name = ${instanceName}
       `
     ).catch(() => [])
     if (rows.length === 0) return reply.code(404).send({ error: 'connector not registered' })
+    const connectorId = rows[0]!.id
     const pub = await getBootstrapPub()
     if (pub) {
-      await pub.del(`graph:bootstrap:lock:${tenantId}:${type}`).catch(() => {})
+      await pub.del(`graph:bootstrap:lock:${tenantId}:${connectorId}`).catch(() => {})
       await pub.publish('connector_reconnected', JSON.stringify({
         type: 'connector_reconnected',
         tenantId,
         connectorType: type,
-        connectorId: type,
+        connectorId,
       }))
     }
-    return { ok: true, message: `Reconnect triggered for ${type}` }
+    return { ok: true, message: `Reconnect triggered for ${type} (${instanceName})` }
   })
 
   // GET /api/connectors/activity — unified connector event log for all connector types

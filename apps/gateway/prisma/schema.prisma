@@ -181,6 +181,11 @@ model ConnectorConfig {
   enabled                Boolean   @default(false)
   bootstrapped_at        DateTime? @db.Timestamptz
   last_bootstrap_summary Json?     @default("{}")
+  // allowedTools (per-tool enforcement) + toolRoleMap (classified
+  // discovery/search/get/write tool names) for mcp/cli connector instances —
+  // see migration 0047 and graph-builder/subscriber.ts's
+  // persistToolRoleMapIfPresent.
+  capability_manifest    Json      @default("{}")
   updated_at             DateTime  @default(now()) @db.Timestamptz
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)

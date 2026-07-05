@@ -175,6 +175,13 @@ export function ConnectorsView() {
       for (const field of modal.configFields) {
         if (formValues[field.key]) credentials[field.key] = formValues[field.key];
       }
+      // instance_name is a registration-level field, not a stored credential
+      // (mcp/cli are multi-instance — see CONNECTOR_CATALOG in
+      // apps/gateway/src/routes/connectors.ts) — settings.ts's PUT route
+      // expects it as a separate top-level `instanceName`, not nested inside
+      // credentials.
+      const instanceName = credentials['instance_name']
+      delete credentials['instance_name']
 
       // Auto-test before save — warn on failure, let user click "Save anyway" to proceed
       if (!testResult) {
@@ -196,7 +203,7 @@ export function ConnectorsView() {
       const resp = await fetch(`/api/settings/connectors/${modal.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credentials }),
+        body: JSON.stringify(instanceName ? { credentials, instanceName } : { credentials }),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({})) as { error?: string }

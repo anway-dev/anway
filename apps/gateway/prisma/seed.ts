@@ -65,15 +65,15 @@ async function seedDemo() {
   // Seed connector_config rows for demo — these power getNativeConnectorTools in chat.ts.
   // Without these rows, selectConnectorTypes skips alertmanager/prometheus/etc in incident triage.
   await prisma.$executeRaw`
-    INSERT INTO connector_config (tenant_id, connector_type, enabled, credentials_enc)
+    INSERT INTO connector_config (tenant_id, connector_type, instance_name, enabled, credentials_enc)
     VALUES
-      (${DEMO_TENANT_ID}::uuid, 'prometheus',   true, NULL),
-      (${DEMO_TENANT_ID}::uuid, 'alertmanager', true, NULL),
-      (${DEMO_TENANT_ID}::uuid, 'loki',         true, NULL),
-      (${DEMO_TENANT_ID}::uuid, 'grafana',      true, NULL),
-      (${DEMO_TENANT_ID}::uuid, 'github',       true, NULL),
-      (${DEMO_TENANT_ID}::uuid, 'k8s',          true, NULL)
-    ON CONFLICT (tenant_id, connector_type, COALESCE(env_id, '00000000-0000-0000-0000-000000000000'::uuid))
+      (${DEMO_TENANT_ID}::uuid, 'prometheus',   'prometheus',   true, NULL),
+      (${DEMO_TENANT_ID}::uuid, 'alertmanager', 'alertmanager', true, NULL),
+      (${DEMO_TENANT_ID}::uuid, 'loki',         'loki',         true, NULL),
+      (${DEMO_TENANT_ID}::uuid, 'grafana',      'grafana',      true, NULL),
+      (${DEMO_TENANT_ID}::uuid, 'github',       'github',       true, NULL),
+      (${DEMO_TENANT_ID}::uuid, 'k8s',          'k8s',          true, NULL)
+    ON CONFLICT (tenant_id, connector_type, instance_name, COALESCE(env_id, '00000000-0000-0000-0000-000000000000'::uuid))
     DO UPDATE SET enabled = true, updated_at = NOW()
   `
 

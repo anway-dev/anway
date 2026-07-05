@@ -21,6 +21,20 @@ export interface ConnectorManifest {
     readonly read: string[]
     readonly write: string[]
   }
+  /**
+   * Explicit per-tool allowlist, by exact tool name (e.g.
+   * "my-notion-mcp.search_pages"). Native connectors (github, prometheus,
+   * ...) have a fixed, code-reviewed tool set, so a connector-level
+   * read/write scope is a safe default. MCP/CLI-backed connectors expose
+   * whatever tools their real, arbitrary target server/binary happens to
+   * have — most of those tool calls carry no generic `resource` arg at
+   * all, so the read/write-scope check below would otherwise allow EVERY
+   * discovered tool as soon as any read scope exists, regardless of
+   * whether that specific tool was ever reviewed. When set, only tool
+   * names in this list are allowed, full stop — anything discovered but
+   * not in this list is denied by default, not fabricated as available.
+   */
+  readonly allowedTools?: string[]
 }
 
 export interface HardBlock {
@@ -70,6 +84,11 @@ function intersectScope(userScope: ConnectorScope, manifest: ConnectorManifest):
 export class AgentPerimeter {
   // Map from connectorId → resolved (user ∩ manifest) scopes
   private readonly resolved: Map<string, ResolvedScope>
+  // Manifest-declared per-tool allowlist, by connectorId. Connector-level
+  // (not intersected with user scope) — a hard boundary on which of a
+  // dynamically-discovered tool set was ever reviewed, independent of which
+  // resource patterns a given user is granted within it.
+  private readonly allowedToolsByConnector: Map<string, Set<string>>
   // Harness-owned tools with bare names (no `<connector>.` prefix), e.g.
   // list_connectors, register_connector. Explicit allowlist — an unprefixed
   // tool NOT in this set is still hard-blocked. Write built-ins remain
@@ -78,8 +97,13 @@ export class AgentPerimeter {
 
   constructor(userPerimeter: UserPerimeter, manifests: ConnectorManifest[], builtinTools: string[] = []) {
     this.resolved = new Map()
+    this.allowedToolsByConnector = new Map()
     this.builtins = new Set(builtinTools)
     const manifestMap = new Map(manifests.map((m) => [m.connectorId, m]))
+
+    for (const manifest of manifests) {
+      if (manifest.allowedTools) this.allowedToolsByConnector.set(manifest.connectorId, new Set(manifest.allowedTools))
+    }
 
     for (const scope of userPerimeter.connectors) {
       const manifest = manifestMap.get(scope.connectorId)
@@ -100,6 +124,9 @@ export class AgentPerimeter {
     const connectorId = connectorIdFromTool(toolCall.name)
     const scope = this.resolved.get(connectorId)
     if (!scope) return false
+
+    const allowedTools = this.allowedToolsByConnector.get(connectorId)
+    if (allowedTools && !allowedTools.has(toolCall.name)) return false
 
     const resource = typeof toolCall.args['resource'] === 'string' ? toolCall.args['resource'] : null
 

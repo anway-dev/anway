@@ -19,12 +19,17 @@ describe('prometheus conformance', () => {
     }
   })
 
-  it('bootstrap returns valid result structure', async () => {
+  it('bootstrap throws explicitly when prometheus is unreachable (no localhost:9090 in CI)', async () => {
+    // Unlike most connectors, PrometheusBootstrap deliberately throws rather
+    // than silently returning entitiesUpserted: 0 on connection failure — so
+    // an outage is never reported as "0 real entities, all fine." The real
+    // caller (graph-builder/subscriber.ts) catches this and records
+    // bootstrap_failed via audit log; it does not crash. This test asserts
+    // that real contract instead of assuming a graceful return that this
+    // connector intentionally does not provide.
     const kg = new FakeKnowledgeGraph()
-    const result = await new PrometheusBootstrap(kg).bootstrap(
-      '00000000-0000-0000-0000-000000000001' as any, 'test-conn', {}
-    )
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
-    expect(result.episodeHints).toBeDefined()
+    await expect(
+      new PrometheusBootstrap(kg).bootstrap('00000000-0000-0000-0000-000000000001' as any, 'test-conn', {}),
+    ).rejects.toThrow(/prometheus unreachable/)
   })
 })

@@ -26,18 +26,21 @@ describe('grafana — integration (real Docker)', () => {
     // /api/health passing doesn't guarantee the dashboard/search subsystem is
     // warmed up yet — confirmed live: the identical POST succeeds fine when
     // run standalone a few seconds after container start, but raced here.
-    // Retry once instead of silently swallowing the failure (the previous
-    // .catch(() => null) masked exactly this — the test "passed" its own
-    // seed step even when the seed silently failed, then asserted on the
-    // now-inevitably-empty bootstrap result).
+    // Retry with backoff instead of silently swallowing the failure (the
+    // previous .catch(() => null) masked exactly this — the test "passed"
+    // its own seed step even when the seed silently failed, then asserted
+    // on the now-inevitably-empty bootstrap result). A single 2s retry
+    // wasn't enough under real concurrent test-suite load (confirmed live:
+    // still raced under 4-way parallel connector test execution) — loop
+    // with increasing backoff instead of a fixed one-shot retry.
     const seed = async () => fetch(`${baseUrl}/api/dashboards/db`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dashboard: { title: 'Test Dashboard', uid: 'test-dash', panels: [] }, overwrite: true }),
     })
     let seedRes = await seed()
-    if (!seedRes.ok) {
-      await new Promise(r => setTimeout(r, 2000))
+    for (let attempt = 1; !seedRes.ok && attempt <= 4; attempt++) {
+      await new Promise(r => setTimeout(r, attempt * 2000))
       seedRes = await seed()
     }
     if (!seedRes.ok) throw new Error(`seed dashboard failed: ${seedRes.status} ${await seedRes.text()}`)

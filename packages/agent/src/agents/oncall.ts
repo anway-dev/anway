@@ -23,7 +23,7 @@ export class OncallAgent {
     ], [], { model: this.cheapModel.cheapModelId, maxTokens: 200, temperature: 0 })
 
     const result = await this.mainModel.chat([
-      { role: 'system', content: 'Generate shift brief in JSON matching { summary, openIncidents: [{title, severity, startedAt, status}], recentDeploys: string[], watchItems: string[], handoffNotes: string }. Return ONLY valid JSON.' },
+      { role: 'system', content: 'Generate shift brief in JSON matching { summary, openIncidents: [{title, severity, startedAt, status}], recentDeploys: string[], watchItems: string[], handoffNotes: string }. Do not fabricate incidents, deploys, or specifics not present in the provided activity — if no real incidents/deploys are available, say so explicitly in summary/handoffNotes and leave openIncidents/recentDeploys empty rather than inventing plausible-sounding ones. Return ONLY valid JSON.' },
       { role: 'user', content: `Team: ${teamName}\nActivity: ${extraction.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 

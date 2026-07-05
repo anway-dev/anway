@@ -102,6 +102,7 @@ export { createGetIncidentContextTool } from './tools/incident-context.js'
 // Connectors — shared MCP/CLI template support
 export { classifyToolRoles } from './connectors/tool-role-classifier.js'
 export type { ToolRoleMap, ClassifiableTool } from './connectors/tool-role-classifier.js'
+export { extractListItems, resourceName, resourceId } from './connectors/resource-extraction.js'
 
 // Scheduler
 export type { IScheduler, ScheduledJob } from './scheduler/scheduler.js'

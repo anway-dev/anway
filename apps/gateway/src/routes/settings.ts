@@ -183,10 +183,11 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     'opsgenie', 'launchdarkly', 'confluence',
     'eks', 'gke', 'aks', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
     'alertmanager',
-    // Generic fallback templates — for services with no native connector.
-    // Multi-instance (see MULTI_INSTANCE_TYPES below): each registration is
-    // a distinct real MCP server / CLI binary, not a single shared connector.
-    'mcp', 'cli',
+    // mcp/cli are NOT registered here — they're multi-instance templates
+    // registered via the register_connector chat tool (apps/gateway/src/
+    // connectors/registry.ts), which stores them in the `connectors` table,
+    // not connector_config. This route/table is for singleton native
+    // connectors only.
   ]
 
   app.get<{ Params: { type: string }; Querystring: { instanceName?: string } }>(
@@ -220,13 +221,12 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     }
   )
 
-  // MCP/CLI adapters are a template, not a singleton connector — a tenant
-  // can register many differently-configured instances of the same type
-  // (e.g. two separate MCP servers backing two different services).
-  // instanceName distinguishes them; every other connector_type defaults it
-  // to the type itself, preserving today's exact one-row-per-type behavior.
-  const MULTI_INSTANCE_TYPES = new Set(['mcp', 'cli'])
-
+  // instanceName lets a caller target a specific instance_name row for a
+  // connector_type where one might exist (defaults to the type itself,
+  // preserving the one-row-per-type behavior every native connector still
+  // has). mcp/cli are excluded from KNOWN_CONNECTORS above — they're
+  // multi-instance templates registered via register_connector instead,
+  // into the separate `connectors` table.
   app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown>; instanceName?: string } }>(
     '/api/settings/connectors/:type', { preHandler: [app.authenticate, requireRole('admin')] }, async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
@@ -235,9 +235,6 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         return reply.code(400).send({ error: 'Unknown connector type' })
       }
       const { credentials, instanceName: rawInstanceName } = request.body
-      if (MULTI_INSTANCE_TYPES.has(type) && !rawInstanceName?.trim()) {
-        return reply.code(400).send({ error: 'instanceName is required for mcp/cli connectors — multiple instances of the same type can coexist' })
-      }
       const instanceName = rawInstanceName?.trim() || type
 
       // Check if this is a first registration vs credential update

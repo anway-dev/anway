@@ -42,13 +42,12 @@ import { EcsBootstrap } from '@anway/connector-ecs'
 import { AwsHealthBootstrap } from '@anway/connector-aws-health'
 import { AzureMonitorBootstrap } from '@anway/connector-azure-monitor'
 import { GcpMonitoringBootstrap } from '@anway/connector-gcp-monitoring'
-// Generic MCP/CLI fallback templates — not a fixed connector. Every real
-// registered instance (a distinct MCP server URL or CLI binary) is
-// distinguished by its own connectorId/payload passed per bootstrap() call,
-// exactly like every native connector above — one shared class instance
-// here correctly serves unlimited registered instances of that type.
-import { McpConnectorBootstrap } from '@anway/mcp-adapter'
-import { CliConnectorBootstrap } from '@anway/cli-adapter'
+// mcp/cli are NOT registered here — they're multi-instance templates that
+// live in the separate `connectors` table (apps/gateway/src/connectors/
+// registry.ts's register_connector), with classification + graph bootstrap
+// run inline at registration time, not via this connector_config-keyed
+// event-driven registry (which requires exactly one row per connector_type
+// per tenant, wrong for a template many real instances share).
 // (avoid build-time dependency on packages that may not have dist/ built)
 
 // Alertmanager is a native connector (no separate package) — bootstrap inline
@@ -187,45 +186,7 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   return null
 }
 
-// Persists an MCP/CLI connector's classified tool→role map into its own
-// capability_manifest.allowedTools — so the perimeter (chat.ts + engine.ts)
-// can enforce that only reviewed/classified tools are ever callable for
-// that specific instance, and so re-bootstrap doesn't re-pay a model call
-// once a mapping is known (checked by McpConnectorBootstrap/
-// CliConnectorBootstrap via payload['toolRoleMap'] before reclassifying).
-// GraphBuilderAgent itself has no DB access (only IKnowledgeGraph), so this
-// runs here, in the one layer that does.
-function persistToolRoleMapIfPresent(
-  tid: string,
-  connectorId: string,
-  connectorType: string,
-  result: { metadata?: Record<string, unknown> },
-  log?: SubscriberLogger,
-): void {
-  if (connectorType !== 'mcp' && connectorType !== 'cli') return
-  if (!UUID_RE.test(connectorId)) return
-  const roleMap = result.metadata?.['toolRoleMap'] as { discovery?: string; search?: string; get?: string; write?: string[] } | undefined
-  if (!roleMap) return
-  // Write-role tools are included here too — allowedTools only governs
-  // "was this tool ever reviewed/classified at all," not read-vs-write.
-  // The actual write gate is the connector's mode/write-scope check in
-  // engine.ts's allows(), same as every native connector.
-  const allowedTools = [roleMap.discovery, roleMap.search, roleMap.get, ...(roleMap.write ?? [])].filter((t): t is string => !!t)
-  if (allowedTools.length === 0) return
-  // Store both: allowedTools (flat list) is what engine.ts's per-tool check
-  // reads; toolRoleMap (structured, preserves which one is "discovery")
-  // is what the bootstrap reads back on the next reconnect to skip paying
-  // for reclassification again.
-  void withTenant(prisma, tid, (tx) =>
-    tx.$executeRaw`
-      UPDATE connector_config
-      SET capability_manifest = COALESCE(capability_manifest, '{}'::jsonb) || ${JSON.stringify({ allowedTools, toolRoleMap: roleMap })}::jsonb
-      WHERE tenant_id = ${tid}::uuid AND id = ${connectorId}::uuid
-    `
-  ).catch((err: Error) => log?.warn?.({ err, connectorId, connectorType }, 'failed to persist toolRoleMap to capability_manifest'))
-}
-
-async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string, provider?: ReturnType<typeof ProviderFactory.create>): Promise<Map<string, IConnectorBootstrap>> {
+async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string): Promise<Map<string, IConnectorBootstrap>> {
   const reg = new Map<string, IConnectorBootstrap>()
   // Tier 1 — fully operational
   reg.set('github', new GitHubBootstrap(kg))
@@ -267,10 +228,6 @@ async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph
   reg.set('azure-monitor', new AzureMonitorBootstrap(kg))
   reg.set('gcp-monitoring', new GcpMonitoringBootstrap(kg))
   reg.set('alertmanager', new AlertmanagerBootstrapImpl(kg))
-  // Generic MCP/CLI fallback templates — registered once, serve unlimited
-  // real instances (see import comment above).
-  reg.set('mcp', new McpConnectorBootstrap(kg, provider))
-  reg.set('cli', new CliConnectorBootstrap(kg, provider))
   return reg
 }
 
@@ -324,11 +281,10 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
           const k = registryCache.keys().next().value
           if (k !== undefined) registryCache.delete(k)
         }
-        registryCache.set(tid, await buildBootstrapRegistry(kg, tid, provider))
+        registryCache.set(tid, await buildBootstrapRegistry(kg, tid))
       }
       const bootstrapRegistry = registryCache.get(tid)!
-      const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub,
-        (connectorId, connectorType, result) => persistToolRoleMapIfPresent(tid, connectorId, connectorType, result, log))
+      const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub)
 
       // Connector lifecycle events re-published internally (e.g. kb:stale) carry no
       // payload — load stored credentials so bootstrap reaches the right endpoint.
@@ -562,7 +518,7 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
         const k = registryCache.keys().next().value
         if (k !== undefined) registryCache.delete(k)
       }
-      registryCache.set(tid, await buildBootstrapRegistry(kg, tid, provider))
+      registryCache.set(tid, await buildBootstrapRegistry(kg, tid))
     }
     const bootstrapRegistry = registryCache.get(tid)!
     const pub = createClient({
@@ -573,8 +529,7 @@ export async function startGraphBuilderWorker(redisUrl: string, log: SubscriberL
     })
     pub.on('error', (err: Error) => log.error({ err }, 'Redis graph-worker pub error — will reconnect'))
     await pub.connect()
-    const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, pub,
-      (connectorId, connectorType, result) => persistToolRoleMapIfPresent(tid, connectorId, connectorType, result, log))
+    const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, pub)
 
     try {
       await agent.handle(event)

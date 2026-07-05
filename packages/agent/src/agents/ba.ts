@@ -23,7 +23,7 @@ export class BAAgent {
     ], [], { model: this.cheapModel.cheapModelId, maxTokens: 10, temperature: 0 })
 
     const result = await this.mainModel.chat([
-      { role: 'system', content: 'Answer business query in JSON matching { query, summary, metrics: [{label, value, trend?: "up"|"down"|"stable"}], insights: string[], recommendations: string[] }. Return ONLY valid JSON.' },
+      { role: 'system', content: 'Answer business query in JSON matching { query, summary, metrics: [{label, value, trend?: "up"|"down"|"stable"}], insights: string[], recommendations: string[] }. Do not fabricate specific numbers, percentages, or metrics not grounded in the provided context — if no real underlying data is available, say so explicitly in summary and leave metrics empty rather than inventing plausible-sounding figures. Return ONLY valid JSON.' },
       { role: 'user', content: `Query: ${query}\nType: ${classification.content}\n${graphContext ? `Context: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.slice(0, 5).map(e => e.name).join(', ')}` : ''}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 

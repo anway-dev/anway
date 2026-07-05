@@ -47,8 +47,17 @@ export function isWriteAction(toolName: string): boolean {
   let action = toolName
   if (toolName.includes('.')) action = toolName.split('.').pop() ?? toolName
   else if (toolName.includes('__')) action = toolName.split('__').pop() ?? toolName
+  // READ_ACTION_PATTERNS are underscore-prefixed (native connectors' own
+  // convention, e.g. get_pods) — MCP/CLI tool names are conventionally
+  // kebab-case (get-resource-links), which none of those patterns match at
+  // all. Confirmed live: this silently misclassified every read-shaped MCP
+  // tool as a write action, denying it regardless of any per-tool allowlist
+  // (scope.write is correctly empty, so the write branch always denies).
+  // Normalize hyphens to underscores before testing, not the other way
+  // round, since the patterns are the established native-connector contract.
+  const normalized = action.replace(/-/g, '_')
   // Default-deny: anything that does NOT match a known read prefix is a write
-  return !READ_ACTION_PATTERNS.some((p) => p.test(action))
+  return !READ_ACTION_PATTERNS.some((p) => p.test(normalized))
 }
 
 export async function pollGate(

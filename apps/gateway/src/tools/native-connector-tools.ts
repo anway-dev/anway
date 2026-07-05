@@ -4,8 +4,8 @@ import { withTenant } from '../db/prisma.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import type { PrismaClient } from '@prisma/client'
 import { adaptConnectorAgent } from './connector-tools-adapter.js'
-import { McpConnector } from '@anway/mcp-adapter'
-import { CliConnector } from '@anway/cli-adapter'
+// mcp/cli tools are exposed via connectors/registry.ts's getToolsForTenant
+// (the `connectors` table, not connector_config) — not here.
 import { ArgocdAgent } from '@anway/connector-argocd'
 import { AwsCloudwatchAgent } from '@anway/connector-aws-cloudwatch'
 import { AwsHealthAgent } from '@anway/connector-aws-health'
@@ -41,40 +41,6 @@ type ConnectorConfigRow = {
   connector_type: string
   credentials_enc: string | null
   instance_name: string | null
-  capability_manifest: Record<string, unknown> | null
-}
-
-/**
- * mcp/cli connectors have no fixed tool set — only the roles a prior
- * bootstrap classified (persisted to capability_manifest.toolRoleMap) are
- * ever exposed to chat, and only the read-shaped ones (discovery/search/
- * get) — write-classified tools are excluded entirely, same V1 posture as
- * every native connector's write:true tools (adaptConnectorAgent). Each
- * tool's `run` lazily builds the real adapter and re-discovers at call
- * time (same laziness as every native connector's fetch-on-call pattern)
- * rather than caching a possibly-stale definition.
- */
-function makeMcpOrCliTools(
-  kind: 'mcp' | 'cli',
-  creds: Record<string, unknown>,
-  instanceName: string,
-  capabilityManifest: Record<string, unknown> | null,
-): ExecutableTool[] {
-  const roleMap = capabilityManifest?.['toolRoleMap'] as { discovery?: string; search?: string; get?: string } | undefined
-  if (!roleMap) return []
-  const readRoles = [roleMap.discovery, roleMap.search, roleMap.get].filter((t): t is string => !!t)
-  return readRoles.map((toolName) => ({
-    name: `${instanceName}__${toolName.replace(`${instanceName}.`, '')}`,
-    description: `${kind === 'mcp' ? 'MCP' : 'CLI'} connector "${instanceName}" tool: ${toolName}`,
-    parameters: { type: 'object' as const, properties: {} },
-    run: async (args: Record<string, unknown>) => {
-      const adapter = kind === 'mcp'
-        ? new McpConnector({ url: String(creds['mcpUrl'] ?? creds['url'] ?? ''), name: instanceName })
-        : new CliConnector({ name: instanceName, binary: String(creds['binary'] ?? ''), allowedSubcommands: creds['allowedSubcommands'] as string[] | undefined, env: creds['env'] as Record<string, string> | undefined })
-      const bareName = toolName.startsWith(`${instanceName}.`) ? toolName.slice(instanceName.length + 1) : toolName
-      return adapter.call(bareName, args)
-    },
-  }))
 }
 
 function parseDurationSec(s: string): number {
@@ -372,7 +338,7 @@ export async function getNativeConnectorTools(
 ): Promise<ExecutableTool[]> {
   const rows = await withTenant(prismaClient, tenantId, (tx) =>
     tx.$queryRaw<ConnectorConfigRow[]>`
-      SELECT connector_type, credentials_enc, instance_name, capability_manifest
+      SELECT connector_type, credentials_enc, instance_name
       FROM connector_config
       WHERE tenant_id = ${tenantId}::uuid AND enabled = true
     `
@@ -417,8 +383,6 @@ export async function getNativeConnectorTools(
       case 'terraform':       tools.push(...adaptConnectorAgent(new TerraformAgent(), creds as ConnectorCreds)); break
       case 'vault':           tools.push(...adaptConnectorAgent(new VaultAgent(), creds as ConnectorCreds)); break
       case 'vercel':          tools.push(...adaptConnectorAgent(new VercelAgent(), creds as ConnectorCreds)); break
-      case 'mcp':             tools.push(...makeMcpOrCliTools('mcp', creds, row.instance_name ?? 'mcp', row.capability_manifest)); break
-      case 'cli':             tools.push(...makeMcpOrCliTools('cli', creds, row.instance_name ?? 'cli', row.capability_manifest)); break
     }
   }
   return tools

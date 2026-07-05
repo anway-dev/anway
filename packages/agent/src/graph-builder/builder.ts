@@ -2,7 +2,7 @@ import type { TenantId } from '@anway/types'
 import type { IModelProvider, Message } from '../interfaces/provider.js'
 import type { IKnowledgeGraph } from '../interfaces/knowledge-graph.js'
 import type { GraphEvent } from './events.js'
-import type { IConnectorBootstrap, ConnectorBootstrapResult } from './bootstrap.js'
+import type { IConnectorBootstrap } from './bootstrap.js'
 
 export interface GraphBuilderLogger {
   error(obj: unknown, msg?: string): void
@@ -22,12 +22,6 @@ export class GraphBuilderAgent {
     private readonly logger?: GraphBuilderLogger,
     private readonly bootstrapRegistry?: Map<string, IConnectorBootstrap>,
     private readonly redisPublisher?: { publish(channel: string, message: string): Promise<number> },
-    // Fires after a successful bootstrap() call with the raw result —
-    // callers with DB access (apps/gateway) use this to persist anything in
-    // result.metadata (e.g. an MCP/CLI connector's classified toolRoleMap)
-    // into that connector's stored capability_manifest, since this class
-    // itself has no DB access, only the IKnowledgeGraph interface.
-    private readonly onBootstrapResult?: (connectorId: string, connectorType: string, result: ConnectorBootstrapResult) => void,
   ) {}
 
   /**
@@ -111,7 +105,6 @@ export class GraphBuilderAgent {
             `GraphBuilder: bootstrapped ${result.entitiesUpserted} entities from ${event.connectorType}`,
           )
         }
-        this.onBootstrapResult?.(event.connectorId, event.connectorType, result)
         // Write bootstrap episode hints to episodic layer (same pattern as onConnectorReconnected)
         await this.kg.addEpisode({
           text: `Connector registered and bootstrapped: ${event.connectorType}. ${result.episodeHints.join('. ')}`,
@@ -360,7 +353,6 @@ export class GraphBuilderAgent {
       return
     }
     const result = await bootstrap.bootstrap(tenantId, event.connectorId, event.payload)
-    this.onBootstrapResult?.(event.connectorId, event.connectorType, result)
     await this.kg.addEpisode({
       text: `Connector reconnected and re-bootstrapped: ${event.connectorType}. ${result.episodeHints.join('. ')}`,
       source: 'graph-builder',

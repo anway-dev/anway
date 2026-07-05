@@ -359,30 +359,19 @@ export async function chatRoutes(app: FastifyInstance) {
     const dbConnectors = connectorsResult.status === 'fulfilled' ? connectorsResult.value : []
     const dbTenant = tenantResult.status === 'fulfilled' ? tenantResult.value : null
 
-    // Load native connector config for perimeter + system prompt connector list.
-    // Excludes mcp/cli — those are multi-instance (see templateConnectorRows
-    // below) and keyed by instance_name in tool names, not connector_type,
-    // so the blanket connector_type-keyed read:['*'] grant below would never
-    // actually match their real per-instance tool-name-derived connectorId.
+    // Load native connector config for perimeter + system prompt connector
+    // list. mcp/cli are NOT here — they're multi-instance templates that
+    // live in the `connectors` table (dbConnectors above, from
+    // tx.connector.findMany()), not connector_config; that table's rows
+    // already carry their own capability_manifest.allowedTools (set at
+    // registration by connectors/registry.ts's register_connector) and are
+    // already covered by the dbConnectors-based manifests/scopes below.
     const nativeConnectorRows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ connector_type: string; mode: string }>>`
         SELECT connector_type, 'read' AS mode FROM connector_config
-        WHERE tenant_id = ${tenantId}::uuid AND enabled = true AND connector_type NOT IN ('mcp', 'cli')
+        WHERE tenant_id = ${tenantId}::uuid AND enabled = true
       `
     ).catch(() => [] as Array<{ connector_type: string; mode: string }>)
-
-    // mcp/cli connector instances — each row is a distinct real MCP server or
-    // CLI binary, identified by instance_name (not connector_type). Only
-    // tools the classifier actually reviewed (capability_manifest.allowedTools)
-    // are ever callable; absent that, default-deny for non-admin (same
-    // posture as dbConnectors above), never the blanket read:['*'] native
-    // connectors get.
-    const templateConnectorRows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ instance_name: string; connector_type: string; capability_manifest: Record<string, unknown> | null }>>`
-        SELECT instance_name, connector_type, capability_manifest FROM connector_config
-        WHERE tenant_id = ${tenantId}::uuid AND enabled = true AND connector_type IN ('mcp', 'cli')
-      `
-    ).catch(() => [] as Array<{ instance_name: string; connector_type: string; capability_manifest: Record<string, unknown> | null }>)
 
     // Token budget enforcement — Postgres authoritative check (not Redis-only)
     const usage = await loadTokenUsage(tenantId)
@@ -444,20 +433,6 @@ export async function chatRoutes(app: FastifyInstance) {
     // Apply user_perimeters overrides if configured — same pattern as dbConnectors above.
     connectorScopes.push(...buildNativeConnectorScopes(nativeConnectorRows, userPerimeterRows))
 
-    // mcp/cli connector instances — one scope per real instance, keyed by
-    // instance_name (matching the tool-name prefix native-connector-tools.ts
-    // actually generates), not connector_type. Default-deny for non-admin
-    // when no capability_manifest exists yet, same posture as dbConnectors.
-    for (const tc of templateConnectorRows) {
-      const raw = tc.capability_manifest as { capabilities?: { read?: string[]; write?: string[] } } | null
-      const userOverride = userPerimeterRows.find(r => r.connector_name === tc.instance_name)
-      connectorScopes.push({
-        connectorId: tc.instance_name,
-        read: userOverride ? userOverride.read_scopes : (raw?.capabilities?.read ?? (isAdmin ? ['*'] : [])),
-        write: [], // V1 read-only-via-chat posture, same as every native connector
-      })
-    }
-
     const userPerimeter: UserPerimeter = {
       userId: UserId(userId),
       connectors: connectorScopes,
@@ -491,19 +466,6 @@ export async function chatRoutes(app: FastifyInstance) {
         connectorId: nc.connector_type,
         mode: 'read' as const,
         capabilities: { read: ['*'], write: [] },
-      })
-    }
-
-    for (const tc of templateConnectorRows) {
-      const raw = tc.capability_manifest as { capabilities?: { read?: string[]; write?: string[] }; allowedTools?: string[] } | null
-      manifests.push({
-        connectorId: tc.instance_name,
-        mode: 'read' as const,
-        capabilities: {
-          read: raw?.capabilities?.read ?? (isAdmin ? ['*'] : []),
-          write: [],
-        },
-        allowedTools: raw?.allowedTools,
       })
     }
 
@@ -625,11 +587,6 @@ export async function chatRoutes(app: FastifyInstance) {
         ...nativeConnectorRows.map((nc) => ({
           name: nc.connector_type,
           type: nc.connector_type,
-          mode: 'read' as const,
-        })),
-        ...templateConnectorRows.map((tc) => ({
-          name: tc.instance_name,
-          type: tc.connector_type,
           mode: 'read' as const,
         })),
       ],

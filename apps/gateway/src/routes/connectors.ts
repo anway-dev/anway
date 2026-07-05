@@ -50,11 +50,11 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "sonarqube", name: "SonarQube", category: "Code Quality", description: "Code smell, coverage, technical debt, security hotspots", color: "#4e9bcd", icon: "SQ", capabilities: ["code", "security"], configFields: [{ label: "Server URL", key: "url", type: "text" }, { label: "Token", key: "token", type: "password" }, { label: "Project Key", key: "project", type: "text" }] },
   { id: "opsgenie", name: "OpsGenie", category: "Alerting", description: "Alerts, on-call schedules, escalations", color: "#ef5c35", icon: "OG", capabilities: ["alerts", "incidents"], configFields: [{ label: "API Key", key: "api_key", type: "password" }] },
   { id: "launchdarkly", name: "LaunchDarkly", category: "Feature Flags", description: "Feature flags, A/B tests, rollouts", color: "#405bff", icon: "LD", capabilities: ["flags", "releases"], configFields: [{ label: "SDK Key", key: "sdk_key", type: "password" }, { label: "Project Key", key: "project", type: "text" }] },
-  // Generic fallback templates — for a service with no native connector.
-  // Multi-instance: register this as many times as needed, each with a
-  // distinct instance_name — e.g. one row per real MCP server/CLI binary.
-  { id: "mcp", name: "MCP Server (generic)", category: "Fallback Template", description: "Connect any MCP server — tools are discovered and mapped to standard lifecycle roles (discovery/search/get) at registration time", color: "#8b5cf6", icon: "MC", capabilities: ["custom"], configFields: [{ label: "Instance Name (unique per registration)", key: "instance_name", type: "text" }, { label: "MCP Server URL", key: "mcpUrl", type: "text" }] },
-  { id: "cli", name: "CLI Binary (generic)", category: "Fallback Template", description: "Connect any local CLI binary — subcommands are discovered and mapped to standard lifecycle roles (discovery/search/get) at registration time", color: "#8b5cf6", icon: "CL", capabilities: ["custom"], configFields: [{ label: "Instance Name (unique per registration)", key: "instance_name", type: "text" }, { label: "Binary Name", key: "binary", type: "text" }] },
+  // NOTE: mcp/cli are NOT in this catalog — they're not singleton native
+  // connectors. They're registered via the register_connector chat tool
+  // (apps/gateway/src/connectors/registry.ts), which supports true
+  // multi-instance (every call creates a genuinely distinct row) and runs
+  // real tool discovery + classification on registration.
 ]
 
 const BOOTSTRAP_UNSAFE_KEYS = new Set(['error', 'stack', 'stackTrace', 'stderr', 'stdout'])
@@ -189,7 +189,9 @@ export async function connectorsRoutes(app: FastifyInstance) {
     })
   })
 
-  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','alertmanager','pagerduty','k8s','eks','gke','aks','aws-cloudwatch','mcp','cli'])
+  // mcp/cli excluded — their bootstrap runs inline during register_connector
+  // (apps/gateway/src/connectors/registry.ts), not via this trigger route.
+  const VALID_BOOTSTRAP_TYPES = new Set(['github','linear','argocd','datadog','prometheus','loki','alertmanager','pagerduty','k8s','eks','gke','aks','aws-cloudwatch'])
 const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
 
   // T9: Trigger bootstrap

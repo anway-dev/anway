@@ -2,6 +2,7 @@ import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
 import type { TechSpec } from './techspec.js'
+import { extractJson } from './extract-json.js'
 
 export interface TestFile { path: string; description: string; testCases: string[] }
 export interface TestPlan { unitTests: TestFile[]; integrationTests: TestFile[]; e2eScenarios: string[]; coverageTarget: number }
@@ -27,7 +28,7 @@ export class TestAgent {
       { role: 'user', content: `Title: ${spec.title}\nComponents: ${spec.components.map(c => `${c.name} (${c.technology})`).join(', ')}\nAPI: ${spec.apiChanges.map(a => `${a.method} ${a.path}`).join(', ')}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as TestPlan } catch { return { unitTests: [], integrationTests: [], e2eScenarios: [], coverageTarget: 80 } }
+    try { return extractJson<TestPlan>(result.content) } catch { return { unitTests: [], integrationTests: [], e2eScenarios: [], coverageTarget: 80 } }
   }
 
   async writeRegressionTest(incident: string, tenantId: TenantId): Promise<TestFile> {
@@ -39,6 +40,6 @@ export class TestAgent {
       { role: 'user', content: `Incident: ${incident}\n${graphContext ? 'Context: ' + graphContext.primaryEntity.name : ''}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as TestFile } catch { return { path: 'test/regression.test.ts', description: `Regression test for: ${incident}`, testCases: [] } }
+    try { return extractJson<TestFile>(result.content) } catch { return { path: 'test/regression.test.ts', description: `Regression test for: ${incident}`, testCases: [] } }
   }
 }

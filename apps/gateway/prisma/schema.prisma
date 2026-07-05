@@ -169,6 +169,13 @@ model ConnectorConfig {
   id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id              String    @db.Uuid
   connector_type         String    @db.VarChar(50)
+  // Distinguishes multiple instances of the same connector_type for the same
+  // tenant (e.g. two separate MCP-backed connectors). Defaults to
+  // connector_type for singleton native connectors — see migration 0046.
+  // Real unique index (with env_id folded via COALESCE) is a raw-SQL
+  // functional index Prisma can't express directly; @@unique below omits
+  // env_id to match the pre-existing pattern in this model.
+  instance_name          String    @db.VarChar(100)
   // credentials Json field dropped by migration 0024 — use credentials_enc instead
   credentials_enc        String?   @db.Text
   enabled                Boolean   @default(false)
@@ -178,6 +185,6 @@ model ConnectorConfig {
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
-  @@unique([tenant_id, connector_type])
+  @@unique([tenant_id, connector_type, instance_name])
   @@map("connector_config")
 }

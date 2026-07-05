@@ -42,6 +42,13 @@ import { EcsBootstrap } from '@anway/connector-ecs'
 import { AwsHealthBootstrap } from '@anway/connector-aws-health'
 import { AzureMonitorBootstrap } from '@anway/connector-azure-monitor'
 import { GcpMonitoringBootstrap } from '@anway/connector-gcp-monitoring'
+// Generic MCP/CLI fallback templates — not a fixed connector. Every real
+// registered instance (a distinct MCP server URL or CLI binary) is
+// distinguished by its own connectorId/payload passed per bootstrap() call,
+// exactly like every native connector above — one shared class instance
+// here correctly serves unlimited registered instances of that type.
+import { McpConnectorBootstrap } from '@anway/mcp-adapter'
+import { CliConnectorBootstrap } from '@anway/cli-adapter'
 // (avoid build-time dependency on packages that may not have dist/ built)
 
 // Alertmanager is a native connector (no separate package) — bootstrap inline
@@ -180,7 +187,7 @@ async function resolveProviderConfig(tenantId?: string): Promise<ProviderConfig 
   return null
 }
 
-async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string): Promise<Map<string, IConnectorBootstrap>> {
+async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph>, tid: string, provider?: ReturnType<typeof ProviderFactory.create>): Promise<Map<string, IConnectorBootstrap>> {
   const reg = new Map<string, IConnectorBootstrap>()
   // Tier 1 — fully operational
   reg.set('github', new GitHubBootstrap(kg))
@@ -222,6 +229,10 @@ async function buildBootstrapRegistry(kg: ReturnType<typeof createKnowledgeGraph
   reg.set('azure-monitor', new AzureMonitorBootstrap(kg))
   reg.set('gcp-monitoring', new GcpMonitoringBootstrap(kg))
   reg.set('alertmanager', new AlertmanagerBootstrapImpl(kg))
+  // Generic MCP/CLI fallback templates — registered once, serve unlimited
+  // real instances (see import comment above).
+  reg.set('mcp', new McpConnectorBootstrap(kg, provider))
+  reg.set('cli', new CliConnectorBootstrap(kg, provider))
   return reg
 }
 
@@ -275,7 +286,7 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
           const k = registryCache.keys().next().value
           if (k !== undefined) registryCache.delete(k)
         }
-        registryCache.set(tid, await buildBootstrapRegistry(kg, tid))
+        registryCache.set(tid, await buildBootstrapRegistry(kg, tid, provider))
       }
       const bootstrapRegistry = registryCache.get(tid)!
       const agent = new GraphBuilderAgent(kg, provider, log, bootstrapRegistry, graphPub)
@@ -285,12 +296,25 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       if ((event.type === 'connector_registered' || event.type === 'connector_reconnected') && eventConnectorType) {
         const existing = (event as { payload?: Record<string, unknown> }).payload
         if (!existing || Object.keys(existing).length === 0) {
-          const rows = await withTenant(prisma, tid, (tx) =>
-            tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-              SELECT credentials_enc FROM connector_config
-              WHERE tenant_id = ${tid}::uuid AND connector_type = ${eventConnectorType} AND enabled = true
-            `
-          ).catch(() => [])
+          const eventConnectorId = (event as { connectorId?: string }).connectorId
+          // connectorId is the real connector_config row UUID (post multi-instance
+          // fix) — look up by id when it's a real UUID, since connector_type alone
+          // is ambiguous once multiple instances of the same type can exist
+          // (mcp/cli). Falls back to type-based lookup only for any caller still
+          // passing the bare type string as connectorId.
+          const rows = eventConnectorId && UUID_RE.test(eventConnectorId)
+            ? await withTenant(prisma, tid, (tx) =>
+                tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
+                  SELECT credentials_enc FROM connector_config
+                  WHERE tenant_id = ${tid}::uuid AND id = ${eventConnectorId}::uuid AND enabled = true
+                `
+              ).catch(() => [])
+            : await withTenant(prisma, tid, (tx) =>
+                tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
+                  SELECT credentials_enc FROM connector_config
+                  WHERE tenant_id = ${tid}::uuid AND connector_type = ${eventConnectorType} AND enabled = true
+                `
+              ).catch(() => [])
           const creds = effectiveCredentials(rows[0])
           if (Object.keys(creds).length > 0) (event as { payload?: Record<string, unknown> }).payload = creds
         }

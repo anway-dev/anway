@@ -19,6 +19,7 @@
     "build": "tsc --build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval": "tsx src/evals/cli.ts",
     "lint": "eslint src"
   },
   "dependencies": {

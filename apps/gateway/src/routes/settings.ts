@@ -181,6 +181,10 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     'opsgenie', 'launchdarkly', 'confluence',
     'eks', 'gke', 'aks', 'aws-cloudwatch', 'aws-health', 'gcp-monitoring', 'azure-monitor',
     'alertmanager',
+    // Generic fallback templates — for services with no native connector.
+    // Multi-instance (see MULTI_INSTANCE_TYPES below): each registration is
+    // a distinct real MCP server / CLI binary, not a single shared connector.
+    'mcp', 'cli',
   ]
 
   app.get<{ Params: { type: string } }>(
@@ -210,18 +214,29 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     }
   )
 
-  app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(
+  // MCP/CLI adapters are a template, not a singleton connector — a tenant
+  // can register many differently-configured instances of the same type
+  // (e.g. two separate MCP servers backing two different services).
+  // instanceName distinguishes them; every other connector_type defaults it
+  // to the type itself, preserving today's exact one-row-per-type behavior.
+  const MULTI_INSTANCE_TYPES = new Set(['mcp', 'cli'])
+
+  app.put<{ Params: { type: string }; Body: { credentials: Record<string, unknown>; instanceName?: string } }>(
     '/api/settings/connectors/:type', { preHandler: [app.authenticate, requireRole('admin')] }, async (request, reply) => {
       const { tenantId } = request.user as { tenantId: string }
       const { type } = request.params
       if (!KNOWN_CONNECTORS.includes(type)) {
         return reply.code(400).send({ error: 'Unknown connector type' })
       }
-      const { credentials } = request.body
+      const { credentials, instanceName: rawInstanceName } = request.body
+      if (MULTI_INSTANCE_TYPES.has(type) && !rawInstanceName?.trim()) {
+        return reply.code(400).send({ error: 'instanceName is required for mcp/cli connectors — multiple instances of the same type can coexist' })
+      }
+      const instanceName = rawInstanceName?.trim() || type
 
       // Check if this is a first registration vs credential update
       const existing = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM connector_config WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid LIMIT 1`
+        tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM connector_config WHERE connector_type = ${type} AND instance_name = ${instanceName} AND tenant_id = ${tenantId}::uuid LIMIT 1`
       ).catch(() => [])
       const isNew = existing.length === 0
 
@@ -229,31 +244,37 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       const credsEnc = encryptJson(credentials)
       await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
-          INSERT INTO connector_config (tenant_id, connector_type, credentials_enc, enabled, env_id)
-          VALUES (${tenantId}::uuid, ${type}, ${credsEnc}, true, NULL)
-          ON CONFLICT (tenant_id, connector_type, COALESCE(env_id, '00000000-0000-0000-0000-000000000000'::uuid))
+          INSERT INTO connector_config (tenant_id, connector_type, instance_name, credentials_enc, enabled, env_id)
+          VALUES (${tenantId}::uuid, ${type}, ${instanceName}, ${credsEnc}, true, NULL)
+          ON CONFLICT (tenant_id, connector_type, instance_name, COALESCE(env_id, '00000000-0000-0000-0000-000000000000'::uuid))
           DO UPDATE SET credentials_enc = ${credsEnc}, enabled = true, updated_at = NOW()
         `
       )
 
       const pub = await getSettingsPub().catch(() => null)
       if (pub) {
-        const creds = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ credentials_enc: string | null; credentials: Record<string, unknown> }>>`
-            SELECT credentials_enc FROM connector_config
-            WHERE connector_type = ${type} AND tenant_id = ${tenantId}::uuid LIMIT 1
+        const row = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ id: string; credentials_enc: string | null }>>`
+            SELECT id, credentials_enc FROM connector_config
+            WHERE connector_type = ${type} AND instance_name = ${instanceName} AND tenant_id = ${tenantId}::uuid LIMIT 1
           `
         ).catch(() => [])
-        const credPayload = effectiveCredentials(creds[0])
+        const credPayload = effectiveCredentials(row[0])
+        // connectorId is the connector_config row's own UUID — not the bare
+        // type string — so multiple instances of the same type are properly
+        // distinguished downstream (bootstrap registry, graph entities,
+        // audit log). Confirmed live: the old `connectorId: type` pattern
+        // was the other half of why only one instance per type ever worked.
+        const connectorId = row[0]?.id ?? type
         // First registration → full bootstrap; credential update → reconnect (re-bootstrap with updated creds)
         const eventType = isNew ? 'connector_registered' : 'connector_reconnected'
-        await pub.del(`graph:bootstrap:lock:${tenantId}:${type}`).catch(() => {})
+        await pub.del(`graph:bootstrap:lock:${tenantId}:${connectorId}`).catch(() => {})
         await pub.publish(eventType, JSON.stringify({
           type: eventType,
           tenantId,
           connectorType: type,
-          connectorId: type,
-          payload: credPayload,
+          connectorId,
+          payload: { ...credPayload, name: instanceName },
         }))
       }
 

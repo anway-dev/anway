@@ -50,6 +50,11 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
   { id: "sonarqube", name: "SonarQube", category: "Code Quality", description: "Code smell, coverage, technical debt, security hotspots", color: "#4e9bcd", icon: "SQ", capabilities: ["code", "security"], configFields: [{ label: "Server URL", key: "url", type: "text" }, { label: "Token", key: "token", type: "password" }, { label: "Project Key", key: "project", type: "text" }] },
   { id: "opsgenie", name: "OpsGenie", category: "Alerting", description: "Alerts, on-call schedules, escalations", color: "#ef5c35", icon: "OG", capabilities: ["alerts", "incidents"], configFields: [{ label: "API Key", key: "api_key", type: "password" }] },
   { id: "launchdarkly", name: "LaunchDarkly", category: "Feature Flags", description: "Feature flags, A/B tests, rollouts", color: "#405bff", icon: "LD", capabilities: ["flags", "releases"], configFields: [{ label: "SDK Key", key: "sdk_key", type: "password" }, { label: "Project Key", key: "project", type: "text" }] },
+  // Generic fallback templates — for a service with no native connector.
+  // Multi-instance: register this as many times as needed, each with a
+  // distinct instance_name — e.g. one row per real MCP server/CLI binary.
+  { id: "mcp", name: "MCP Server (generic)", category: "Fallback Template", description: "Connect any MCP server — tools are discovered and mapped to standard lifecycle roles (discovery/search/get) at registration time", color: "#8b5cf6", icon: "MC", capabilities: ["custom"], configFields: [{ label: "Instance Name (unique per registration)", key: "instance_name", type: "text" }, { label: "MCP Server URL", key: "mcpUrl", type: "text" }] },
+  { id: "cli", name: "CLI Binary (generic)", category: "Fallback Template", description: "Connect any local CLI binary — subcommands are discovered and mapped to standard lifecycle roles (discovery/search/get) at registration time", color: "#8b5cf6", icon: "CL", capabilities: ["custom"], configFields: [{ label: "Instance Name (unique per registration)", key: "instance_name", type: "text" }, { label: "Binary Name", key: "binary", type: "text" }] },
 ]
 
 const BOOTSTRAP_UNSAFE_KEYS = new Set(['error', 'stack', 'stackTrace', 'stderr', 'stdout'])
@@ -182,7 +187,11 @@ export async function connectorsRoutes(app: FastifyInstance) {
 const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
 
   // T9: Trigger bootstrap
-  app.post<{ Params: { type: string } }>('/api/connectors/:type/bootstrap', {
+  // instanceName selects which registered instance to bootstrap for
+  // multi-instance types (mcp/cli) — required there, since :type alone
+  // can no longer identify a unique row. Defaults to :type for every other
+  // (singleton) connector, matching existing behavior exactly.
+  app.post<{ Params: { type: string }; Querystring: { instanceName?: string } }>('/api/connectors/:type/bootstrap', {
     preHandler: [app.authenticate, requireRole('admin', 'sre')],
   }, async (request, reply) => {
     const { tenantId } = request.user as { tenantId: string }
@@ -190,25 +199,27 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
     if (!VALID_BOOTSTRAP_TYPES.has(type)) {
       return reply.code(400).send({ error: `unknown connector type: ${type}` })
     }
+    const instanceName = request.query.instanceName?.trim() || type
     const rows = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<Array<{ credentials_enc: string }>>`
-        SELECT credentials_enc FROM connector_config
-        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type}
+      tx.$queryRaw<Array<{ id: string; credentials_enc: string }>>`
+        SELECT id, credentials_enc FROM connector_config
+        WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type} AND instance_name = ${instanceName}
       `
     ).catch(() => [])
     if (rows.length === 0) return reply.code(404).send({ error: 'connector not registered' })
+    const connectorId = rows[0]!.id
 
     const pub = await getBootstrapPub()
     if (pub) {
-      await pub.del(`graph:bootstrap:lock:${tenantId}:${type}`).catch(() => {})
+      await pub.del(`graph:bootstrap:lock:${tenantId}:${connectorId}`).catch(() => {})
       await pub.publish('connector_registered', JSON.stringify({
         type: 'connector_registered',
         tenantId,
         connectorType: type,
-        connectorId: type,
+        connectorId,
       }))
     }
-    return { ok: true, message: `Bootstrap triggered for ${type}` }
+    return { ok: true, message: `Bootstrap triggered for ${type} (${instanceName})` }
   })
 
   // DELETE connector — emits connector_removed for stale marking

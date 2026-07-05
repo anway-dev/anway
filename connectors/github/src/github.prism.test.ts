@@ -17,10 +17,10 @@ describe('github — Prism contract test', () => {
         target: '/spec/openapi.yaml',
       }])
       .withExposedPorts(4010)
-      .withWaitStrategy(Wait.forLogMessage('Prism is listening'))
+      .withWaitStrategy(Wait.forLogMessage('Prism is listening').withStartupTimeout(120_000))
       .start()
     baseUrl = `http://${container.getHost()}:${container.getMappedPort(4010)}`
-  }, 60_000)
+  }, 150_000)
 
   afterAll(async () => { await container?.stop() })
 

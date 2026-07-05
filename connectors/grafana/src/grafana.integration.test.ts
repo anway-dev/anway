@@ -23,11 +23,24 @@ describe('grafana — integration (real Docker)', () => {
   it('bootstrap runs without throwing', async () => {
     // Seed a test dashboard so bootstrap has something to discover.
     // Grafana anonymous auth is enabled (Admin role) — API accepts unauthenticated writes.
-    await fetch(`${baseUrl}/api/dashboards/db`, {
+    // /api/health passing doesn't guarantee the dashboard/search subsystem is
+    // warmed up yet — confirmed live: the identical POST succeeds fine when
+    // run standalone a few seconds after container start, but raced here.
+    // Retry once instead of silently swallowing the failure (the previous
+    // .catch(() => null) masked exactly this — the test "passed" its own
+    // seed step even when the seed silently failed, then asserted on the
+    // now-inevitably-empty bootstrap result).
+    const seed = async () => fetch(`${baseUrl}/api/dashboards/db`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dashboard: { title: 'Test Dashboard', uid: 'test-dash', panels: [] }, overwrite: true }),
-    }).catch(() => null)
+    })
+    let seedRes = await seed()
+    if (!seedRes.ok) {
+      await new Promise(r => setTimeout(r, 2000))
+      seedRes = await seed()
+    }
+    if (!seedRes.ok) throw new Error(`seed dashboard failed: ${seedRes.status} ${await seedRes.text()}`)
 
     const kg = new FakeKG()
     const result = await new GrafanaBootstrap(kg).bootstrap(

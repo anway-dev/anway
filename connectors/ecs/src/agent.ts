@@ -7,6 +7,11 @@ function awsCli(args: string[], creds: Record<string, unknown>): { stdout: strin
   if (creds['accessKeyId']) env['AWS_ACCESS_KEY_ID'] = String(creds['accessKeyId'])
   if (creds['secretAccessKey']) env['AWS_SECRET_ACCESS_KEY'] = String(creds['secretAccessKey'])
   if (creds['region']) env['AWS_DEFAULT_REGION'] = String(creds['region'])
+  // Optional endpoint override (e.g. LocalStack) — aws CLI v2.13+ reads this
+  // natively, no argv changes needed. Absent in production; only set for
+  // local/test environments pointing at an AWS-API-compatible emulator.
+  // Same pattern as aws-cloudwatch/aws-health — this connector was missing it.
+  if (creds['endpointUrl']) env['AWS_ENDPOINT_URL'] = String(creds['endpointUrl'])
   const result = spawnSync('aws', args, { encoding: 'utf-8', timeout: 15_000, env: { ...process.env, ...env } })
   return { stdout: result.stdout ?? '', status: result.status }
 }

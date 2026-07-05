@@ -1,6 +1,7 @@
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import { extractJson } from './extract-json.js'
 
 export interface Finding { file: string; line?: number; severity: 'blocking' | 'high' | 'medium' | 'low'; description: string; suggestion: string }
 export interface ReviewFindings { summary: string; blocking: Finding[]; nonBlocking: Finding[]; testPlan: string[]; approvalRecommendation: 'approve' | 'approve_with_changes' | 'request_changes' }
@@ -26,6 +27,6 @@ export class ReviewAgent {
       { role: 'user', content: `PR: ${prTitle}\nDiff type: ${classification.content}\n${graphContext ? 'Context: ' + graphContext.primaryEntity.name : ''}\n\n${diffSummary}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return JSON.parse(result.content) as ReviewFindings } catch { return { summary: '', blocking: [], nonBlocking: [], testPlan: [], approvalRecommendation: 'request_changes' } }
+    try { return extractJson<ReviewFindings>(result.content) } catch { return { summary: '', blocking: [], nonBlocking: [], testPlan: [], approvalRecommendation: 'request_changes' } }
   }
 }

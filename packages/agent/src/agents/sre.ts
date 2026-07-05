@@ -25,8 +25,6 @@ export class SREAgent {
     private readonly cheapModel: IModelProvider,
     private readonly mainModel: IModelProvider,
     private readonly knowledgeGraph: IKnowledgeGraph,
-    private readonly cheapModelId = this.cheapModel.cheapModelId,
-    private readonly mainModelId = this.mainModel.modelId,
   ) {}
 
   async assembleContext(alertTitle: string, alertDescription: string, tenantId: TenantId): Promise<IncidentContext> {
@@ -38,7 +36,7 @@ export class SREAgent {
     const entityExtraction = await this.cheapModel.chat([
       { role: 'system', content: 'Extract service name, team, and any error type from this alert. Respond with comma-separated values only.' },
       { role: 'user', content: `${alertTitle}: ${alertDescription}` },
-    ], [], { model: this.cheapModelId, maxTokens: 50, temperature: 0 })
+    ], [], { model: this.cheapModel.cheapModelId, maxTokens: 50, temperature: 0 })
     const entities = entityExtraction.content.split(',').map(s => s.trim()).filter(Boolean)
 
     const graphBlock = graphContext
@@ -48,7 +46,7 @@ export class SREAgent {
     const hypothesisResult = await this.mainModel.chat([
       { role: 'system', content: `You are an SRE analyzing an incident. Based on the alert information and knowledge graph context, produce a grounded root cause hypothesis. Format: hypothesis, possible causes, recommended actions. Do not fabricate data — state clearly when information is unavailable.` },
       { role: 'user', content: `Alert: ${alertTitle}\nDescription: ${alertDescription}\nEntities identified: ${entities.join(', ')}\n\n${graphBlock}` },
-    ], [], { model: this.mainModelId, maxTokens: 500, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 500, temperature: 0 })
 
     // Populate from graph relationships + live connector calls
     const relatedDeploys: string[] = []

@@ -122,6 +122,19 @@ export async function* runSession(
 
   const checkTokens = createTokenMeterMiddleware(budget)
 
+  // Real cumulative total across every model call this session makes (intent
+  // classification, entity extraction, every ConnectorAgent, synthesis) — not
+  // just the final synthesis call. Confirmed live via independent review:
+  // the `done` event previously only reported the synthesis call's own
+  // inputTokens/outputTokens, and apps/gateway/src/routes/chat.ts persists
+  // exactly and only what `done` reports — so token_usage_daily and the
+  // monthly-budget enforcement it feeds silently undercounted every session,
+  // sometimes by the majority of real spend (cheap-model calls and every
+  // ConnectorAgent's tokens were tracked correctly in-memory via `budget.*`
+  // but never made it into the persisted total at all).
+  let totalInputTokens = 0
+  let totalOutputTokens = 0
+
   await auditSink.append({
     id: crypto.randomUUID(),
     tenantId: ctx.tenantId,
@@ -167,6 +180,8 @@ export async function* runSession(
     budget.sessionUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
     budget.tenantDailyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
     budget.tenantMonthlyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
+    totalInputTokens += intentResp?.usage?.inputTokens ?? 0
+    totalOutputTokens += intentResp?.usage?.outputTokens ?? 0
     const parsed = extractJson<{ intent?: unknown }>(intentResp.content)
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
   } catch (err) {
@@ -259,6 +274,8 @@ export async function* runSession(
     budget.sessionUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
     budget.tenantDailyUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
     budget.tenantMonthlyUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
+    totalInputTokens += entityResp?.usage?.inputTokens ?? 0
+    totalOutputTokens += entityResp?.usage?.outputTokens ?? 0
     const entityName = entityResp.content.trim()
 
     if (entityName) {
@@ -366,7 +383,7 @@ const context = resolvedAgentContext
   const selectedTypes = selectConnectorTypes(classifiedIntent, isAlertInvestigation, [...toolMap.keys()])
 
   if (selectedTypes.length === 0) {
-    yield* synthesisOnlyFallback(model, input, graphContext, connectorContext, sreContext, ctx.effectiveRole, history, checkTokens)
+    yield* synthesisOnlyFallback(model, input, graphContext, connectorContext, sreContext, ctx.effectiveRole, history, checkTokens, budget, totalInputTokens, totalOutputTokens, { sessionMemory, auditSink, ctx })
     return
   }
 
@@ -528,6 +545,8 @@ const context = resolvedAgentContext
   budget.sessionUsed += agentInputTokens + agentOutputTokens
   budget.tenantDailyUsed += agentInputTokens + agentOutputTokens
   budget.tenantMonthlyUsed += agentInputTokens + agentOutputTokens
+  totalInputTokens += agentInputTokens
+  totalOutputTokens += agentOutputTokens
 
   // Token check before synthesis
   const synthesisMessages = buildSynthesisMessages(input, graphContext, findings, ctx.effectiveRole, connectorContext, sreContext, history)
@@ -570,6 +589,8 @@ const context = resolvedAgentContext
   budget.sessionUsed += inputTokens + outputTokens
   budget.tenantDailyUsed += inputTokens + outputTokens
   budget.tenantMonthlyUsed += inputTokens + outputTokens
+  totalInputTokens += inputTokens
+  totalOutputTokens += outputTokens
   auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'synthesis_complete', payload: { inputTokens, outputTokens, agentCount: findings.length }, createdAt: new Date() }).catch(() => {})
 
   // Persist assistant turn summary
@@ -581,8 +602,13 @@ const context = resolvedAgentContext
 
   yield {
     type: 'done' as const,
-    inputTokens,
-    outputTokens,
+    // Real cumulative total (intent + entity + every agent + synthesis) —
+    // confirmed live via independent review that reporting only the
+    // synthesis call's own tokens here left apps/gateway/src/routes/chat.ts's
+    // persisted token_usage_daily total silently missing most of a session's
+    // real spend, since that's the only field it reads off this event.
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
     ...(groundingSources.length > 0 ? { groundingSources } : {}),
   }
 }
@@ -626,10 +652,20 @@ function buildSynthesisMessages(
     `- DO NOT call any tools — all data collection is complete.\n` +
     `- If findings show no issues, say so explicitly and cite the healthy metrics.`
 
+  // `history` already ends with the current turn in the normal case — the
+  // caller appends it to session memory before fetching history, specifically
+  // so it's included. Appending `input` again unconditionally meant every
+  // synthesis call saw the current query twice (confirmed live via
+  // independent review). Guard rather than unconditionally drop the trailing
+  // append, since a failed/skipped session-memory write would otherwise
+  // silently drop the actual question from what the model sees.
+  const historyMessages = history.map(t => ({ role: t.role as 'user' | 'assistant' | 'system', content: t.content }))
+  const lastTurn = historyMessages[historyMessages.length - 1]
+  const alreadyIncluded = lastTurn?.role === 'user' && lastTurn.content === input
   return [
     { role: 'system', content: systemContent },
-    ...history.map(t => ({ role: t.role as 'user' | 'assistant' | 'system', content: t.content })),
-    { role: 'user', content: input },
+    ...historyMessages,
+    ...(alreadyIncluded ? [] : [{ role: 'user' as const, content: input }]),
   ]
 }
 
@@ -642,6 +678,16 @@ async function* synthesisOnlyFallback(
   effectiveRole: string,
   history: Array<{ role: string; content: string }>,
   checkTokens?: ReturnType<typeof createTokenMeterMiddleware>,
+  budget?: TokenBudget,
+  priorInputTokens = 0,
+  priorOutputTokens = 0,
+  // Confirmed live via independent review: this path (chosen for any "general"
+  // query with no matched connector type — likely the most common query
+  // shape) never persisted the assistant's response to session memory or
+  // logged a synthesis_complete audit event at all, unlike the multi-agent
+  // path. Follow-up chaining ("why broken?" -> "now write the fix") silently
+  // lost context for every query that landed here.
+  persistence?: { sessionMemory: ISessionMemory; auditSink: IAuditSink; ctx: SessionContext },
 ): AsyncGenerator<StreamEvent> {
   const messages = buildSynthesisMessages(input, graphContext, [], effectiveRole, connectorContext, sreContext, history)
   const estimatedTokens = Math.ceil(JSON.stringify(messages).length / 4) + 500
@@ -654,9 +700,11 @@ async function* synthesisOnlyFallback(
   }
   let inputTokens = 0
   let outputTokens = 0
+  let accumulatedText = ''
   try {
     for await (const chunk of model.stream(messages, [], { model: model.modelId, maxTokens: 2048, temperature: 0.2 })) {
       if (chunk.type === 'text_delta') {
+        accumulatedText += chunk.content
         yield { type: 'text_delta' as const, content: chunk.content }
       } else if (chunk.type === 'done') {
         inputTokens = chunk.inputTokens ?? 0
@@ -665,9 +713,36 @@ async function* synthesisOnlyFallback(
     }
   } catch (e) {
     yield { type: 'error' as const, code: 'UPSTREAM_ERROR' as const, message: e instanceof Error ? e.message : String(e) }
-    yield { type: 'done' as const, inputTokens, outputTokens }
+    if (budget) {
+      budget.sessionUsed += inputTokens + outputTokens
+      budget.tenantDailyUsed += inputTokens + outputTokens
+      budget.tenantMonthlyUsed += inputTokens + outputTokens
+    }
+    yield { type: 'done' as const, inputTokens: priorInputTokens + inputTokens, outputTokens: priorOutputTokens + outputTokens }
     return
   }
-  yield { type: 'done' as const, inputTokens, outputTokens }
+  // Confirmed live via independent review: this path never added its own
+  // synthesis tokens to `budget` at all (unlike the multi-agent path), and
+  // reported only its own tokens in `done` — silently dropping the
+  // intent-classification + entity-extraction tokens already spent earlier
+  // in runSession before this fallback was chosen.
+  if (budget) {
+    budget.sessionUsed += inputTokens + outputTokens
+    budget.tenantDailyUsed += inputTokens + outputTokens
+    budget.tenantMonthlyUsed += inputTokens + outputTokens
+  }
+  if (persistence) {
+    const { sessionMemory, auditSink, ctx } = persistence
+    await sessionMemory.append(ctx.sessionId, {
+      role: 'assistant',
+      content: accumulatedText || '[no response]',
+      timestamp: Date.now(),
+    })
+    auditSink.append({
+      id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId,
+      eventType: 'synthesis_complete', payload: { inputTokens, outputTokens, agentCount: 0 }, createdAt: new Date(),
+    }).catch(() => {})
+  }
+  yield { type: 'done' as const, inputTokens: priorInputTokens + inputTokens, outputTokens: priorOutputTokens + outputTokens }
 }
 

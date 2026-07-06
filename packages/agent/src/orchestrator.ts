@@ -208,7 +208,7 @@ export async function* runSession(
   let sreContext: string | null = null
   if (classifiedIntent === 'sre' || classifiedIntent === 'incident_triage') {
     try {
-      const sreAgent = new SREAgent(config.model, config.model, config.knowledgeGraph)
+      const sreAgent = new SREAgent(config.model, config.model, config.knowledgeGraph, config.perimeter, config.auditSink, { tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId })
       const sreResult: IncidentContext = await sreAgent.assembleContext(input, '', ctx.tenantId)
       const lines = [
         `## Live Triage Context (SREAgent)`,

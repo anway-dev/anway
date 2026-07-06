@@ -3,6 +3,9 @@ import { promisify } from 'node:util'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph, AgentContext } from '../interfaces/knowledge-graph.js'
 import type { TenantId } from '@anway/types'
+import type { IAuditSink } from '../interfaces/audit.js'
+import type { AgentPerimeter } from '../perimeter/engine.js'
+import { createPerimeterMiddleware, type PerimeterCtx } from '../middleware/perimeter.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -21,11 +24,28 @@ export interface TimelineEvent {
 }
 
 export class SREAgent {
+  // auditPerimeterCtx is optional (not every call site has a real
+  // tenant/user/session to scope it to, e.g. evals) — when provided, every
+  // live CLI call below goes through the same perimeter check + audit log
+  // every other connector call in this codebase gets. Confirmed live via
+  // independent review: this agent's argocd/gh CLI calls were the only
+  // unaudited, perimeter-bypassing connector read path in the package,
+  // firing on every incident_triage query.
   constructor(
     private readonly cheapModel: IModelProvider,
     private readonly mainModel: IModelProvider,
     private readonly knowledgeGraph: IKnowledgeGraph,
+    private readonly perimeter?: AgentPerimeter,
+    private readonly auditSink?: IAuditSink,
+    private readonly perimeterCtx?: PerimeterCtx,
   ) {}
+
+  private async checkPerimeter(toolName: string, args: Record<string, unknown>): Promise<boolean> {
+    if (!this.perimeter || !this.auditSink || !this.perimeterCtx) return true
+    const check = createPerimeterMiddleware(this.perimeter, this.auditSink, this.perimeterCtx)
+    const result = await check({ id: crypto.randomUUID(), name: toolName, args })
+    return !('_tag' in result && result._tag === 'HardBlock')
+  }
 
   async assembleContext(alertTitle: string, alertDescription: string, tenantId: TenantId): Promise<IncidentContext> {
     let graphContext: AgentContext | null = null
@@ -59,27 +79,33 @@ export class SREAgent {
         }
       }
 
-      // Live ArgoCD calls via CLI
+      // Live ArgoCD calls via CLI — perimeter-checked + audited like every
+      // other connector call (see checkPerimeter above).
       const argoCoords = graphContext.connectorCoordinates?.['argocd'] as { resourceIds?: Record<string, string> } | undefined
       if (argoCoords?.resourceIds) {
         const appName = argoCoords.resourceIds['appName'] ?? argoCoords.resourceIds['service'] ?? graphContext.primaryEntity.name
         try {
-          const { stdout } = await execFileAsync('argocd', ['app', 'history', appName, '-o', 'json'], { timeout: 10_000 })
-          const history = JSON.parse(stdout) as Array<{ revision?: string; deployedAt?: string; status?: string }>
-          for (const h of history.slice(0, 3)) {
-            relatedDeploys.push(`${h.revision ?? 'unknown'} @ ${h.deployedAt ?? '?'} (${h.status ?? '?'})`)
+          if (await this.checkPerimeter('argocd__app_history', { appName })) {
+            const { stdout } = await execFileAsync('argocd', ['app', 'history', appName, '-o', 'json'], { timeout: 10_000 })
+            const history = JSON.parse(stdout) as Array<{ revision?: string; deployedAt?: string; status?: string }>
+            for (const h of history.slice(0, 3)) {
+              relatedDeploys.push(`${h.revision ?? 'unknown'} @ ${h.deployedAt ?? '?'} (${h.status ?? '?'})`)
+            }
           }
         } catch { /* ArgoCD CLI unavailable */ }
       }
 
-      // Live GitHub calls via CLI
+      // Live GitHub calls via CLI — perimeter-checked + audited like every
+      // other connector call (see checkPerimeter above).
       const ghCoords = graphContext.connectorCoordinates?.['github'] as { resourceIds?: Record<string, string> } | undefined
       if (ghCoords?.resourceIds?.['repo']) {
         try {
-          const { stdout } = await execFileAsync('gh', ['pr', 'list', '--repo', ghCoords.resourceIds['repo'], '--limit', '5', '--json', 'number,title,mergedAt,state'], { timeout: 10_000 })
-          const prs = JSON.parse(stdout) as Array<{ number: number; title: string; mergedAt?: string; state: string }>
-          for (const pr of prs) {
-            relatedPRs.push(`PR#${pr.number}: ${pr.title} (${pr.state})`)
+          if (await this.checkPerimeter('github__list_prs', { repo: ghCoords.resourceIds['repo'] })) {
+            const { stdout } = await execFileAsync('gh', ['pr', 'list', '--repo', ghCoords.resourceIds['repo'], '--limit', '5', '--json', 'number,title,mergedAt,state'], { timeout: 10_000 })
+            const prs = JSON.parse(stdout) as Array<{ number: number; title: string; mergedAt?: string; state: string }>
+            for (const pr of prs) {
+              relatedPRs.push(`PR#${pr.number}: ${pr.title} (${pr.state})`)
+            }
           }
         } catch { /* GitHub CLI unavailable */ }
       }

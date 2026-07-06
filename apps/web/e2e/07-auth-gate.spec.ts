@@ -22,7 +22,11 @@ test.describe('Auth gate', () => {
     }
   })
 
-  test('P0: login page has email, tenantId, and sign-in button', async ({ page }) => {
+  // The real login flow moved from email+tenantId to email+password (tenant
+  // is resolved server-side, not entered by the user) — see
+  // components/login-page.tsx. These two tests predated that change and
+  // asserted a tenantId input that no longer exists.
+  test('P0: login page has email, password, and sign-in button', async ({ page }) => {
     await page.context().clearCookies()
     await setAuthCookie(page.context())
     await page.goto('/login')
@@ -35,28 +39,40 @@ test.describe('Auth gate', () => {
     const emailInput = page.locator('input[type="email"]').first()
     await expect(emailInput, 'email input must be visible').toBeVisible()
 
-    // Tenant ID input
-    const tenantInput = page.locator('input[pattern]').or(page.locator('input[placeholder*="00000000"]')).first()
-    await expect(tenantInput, 'tenant ID input must be visible').toBeVisible()
+    // Password input
+    const passwordInput = page.locator('input[type="password"]').first()
+    await expect(passwordInput, 'password input must be visible').toBeVisible()
+
+    const submitButton = page.locator('button[type="submit"]').first()
+    await expect(submitButton, 'sign-in button must be visible').toBeVisible()
   })
 
   test('P0: login with valid credentials redirects to app', async ({ page }) => {
+    // No setAuthCookie here (unlike other tests in this file) — this test
+    // exercises the real password-login form itself. Pre-setting a demo-admin
+    // cookie via the separate /api/auth/demo mechanism before navigating to
+    // /login conflicts with that (the app may redirect away from /login
+    // immediately since a valid session cookie is already present, before the
+    // form is ever filled) — confirmed live, this caused the test to still be
+    // on /login after submit.
     await page.context().clearCookies()
-    await setAuthCookie(page.context())
     await page.goto('/login')
+    // Under Next.js dev-mode's on-demand compilation, filling immediately
+    // after goto can race the page's own hydration and lose the value
+    // (confirmed live: email field silently ended up empty pre-submit without
+    // this). A brief settle wait makes this reliable without masking a real
+    // app bug — the actual login round-trip itself is unaffected.
+    await page.waitForTimeout(2000)
 
-    // Fill and submit
-    await page.locator('input[type="email"]').first().fill('dev@anway.local')
-    await page.locator('input[pattern]').or(page.locator('input[placeholder*="00000000"]')).first()
-      .fill('00000000-0000-0000-0000-000000000001')
+    // Fill and submit — seeded in prisma/seed.ts, real password_hash
+    await page.locator('input[type="email"]').first().fill('dev@demo.anway.dev')
+    await page.locator('input[type="password"]').first().fill('E2ETestPassword2026!')
     await page.locator('button[type="submit"]').first().click()
 
-    // Wait for redirect
-    await page.waitForURL('**/login?**', { timeout: 10000 }).catch(() => {})
+    // Wait for redirect away from /login
+    await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 }).catch(() => {})
     const url = page.url()
-    // Either redirected to app (no /login) or still on /login with error (gateway down)
-    // Both are valid — test just verifies the login flow runs without crashing
-    expect(url, 'login page must load and attempt auth').toBeTruthy()
+    expect(url, 'must redirect away from /login on valid credentials').not.toContain('/login')
   })
 
   test('P1: POST /auth/token with valid email+tenantId returns JWT', async ({ request }) => {

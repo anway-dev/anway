@@ -53,6 +53,25 @@ async function seedDemo() {
     ON CONFLICT (id) DO NOTHING
   `
 
+  // e2e/fixtures.ts's getToken2/getToken3 log in as these exact emails via real
+  // password auth (SoD / RBAC / non-admin-role test flows need a genuinely
+  // different, real-password-authenticated user, not just a demo-JWT mint).
+  // Without a real password_hash here, login correctly 401s, the fixture's
+  // token comes back empty, and every test needing a second user fails with
+  // 401 instead of the intended 200/403 — confirmed live: this was the actual
+  // root cause behind a large cluster of e2e failures (gate SoD, RBAC checks,
+  // access-api 403-for-non-admin), not real app bugs.
+  // Password hash is bcrypt('E2ETestPassword2026!', 10) — test-only credential,
+  // matches e2e/fixtures.ts's default fallback.
+  const E2E_TEST_PASSWORD_HASH = '$2b$10$WDGislF0oEQO7YtIOrLw0ubZsEWs0h3bxAkkJ7.ZyWLZlAKEr9Mla'
+  await prisma.$executeRaw`
+    INSERT INTO users (id, tenant_id, email, role, password_hash)
+    VALUES
+      ('00000000-0000-0000-0000-000000000003'::uuid, ${DEMO_TENANT_ID}::uuid, 'sre@demo.anway.dev', 'sre', ${E2E_TEST_PASSWORD_HASH}),
+      ('00000000-0000-0000-0000-000000000004'::uuid, ${DEMO_TENANT_ID}::uuid, 'dev@demo.anway.dev', 'dev', ${E2E_TEST_PASSWORD_HASH})
+    ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash
+  `
+
   await prisma.connector.createMany({
     skipDuplicates: true,
     data: [

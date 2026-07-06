@@ -56,29 +56,36 @@ test.describe('K8s write ops — API', () => {
   let headers: Record<string, string>
   test.beforeAll(async ({ request }) => { headers = await authHeaders(request) })
 
-  test('POST /api/k8s/pods/:ns/:name/restart — admin skips perimeter, hits cluster', async ({ request }) => {
+  // "admin skips perimeter" means admin bypasses the write-*scope* check (the
+  // `if (user.role !== 'admin')` block in k8s.ts) — it does NOT mean admin
+  // skips the V1 write gate. Per CLAUDE.md's V1 Trust Principle, every write
+  // action is gated with no exceptions, admin included: without a gateId in
+  // the body, these correctly 403 with "gate approval required" before ever
+  // reaching cluster logic. Confirmed live via a direct call.
+  test('POST /api/k8s/pods/:ns/:name/restart — admin skips perimeter, still requires gate approval', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/k8s/pods/default/nonexistent-pod-e2e/restart`, {
       headers: { ...headers, 'Content-Type': 'application/json' },
       data: {},
     })
-    // 500/501/503 = no k8s cluster in test env; 404 = pod not found; 403 = perimeter denied
-    expect([404, 500, 501, 503]).toContain(resp.status())
+    // 403 = gate approval required (no gateId supplied) or perimeter denied;
+    // 500/501/503 = no k8s cluster in test env; 404 = pod not found
+    expect([403, 404, 500, 501, 503]).toContain(resp.status())
   })
 
-  test('POST /api/k8s/deployments/:ns/:name/scale — admin skips perimeter, hits cluster', async ({ request }) => {
+  test('POST /api/k8s/deployments/:ns/:name/scale — admin skips perimeter, still requires gate approval', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/k8s/deployments/default/nonexistent-deploy-e2e/scale`, {
       headers: { ...headers, 'Content-Type': 'application/json' },
       data: { replicas: 2 },
     })
-    expect([404, 500, 501, 503]).toContain(resp.status())
+    expect([403, 404, 500, 501, 503]).toContain(resp.status())
   })
 
-  test('POST /api/k8s/nodes/:name/cordon — admin skips perimeter, hits cluster', async ({ request }) => {
+  test('POST /api/k8s/nodes/:name/cordon — admin skips perimeter, still requires gate approval', async ({ request }) => {
     const resp = await request.post(`${GATEWAY}/api/k8s/nodes/nonexistent-node-e2e/cordon`, {
       headers: { ...headers, 'Content-Type': 'application/json' },
       data: {},
     })
-    expect([404, 500, 501, 503]).toContain(resp.status())
+    expect([403, 404, 500, 501, 503]).toContain(resp.status())
   })
 
   test('POST /api/k8s/pods/:ns/:name/restart — without auth returns 401', async ({ request }) => {

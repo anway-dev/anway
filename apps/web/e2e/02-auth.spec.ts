@@ -2,24 +2,14 @@ import { test, expect } from '@playwright/test'
 import { GATEWAY, authHeaders } from './fixtures'
 
 test.describe('Auth — API', () => {
-  test('P0: GET /api/auth/dev-token returns 200 with token + tenantId', async ({ request }) => {
+  // dev-token was a real, working endpoint under an earlier auth model. It was
+  // deliberately removed — the web app must not be able to self-authenticate
+  // (see e2e/99-certification.spec.ts CERT I.0, which already certifies this
+  // exact 404 as correct). These two tests were never updated after that
+  // removal and asserted the old, insecure behavior should still work.
+  test('P0: GET /api/auth/dev-token no longer exists (removed for security)', async ({ request }) => {
     const resp = await request.get(`${GATEWAY}/api/auth/dev-token`)
-    expect(resp.status()).toBe(200)
-    const body = await resp.json() as { token: string; tenantId: string }
-    expect(body.token).toBeTruthy()
-    expect(body.tenantId).toBeTruthy()
-  })
-
-  test('P0: dev-token JWT has required claims', async ({ request }) => {
-    const resp = await request.get(`${GATEWAY}/api/auth/dev-token`)
-    const body = await resp.json() as { token: string }
-    const parts = body.token.split('.')
-    expect(parts.length).toBe(3)
-    const payload = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString())
-    expect(payload.sub).toBeTruthy()
-    expect(payload.email).toBeTruthy()
-    expect(payload.tenantId).toBeTruthy()
-    expect(payload.role).toBeTruthy()
+    expect(resp.status()).toBe(404)
   })
 
   test('P0: GET /api/incidents without auth returns 401', async ({ request }) => {

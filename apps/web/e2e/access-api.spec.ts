@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test'
 import { GATEWAY, authHeaders, authHeaders2, uniqueId } from './fixtures'
 
-// dev user: admin role (sub: ...0002)
-// dev2 user: sre role (sub: ...0003) — after GA-T2 bridge fix
-// Only admin can manage users + perimeters
+// User ...0002 is now dedicated to e2e/99-certification.spec.ts's CERT K/U/AQ/AS
+// perimeter checks (see prisma/seed.ts) — role 'dev', email cert-user2@demo.anway.dev.
+// This test used to assume an older admin/dev@anway.local identity for that same
+// id; updated to match what's actually seeded now rather than resurrecting the
+// old identity and risking the certification suite's own hardcoded expectations.
+// Only admin can manage users + perimeters.
 
 const DEV_USER_ID = '00000000-0000-0000-0000-000000000002'
 const DEV_TENANT_ID = '00000000-0000-0000-0000-000000000001'
@@ -28,8 +31,8 @@ test.describe('Access API — GET /api/access/users', () => {
     expect(Array.isArray(body)).toBe(true)
     const devUser = body.find(u => u.id === DEV_USER_ID)
     expect(devUser, 'dev user must appear in list').toBeDefined()
-    expect(devUser?.role).toBe('admin')
-    expect(devUser?.email).toBe('dev@anway.local')
+    expect(devUser?.role).toBe('dev')
+    expect(devUser?.email).toBe('cert-user2@demo.anway.dev')
   })
 })
 

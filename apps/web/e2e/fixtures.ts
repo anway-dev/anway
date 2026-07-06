@@ -5,11 +5,27 @@ export const WEB = 'http://localhost:8500'
 export const DEMO_TENANT = '00000000-0000-0000-0000-000000000001'
 export const DEMO_EMAIL = 'admin@demo.anway.dev'
 
+// The real /api/auth/login route has its own strict anti-brute-force rate
+// limit (5 req/min per IP, apps/gateway/src/routes/auth.ts) — a legitimate
+// production security control, not something to weaken for tests. But every
+// spec file's own beforeAll independently calls getToken2/getToken3, and with
+// workers=1 the whole suite runs in one process — so cache each token at
+// module scope and only actually hit the login/demo endpoints once per real
+// run. Confirmed live: without this, a full suite run exhausts the 5/min
+// budget partway through and every later file's login silently returns
+// {error: 'too many requests...'} (no token field), cascading into 400/401s
+// that look like gate/RBAC bugs but are actually just this rate limit.
+let cachedToken: string | undefined
+let cachedToken2: string | undefined
+let cachedToken3: string | undefined
+
 // Auth via demo login — requires DEMO_MODE=true on gateway
 export async function getToken(request: APIRequestContext): Promise<string> {
+  if (cachedToken !== undefined) return cachedToken
   const r = await request.post(`${GATEWAY}/api/auth/demo`)
   const body = await r.json() as { token?: string }
-  return body.token ?? ''
+  cachedToken = body.token ?? ''
+  return cachedToken
 }
 
 // For multi-role tests: login as a seeded user with a known password
@@ -23,12 +39,22 @@ async function loginAs(request: APIRequestContext, email: string, password: stri
   return body.token ?? ''
 }
 
+// Default password matches prisma/seed.ts's E2E_TEST_PASSWORD_HASH for these
+// exact seeded users — without SEED_DEMO=true having run, login correctly
+// 401s and these helpers return an empty token (same as before), but against
+// a demo-seeded DB this now actually authenticates instead of always failing.
+const E2E_DEFAULT_PASSWORD = 'E2ETestPassword2026!'
+
 export async function getToken2(request: APIRequestContext): Promise<string> {
-  return loginAs(request, process.env['E2E_USER2_EMAIL'] ?? 'sre@demo.anway.dev', process.env['E2E_USER2_PASSWORD'] ?? '')
+  if (cachedToken2 !== undefined) return cachedToken2
+  cachedToken2 = await loginAs(request, process.env['E2E_USER2_EMAIL'] ?? 'sre@demo.anway.dev', process.env['E2E_USER2_PASSWORD'] ?? E2E_DEFAULT_PASSWORD)
+  return cachedToken2
 }
 
 export async function getToken3(request: APIRequestContext): Promise<string> {
-  return loginAs(request, process.env['E2E_USER3_EMAIL'] ?? 'dev@demo.anway.dev', process.env['E2E_USER3_PASSWORD'] ?? '')
+  if (cachedToken3 !== undefined) return cachedToken3
+  cachedToken3 = await loginAs(request, process.env['E2E_USER3_EMAIL'] ?? 'dev@demo.anway.dev', process.env['E2E_USER3_PASSWORD'] ?? E2E_DEFAULT_PASSWORD)
+  return cachedToken3
 }
 
 export async function authHeaders(request: APIRequestContext): Promise<Record<string, string>> {

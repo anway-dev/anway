@@ -2,11 +2,20 @@ import { spawnSync } from 'node:child_process'
 import type { ConnectorCreds } from '@anway/types'
 import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
-function kubectl(args: string[], creds: Record<string, unknown>): { stdout: string; status: number | null } {
+function kubectl(args: string[], creds: Record<string, unknown>): { stdout: string; stderr: string; status: number | null } {
   const kubeconfig = typeof (creds as ConnectorCreds).kubeconfig === 'string' ? (creds as ConnectorCreds).kubeconfig as string : undefined
   const fullArgs = kubeconfig ? ['--kubeconfig', kubeconfig, ...args] : args
   const result = spawnSync('kubectl', fullArgs, { encoding: 'utf-8', timeout: 15_000 })
-  return { stdout: result.stdout ?? '', status: result.status }
+  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status }
+}
+
+// A nonzero kubectl exit is a real failure (bad kubeconfig, cluster
+// unreachable, RBAC denial, namespace not found) — confirmed live via
+// independent review that every read tool below previously collapsed this
+// into the same empty array a genuinely-empty-but-successful list returns,
+// masking real cluster/auth failures as "no pods/deployments/events".
+function assertOk(r: { stdout: string; stderr: string; status: number | null }, action: string): void {
+  if (r.status !== 0) throw new Error(`kubectl ${action} failed (exit ${r.status}): ${r.stderr.trim() || 'no stderr'}`)
 }
 
 const TOOLS: ConnectorTool[] = [
@@ -15,11 +24,9 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const ns = params.namespace as string ?? 'default'
       const r = kubectl(['get', 'pods', '-n', ns, '-o', 'json'], creds)
-      if (r.status !== 0) return { pods: [] }
-      try {
-        const data = JSON.parse(r.stdout) as { items: Array<{ metadata: { name: string }; status: { phase: string }; spec: { containers: Array<{ image: string }> } }> }
-        return { pods: data.items.map(p => ({ name: p.metadata.name, status: p.status.phase, image: p.spec.containers[0]?.image ?? '', restarts: 0, namespace: ns })) }
-      } catch { return { pods: [] } }
+      assertOk(r, 'get pods')
+      const data = JSON.parse(r.stdout) as { items: Array<{ metadata: { name: string }; status: { phase: string }; spec: { containers: Array<{ image: string }> } }> }
+      return { pods: data.items.map(p => ({ name: p.metadata.name, status: p.status.phase, image: p.spec.containers[0]?.image ?? '', restarts: 0, namespace: ns })) }
     },
     write: false,
   },
@@ -28,11 +35,9 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const ns = params.namespace as string ?? 'default'
       const r = kubectl(['get', 'deployments', '-n', ns, '-o', 'json'], creds)
-      if (r.status !== 0) return { deployments: [] }
-      try {
-        const data = JSON.parse(r.stdout) as { items: Array<{ metadata: { name: string }; status: { readyReplicas?: number; replicas?: number }; spec: { template: { spec: { containers: Array<{ image: string }> } } } }> }
-        return { deployments: data.items.map(d => ({ name: d.metadata.name, ready: d.status.readyReplicas ?? 0, desired: d.status.replicas ?? 0, image: d.spec.template.spec.containers[0]?.image ?? '' })) }
-      } catch { return { deployments: [] } }
+      assertOk(r, 'get deployments')
+      const data = JSON.parse(r.stdout) as { items: Array<{ metadata: { name: string }; status: { readyReplicas?: number; replicas?: number }; spec: { template: { spec: { containers: Array<{ image: string }> } } } }> }
+      return { deployments: data.items.map(d => ({ name: d.metadata.name, ready: d.status.readyReplicas ?? 0, desired: d.status.replicas ?? 0, image: d.spec.template.spec.containers[0]?.image ?? '' })) }
     },
     write: false,
   },
@@ -41,7 +46,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const ns = params.namespace as string ?? 'default'
       const r = kubectl(['logs', String(params.pod), '-n', ns, '--tail', String(params.lines ?? 100)], creds)
-      if (r.status !== 0) return { logs: [] }
+      assertOk(r, 'logs')
       return { logs: r.stdout.split('\n').filter(Boolean) }
     },
     write: false,
@@ -51,11 +56,9 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const ns = params.namespace as string ?? 'default'
       const r = kubectl(['get', 'events', '-n', ns, '--sort-by=.lastTimestamp', '-o', 'json'], creds)
-      if (r.status !== 0) return { events: [] }
-      try {
-        const data = JSON.parse(r.stdout) as { items: Array<{ reason: string; message: string; involvedObject: { name: string }; lastTimestamp: string }> }
-        return { events: data.items.slice(0, 50).map(e => ({ reason: e.reason, object: e.involvedObject.name, message: e.message, ts: e.lastTimestamp })) }
-      } catch { return { events: [] } }
+      assertOk(r, 'get events')
+      const data = JSON.parse(r.stdout) as { items: Array<{ reason: string; message: string; involvedObject: { name: string }; lastTimestamp: string }> }
+      return { events: data.items.slice(0, 50).map(e => ({ reason: e.reason, object: e.involvedObject.name, message: e.message, ts: e.lastTimestamp })) }
     },
     write: false,
   },

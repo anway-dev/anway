@@ -4,23 +4,23 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 interface JenkinsConn { baseUrl: string; user: string; apiToken: string }
 
-function connFromCreds(creds: Record<string, unknown>): JenkinsConn | null {
+function connFromCreds(creds: Record<string, unknown>): JenkinsConn {
   const baseUrl = creds['baseUrl']
   const user = creds['user']
   const apiToken = creds['apiToken']
-  if (typeof baseUrl !== 'string' || typeof user !== 'string' || typeof apiToken !== 'string') return null
+  if (typeof baseUrl !== 'string' || typeof user !== 'string' || typeof apiToken !== 'string') {
+    throw new Error('Jenkins credentials not configured (baseUrl/user/apiToken)')
+  }
   return { baseUrl: baseUrl.replace(/\/$/, ''), user, apiToken }
 }
 
-async function jenkinsGet(conn: JenkinsConn, path: string): Promise<unknown | null> {
-  try {
-    const auth = Buffer.from(`${conn.user}:${conn.apiToken}`).toString('base64')
-    const res = await fetch(`${conn.baseUrl}${path}`, {
-      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    })
-    if (!res.ok) return null
-    return await res.json() as unknown
-  } catch { return null }
+async function jenkinsGet(conn: JenkinsConn, path: string): Promise<unknown> {
+  const auth = Buffer.from(`${conn.user}:${conn.apiToken}`).toString('base64')
+  const res = await fetch(`${conn.baseUrl}${path}`, {
+    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`Jenkins API failed: HTTP ${res.status} (${path})`)
+  return await res.json() as unknown
 }
 
 interface JenkinsJob { name: string; url: string; color?: string }
@@ -38,10 +38,9 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { pipelines: [] }
       const filter = typeof params.service === 'string' ? (params.service as string).toLowerCase() : null
-      const data = await jenkinsGet(conn, '/api/json?tree=jobs[name,url,color]') as { jobs?: JenkinsJob[] } | null
-      if (!data?.jobs) return { pipelines: [] }
+      const data = await jenkinsGet(conn, '/api/json?tree=jobs[name,url,color]') as { jobs?: JenkinsJob[] }
+      if (!data.jobs) return { pipelines: [] }
       const jobs = filter ? data.jobs.filter(j => j.name.toLowerCase().includes(filter)) : data.jobs
       return {
         pipelines: jobs.map(j => {
@@ -64,14 +63,13 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { builds: [] }
       const jobName = encodeURIComponent(String(params.pipeline))
       const limit = typeof params.limit === 'number' ? (params.limit as number) : 10
       const data = await jenkinsGet(
         conn,
         `/job/${jobName}/api/json?tree=builds[number,result,timestamp,duration]{0,${limit - 1}}`,
-      ) as { builds?: JenkinsBuild[] } | null
-      if (!data?.builds) return { builds: [] }
+      ) as { builds?: JenkinsBuild[] }
+      if (!data.builds) return { builds: [] }
       return {
         builds: data.builds.map(b => ({
           id: `b-${b.number}`,

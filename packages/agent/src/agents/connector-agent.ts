@@ -324,6 +324,12 @@ export class ConnectorAgent {
 
     const rawData: Record<string, unknown> = {}
     const toolsUsed: string[] = []
+    // Real signal for the confidence score below, replacing what was a
+    // hardcoded 0.80/0.20/0.40 constant regardless of what actually happened
+    // — confirmed live via independent review that number was fabricated and
+    // fed to users/synthesis as if it reflected real data quality.
+    let toolCallsAttempted = 0
+    let toolCallsSucceeded = 0
     let agentInputTokens = 0
     let agentOutputTokens = 0
     const MAX_STEPS = this.maxSteps
@@ -386,7 +392,7 @@ export class ConnectorAgent {
           toolsUsed,
           rawData,
           summary: resp.content || `${this.agentType}: no findings.`,
-          confidence: toolsUsed.length > 0 ? 0.80 : 0.20,
+          confidence: toolCallsAttempted === 0 ? 0 : Math.round((toolCallsSucceeded / toolCallsAttempted) * 100) / 100,
           inputTokens: agentInputTokens,
           outputTokens: agentOutputTokens,
         }
@@ -395,6 +401,7 @@ export class ConnectorAgent {
       // Execute tool calls, feed results back
       const resultMessages: Message[] = []
       for (const call of resp.toolCalls) {
+        toolCallsAttempted++
         const tool = this.tools.find(t => t.name === call.name)
         let result: unknown
 
@@ -482,6 +489,7 @@ export class ConnectorAgent {
           result = await tool.run(call.args)
           rawData[call.name] = result
           toolsUsed.push(call.name)
+          toolCallsSucceeded++
         } catch (e) {
           result = { error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` }
         }
@@ -497,12 +505,17 @@ export class ConnectorAgent {
       for (const r of resultMessages) messages.push(r)
     }
 
+    // Same real success-ratio signal as above, with a penalty since hitting
+    // MAX_STEPS itself means the investigation was cut off incomplete —
+    // worth reflecting honestly rather than reporting whatever ratio was
+    // reached as if the agent had actually finished.
+    const rawConfidence = toolCallsAttempted === 0 ? 0 : toolCallsSucceeded / toolCallsAttempted
     return {
       agentType: this.agentType,
       toolsUsed,
       rawData,
       summary: `${this.agentType}: max investigation steps reached. Partial data collected.`,
-      confidence: 0.40,
+      confidence: Math.round(rawConfidence * 0.75 * 100) / 100,
       inputTokens: agentInputTokens,
       outputTokens: agentOutputTokens,
     }

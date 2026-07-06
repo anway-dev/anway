@@ -47,6 +47,48 @@ function resolveGitSha(): string {
   return 'latest'
 }
 
+// The app's own operational secrets (ANWAY_ENCRYPTION_KEY, JWT_SECRET) were only
+// ever sourced from this gateway process's local .env — real for a dev machine,
+// not for production. If a real 'vault' connector is registered for this
+// tenant, prefer reading these from its actual KV v2 store instead. Falls back
+// to the existing process.env-based logic (untouched) if no vault connector is
+// registered, or if the read fails for any reason — deploy must not become
+// impossible just because Vault is briefly unreachable.
+async function fetchGatewaySecretsFromVault(
+  tenantId: string,
+): Promise<{ encryptionKey?: string; jwtSecret?: string } | null> {
+  const vaultRows = await withTenant(prisma, tenantId, (tx) =>
+    tx.$queryRaw<Array<{ credentials_enc: string }>>`
+      SELECT credentials_enc FROM connector_config
+      WHERE tenant_id = ${tenantId}::uuid AND connector_type = 'vault' AND enabled = true LIMIT 1
+    `
+  ).catch(() => [])
+  if (vaultRows.length === 0) return null
+
+  try {
+    const creds = decryptJson(vaultRows[0]!.credentials_enc) as { baseUrl?: string; token?: string; apiKey?: string }
+    const baseUrl = (creds.baseUrl ?? 'http://localhost:8200').replace(/\/$/, '')
+    const token = creds.token ?? creds.apiKey
+    if (!token) return null
+
+    // KV v2 real REST path: secret data lives under {mount}/data/{path}, one
+    // level deeper than the KV path itself (metadata/list operations use
+    // {mount}/metadata/{path} instead — a different real Vault convention).
+    const res = await fetch(`${baseUrl}/v1/secret/data/anway/gateway`, {
+      headers: { 'X-Vault-Token': token },
+    })
+    if (!res.ok) return null
+    const body = await res.json() as { data?: { data?: Record<string, string> } }
+    const kv = body.data?.data ?? {}
+    const result: { encryptionKey?: string; jwtSecret?: string } = {}
+    if (kv['ANWAY_ENCRYPTION_KEY']) result.encryptionKey = kv['ANWAY_ENCRYPTION_KEY']
+    if (kv['JWT_SECRET']) result.jwtSecret = kv['JWT_SECRET']
+    return result
+  } catch {
+    return null
+  }
+}
+
 // A kubeconfig captured on the host (e.g. from `orbstack`/`kind`/`minikube`,
 // which expose the API server on the host's loopback) is unusable as-is from
 // inside this gateway's own container — 127.0.0.1/localhost there means the
@@ -777,8 +819,12 @@ export async function pipelineRoutes(app: FastifyInstance) {
             // check under NODE_ENV=production, so generate a secure one instead of
             // forwarding a value that's guaranteed to crash-loop the pod (confirmed
             // live: "Production requires ... JWT_SECRET >=32 chars").
-            const encryptionKey = process.env['ANWAY_ENCRYPTION_KEY'] ?? ''
-            const rawJwtSecret = process.env['JWT_SECRET'] ?? ''
+            const vaultSecrets = await fetchGatewaySecretsFromVault(tenantId)
+            if (vaultSecrets) {
+              sse({ type: 'log', line: '→ Sourcing gateway secrets from registered Vault connector (secret/anway/gateway)' })
+            }
+            const encryptionKey = vaultSecrets?.encryptionKey ?? process.env['ANWAY_ENCRYPTION_KEY'] ?? ''
+            const rawJwtSecret = vaultSecrets?.jwtSecret ?? process.env['JWT_SECRET'] ?? ''
             const jwtSecret = rawJwtSecret.length >= 32 ? rawJwtSecret : randomBytes(32).toString('base64')
             if (!encryptionKey) {
               sse({ type: 'status', message: 'Warning: ANWAY_ENCRYPTION_KEY not set in this environment — deployed gateway will crash-loop unless HELM_SET_ANWAY_ENCRYPTION_KEY is provided separately' })

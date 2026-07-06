@@ -2,11 +2,18 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to build and push images for'
+        required: true
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -19,3 +26,29 @@ jobs:
       - run: npx tsc --noEmit -p apps/web/tsconfig.json
       - run: docker build -f apps/gateway/Dockerfile . -t anway-gateway:ci
       - run: docker build -f apps/web/Dockerfile . -t anway-web:ci
+  build-and-push:
+    # Only runs for the pipeline's workflow_dispatch trigger (apps/gateway/src/routes/pipeline.ts's
+    # "Strategy A" build path — dispatches this workflow with { inputs: { sha } } and expects real
+    # images tagged with that sha to land in a registry). PRs only need the type-check/build-only
+    # `check` job above, not a push.
+    if: github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker build -f apps/gateway/Dockerfile . -t ghcr.io/${{ github.repository_owner }}/anway-gateway:${{ inputs.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/anway-gateway:${{ inputs.sha }}
+      - run: |
+          docker build -f apps/web/Dockerfile . -t ghcr.io/${{ github.repository_owner }}/anway-web:${{ inputs.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/anway-web:${{ inputs.sha }}

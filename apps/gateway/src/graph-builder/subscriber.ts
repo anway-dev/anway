@@ -1,5 +1,6 @@
 import { createClient } from 'redis'
 import type { RedisClientType } from 'redis'
+import crypto from 'node:crypto'
 import { GraphBuilderAgent } from '@anway/agent'
 import type { GraphEvent, IConnectorBootstrap, IKnowledgeGraph } from '@anway/agent'
 import { ProviderFactory } from '@anway/agent'
@@ -327,10 +328,25 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
       // type alone would also serialize unrelated instances of the same
       // multi-instance type (mcp/cli) behind one shared lock.
       let lockKey: string | null = null
+      // Random per-attempt token (not a fixed '1') — the release below
+      // compares this exact value before deleting, so a stale/expired lock
+      // held by a *different* instance is never accidentally deleted by
+      // this one (the classic "unlock without an ownership check" bug,
+      // confirmed live via independent review: with the previous fixed
+      // value, any instance could unconditionally del(lockKey) in its
+      // `finally` block, including deleting a lock a *different* instance
+      // had legitimately re-acquired after this one's lock already expired).
+      const lockToken = crypto.randomUUID()
       if (event.type === 'connector_registered' || event.type === 'connector_reconnected') {
         const eventConnectorId = (event as { connectorId?: string }).connectorId ?? eventConnectorType
         lockKey = `graph:bootstrap:lock:${tid}:${eventConnectorId}`
-        const acquired = await graphPub.set(lockKey, '1', { NX: true, EX: 60 })
+        // 60s was too short for a real multi-minute bootstrap (confirmed
+        // live) — the lock would expire mid-bootstrap and let a second
+        // instance start a concurrent, duplicate bootstrap for the same
+        // connector. 10 minutes covers a real cold bootstrap; idempotent
+        // upserts mean a false-negative (lock expires just before finish)
+        // is harmless, unlike the previous false-positive (concurrent runs).
+        const acquired = await graphPub.set(lockKey, lockToken, { NX: true, EX: 600 })
         if (!acquired) {
           log.info({ lockKey }, 'GraphBuilderSubscriber: bootstrap lock held by another instance — skipping')
           appendAuditEvent({ tenantId: tid, action: 'connector.bootstrap_queued', resource: eventConnectorType ?? '', outcome: 'success', metadata: { connectorType: eventConnectorType, message: 'Bootstrap already in progress — will retry automatically in ~5 min. Click Force Resync to retry now.' } }).catch(() => {})
@@ -459,7 +475,17 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
           }
         }
       } finally {
-        if (lockKey) await graphPub.del(lockKey).catch(() => {})
+        // Atomic compare-then-delete (Lua, single round-trip) — only removes
+        // the lock if it still holds *this instance's* token. If it expired
+        // and a different instance already re-acquired it with a new token,
+        // this correctly leaves that instance's lock alone instead of
+        // deleting it out from under it.
+        if (lockKey) {
+          await graphPub.eval(
+            `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`,
+            { keys: [lockKey], arguments: [lockToken] },
+          ).catch(() => {})
+        }
       }
     })
   }

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
 import { compare, hash } from 'bcryptjs'
 
@@ -198,8 +199,23 @@ export async function authRoutes(app: FastifyInstance) {
   // POST /api/auth/refresh — issue a fresh 24h JWT for an authenticated user
   app.post('/api/auth/refresh', { preHandler: [app.authenticate] }, async (request, reply) => {
     const user = request.user as { sub: string; email: string; tenantId: string; role: string }
+    // Re-check role (and existence) from the DB instead of trusting the
+    // presented token's claims verbatim — confirmed live via independent
+    // review: a user demoted or deleted via PATCH /api/access/users/:id/role
+    // (or removed entirely) kept their old, stale role/access indefinitely
+    // as long as they kept calling refresh before the token's own 24h
+    // expiry, since this route never looked anything up.
+    const rows = await withTenant(prisma, user.tenantId, (tx) =>
+      tx.$queryRaw<Array<{ role: string; email: string }>>`
+        SELECT role, email FROM users WHERE id = ${user.sub}::uuid AND tenant_id = ${user.tenantId}::uuid LIMIT 1
+      `
+    ).catch(() => [])
+    if (rows.length === 0) {
+      return reply.code(401).send({ error: 'user no longer exists' })
+    }
+    const current = rows[0]!
     const token = await reply.jwtSign(
-      { sub: user.sub, email: user.email, tenantId: user.tenantId, role: user.role },
+      { sub: user.sub, email: current.email, tenantId: user.tenantId, role: current.role },
     )
     return reply.send({ token, expiresIn: '24h' })
   })

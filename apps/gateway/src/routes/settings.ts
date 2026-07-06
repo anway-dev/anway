@@ -184,9 +184,15 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       if (rows.length === 0) return reply.code(404).send({ error: 'not configured' })
       const creds = decryptJson<Record<string, unknown>>(rows[0]!.credentials_enc)
       const catalogEntry = CONNECTOR_CATALOG.find(c => c.id === type)
+      // 'textarea' fields (kubeconfig, GCP service-account JSON) are just as
+      // sensitive as password/secret fields — confirmed live via independent
+      // review every textarea field in the whole catalog is one of these two
+      // credential types, none benign, and they were slipping through this
+      // filter and getting returned in plaintext to any client that GETs
+      // these connector credentials.
       const sensitiveKeys = new Set(
         (catalogEntry?.configFields ?? [])
-          .filter(f => f.type === 'password' || f.type === 'secret')
+          .filter(f => f.type === 'password' || f.type === 'secret' || f.type === 'textarea')
           .map(f => f.key)
       )
       const safe: Record<string, unknown> = {}

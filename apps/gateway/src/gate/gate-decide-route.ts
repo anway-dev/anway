@@ -164,6 +164,18 @@ export async function gateDecideRoutes(app: FastifyInstance) {
         `
       ).catch((err) => { request.log.warn({ err, gateId }, 'gate.decision audit write failed') })
 
+      // pipeline_rollback has no real auto-execution path (see pipeline.ts's
+      // removed runRollback — it was dead code and its terraform invocation
+      // was invalid even if it had been reachable). Approving this gate only
+      // ever updated its DB status; the response must say so honestly
+      // instead of implying a rollback actually ran.
+      if (decision === 'approved' && gateRows.length > 0 && gateRows[0]!.tool_name === 'pipeline_rollback') {
+        return {
+          ok: true, gateId, decision, executed: false,
+          note: 'Rollback approval recorded, but automatic execution is not implemented — re-deploy the previous known-good version manually.',
+        }
+      }
+
       // If the gate was approved AND this is a trigger action, dispatch to executor
       if (decision === 'approved' && gateRows.length > 0) {
         const toolName = gateRows[0]!.tool_name

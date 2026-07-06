@@ -7,7 +7,6 @@ import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
 import { UUID_RE } from '../utils/validators.js'
 import { requireRole } from '../plugins/rbac.js'
-import type { FastifyLoggerInstance } from 'fastify'
 
 // Module-level EventEmitter for single-pod SSE fan-out (no Redis)
 import { EventEmitter } from 'node:events'
@@ -258,70 +257,18 @@ async function loadStagesForTenant(tenantId: string): Promise<object[]> {
   return buildStagesFromEnvs(rows.map(r => ({ id: r.id, name: r.name, label: r.label, color: r.color })))
 }
 
-async function runRollback(pipelineId: string, tenantId: string, prevState: unknown, log: FastifyLoggerInstance): Promise<void> {
-  try {
-    await withTenant(prisma, tenantId, (tx) =>
-      tx.$executeRaw`
-        UPDATE pipeline_stage_runs
-        SET status = 'running', output = output || '{"rollback_progress":"applying previous terraform state"}'::jsonb
-        WHERE pipeline_id = ${pipelineId}::uuid AND stage_id = 'rollback' AND tenant_id = ${tenantId}::uuid AND status = 'running'
-      `
-    )
-
-    // Execute terraform apply with previous state via subprocess
-    const stateJson = JSON.stringify(prevState)
-    const tfDir = process.env['TF_DIR'] ?? 'infra/terraform'
-
-    try {
-      const { spawn } = await import('node:child_process')
-      const filteredEnv: Record<string, string | undefined> = {}
-      for (const [k, v] of Object.entries(process.env)) {
-        if (/^(AWS_|GCP_|AZURE_|TF_|KUBECONFIG|HELM_|DOCKER_|GITHUB_)/.test(k)) filteredEnv[k] = v
-      }
-      filteredEnv['PATH'] = process.env['PATH']
-      filteredEnv['HOME'] = process.env['HOME']
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn('terraform', ['apply', '-auto-approve', '-state', '-'], {
-          cwd: tfDir,
-          env: filteredEnv as Record<string, string>,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-        child.stdin.write(stateJson)
-        child.stdin.end()
-        let stdout = ''
-        let stderr = ''
-        child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
-        child.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
-        child.on('close', (code) => {
-          if (code === 0) resolve()
-          else reject(new Error(`terraform apply exited ${code}: ${stderr || stdout}`))
-        })
-        child.on('error', reject)
-        setTimeout(() => { child.kill(); reject(new Error('terraform apply timed out after 120s')) }, 120_000)
-      })
-
-      await withTenant(prisma, tenantId, (tx) =>
-        tx.$executeRaw`
-          UPDATE pipeline_stage_runs
-          SET status = 'success', finished_at = now(),
-              output = output || '{"rollback_result":"terraform apply succeeded"}'::jsonb
-          WHERE pipeline_id = ${pipelineId}::uuid AND stage_id = 'rollback' AND tenant_id = ${tenantId}::uuid
-        `
-      )
-    } catch (tfErr) {
-      await withTenant(prisma, tenantId, (tx) =>
-        tx.$executeRaw`
-          UPDATE pipeline_stage_runs
-          SET status = 'failed', finished_at = now(),
-              output = output || ${JSON.stringify({ rollback_error: String(tfErr) })}::jsonb
-          WHERE pipeline_id = ${pipelineId}::uuid AND stage_id = 'rollback' AND tenant_id = ${tenantId}::uuid
-        `
-      )
-    }
-  } catch (err) {
-    log.error({ err }, 'runRollback failed')
-  }
-}
+// runRollback (previously here) was dead code — never called from anywhere
+// in the codebase — and would have failed even if it were: it piped a raw
+// terraform state JSON blob to `terraform apply -state -`, but real
+// terraform's -state flag takes a file path, not stdin; there is no such
+// input mechanism. Confirmed live via independent review as "rollback flow
+// is theater" — approving a pipeline_rollback gate marked it approved in
+// the DB and executed nothing, with no indication to the approving user
+// that no rollback actually happened. Removed rather than left as
+// unreachable, broken code (this project's standing rule: zero stubs, zero
+// unimplemented code in production) — see gate-decide-route.ts, which now
+// responds honestly (executed: false, a real explanatory note) instead of
+// silently no-op'ing behind an `{ ok: true }` that implied success.
 
 export async function pipelineRoutes(app: FastifyInstance) {
   // GET /api/pipelines

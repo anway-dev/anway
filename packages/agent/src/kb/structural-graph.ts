@@ -42,11 +42,25 @@ export class StructuralGraph implements IKnowledgeGraph {
     }
   }
 
-  async getFacts(_query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
-    const since = at ?? new Date(Date.now() - 24 * 60 * 60 * 1000)
+  // Previously ignored `query` entirely (parameter was prefixed `_query` and
+  // never referenced in the SQL) — every call returned the last 50 episodes
+  // in the time window regardless of relevance to the actual question asked.
+  // Also inverted `at`'s semantics: `created_at >= since` returns episodes
+  // *after* the requested point in time, the opposite of "facts as they
+  // stood at time T" (a point-in-time / historical query would instead need
+  // everything up to and including `at`). Confirmed live via independent
+  // review as a real correctness bug in the interface's documented temporal
+  // contract (IKnowledgeGraph.getFacts: "facts valid at time T").
+  async getFacts(query: string, tenantId?: string, at?: Date): Promise<Fact[]> {
+    const asOf = at ?? new Date()
+    const windowStart = new Date(asOf.getTime() - 24 * 60 * 60 * 1000)
+    const trimmedQuery = query.trim()
     const rows = await this.query<{ text: string; created_at: Date }>(
-      `SELECT text, created_at FROM kb_episodes WHERE tenant_id = $1::uuid AND created_at >= $2 ORDER BY created_at DESC LIMIT 50`,
-      [tenantId ?? '', since],
+      `SELECT text, created_at FROM kb_episodes
+       WHERE tenant_id = $1::uuid AND created_at <= $2 AND created_at >= $3
+         AND ($4 = '' OR text ILIKE '%' || $4 || '%')
+       ORDER BY created_at DESC LIMIT 50`,
+      [tenantId ?? '', asOf, windowStart, trimmedQuery],
     ).catch(() => [])
     return rows.map(r => ({
       claim: r.text,

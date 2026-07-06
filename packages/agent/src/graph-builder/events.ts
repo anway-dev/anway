@@ -9,6 +9,7 @@ export type GraphEvent =
   | ConnectorRemoved
   | PrMerged
   | IncidentCreated
+  | AlertFired
   | DeployCompleted
   | DeployTrigger
   | TicketCreated
@@ -45,6 +46,21 @@ export interface IncidentCreated {
   title: string
   severity: string
   serviceHint?: string
+}
+
+// Alertmanager webhooks publish both incident_created AND alert_fired
+// (apps/gateway/src/routes/events.ts) — previously alert_fired had no
+// GraphEvent type and no handler, so CLAUDE.md's documented
+// (Alert) -[:TRIGGERED_BY]-> (Incident) edge could never be created; the
+// alert itself never became a graph entity at all.
+export interface AlertFired {
+  type: 'alert_fired'
+  tenantId: string
+  incidentId: string
+  title: string
+  severity: string
+  service?: string | null
+  description?: string | null
 }
 
 export interface DeployCompleted {

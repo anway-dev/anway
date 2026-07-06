@@ -143,7 +143,7 @@ async function connectorCredential(tenantId: string, connectorType: string, envV
 }
 
 const GRAPH_EVENT_CHANNELS = [
-  'pr_merged', 'deploy_completed', 'incident_created',
+  'pr_merged', 'deploy_completed', 'incident_created', 'alert_fired',
   'ticket_created', 'connector_registered', 'connector_removed',
   'connector_reconnected',
   // T17 — missing lifecycle channels

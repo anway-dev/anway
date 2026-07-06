@@ -15,6 +15,11 @@ const EXTRACT_PROMPT =
   'Respond with ONLY the name (max 3 words), or empty string if none found.\n\n' +
   'Text: '
 
+// GitHub's standard issue-closing keywords (case-insensitive). Matches the
+// CLAUDE.md-documented trigger: "pr_merged → ... extract 'fixes #N' →
+// Commit→FIXES→Ticket" — previously never implemented at all.
+const FIXES_RE = /\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#(\d+)/gi
+
 export class GraphBuilderAgent {
   constructor(
     private readonly kg: IKnowledgeGraph,
@@ -39,6 +44,8 @@ export class GraphBuilderAgent {
           await this.onPrMerged(event); break
         case 'incident_created':
           await this.onIncidentCreated(event); break
+        case 'alert_fired':
+          await this.onAlertFired(event); break
         case 'deploy_completed':
           await this.onDeployCompleted(event); break
         case 'deploy_trigger':
@@ -162,6 +169,27 @@ export class GraphBuilderAgent {
       { fromEntityId: commitId, relType: 'INTRODUCED_BY', toEntityId: repoId },
       tenantId,
     )
+
+    // Commit -[:FIXES]-> Ticket — previously never parsed at all. Ticket
+    // identity here is repo-scoped (`${repo}#${number}`) since a bare issue
+    // number in commit text carries no connector-specific ticket ID. If a
+    // richer Ticket entity already exists for the same issue via a separate
+    // Jira/Linear/GitHub-issues sync (ticket_created), this creates a
+    // second, repo-scoped Ticket record rather than resolving to it — a
+    // disclosed limitation; true cross-connector ticket identity resolution
+    // needs the ticket_created bootstrap's own external ID, not a bare
+    // commit-message reference.
+    const ticketNumbers = [...event.message.matchAll(FIXES_RE)].map(m => m[1])
+    for (const num of ticketNumbers) {
+      const ticketId = await this.kg.upsertEntity(
+        { type: 'Ticket', name: `${event.repo}#${num}`, metadata: { source: 'commit-message-reference' } },
+        tenantId,
+      )
+      await this.kg.upsertRelationship(
+        { fromEntityId: commitId, relType: 'FIXES', toEntityId: ticketId },
+        tenantId,
+      )
+    }
   }
 
   private async onDeployCompleted(event: GraphEvent & { type: 'deploy_completed' }): Promise<void> {
@@ -186,6 +214,51 @@ export class GraphBuilderAgent {
     // Deploy → DEPLOYED_TO → Service
     await this.kg.upsertRelationship(
       { fromEntityId: deployId, relType: 'DEPLOYED_TO', toEntityId: serviceId },
+      tenantId,
+    )
+
+    // Deploy -[:INTRODUCED]-> Commit — documented in CLAUDE.md's canonical
+    // relationship table but never created anywhere. Same (type, name)
+    // upsert key as onPrMerged's Commit entity, so this resolves the same
+    // Commit row if pr_merged already fired for this sha, or creates a
+    // minimal placeholder Commit record if deploy events arrive standalone
+    // (e.g. no GitHub connector wired, direct CI push).
+    const commitId = await this.kg.upsertEntity(
+      { type: 'Commit', name: event.sha.slice(0, 7), metadata: { sha: event.sha } },
+      tenantId,
+    )
+    await this.kg.upsertRelationship(
+      { fromEntityId: deployId, relType: 'INTRODUCED', toEntityId: commitId },
+      tenantId,
+    )
+  }
+
+  // Alert -[:TRIGGERED_BY]-> Incident — documented in CLAUDE.md's canonical
+  // relationship table but had no GraphEvent type or handler at all.
+  // Alertmanager webhooks publish both incident_created AND alert_fired
+  // (apps/gateway/src/routes/events.ts); only incident_created was ever
+  // subscribed to, so the Alert entity itself was never created.
+  private async onAlertFired(event: GraphEvent & { type: 'alert_fired' }): Promise<void> {
+    const tenantId = this.tid(event.tenantId)
+
+    const alertId = await this.kg.upsertEntity(
+      {
+        type: 'Alert',
+        name: `alert-${event.incidentId}`,
+        metadata: { title: event.title, severity: event.severity, service: event.service ?? null },
+      },
+      tenantId,
+    )
+
+    // Same (tenant_id, type, name) upsert key as onIncidentCreated — resolves
+    // the same Incident row rather than creating a duplicate.
+    const incidentId = await this.kg.upsertEntity(
+      { type: 'Incident', name: event.incidentId, metadata: { title: event.title, severity: event.severity } },
+      tenantId,
+    )
+
+    await this.kg.upsertRelationship(
+      { fromEntityId: alertId, relType: 'TRIGGERED_BY', toEntityId: incidentId },
       tenantId,
     )
   }

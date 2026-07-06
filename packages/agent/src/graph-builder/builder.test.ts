@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GraphBuilderAgent } from './builder.js'
-import type { GraphEvent, PrMerged, DeployCompleted, IncidentCreated, TicketCreated } from './events.js'
+import type { GraphEvent, PrMerged, DeployCompleted, IncidentCreated, TicketCreated, AlertFired } from './events.js'
 import type { IKnowledgeGraph, EntitySpec, RelationshipSpec } from '../interfaces/knowledge-graph.js'
 import type { IModelProvider, ChatResponse } from '../interfaces/provider.js'
 import type { TenantId } from '@anway/types'
@@ -75,6 +75,15 @@ const INCIDENT_EVENT: IncidentCreated = {
   serviceHint: 'payments-api',
 }
 
+const ALERT_FIRED_EVENT: AlertFired = {
+  type: 'alert_fired',
+  tenantId: 't-1',
+  incidentId: 'inc-001',
+  title: 'Checkout failures',
+  severity: 'critical',
+  service: 'payments-api',
+}
+
 const TICKET_EVENT: TicketCreated = {
   type: 'ticket_created',
   tenantId: 't-1',
@@ -125,6 +134,38 @@ describe('GraphBuilderAgent', () => {
         't-1' as TenantId,
       )
     })
+
+    // Regression test for finding I9: "fixes #N" (and closes/resolves,
+    // singular/plural/past-tense variants) was never parsed at all —
+    // CLAUDE.md documents this as pr_merged's Commit→FIXES→Ticket trigger.
+    it('parses "fixes #N" / "closes #N" from the commit message and creates Commit→FIXES→Ticket', async () => {
+      const event: PrMerged = {
+        ...PR_MERGED_EVENT,
+        message: 'Fixes #123 and closes #456 — checkout crash',
+      }
+      await agent.handle(event)
+
+      expect(kg.upsertEntity).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'Ticket', name: 'org/payments#123' }),
+        't-1' as TenantId,
+      )
+      expect(kg.upsertEntity).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'Ticket', name: 'org/payments#456' }),
+        't-1' as TenantId,
+      )
+      expect(kg.upsertRelationship).toHaveBeenCalledWith(
+        expect.objectContaining({ relType: 'FIXES' }),
+        't-1' as TenantId,
+      )
+    })
+
+    it('creates no FIXES relationship when the commit message has no closing keyword', async () => {
+      await agent.handle(PR_MERGED_EVENT) // message: 'Fix payments-api checkout bug' — no "#N"
+      expect(kg.upsertRelationship).not.toHaveBeenCalledWith(
+        expect.objectContaining({ relType: 'FIXES' }),
+        't-1' as TenantId,
+      )
+    })
   })
 
   describe('handle(deploy_completed)', () => {
@@ -141,6 +182,45 @@ describe('GraphBuilderAgent', () => {
       )
       expect(kg.upsertRelationship).toHaveBeenCalledWith(
         expect.objectContaining({ relType: 'DEPLOYED_TO' }),
+        't-1' as TenantId,
+      )
+    })
+
+    // Regression test for finding I9: CLAUDE.md documents
+    // (Deploy) -[:INTRODUCED]-> (Commit) as a canonical relationship, but it
+    // was never created anywhere in the codebase.
+    it('upserts Commit + creates Deploy→INTRODUCED→Commit relationship', async () => {
+      await agent.handle(DEPLOY_EVENT)
+
+      expect(kg.upsertEntity).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'Commit', name: 'abc1234' }),
+        't-1' as TenantId,
+      )
+      expect(kg.upsertRelationship).toHaveBeenCalledWith(
+        expect.objectContaining({ relType: 'INTRODUCED' }),
+        't-1' as TenantId,
+      )
+    })
+  })
+
+  describe('handle(alert_fired)', () => {
+    // Regression test for finding I9: alert_fired had no GraphEvent type and
+    // no handler at all — CLAUDE.md's documented
+    // (Alert) -[:TRIGGERED_BY]-> (Incident) edge could never be created,
+    // and the Alert itself never became a graph entity.
+    it('upserts Alert + Incident + creates TRIGGERED_BY relationship', async () => {
+      await agent.handle(ALERT_FIRED_EVENT)
+
+      expect(kg.upsertEntity).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'Alert', name: 'alert-inc-001' }),
+        't-1' as TenantId,
+      )
+      expect(kg.upsertEntity).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'Incident', name: 'inc-001' }),
+        't-1' as TenantId,
+      )
+      expect(kg.upsertRelationship).toHaveBeenCalledWith(
+        expect.objectContaining({ relType: 'TRIGGERED_BY' }),
         't-1' as TenantId,
       )
     })

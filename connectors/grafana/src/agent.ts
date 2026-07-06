@@ -4,15 +4,19 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const TOOLS: ConnectorTool[] = [
   {
+    // These 3 read tools previously swallowed every real error (network
+    // failure, auth failure, Grafana down) into the same empty-array
+    // "success" as a genuinely empty result — confirmed live via
+    // independent review as a systemic pattern across many connectors,
+    // masking real outages as "all clear". A real error now throws instead;
+    // a genuine 200-OK-but-empty response is unaffected.
     definition: { name: 'get_dashboards', description: 'List Grafana dashboards', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
       const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
-      try {
-        const res = await fetch(`${base}/api/search?type=dash-db`, { headers: { Authorization: `Basic ${auth}` } })
-        if (!res.ok) return { dashboards: [] }
-        return { dashboards: await res.json() }
-      } catch { return { dashboards: [] } }
+      const res = await fetch(`${base}/api/search?type=dash-db`, { headers: { Authorization: `Basic ${auth}` } })
+      if (!res.ok) throw new Error(`Grafana get_dashboards failed: HTTP ${res.status}`)
+      return { dashboards: await res.json() }
     },
     write: false,
   },
@@ -21,11 +25,9 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
       const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
-      try {
-        const res = await fetch(`${base}/api/alerts`, { headers: { Authorization: `Basic ${auth}` } })
-        if (!res.ok) return { alerts: [] }
-        return { alerts: await res.json() }
-      } catch { return { alerts: [] } }
+      const res = await fetch(`${base}/api/alerts`, { headers: { Authorization: `Basic ${auth}` } })
+      if (!res.ok) throw new Error(`Grafana get_alerts failed: HTTP ${res.status}`)
+      return { alerts: await res.json() }
     },
     write: false,
   },
@@ -34,11 +36,9 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
       const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
-      try {
-        const res = await fetch(`${base}/api/datasources`, { headers: { Authorization: `Basic ${auth}` } })
-        if (!res.ok) return { datasources: [] }
-        return { datasources: await res.json() }
-      } catch { return { datasources: [] } }
+      const res = await fetch(`${base}/api/datasources`, { headers: { Authorization: `Basic ${auth}` } })
+      if (!res.ok) throw new Error(`Grafana get_datasources failed: HTTP ${res.status}`)
+      return { datasources: await res.json() }
     },
     write: false,
   },

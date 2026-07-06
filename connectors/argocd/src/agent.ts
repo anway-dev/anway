@@ -46,34 +46,35 @@ const TOOLS: ConnectorTool[] = [
         properties: { service: { type: 'string', optional: true } },
       },
     },
+    // Confirmed live via independent review: swallowing every real error
+    // (missing creds, non-OK response, network failure) into an
+    // empty-array "success" is a systemic pattern across many connectors
+    // that masks real outages/auth failures as "no pipelines" instead of
+    // "ArgoCD is unreachable". Throws now; a genuine empty result (real
+    // 200 OK, zero matching apps) is unaffected.
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { pipelines: [] }
+      if (!c) throw new Error('ArgoCD credentials not configured (token/baseUrl)')
       const filter = typeof params.service === 'string' ? (params.service as string).toLowerCase() : null
-      try {
-        const res = await fetch(`${c.baseUrl}/api/v1/applications`, {
-          headers: { Authorization: `Bearer ${c.token}` },
-        })
-        if (!res.ok) return { pipelines: [] }
-        const data = (await res.json()) as { items?: ArgoCDApp[] }
-        if (!data?.items) return { pipelines: [] }
-        const apps = filter
-          ? data.items.filter(a => (a.metadata?.name ?? '').toLowerCase().includes(filter))
-          : data.items
-        return {
-          pipelines: apps.map(a => ({
-            id: a.metadata?.name ?? 'unknown',
-            name: a.metadata?.name ?? 'unknown',
-            status: mapPipelineStatus(
-              a.status?.sync?.status ?? 'Unknown',
-              a.status?.health?.status ?? 'Unknown',
-            ),
-            syncStatus: a.status?.sync?.status ?? 'Unknown',
-            healthStatus: a.status?.health?.status ?? 'Unknown',
-          })),
-        }
-      } catch {
-        return { pipelines: [] }
+      const res = await fetch(`${c.baseUrl}/api/v1/applications`, {
+        headers: { Authorization: `Bearer ${c.token}` },
+      })
+      if (!res.ok) throw new Error(`ArgoCD get_pipelines failed: HTTP ${res.status}`)
+      const data = (await res.json()) as { items?: ArgoCDApp[] }
+      const apps = filter
+        ? (data.items ?? []).filter(a => (a.metadata?.name ?? '').toLowerCase().includes(filter))
+        : (data.items ?? [])
+      return {
+        pipelines: apps.map(a => ({
+          id: a.metadata?.name ?? 'unknown',
+          name: a.metadata?.name ?? 'unknown',
+          status: mapPipelineStatus(
+            a.status?.sync?.status ?? 'Unknown',
+            a.status?.health?.status ?? 'Unknown',
+          ),
+          syncStatus: a.status?.sync?.status ?? 'Unknown',
+          healthStatus: a.status?.health?.status ?? 'Unknown',
+        })),
       }
     },
     write: false,
@@ -98,27 +99,23 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { builds: [] }
+      if (!c) throw new Error('ArgoCD credentials not configured (token/baseUrl)')
       const appName = encodeURIComponent(String(params.pipeline))
       const limit = typeof params.limit === 'number' ? (params.limit as number) : 10
-      try {
-        const res = await fetch(`${c.baseUrl}/api/v1/applications/${appName}`, {
-          headers: { Authorization: `Bearer ${c.token}` },
-        })
-        if (!res.ok) return { builds: [] }
-        const app = (await res.json()) as ArgoCDApp
-        const history = app.status?.history ?? []
-        const builds = history.slice(0, limit).map(h => ({
-          id: `b-${h.id}`,
-          sha: h.revision ?? '',
-          status: 'deployed', // history only records completed syncs — all entries are deployed
-          duration: 0, // ArgoCD does not track per-deploy duration
-          startedAt: h.deployedAt ?? h.deployStartedAt ?? new Date().toISOString(),
-        }))
-        return { builds }
-      } catch {
-        return { builds: [] }
-      }
+      const res = await fetch(`${c.baseUrl}/api/v1/applications/${appName}`, {
+        headers: { Authorization: `Bearer ${c.token}` },
+      })
+      if (!res.ok) throw new Error(`ArgoCD get_builds failed: HTTP ${res.status}`)
+      const app = (await res.json()) as ArgoCDApp
+      const history = app.status?.history ?? []
+      const builds = history.slice(0, limit).map(h => ({
+        id: `b-${h.id}`,
+        sha: h.revision ?? '',
+        status: 'deployed', // history only records completed syncs — all entries are deployed
+        duration: 0, // ArgoCD does not track per-deploy duration
+        startedAt: h.deployedAt ?? h.deployStartedAt ?? new Date().toISOString(),
+      }))
+      return { builds }
     },
     write: false,
   },

@@ -3,19 +3,26 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const DD_API = 'https://api.datadoghq.com'
 
-async function ddApi(path: string, creds: Record<string, unknown>, body?: Record<string, unknown>): Promise<unknown | null> {
+// Throws on a real failure (missing creds, non-OK response, network error)
+// instead of returning null — confirmed live via independent review that
+// collapsing "credentials missing", "auth failed", "Datadog is down", and
+// "rate limited" all into the same null, which every tool then treated as
+// "genuinely empty" ({alerts: []}, {points: [], unit: ''}, {lines: []}), is
+// a dangerous false "all clear" for exactly the monitoring data an SRE
+// agent relies on to assess real incident status. A genuinely empty *valid*
+// response (200 OK, no matching data) is a separate, real case each tool
+// still handles on its own — this only changes what happens on a real error.
+async function ddApi(path: string, creds: Record<string, unknown>, body?: Record<string, unknown>): Promise<unknown> {
   const apiKey = (creds as ConnectorCreds).apiKey
   const appKey = (creds as ConnectorCreds).app_key
-  if (typeof apiKey !== 'string' || typeof appKey !== 'string') return null
-  try {
-    const resp = await fetch(`${DD_API}${path}`, {
-      method: body ? 'POST' : 'GET',
-      headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    })
-    if (!resp.ok) return null
-    return await resp.json() as unknown
-  } catch { return null }
+  if (typeof apiKey !== 'string' || typeof appKey !== 'string') throw new Error('Datadog credentials not configured (apiKey/app_key)')
+  const resp = await fetch(`${DD_API}${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  if (!resp.ok) throw new Error(`Datadog API error: HTTP ${resp.status}`)
+  return await resp.json() as unknown
 }
 
 const TOOLS: ConnectorTool[] = [

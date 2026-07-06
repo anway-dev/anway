@@ -8,7 +8,7 @@ interface ElasticCreds { baseUrl: string; headers: Record<string, string> }
  * - Basic user:password (payload['user'] / payload['password'])
  * - Unauthenticated fallback (no auth header)
  */
-function extractCreds(creds: Record<string, unknown>): ElasticCreds | null {
+function extractCreds(creds: Record<string, unknown>): ElasticCreds {
   const baseUrl = (creds['baseUrl'] as string | undefined) ?? 'http://localhost:9200'
   const user = (creds['user'] as string | undefined) ?? ''
   const password = (creds['password'] as string | undefined) ?? ''
@@ -76,10 +76,9 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { points: [], unit: 'value' }
 
       const service = String(params.service ?? '').trim()
-      if (!service) return { points: [], unit: 'value' }
+      if (!service) throw new Error('Elastic get_metrics: service is required')
 
       const windowMs = parseWindowMs(String(params.window ?? '1h'))
       const interval = intervalForWindow(windowMs)
@@ -89,7 +88,7 @@ const TOOLS: ConnectorTool[] = [
       const now = Date.now()
       const gte = new Date(now - windowMs).toISOString()
 
-      try {
+      {
         const body = {
           size: 0,
           query: {
@@ -120,7 +119,7 @@ const TOOLS: ConnectorTool[] = [
           headers: c.headers,
           body: JSON.stringify(body),
         })
-        if (!res.ok) return { points: [], unit: 'value' }
+        if (!res.ok) throw new Error(`Elastic get_metrics failed: HTTP ${res.status}`)
 
         const data = (await res.json()) as {
           aggregations?: {
@@ -143,8 +142,6 @@ const TOOLS: ConnectorTool[] = [
         else if (metricField.includes('count')) unit = 'count'
 
         return { points, unit }
-      } catch {
-        return { points: [], unit: 'value' }
       }
     },
     write: false,
@@ -181,7 +178,6 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { alerts: [] }
 
       const serviceFilter = typeof params.service === 'string'
         ? (params.service as string).toLowerCase()
@@ -190,7 +186,7 @@ const TOOLS: ConnectorTool[] = [
         ? (params.severity as string).toLowerCase()
         : null
 
-      try {
+      {
         // There is no "list all watches" REST verb in the real Watcher API —
         // GET /_watcher/watch is not a valid endpoint (405, only GET
         // /_watcher/watch/{id} for a single watch by id exists). The real,
@@ -198,8 +194,8 @@ const TOOLS: ConnectorTool[] = [
         // system index, .watches, directly. Confirmed against a live
         // Elasticsearch 8.15 instance with a trial license (Watcher requires
         // at least trial/basic-plus licensing — a non-compliant license
-        // returns a 403 security_exception, handled as a normal empty result
-        // below like any other non-2xx response).
+        // returns a 403 security_exception, which throws below like any
+        // other real failure rather than masquerading as "no watches").
         // POST, not GET — Node's fetch (unlike curl) rejects a GET request
         // with a body per the Fetch spec ("Request with GET/HEAD method
         // cannot have body"). Elasticsearch's _search endpoint accepts POST
@@ -209,7 +205,7 @@ const TOOLS: ConnectorTool[] = [
           headers: c.headers,
           body: JSON.stringify({ size: 100 }),
         })
-        if (!res.ok) return { alerts: [] }
+        if (!res.ok) throw new Error(`Elastic get_alerts failed: HTTP ${res.status}`)
 
         const data = (await res.json()) as {
           hits?: {
@@ -266,8 +262,6 @@ const TOOLS: ConnectorTool[] = [
           })
 
         return { alerts }
-      } catch {
-        return { alerts: [] }
       }
     },
     write: false,
@@ -298,15 +292,14 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { lines: [] }
 
       const service = String(params.service ?? '').trim()
-      if (!service) return { lines: [] }
+      if (!service) throw new Error('Elastic get_logs: service is required')
 
       const query = String(params.query ?? '').trim()
       const limit = typeof params.limit === 'number' ? (params.limit as number) : 50
 
-      try {
+      {
         const body = {
           size: limit,
           query: {
@@ -330,7 +323,7 @@ const TOOLS: ConnectorTool[] = [
           headers: c.headers,
           body: JSON.stringify(body),
         })
-        if (!res.ok) return { lines: [] }
+        if (!res.ok) throw new Error(`Elastic get_logs failed: HTTP ${res.status}`)
 
         const data = (await res.json()) as {
           hits?: {
@@ -359,8 +352,6 @@ const TOOLS: ConnectorTool[] = [
         })
 
         return { lines }
-      } catch {
-        return { lines: [] }
       }
     },
     write: false,

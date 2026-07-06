@@ -104,12 +104,17 @@ const TOOLS: ConnectorTool[] = [
         required: ['service', 'window'],
       },
     },
+    // Confirmed live via independent review: missing creds, an empty
+    // required param, a non-OK response, and a network error all
+    // previously collapsed into the same empty-points "success" — masking
+    // a real Coralogix outage/auth failure as "no metrics". Throws now; a
+    // genuine 200-OK-with-zero-datapoints result is unaffected.
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { points: [], unit: 'requests/s' }
+      if (!c) throw new Error('Coralogix credentials not configured')
 
       const service = String(params.service ?? '').trim()
-      if (!service) return { points: [], unit: 'requests/s' }
+      if (!service) throw new Error('Coralogix get_metrics: service is required')
 
       const windowMs = parseWindowMs(String(params.window ?? '1h'))
       const interval = intervalForWindow(windowMs)
@@ -120,45 +125,41 @@ const TOOLS: ConnectorTool[] = [
       const startTime = new Date(now.getTime() - windowMs).toISOString()
       const endTime = now.toISOString()
 
-      try {
-        const query = [
-          'source metrics',
-          `| filter metadata_applicationName = '${service.replace(/'/g, "\\'")}'`,
-          `| timeslice ${interval}`,
-          `| stats avg(metadata_${metricField}) by timeslice`,
-        ].join(' ')
+      const query = [
+        'source metrics',
+        `| filter metadata_applicationName = '${service.replace(/'/g, "\\'")}'`,
+        `| timeslice ${interval}`,
+        `| stats avg(metadata_${metricField}) by timeslice`,
+      ].join(' ')
 
-        const res = await fetch(`${c.baseUrl}/api/v1/dataprime/query`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${c.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query, startTime, endTime }),
-        })
-        if (!res.ok) return { points: [], unit: 'requests/s' }
+      const res = await fetch(`${c.baseUrl}/api/v1/dataprime/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${c.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query, startTime, endTime }),
+      })
+      if (!res.ok) throw new Error(`Coralogix get_metrics failed: HTTP ${res.status}`)
 
-        const data = (await res.json()) as {
-          results?: Array<Record<string, unknown>>
-        }
-
-        const results = data.results ?? []
-        const points = results
-          .map(r => {
-            const tsField = r['timeslice'] as string | undefined
-            const valField = r[`avg(metadata_${metricField})`] ?? r['avg(metadata_value)'] ?? r['value']
-            if (!tsField) return null
-            const t = new Date(tsField).getTime()
-            const v = typeof valField === 'number' ? valField : parseFloat(String(valField))
-            if (isNaN(v)) return null
-            return { t, v }
-          })
-          .filter((p): p is { t: number; v: number } => p !== null)
-
-        return { points, unit: 'requests/s' }
-      } catch {
-        return { points: [], unit: 'requests/s' }
+      const data = (await res.json()) as {
+        results?: Array<Record<string, unknown>>
       }
+
+      const results = data.results ?? []
+      const points = results
+        .map(r => {
+          const tsField = r['timeslice'] as string | undefined
+          const valField = r[`avg(metadata_${metricField})`] ?? r['avg(metadata_value)'] ?? r['value']
+          if (!tsField) return null
+          const t = new Date(tsField).getTime()
+          const v = typeof valField === 'number' ? valField : parseFloat(String(valField))
+          if (isNaN(v)) return null
+          return { t, v }
+        })
+        .filter((p): p is { t: number; v: number } => p !== null)
+
+      return { points, unit: 'requests/s' }
     },
     write: false,
   },
@@ -199,9 +200,10 @@ const TOOLS: ConnectorTool[] = [
         },
       },
     },
+    // See get_metrics above — same fix, same reasoning.
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { alerts: [] }
+      if (!c) throw new Error('Coralogix credentials not configured')
 
       const serviceFilter = typeof params.service === 'string'
         ? (params.service as string).toLowerCase()
@@ -210,55 +212,51 @@ const TOOLS: ConnectorTool[] = [
         ? (params.severity as string).toLowerCase()
         : null
 
-      try {
-        const res = await fetch(`${c.baseUrl}/api/v1/alert-definitions`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${c.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        })
-        if (!res.ok) return { alerts: [] }
+      const res = await fetch(`${c.baseUrl}/api/v1/alert-definitions`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${c.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      if (!res.ok) throw new Error(`Coralogix get_alerts failed: HTTP ${res.status}`)
 
-        const data = (await res.json()) as {
-          alert_definitions?: Array<{
-            id: string
-            name: string
-            severity?: string
-            enabled?: boolean
-            description?: string
-            labels?: Record<string, string>
-            last_triggered_at?: string
-            updated_at?: string
-            created_at?: string
-          }>
-        }
-
-        const defs = data.alert_definitions ?? []
-
-        const alerts = defs
-          .map(d => {
-            const title = d.name ?? d.id
-            const severity = (d.severity ?? 'info').toLowerCase()
-            const enabled = d.enabled !== false
-            const status = enabled ? 'firing' : 'disabled'
-            const firedAt = d.last_triggered_at ?? d.updated_at ?? d.created_at ?? new Date().toISOString()
-
-            return { id: d.id, title, severity, status, firedAt }
-          })
-          .filter(a => {
-            if (serviceFilter) {
-              const haystack = `${a.title} ${a.id}`.toLowerCase()
-              if (!haystack.includes(serviceFilter)) return false
-            }
-            if (severityFilter && a.severity !== severityFilter) return false
-            return true
-          })
-
-        return { alerts }
-      } catch {
-        return { alerts: [] }
+      const data = (await res.json()) as {
+        alert_definitions?: Array<{
+          id: string
+          name: string
+          severity?: string
+          enabled?: boolean
+          description?: string
+          labels?: Record<string, string>
+          last_triggered_at?: string
+          updated_at?: string
+          created_at?: string
+        }>
       }
+
+      const defs = data.alert_definitions ?? []
+
+      const alerts = defs
+        .map(d => {
+          const title = d.name ?? d.id
+          const severity = (d.severity ?? 'info').toLowerCase()
+          const enabled = d.enabled !== false
+          const status = enabled ? 'firing' : 'disabled'
+          const firedAt = d.last_triggered_at ?? d.updated_at ?? d.created_at ?? new Date().toISOString()
+
+          return { id: d.id, title, severity, status, firedAt }
+        })
+        .filter(a => {
+          if (serviceFilter) {
+            const haystack = `${a.title} ${a.id}`.toLowerCase()
+            if (!haystack.includes(serviceFilter)) return false
+          }
+          if (severityFilter && a.severity !== severityFilter) return false
+          return true
+        })
+
+      return { alerts }
     },
     write: false,
   },
@@ -292,58 +290,55 @@ const TOOLS: ConnectorTool[] = [
         required: ['service', 'query'],
       },
     },
+    // See get_metrics above — same fix, same reasoning.
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { lines: [] }
+      if (!c) throw new Error('Coralogix credentials not configured')
 
       const service = String(params.service ?? '').trim()
-      if (!service) return { lines: [] }
+      if (!service) throw new Error('Coralogix get_logs: service is required')
 
       const query = String(params.query ?? '').trim()
       const limit = typeof params.limit === 'number' ? (params.limit as number) : 50
 
-      try {
-        const dpQuery = [
-          'source logs',
-          `| filter applicationName = '${service.replace(/'/g, "\\'")}'`,
-          `| filter text contains '${query.replace(/'/g, "\\'")}'`,
-          `| limit ${limit}`,
-        ].join(' ')
+      const dpQuery = [
+        'source logs',
+        `| filter applicationName = '${service.replace(/'/g, "\\'")}'`,
+        `| filter text contains '${query.replace(/'/g, "\\'")}'`,
+        `| limit ${limit}`,
+      ].join(' ')
 
-        const now = new Date()
-        const startTime = new Date(now.getTime() - 86_400_000).toISOString() // last 24h default
+      const now = new Date()
+      const startTime = new Date(now.getTime() - 86_400_000).toISOString() // last 24h default
 
-        const res = await fetch(`${c.baseUrl}/api/v1/dataprime/query`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${c.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: dpQuery, startTime, endTime: now.toISOString(), limit }),
-        })
-        if (!res.ok) return { lines: [] }
+      const res = await fetch(`${c.baseUrl}/api/v1/dataprime/query`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${c.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: dpQuery, startTime, endTime: now.toISOString(), limit }),
+      })
+      if (!res.ok) throw new Error(`Coralogix get_logs failed: HTTP ${res.status}`)
 
-        const data = (await res.json()) as {
-          results?: Array<{
-            timestamp?: string
-            severity?: string
-            text?: string
-            message?: string
-            metadata?: Record<string, unknown>
-          }>
-        }
-
-        const results = data.results ?? []
-        const lines = results.map(r => ({
-          ts: r.timestamp ?? new Date().toISOString(),
-          level: (r.severity ?? 'info').toLowerCase(),
-          msg: r.text ?? r.message ?? '',
-        }))
-
-        return { lines }
-      } catch {
-        return { lines: [] }
+      const data = (await res.json()) as {
+        results?: Array<{
+          timestamp?: string
+          severity?: string
+          text?: string
+          message?: string
+          metadata?: Record<string, unknown>
+        }>
       }
+
+      const results = data.results ?? []
+      const lines = results.map(r => ({
+        ts: r.timestamp ?? new Date().toISOString(),
+        level: (r.severity ?? 'info').toLowerCase(),
+        msg: r.text ?? r.message ?? '',
+      }))
+
+      return { lines }
     },
     write: false,
   },

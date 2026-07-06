@@ -88,12 +88,18 @@ const TOOLS: ConnectorTool[] = [
         required: ['service', 'window'],
       },
     },
+    // Confirmed live via independent review: missing creds, an empty
+    // required param, a non-OK response, and a network error all
+    // previously collapsed into the same empty-points "success" — masking
+    // a real Dynatrace outage/auth failure as "no metrics". Throws now; a
+    // genuine 200-OK-with-zero-datapoints result is unaffected (still
+    // returns points: []).
     execute: async (params, creds) => {
       const conn = resolveCreds(creds)
-      if (!conn) return { points: [], unit: 'unknown' }
+      if (!conn) throw new Error('Dynatrace credentials not configured (host/token)')
 
       const service = String(params.service).trim()
-      if (!service) return { points: [], unit: 'unknown' }
+      if (!service) throw new Error('Dynatrace get_metrics: service is required')
 
       const window = String(params.window)
       const metricSelector =
@@ -102,39 +108,33 @@ const TOOLS: ConnectorTool[] = [
           : 'builtin:service.requestCount.total'
       const from = mapWindowToFrom(window)
 
-      try {
-        const url = new URL(`${conn.baseUrl}/api/v2/metrics/query`)
-        url.searchParams.set('metricSelector', metricSelector)
-        url.searchParams.set('entitySelector', `type(SERVICE),entityName.equals(${service})`)
-        url.searchParams.set('from', from)
+      const url = new URL(`${conn.baseUrl}/api/v2/metrics/query`)
+      url.searchParams.set('metricSelector', metricSelector)
+      url.searchParams.set('entitySelector', `type(SERVICE),entityName.equals(${service})`)
+      url.searchParams.set('from', from)
 
-        const res = await fetch(url.toString(), { headers: authHeaders(conn.token) })
-        if (!res.ok) return { points: [], unit: metricSelector }
+      const res = await fetch(url.toString(), { headers: authHeaders(conn.token) })
+      if (!res.ok) throw new Error(`Dynatrace get_metrics failed: HTTP ${res.status}`)
 
-        const json = (await res.json()) as {
-          result?: Array<{
-            metricId: string
-            data?: Array<{ timestamps?: number[]; values?: number[] }>
-          }>
-        }
-        const resultArray = json.result ?? []
-        if (resultArray.length === 0) return { points: [], unit: metricSelector }
-
-        const points: Array<{ t: number; v: number }> = []
-        for (const r of resultArray) {
-          for (const d of r.data ?? []) {
-            const timestamps = d.timestamps ?? []
-            const values = d.values ?? []
-            const len = Math.min(timestamps.length, values.length)
-            for (let i = 0; i < len; i++) {
-              points.push({ t: toEpochMs(timestamps[i]!), v: values[i]! })
-            }
+      const json = (await res.json()) as {
+        result?: Array<{
+          metricId: string
+          data?: Array<{ timestamps?: number[]; values?: number[] }>
+        }>
+      }
+      const resultArray = json.result ?? []
+      const points: Array<{ t: number; v: number }> = []
+      for (const r of resultArray) {
+        for (const d of r.data ?? []) {
+          const timestamps = d.timestamps ?? []
+          const values = d.values ?? []
+          const len = Math.min(timestamps.length, values.length)
+          for (let i = 0; i < len; i++) {
+            points.push({ t: toEpochMs(timestamps[i]!), v: values[i]! })
           }
         }
-        return { points, unit: metricSelector }
-      } catch {
-        return { points: [], unit: metricSelector }
       }
+      return { points, unit: metricSelector }
     },
     write: false,
   },
@@ -156,9 +156,10 @@ const TOOLS: ConnectorTool[] = [
         },
       },
     },
+    // See get_metrics above — same fix, same reasoning.
     execute: async (params, creds) => {
       const conn = resolveCreds(creds)
-      if (!conn) return { alerts: [] }
+      if (!conn) throw new Error('Dynatrace credentials not configured (host/token)')
 
       const service = typeof params.service === 'string' ? String(params.service).trim() : undefined
       const severityParam =
@@ -171,48 +172,44 @@ const TOOLS: ConnectorTool[] = [
         if (dtSev) selectors.push(`severityLevel("${dtSev}")`)
       }
 
-      try {
-        const url = new URL(`${conn.baseUrl}/api/v2/problems`)
-        url.searchParams.set('problemSelector', selectors.join(','))
-        url.searchParams.set('from', 'now-24h')
+      const url = new URL(`${conn.baseUrl}/api/v2/problems`)
+      url.searchParams.set('problemSelector', selectors.join(','))
+      url.searchParams.set('from', 'now-24h')
 
-        const res = await fetch(url.toString(), { headers: authHeaders(conn.token) })
-        if (!res.ok) return { alerts: [] }
+      const res = await fetch(url.toString(), { headers: authHeaders(conn.token) })
+      if (!res.ok) throw new Error(`Dynatrace get_alerts failed: HTTP ${res.status}`)
 
-        const json = (await res.json()) as {
-          problems?: Array<{
-            problemId: string
-            title: string
-            severityLevel: string
-            status: string
-            startTime: number
-            affectedEntities?: Array<{ entityId?: { id?: string }; name?: string }>
-          }>
-        }
-        let problems = json.problems ?? []
+      const json = (await res.json()) as {
+        problems?: Array<{
+          problemId: string
+          title: string
+          severityLevel: string
+          status: string
+          startTime: number
+          affectedEntities?: Array<{ entityId?: { id?: string }; name?: string }>
+        }>
+      }
+      let problems = json.problems ?? []
 
-        // Client-side service filter when service param is supplied
-        if (service) {
-          const svc = service.toLowerCase()
-          problems = problems.filter(p => {
-            if (p.title.toLowerCase().includes(svc)) return true
-            return (p.affectedEntities ?? []).some(
-              e => (e.name ?? '').toLowerCase().includes(svc),
-            )
-          })
-        }
+      // Client-side service filter when service param is supplied
+      if (service) {
+        const svc = service.toLowerCase()
+        problems = problems.filter(p => {
+          if (p.title.toLowerCase().includes(svc)) return true
+          return (p.affectedEntities ?? []).some(
+            e => (e.name ?? '').toLowerCase().includes(svc),
+          )
+        })
+      }
 
-        return {
-          alerts: problems.map(p => ({
-            id: p.problemId,
-            title: p.title,
-            severity: mapSeverityFromDynatrace(p.severityLevel),
-            status: p.status === 'CLOSED' ? 'resolved' : 'firing',
-            firedAt: new Date(toEpochMs(p.startTime)).toISOString(),
-          })),
-        }
-      } catch {
-        return { alerts: [] }
+      return {
+        alerts: problems.map(p => ({
+          id: p.problemId,
+          title: p.title,
+          severity: mapSeverityFromDynatrace(p.severityLevel),
+          status: p.status === 'CLOSED' ? 'resolved' : 'firing',
+          firedAt: new Date(toEpochMs(p.startTime)).toISOString(),
+        })),
       }
     },
     write: false,
@@ -238,15 +235,16 @@ const TOOLS: ConnectorTool[] = [
         required: ['service', 'query'],
       },
     },
+    // See get_metrics above — same fix, same reasoning.
     execute: async (params, creds) => {
       const conn = resolveCreds(creds)
-      if (!conn) return { lines: [] }
+      if (!conn) throw new Error('Dynatrace credentials not configured (host/token)')
 
       const service = String(params.service).trim()
-      if (!service) return { lines: [] }
+      if (!service) throw new Error('Dynatrace get_logs: service is required')
 
       const query = String(params.query).trim()
-      if (!query) return { lines: [] }
+      if (!query) throw new Error('Dynatrace get_logs: query is required')
 
       const limit =
         typeof params.limit === 'number' && (params.limit as number) > 0
@@ -257,30 +255,26 @@ const TOOLS: ConnectorTool[] = [
       // Escaped double-quotes in user input to prevent DQL injection.
       const dql = `matchesPhrase(content, "${query.replace(/"/g, '\\"')}")`
 
-      try {
-        const url = new URL(`${conn.baseUrl}/api/v2/logs/search`)
-        url.searchParams.set('query', dql)
-        url.searchParams.set('entitySelector', `type(SERVICE),entityName.equals(${service})`)
-        url.searchParams.set('from', 'now-1h')
-        url.searchParams.set('limit', String(limit))
+      const url = new URL(`${conn.baseUrl}/api/v2/logs/search`)
+      url.searchParams.set('query', dql)
+      url.searchParams.set('entitySelector', `type(SERVICE),entityName.equals(${service})`)
+      url.searchParams.set('from', 'now-1h')
+      url.searchParams.set('limit', String(limit))
 
-        const res = await fetch(url.toString(), { headers: authHeaders(conn.token) })
-        if (!res.ok) return { lines: [] }
+      const res = await fetch(url.toString(), { headers: authHeaders(conn.token) })
+      if (!res.ok) throw new Error(`Dynatrace get_logs failed: HTTP ${res.status}`)
 
-        const json = (await res.json()) as {
-          results?: Array<{ timestamp: number; status: string; content: string }>
-        }
-        const results = json.results ?? []
+      const json = (await res.json()) as {
+        results?: Array<{ timestamp: number; status: string; content: string }>
+      }
+      const results = json.results ?? []
 
-        return {
-          lines: results.map(r => ({
-            ts: new Date(toEpochMs(r.timestamp)).toISOString(),
-            level: r.status ?? 'INFO',
-            msg: r.content ?? '',
-          })),
-        }
-      } catch {
-        return { lines: [] }
+      return {
+        lines: results.map(r => ({
+          ts: new Date(toEpochMs(r.timestamp)).toISOString(),
+          level: r.status ?? 'INFO',
+          msg: r.content ?? '',
+        })),
       }
     },
     write: false,

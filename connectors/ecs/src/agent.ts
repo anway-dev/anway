@@ -30,11 +30,12 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const cluster = String(params.cluster)
       const r = awsCli(['ecs', 'list-services', '--cluster', cluster, '--output', 'json'], creds as ConnectorCreds as Record<string, unknown>)
-      if (r.status !== 0) return { services: [] }
-      try {
-        const data = JSON.parse(r.stdout) as { serviceArns?: string[] }
-        return { services: (data.serviceArns ?? []).map(a => ({ arn: a, name: a.split('/').pop() ?? a })) }
-      } catch { return { services: [] } }
+      // Confirmed live via independent review: silently returning empty on
+      // a nonzero exit code or parse failure masks a real AWS CLI/auth
+      // failure as "no services in this cluster". Throws now.
+      if (r.status !== 0) throw new Error(`ECS list_services failed: aws CLI exited ${r.status}`)
+      const data = JSON.parse(r.stdout) as { serviceArns?: string[] }
+      return { services: (data.serviceArns ?? []).map(a => ({ arn: a, name: a.split('/').pop() ?? a })) }
     },
     write: false,
   },
@@ -56,11 +57,9 @@ const TOOLS: ConnectorTool[] = [
       const args = ['ecs', 'list-tasks', '--cluster', cluster, '--output', 'json']
       if (params.service) args.push('--service-name', String(params.service))
       const r = awsCli(args, creds as ConnectorCreds as Record<string, unknown>)
-      if (r.status !== 0) return { tasks: [] }
-      try {
-        const data = JSON.parse(r.stdout) as { taskArns?: string[] }
-        return { tasks: (data.taskArns ?? []).map(a => ({ arn: a, id: a.split('/').pop() ?? a })) }
-      } catch { return { tasks: [] } }
+      if (r.status !== 0) throw new Error(`ECS list_tasks failed: aws CLI exited ${r.status}`)
+      const data = JSON.parse(r.stdout) as { taskArns?: string[] }
+      return { tasks: (data.taskArns ?? []).map(a => ({ arn: a, id: a.split('/').pop() ?? a })) }
     },
     write: false,
   },
@@ -81,11 +80,9 @@ const TOOLS: ConnectorTool[] = [
       const cluster = String(params.cluster)
       const service = String(params.service)
       const r = awsCli(['ecs', 'describe-services', '--cluster', cluster, '--services', service, '--output', 'json'], creds as ConnectorCreds as Record<string, unknown>)
-      if (r.status !== 0) return { services: [] }
-      try {
-        const data = JSON.parse(r.stdout) as { services?: Array<{ serviceName: string; desiredCount: number; runningCount: number; status: string }> }
-        return { services: (data.services ?? []).map(s => ({ name: s.serviceName, desired: s.desiredCount, running: s.runningCount, status: s.status })) }
-      } catch { return { services: [] } }
+      if (r.status !== 0) throw new Error(`ECS describe_service failed: aws CLI exited ${r.status}`)
+      const data = JSON.parse(r.stdout) as { services?: Array<{ serviceName: string; desiredCount: number; runningCount: number; status: string }> }
+      return { services: (data.services ?? []).map(s => ({ name: s.serviceName, desired: s.desiredCount, running: s.runningCount, status: s.status })) }
     },
     write: false,
   },

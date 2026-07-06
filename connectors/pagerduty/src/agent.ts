@@ -9,10 +9,10 @@ const TOOLS: ConnectorTool[] = [
     definition: { name: 'get_active_incidents', description: 'List active incidents', parameters: { type: 'object', properties: { service: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
       const token = (creds as ConnectorCreds).apiKey
-      if (!token) return { incidents: [] }
+      if (!token) throw new Error('PagerDuty API key not configured')
       const url = `${PD_API}/incidents?statuses[]=triggered&statuses[]=acknowledged${params.service ? `&service_ids[]=${params.service}` : ''}`
       const res = await fetch(url, { headers: { Authorization: `Token token=${token}`, Accept: 'application/vnd.pagerduty+json;version=2' } })
-      if (!res.ok) return { incidents: [] }
+      if (!res.ok) throw new Error(`PagerDuty get_active_incidents failed: HTTP ${res.status}`)
       const json = await res.json() as { incidents?: Array<{ id: string; title: string; severity: string; created_at: string; status: string }> }
       return { incidents: (json.incidents ?? []).map(i => ({ id: i.id, title: i.title, severity: i.severity, startedAt: i.created_at, status: i.status })) }
     },
@@ -22,11 +22,11 @@ const TOOLS: ConnectorTool[] = [
     definition: { name: 'get_oncall', description: 'Get oncall engineer', parameters: { type: 'object', properties: { team: { type: 'string' } }, required: ['team'] } },
     execute: async (params, creds) => {
       const token = (creds as ConnectorCreds).apiKey
-      if (!token) return { engineer: null }
+      if (!token) throw new Error('PagerDuty API key not configured')
       const res = await fetch(`${PD_API}/oncalls?team_ids[]=${params.team}&include[]=users`, {
         headers: { Authorization: `Token token=${token}`, Accept: 'application/vnd.pagerduty+json;version=2' },
       })
-      if (!res.ok) return { engineer: null }
+      if (!res.ok) throw new Error(`PagerDuty get_oncall failed: HTTP ${res.status}`)
       const json = await res.json() as { oncalls?: Array<{ user?: { name: string; email: string } }> }
       const user = json.oncalls?.[0]?.user
       return { engineer: user ? { name: user.name, email: user.email, phone: '' } : null }

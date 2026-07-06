@@ -2,10 +2,10 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 interface SnykCreds { token: string; baseUrl: string }
 
-function extractCreds(creds: Record<string, unknown>): SnykCreds | null {
+function extractCreds(creds: Record<string, unknown>): SnykCreds {
   const token = (creds['token'] as string | undefined) ?? (creds['apiKey'] as string | undefined)
   const baseUrl = ((creds['baseUrl'] as string | undefined)?.trim() || undefined) ?? 'https://api.snyk.io'
-  if (!token) return null
+  if (!token) throw new Error('Snyk credentials not configured (token/apiKey)')
   return { token, baseUrl: baseUrl.replace(/\/$/, '') }
 }
 
@@ -41,16 +41,14 @@ async function resolveProject(
   baseUrl: string,
   token: string,
 ): Promise<{ orgId: string; projectId: string } | null> {
-  // 1. List orgs
-  let orgsRes: Response
-  try {
-    orgsRes = await fetch(`${baseUrl}/v1/orgs`, {
-      headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
-    })
-  } catch {
-    return null
-  }
-  if (!orgsRes.ok) return null
+  // 1. List orgs — a real failure here (network error, auth failure) means
+  // we cannot know whether the project exists at all, so it throws rather
+  // than being indistinguishable from "traversed everything, found no
+  // match" (which legitimately returns null below).
+  const orgsRes = await fetch(`${baseUrl}/v1/orgs`, {
+    headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
+  })
+  if (!orgsRes.ok) throw new Error(`Snyk list orgs failed: HTTP ${orgsRes.status}`)
   const orgsData = (await orgsRes.json()) as { orgs?: SnykOrg[] }
   const orgs = orgsData.orgs ?? []
 
@@ -91,43 +89,40 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { vulns: [] }
 
       const projectHint = String(params.project ?? '').trim()
-      if (!projectHint) return { vulns: [] }
+      if (!projectHint) throw new Error('Snyk get_vulnerabilities: project is required')
 
-      // Resolve project → (orgId, projectId) via org→project traversal
+      // Resolve project → (orgId, projectId) via org→project traversal.
+      // resolved === null after a successful traversal is a genuine "no
+      // project matched that name/id" result, not a failure.
       const resolved = await resolveProject(projectHint, c.baseUrl, c.token)
       if (!resolved) return { vulns: [] }
 
-      try {
-        const issuesRes = await fetch(
-          `${c.baseUrl}/v1/org/${resolved.orgId}/project/${resolved.projectId}/issues`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `token ${c.token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({}),
+      const issuesRes = await fetch(
+        `${c.baseUrl}/v1/org/${resolved.orgId}/project/${resolved.projectId}/issues`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `token ${c.token}`,
+            'Content-Type': 'application/json',
           },
-        )
-        if (!issuesRes.ok) return { vulns: [] }
-        const issuesData = (await issuesRes.json()) as {
-          issues?: { vulnerabilities?: SnykVuln[] }
-        }
-        const raw = issuesData.issues?.vulnerabilities ?? []
-        const vulns: VulnResult[] = raw.map(v => ({
-          id: v.id,
-          severity: v.issueData?.severity ?? 'unknown',
-          title: v.issueData?.title ?? '',
-          packageName: v.pkgName ?? '',
-          fixable: v.isFixable ?? false,
-        }))
-        return { vulns }
-      } catch {
-        return { vulns: [] }
+          body: JSON.stringify({}),
+        },
+      )
+      if (!issuesRes.ok) throw new Error(`Snyk get_vulnerabilities failed: HTTP ${issuesRes.status}`)
+      const issuesData = (await issuesRes.json()) as {
+        issues?: { vulnerabilities?: SnykVuln[] }
       }
+      const raw = issuesData.issues?.vulnerabilities ?? []
+      const vulns: VulnResult[] = raw.map(v => ({
+        id: v.id,
+        severity: v.issueData?.severity ?? 'unknown',
+        title: v.issueData?.title ?? '',
+        packageName: v.pkgName ?? '',
+        fixable: v.isFixable ?? false,
+      }))
+      return { vulns }
     },
     write: false,
   },

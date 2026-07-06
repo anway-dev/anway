@@ -2,11 +2,11 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 interface SentryConn { baseUrl: string; token: string; org: string }
 
-function connFromCreds(creds: Record<string, unknown>): SentryConn | null {
+function connFromCreds(creds: Record<string, unknown>): SentryConn {
   const token = creds['token']
   const org = creds['org']
   const baseUrl = creds['baseUrl']
-  if (typeof token !== 'string' || typeof org !== 'string') return null
+  if (typeof token !== 'string' || typeof org !== 'string') throw new Error('Sentry credentials not configured (token/org)')
   const resolvedBase = typeof baseUrl === 'string' ? (baseUrl as string) : 'https://sentry.io'
   return { baseUrl: resolvedBase.replace(/\/$/, ''), token, org }
 }
@@ -55,36 +55,31 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { issues: [] }
 
       const project = String(params.project ?? '').trim()
-      if (!project) return { issues: [] }
+      if (!project) throw new Error('Sentry get_issues: project is required')
 
-      try {
-        const res = await fetch(
-          `${conn.baseUrl}/api/0/projects/${encodeURIComponent(conn.org)}/${encodeURIComponent(project)}/issues/`,
-          { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/json' } },
-        )
-        if (!res.ok) return { issues: [] }
+      const res = await fetch(
+        `${conn.baseUrl}/api/0/projects/${encodeURIComponent(conn.org)}/${encodeURIComponent(project)}/issues/`,
+        { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/json' } },
+      )
+      if (!res.ok) throw new Error(`Sentry get_issues failed: HTTP ${res.status}`)
 
-        const json = (await res.json()) as Array<{
-          id: string
-          title: string
-          count: string | number
-          firstSeen: string
-          lastSeen: string
-        }>
-        const issues = (Array.isArray(json) ? json : []).map(issue => ({
-          id: issue.id,
-          title: issue.title,
-          count: typeof issue.count === 'string' ? parseInt(issue.count, 10) : (issue.count as number),
-          firstSeen: issue.firstSeen,
-          lastSeen: issue.lastSeen,
-        }))
-        return { issues }
-      } catch {
-        return { issues: [] }
-      }
+      const json = (await res.json()) as Array<{
+        id: string
+        title: string
+        count: string | number
+        firstSeen: string
+        lastSeen: string
+      }>
+      const issues = (Array.isArray(json) ? json : []).map(issue => ({
+        id: issue.id,
+        title: issue.title,
+        count: typeof issue.count === 'string' ? parseInt(issue.count, 10) : (issue.count as number),
+        firstSeen: issue.firstSeen,
+        lastSeen: issue.lastSeen,
+      }))
+      return { issues }
     },
     write: false,
   },
@@ -104,30 +99,25 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { events: [] }
 
       const issueId = String(params.issueId ?? '').trim()
-      if (!issueId) return { events: [] }
+      if (!issueId) throw new Error('Sentry get_events: issueId is required')
 
-      try {
-        const res = await fetch(
-          `${conn.baseUrl}/api/0/issues/${encodeURIComponent(issueId)}/events/`,
-          { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/json' } },
-        )
-        if (!res.ok) return { events: [] }
+      const res = await fetch(
+        `${conn.baseUrl}/api/0/issues/${encodeURIComponent(issueId)}/events/`,
+        { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/json' } },
+      )
+      if (!res.ok) throw new Error(`Sentry get_events failed: HTTP ${res.status}`)
 
-        const json = (await res.json()) as Array<Record<string, unknown>>
-        const rawEvents = Array.isArray(json) ? json : []
-        const events = rawEvents.map(e => ({
-          id: (e['eventID'] as string) ?? (e['id'] as string) ?? '',
-          message: (e['message'] as string) ?? (e['title'] as string) ?? '',
-          stack: extractStacktrace(e),
-          ts: (e['dateCreated'] as string) ?? (e['dateReceived'] as string) ?? new Date().toISOString(),
-        }))
-        return { events }
-      } catch {
-        return { events: [] }
-      }
+      const json = (await res.json()) as Array<Record<string, unknown>>
+      const rawEvents = Array.isArray(json) ? json : []
+      const events = rawEvents.map(e => ({
+        id: (e['eventID'] as string) ?? (e['id'] as string) ?? '',
+        message: (e['message'] as string) ?? (e['title'] as string) ?? '',
+        stack: extractStacktrace(e),
+        ts: (e['dateCreated'] as string) ?? (e['dateReceived'] as string) ?? new Date().toISOString(),
+      }))
+      return { events }
     },
     write: false,
   },

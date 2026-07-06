@@ -2,21 +2,19 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 interface TerraformConn { baseUrl: string; token: string }
 
-function connFromCreds(creds: Record<string, unknown>): TerraformConn | null {
+function connFromCreds(creds: Record<string, unknown>): TerraformConn {
   const baseUrl = (creds['baseUrl'] as string | undefined) ?? 'https://app.terraform.io'
   const token = (creds['token'] as string | undefined) ?? (creds['apiKey'] as string | undefined) ?? ''
-  if (!token) return null
+  if (!token) throw new Error('Terraform Cloud credentials not configured (token/apiKey)')
   return { baseUrl: baseUrl.replace(/\/$/, ''), token }
 }
 
-async function tfcGet(conn: TerraformConn, path: string): Promise<unknown | null> {
-  try {
-    const res = await fetch(`${conn.baseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/vnd.api+json' },
-    })
-    if (!res.ok) return null
-    return await res.json() as unknown
-  } catch { return null }
+async function tfcGet(conn: TerraformConn, path: string): Promise<unknown> {
+  const res = await fetch(`${conn.baseUrl}${path}`, {
+    headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/vnd.api+json' },
+  })
+  if (!res.ok) throw new Error(`Terraform Cloud API failed: HTTP ${res.status} (${path})`)
+  return await res.json() as unknown
 }
 
 interface TfcOrg { id: string; attributes: { name: string } }
@@ -32,9 +30,8 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (_params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { workspaces: [] }
 
-      try {
+      {
         const orgsData = await tfcGet(conn, '/api/v2/organizations') as { data?: TfcOrg[] } | null
         if (!orgsData?.data) return { workspaces: [] }
 
@@ -84,8 +81,6 @@ const TOOLS: ConnectorTool[] = [
         }
 
         return { workspaces }
-      } catch {
-        return { workspaces: [] }
       }
     },
     write: false,
@@ -102,33 +97,28 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const workspaceId = params['workspaceId'] as string | undefined
-      if (!workspaceId) return { run: null }
+      if (!workspaceId) throw new Error('Terraform get_run: workspaceId is required')
 
       const conn = connFromCreds(creds)
-      if (!conn) return { run: null }
 
-      try {
-        // Terraform Cloud runs list is newest-first; page[size]=1 fetches the
-        // single most recent run.
-        const runsData = await tfcGet(conn, `/api/v2/workspaces/${workspaceId}/runs?page[size]=1`) as { data?: TfcRun[] } | null
-        const latest = runsData?.data?.[0]
-        if (!latest) return { run: null }
+      // Terraform Cloud runs list is newest-first; page[size]=1 fetches the
+      // single most recent run.
+      const runsData = await tfcGet(conn, `/api/v2/workspaces/${workspaceId}/runs?page[size]=1`) as { data?: TfcRun[] } | null
+      const latest = runsData?.data?.[0]
+      if (!latest) return { run: null }
 
-        const ts = latest.attributes['status-timestamps'] ?? {}
-        // applied-at is the canonical "this was applied" timestamp.
-        // If the run hasn't been applied (e.g. still in planned), appliedAt is null.
-        const appliedAt = ts['applied-at'] ?? null
+      const ts = latest.attributes['status-timestamps'] ?? {}
+      // applied-at is the canonical "this was applied" timestamp.
+      // If the run hasn't been applied (e.g. still in planned), appliedAt is null.
+      const appliedAt = ts['applied-at'] ?? null
 
-        return {
-          run: {
-            id: latest.id,
-            status: latest.attributes.status,
-            message: latest.attributes.message,
-            appliedAt,
-          },
-        }
-      } catch {
-        return { run: null }
+      return {
+        run: {
+          id: latest.id,
+          status: latest.attributes.status,
+          message: latest.attributes.message,
+          appliedAt,
+        },
       }
     },
     write: false,

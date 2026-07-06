@@ -6,12 +6,14 @@ interface NewRelicConn {
   baseUrl: string
 }
 
-function resolveCreds(creds: Record<string, unknown>): NewRelicConn | null {
+function resolveCreds(creds: Record<string, unknown>): NewRelicConn {
   const apiKey = creds['apiKey'] ?? process.env['NEW_RELIC_API_KEY']
   const accountId = creds['accountId'] ?? process.env['NEW_RELIC_ACCOUNT_ID']
   const baseUrl = creds['baseUrl']
-  if (typeof apiKey !== 'string' || !apiKey) return null
-  if (!accountId || (typeof accountId !== 'string' && typeof accountId !== 'number')) return null
+  if (typeof apiKey !== 'string' || !apiKey) throw new Error('New Relic credentials not configured (apiKey)')
+  if (!accountId || (typeof accountId !== 'string' && typeof accountId !== 'number')) {
+    throw new Error('New Relic credentials not configured (accountId)')
+  }
   return {
     apiKey,
     accountId: String(accountId),
@@ -40,22 +42,18 @@ async function nerdGraphQuery(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<unknown | null> {
-  try {
-    const res = await fetch(`${conn.baseUrl}/graphql`, {
-      method: 'POST',
-      headers: {
-        'Api-Key': conn.apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query, variables }),
-    })
-    if (!res.ok) return null
-    const json = (await res.json()) as { data?: unknown; errors?: Array<{ message: string }> }
-    if (json.errors?.length) return null
-    return json.data ?? null
-  } catch {
-    return null
-  }
+  const res = await fetch(`${conn.baseUrl}/graphql`, {
+    method: 'POST',
+    headers: {
+      'Api-Key': conn.apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query, variables }),
+  })
+  if (!res.ok) throw new Error(`New Relic NerdGraph query failed: HTTP ${res.status}`)
+  const json = (await res.json()) as { data?: unknown; errors?: Array<{ message: string }> }
+  if (json.errors?.length) throw new Error(`New Relic NerdGraph GraphQL error: ${json.errors[0]!.message}`)
+  return json.data ?? null
 }
 
 const NERDGRAPH_QUERY = `
@@ -93,7 +91,6 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = resolveCreds(creds)
-      if (!conn) return { points: [], unit: 'unknown' }
 
       const service = escapeNrql(String(params.service))
       const window = String(params.window)
@@ -137,7 +134,6 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = resolveCreds(creds)
-      if (!conn) return { alerts: [] }
 
       // Build NRQL with optional filters against NrAiIssue (modern New Relic issue tracking)
       const conditions: string[] = ["state IN ('ACTIVATED', 'CREATED')"]
@@ -197,7 +193,6 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = resolveCreds(creds)
-      if (!conn) return { lines: [] }
 
       const service = escapeNrql(String(params.service))
       const query = escapeNrql(String(params.query))

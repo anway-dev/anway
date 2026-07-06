@@ -28,13 +28,15 @@ function awsEnv(creds: Record<string, unknown>): NodeJS.ProcessEnv {
   return env
 }
 
+// Throws on a real failure (aws CLI missing/not authenticated, nonzero
+// exit, malformed JSON) instead of returning null — same fix applied to
+// connectors/aws-health, azure-monitor, gcp-monitoring's agent.ts this
+// session: collapsing every real failure into null (which every tool then
+// treated as an empty result) masks a real AWS auth/outage/entitlement
+// failure as "no metrics/alarms/events".
 async function runAws(args: string[], env: NodeJS.ProcessEnv): Promise<unknown> {
-  try {
-    const { stdout } = await execFileAsync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
-    return JSON.parse(stdout)
-  } catch {
-    return null
-  }
+  const { stdout } = await execFileAsync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
+  return JSON.parse(stdout)
 }
 
 /** Parse a human-readable window like "1h", "30m", "5m" into milliseconds. */
@@ -160,7 +162,8 @@ const TOOLS: ConnectorTool[] = [
       description:
         'Get AWS service health events via the AWS Health API ' +
         '(requires Business or Enterprise support plan). ' +
-        'Returns an empty array if the call fails (e.g., subscription not entitled).',
+        'Throws a real error if the account lacks that plan or the call ' +
+        'otherwise fails, rather than silently reporting no active events.',
       parameters: { type: 'object', properties: {} },
     },
     execute: async (_params, creds) => {

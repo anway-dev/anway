@@ -11,7 +11,7 @@ import type { FastifyLoggerInstance } from 'fastify'
 
 // Module-level EventEmitter for single-pod SSE fan-out (no Redis)
 import { EventEmitter } from 'node:events'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { writeFileSync, unlinkSync, existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
@@ -25,6 +25,27 @@ import { fileURLToPath } from 'node:url'
 // repo root, which silently broke every one of these spawn calls (confirmed
 // live: docker build failed with "path apps/gateway not found").
 const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', '..')
+
+// The literal string 'latest' as a final fallback tag is a real, critical bug
+// confirmed live: Kubernetes only re-pulls a mutable tag like `:latest` when a
+// pod is newly *created* (scale-up, manual restart) — it does NOT re-pull or
+// restart already-running pods just because the tag's underlying digest
+// changed. Every `helm upgrade` against an already-running release therefore
+// reported success while silently leaving existing pods on stale code (caught
+// by comparing containerStatuses[0].imageID across two replicas of the same
+// ReplicaSet after an HPA-triggered scale-up pulled fresh 'latest' — a
+// day-old sibling pod was still on a completely different image digest).
+// Default to the real current commit SHA instead, so every build/deploy
+// produces a genuinely immutable tag and every deploy is a real rolling
+// restart, not a no-op that happens to report done=true.
+function resolveGitSha(): string {
+  try {
+    const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf-8' })
+    const sha = result.stdout?.trim()
+    if (result.status === 0 && sha) return sha
+  } catch { /* fall through */ }
+  return 'latest'
+}
 
 // A kubeconfig captured on the host (e.g. from `orbstack`/`kind`/`minikube`,
 // which expose the API server on the host's loopback) is unusable as-is from
@@ -529,7 +550,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const gitSha = (pipelineMeta?.['gitSha'] as string | undefined)
               ?? input
               ?? process.env['GITHUB_SHA']
-              ?? 'latest'
+              ?? resolveGitSha()
 
             const registry = process.env['DOCKER_REGISTRY'] ?? ''
             const githubToken = process.env['GITHUB_TOKEN'] ?? ''
@@ -714,7 +735,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const imageTag = (pipelineMeta?.['imageTag'] as string | undefined)
               ?? (input && !['fail','failed'].includes(input) ? input : undefined)
               ?? process.env['DEPLOY_IMAGE_TAG']
-              ?? 'latest'
+              ?? resolveGitSha()
 
             // Derive namespace from stage ID or pipeline metadata
             const helmNamespace = (pipelineMeta?.['namespace'] as string | undefined)

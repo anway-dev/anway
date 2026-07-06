@@ -47,40 +47,41 @@ test.describe('A: Health + Metrics', () => {
 // ---------------------------------------------------------------------------
 // Suite B — Auth
 // ---------------------------------------------------------------------------
+// /auth/token (email+tenantId, no password) never existed on the real
+// gateway — confirmed via a full route search. This block predates the
+// current auth model (real password login via /api/auth/login, or
+// /api/auth/demo for the seeded demo tenant) and was never updated.
+// Rewritten against the real, current endpoints, same test intent
+// (valid credentials produce a working JWT, that JWT grants access,
+// missing a required field is rejected).
 test.describe('B: Auth', () => {
-  let token: string
-
-  test('B.1 POST /auth/token with valid body returns JWT', async ({ request }) => {
-    const resp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { email: DEMO_EMAIL, tenantId: DEMO_TENANT },
-    })
+  test('B.1 POST /api/auth/demo returns a working JWT', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/auth/demo`)
     expect(resp.status()).toBe(200)
     const body = await resp.json()
     expect(body.token).toBeDefined()
     expect(body.expiresIn).toBe('24h')
-    token = body.token
   })
 
   test('B.2 JWT grants access to protected routes', async ({ request }) => {
-    // Reuse B.1's token — /auth/token has a 5/min rate limit and the full suite
-    // exhausts it before this test runs.
-    expect(token, 'B.1 must have produced a valid token').toBeTruthy()
+    const token = await getToken(request)
+    expect(token, 'must have produced a valid token').toBeTruthy()
     const resp = await request.get(`${GATEWAY}/api/connectors`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     expect(resp.status()).toBe(200)
   })
 
-  test('B.3 missing tenantId returns 400', async ({ request }) => {
-    const resp = await request.post(`${GATEWAY}/auth/token`, {
+  test('B.3 POST /api/auth/login missing password returns 400', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/auth/login`, {
       data: { email: DEMO_EMAIL },
     })
     expect(resp.status()).toBe(400)
   })
 
-  test('B.4 missing email returns 400', async ({ request }) => {
-    const resp = await request.post(`${GATEWAY}/auth/token`, {
-      data: { tenantId: DEMO_TENANT },
+  test('B.4 POST /api/auth/login missing email returns 400', async ({ request }) => {
+    const resp = await request.post(`${GATEWAY}/api/auth/login`, {
+      data: { password: 'irrelevant' },
     })
     expect(resp.status()).toBe(400)
   })

@@ -241,11 +241,19 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async upsertEntity(entity: EntitySpec, tenantId: TenantId): Promise<string> {
+    // Merge metadata (jsonb ||) instead of a full replace — confirmed live
+    // via independent review: SET metadata = EXCLUDED.metadata wiped
+    // unrelated existing fields on every upsert of the same entity. Real
+    // case found: a deploy_completed event's metadata ({sha, env, status})
+    // was overwriting a prior deploy_trigger event's richer metadata
+    // (imageUri, triggeredBy, workflowRun, commitMessage) on the same Deploy
+    // entity, instead of the two events' facts accumulating on one record
+    // as GraphBuilder's event-driven upsert model requires.
     const rows = await this.query<{ id: string }>(
       `INSERT INTO entities (tenant_id, type, name, metadata)
        VALUES ($1::uuid, $2, $3, $4::jsonb)
        ON CONFLICT (tenant_id, type, name) DO UPDATE
-         SET metadata = EXCLUDED.metadata
+         SET metadata = entities.metadata || EXCLUDED.metadata
        RETURNING id`,
       [tenantId, entity.type, entity.name, JSON.stringify(entity.metadata ?? {})],
     )
@@ -253,11 +261,12 @@ export class StructuralGraph implements IKnowledgeGraph {
   }
 
   async upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<string> {
+    // Same merge-not-replace fix as upsertEntity above.
     const rows = await this.query<{ id: string }>(
       `INSERT INTO relationships (tenant_id, from_entity_id, rel_type, to_entity_id, metadata)
        VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::jsonb)
        ON CONFLICT (tenant_id, from_entity_id, rel_type, to_entity_id)
-	       DO UPDATE SET metadata = EXCLUDED.metadata
+	       DO UPDATE SET metadata = relationships.metadata || EXCLUDED.metadata
        RETURNING id`,
       [tenantId, rel.fromEntityId, rel.relType, rel.toEntityId, JSON.stringify(rel.metadata ?? {})],
     )

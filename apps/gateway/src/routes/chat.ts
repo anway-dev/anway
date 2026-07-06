@@ -269,18 +269,25 @@ const inMemoryStore = new InMemorySessionMemory()
 
 // buildNativeConnectorScopes converts raw DB rows into ConnectorScope entries for the
 // perimeter. Applies user_perimeters overrides when a row matches the connector_type;
-// defaults to read:['*'] otherwise. Write is always [] (V1 read-only-via-chat posture).
+// absent an override, defaults to admin-only-permissive / deny-for-everyone-else —
+// the exact same pattern already applied to dbConnectors (mcp/cli) above, for the same
+// reason: confirmed live via independent review, this previously defaulted to read:['*']
+// (fully open) for *every* role with no configured perimeter, not just admin — a real
+// inconsistency with dbConnectors' own default-deny fix and with CLAUDE.md's provisioning
+// model (resolved_capabilities = user_perimeter ∩ connector_manifest, not "open unless
+// restricted"). Write is always [] (V1 read-only-via-chat posture).
 // Extracted as a pure function so the T82 fix is independently testable without a
 // Fastify route/DB harness.
 export function buildNativeConnectorScopes(
   nativeConnectorRows: { connector_type: string }[],
   userPerimeterRows: { connector_name: string; read_scopes: string[]; write_scopes: string[] }[],
+  isAdmin: boolean,
 ): ConnectorScope[] {
   return nativeConnectorRows.map((nc) => {
     const userOverride = userPerimeterRows.find(r => r.connector_name === nc.connector_type)
     return {
       connectorId: nc.connector_type,
-      read: userOverride ? userOverride.read_scopes : ['*'],
+      read: userOverride ? userOverride.read_scopes : (isAdmin ? ['*'] : []),
       write: [], // V1 read-only-via-chat posture — write always denied for native connectors
     }
   })
@@ -431,7 +438,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     // Add native connector scopes so perimeter allows their tools.
     // Apply user_perimeters overrides if configured — same pattern as dbConnectors above.
-    connectorScopes.push(...buildNativeConnectorScopes(nativeConnectorRows, userPerimeterRows))
+    connectorScopes.push(...buildNativeConnectorScopes(nativeConnectorRows, userPerimeterRows, isAdmin))
 
     const userPerimeter: UserPerimeter = {
       userId: UserId(userId),

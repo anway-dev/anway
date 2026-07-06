@@ -4,6 +4,25 @@ import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
 import { UUID_RE } from '../utils/validators.js'
 
+// SLACK_APPROVER_MAP: JSON object mapping a Slack user_id to a real Anway
+// user UUID, e.g. {"U0123ABC": "5b1c...-uuid"}. Without a real identity
+// binding, /anway approve had no way to know WHICH permission level (if any)
+// the Slack caller has in Anway — confirmed live via independent review it
+// approved any pending gate for any member of the Slack workspace, no role
+// check, no separation-of-duties check, using a sentinel decided_by with no
+// real identity at all. Every other approval path (HTTP route, chat tool)
+// enforces role + SoD against a real Anway user; Slack must too.
+function resolveSlackApprover(slackUserId: string): string | null {
+  const raw = process.env['SLACK_APPROVER_MAP']
+  if (!raw) return null
+  try {
+    const map = JSON.parse(raw) as Record<string, string>
+    return map[slackUserId] ?? null
+  } catch {
+    return null
+  }
+}
+
 async function formatIncidentList(tenantId: string, userId: string): Promise<string> {
   const incidents = await withTenant(prisma, tenantId, (tx) =>
     tx.$queryRaw<Array<{ id: string; title: string; severity: string; status: string }>>`
@@ -144,21 +163,44 @@ export async function slackCommandRoutes(app: FastifyInstance) {
           return reply.send({ response_type: 'ephemeral', text: 'Usage: /anway approve <gate-id> (must be a valid UUID)' })
         }
         const slashUserId = (request.body as Record<string, string> | undefined)?.['user_id'] ?? 'slack-unknown'
-        // Use sentinel UUID for decided_by (Slack user_id is not an Anway UUID)
+
+        const approverId = resolveSlackApprover(slashUserId)
+        if (!approverId) {
+          return reply.send({ response_type: 'ephemeral', text: 'Your Slack account is not linked to an Anway identity — ask an admin to add you to SLACK_APPROVER_MAP, or approve from the Anway UI.' })
+        }
+        const approverRows = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ role: string }>>`SELECT role FROM users WHERE id = ${approverId}::uuid AND tenant_id = ${tenantId}::uuid LIMIT 1`
+        ).catch(() => [])
+        const approverRole = approverRows[0]?.role
+        if (approverRole !== 'admin' && approverRole !== 'sre') {
+          return reply.send({ response_type: 'ephemeral', text: 'Only admin/sre roles may approve gates.' })
+        }
+
+        // Separation of duties: same real-identity check every other approval
+        // path enforces — the requester cannot approve their own gate.
+        const gateRows = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ user_id: string | null }>>`SELECT user_id FROM gate_events WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending' LIMIT 1`
+        ).catch(() => [])
+        if (gateRows.length === 0) {
+          return reply.send({ response_type: 'ephemeral', text: `Gate *${gateId}* not found or already decided.` })
+        }
+        if (gateRows[0]!.user_id === approverId) {
+          return reply.send({ response_type: 'ephemeral', text: 'You cannot approve a gate you requested yourself.' })
+        }
+
         const affected = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
-            SET status = 'approved', decided_by = '00000000-0000-0000-0000-000000000000'::uuid, decided_at = NOW()
+            SET status = 'approved', decided_by = ${approverId}::uuid, decided_at = NOW()
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
           `
         ).catch(() => 0)
         if (Number(affected) === 0) {
           return reply.send({ response_type: 'ephemeral', text: `Gate *${gateId}* not found or already decided.` })
         }
-        // Slack user_id is not a UUID — use sentinel + store slackUser in metadata
         await appendAuditEvent({
           tenantId,
-          userId: '00000000-0000-0000-0000-000000000000',
+          userId: approverId,
           action: 'gate.approve',
           resource: `gate_event:${gateId}`,
           outcome: 'action_executed',

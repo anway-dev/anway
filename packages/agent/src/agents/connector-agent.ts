@@ -73,11 +73,31 @@ export interface ConnectorAgentConfig {
   onGateResolved?: ((gateId: string) => void) | undefined
   /** Token budget for metering all model calls in this agent. Shared across all agents. */
   budget?: TokenBudget | undefined
+  /** Max tool-call round-trips for this agent (default: 5). Previously hardcoded — OrchestratorConfig.maxSteps was accepted but never actually reached this class. */
+  maxSteps?: number | undefined
 }
 
 // ---------------------------------------------------------------------------
 // Per-connector system prompts — each agent knows only its domain.
 // ---------------------------------------------------------------------------
+
+// Shared baseline, prepended to every connector agent's prompt — including
+// the generic one-line fallback below for any connector type without a
+// hand-written entry in AGENT_SYSTEM_PROMPTS (coralogix, dynatrace, terraform,
+// snyk, cloud connectors, and any future type). Ported from what was
+// ORCHESTRATOR_SYSTEM_PROMPT in orchestrator.ts — confirmed live via
+// independent review that constant was built and then never actually sent to
+// any model (the multi-agent rewrite replaced it with buildSynthesisMessages
+// without carrying its anti-fabrication/graph-first rules anywhere), so every
+// connector type without its own hand-written prompt ran with zero grounding
+// discipline at all.
+const BASE_AGENT_INSTRUCTIONS =
+  'Every claim must be grounded in data returned by your own tool calls. ' +
+  'When you cannot ground a claim, state explicitly what data is missing and why — never fabricate data.\n' +
+  'MANDATORY: use only the connector coordinates / alert-context labels provided to you for every tool call. ' +
+  'NEVER use broad/wildcard queries whose only purpose is to discover what exists — e.g. PromQL {service=~".+"}, ' +
+  '{__name__=~".*"}, or an empty selector {}; Grafana/Loki searches for "" or "*". ' +
+  'If a tool call returns an error or empty result, say so explicitly.\n\n'
 
 const AGENT_SYSTEM_PROMPTS: Record<string, string> = {
   alertmanager:
@@ -238,6 +258,7 @@ export class ConnectorAgent {
   private onGateEvent: ((gateId: string, toolCallId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
   private onGateResolved: ((gateId: string) => void) | undefined
   private budget: TokenBudget | undefined
+  private maxSteps: number
 
   constructor(config: ConnectorAgentConfig) {
     if (!config.perimeter) throw new Error('ConnectorAgent: perimeter is required')
@@ -255,6 +276,7 @@ export class ConnectorAgent {
     this.onGateEvent = config.onGateEvent
     this.onGateResolved = config.onGateResolved
     this.budget = config.budget
+    this.maxSteps = config.maxSteps ?? 5
   }
 
   async run(ctx: SpecialistContext, signal?: AbortSignal): Promise<AgentFinding> {
@@ -271,9 +293,10 @@ export class ConnectorAgent {
     // Perimeter middleware — every tool call is audit-logged (allowed or blocked).
     const checkPerimeter = createPerimeterMiddleware(this.perimeter, this.auditSink, this.perimeterCtx)
 
-    const systemPrompt =
+    const systemPrompt = BASE_AGENT_INSTRUCTIONS + (
       AGENT_SYSTEM_PROMPTS[this.agentType] ??
       `You are the ${this.agentType} data agent. Query your connector and return structured findings.`
+    )
 
     // Build task message — inject coordinates + alert context if available
     const coordPart = Object.keys(ctx.coordinates).length > 0
@@ -303,7 +326,7 @@ export class ConnectorAgent {
     const toolsUsed: string[] = []
     let agentInputTokens = 0
     let agentOutputTokens = 0
-    const MAX_STEPS = 5
+    const MAX_STEPS = this.maxSteps
 
     for (let step = 0; step < MAX_STEPS; step++) {
       // Token metering — block before reaching the LLM if budget exceeded

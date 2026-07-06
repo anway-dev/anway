@@ -59,37 +59,6 @@ const DEFAULT_BUDGET: TokenBudget = {
   tenantMonthlyUsed: 0,
 }
 
-const ORCHESTRATOR_SYSTEM_PROMPT =
-  'You are Anway, the central nervous system of a software organisation. ' +
-  'You are a single unified agent — never mention "routing", "specialist agents", or "handing off". ' +
-  'You investigate and act directly using the tools available to you. ' +
-  'Every claim must be grounded in data returned by tool calls. ' +
-  'When you cannot ground a claim, state explicitly what data is missing and why.' +
-
-  '\n\n## MANDATORY: Graph-first, targeted calls only\n' +
-  'The knowledge graph provides connector coordinates for every known entity. ' +
-  'You MUST use these coordinates for every tool call. ' +
-  'NEVER use broad/wildcard queries. The following are FORBIDDEN:\n' +
-  '  - PromQL: {service=~".+"}, {__name__=~".*"}, {} (empty selector), any selector that matches all series\n' +
-  '  - Grafana: searching for "" or "*" to list everything\n' +
-  '  - Any query whose only purpose is to discover what exists\n' +
-  'If graph context below contains "Connector coordinates", you MUST use those exact values in every tool call.\n' +
-  'The ## GRAPH CONTEXT block injected below tells you exactly what to do:\n' +
-  '  - If it contains "CONNECTOR COORDINATES": use those exact values. No other services.\n' +
-  '  - If it contains "ALERT INVESTIGATION PROTOCOL": follow those steps in order. DO NOT ask the user which service.\n' +
-  '  - If it says "Do NOT call connector tools": obey — ask user which service to investigate.\n' +
-
-  '\n## Investigation approach (when coordinates are available)\n' +
-  '- Incidents, alerts, outages, error spikes: call alertmanager__alerts first, extract labels, ' +
-  'then prometheus__query scoped to those labels, then loki__query.\n' +
-  '- Metrics, SLO, latency, error rate: call prometheus__query with PromQL scoped to the service label from coordinates (e.g. {service="payments-api"}).\n' +
-  '- Dashboards: call grafana__dashboards with the service name as query — not empty string.\n' +
-  '- Code, PRs: call github__list_prs, github__get_commits with the repo from coordinates.\n' +
-  '- Deployments: call trigger_pipeline with { service, environment, sha? }\n' +
-  '- Gate required: surface as "Gate required: [stage] — reply approve to proceed or cancel to abort"\n' +
-  '- User says approve/yes/ship it: call approve_gate with the gate_id\n' +
-  '\nIf a tool call returns an error or empty result, say so explicitly. Never fabricate data.\n'
-
 // Injected into graphContext for alert/incident investigations when graph has no coordinates.
 // Alertmanager labels ARE the connector coordinates — agent extracts them, then calls targeted tools.
 const ALERT_INVESTIGATION_PROTOCOL =
@@ -385,33 +354,12 @@ const context = resolvedAgentContext
     }
   }
 
-  // Tool definitions for the LLM (run function stripped)
-  const toolDefs: ToolDefinition[] = tools.map(({ name, description, parameters }) => ({
-    name,
-    description,
-    parameters,
-  }))
-
   // Inject registered connector list so LLM knows available data sources
   let connectorContext = ''
   if (config.connectors && config.connectors.length > 0) {
     const lines = config.connectors.map(c => `  - ${c.name} (${c.type}, ${c.mode})`)
     connectorContext = `\n\nRegistered data sources (use these tools to answer queries):\n${lines.join('\n')}`
   }
-
-  // Build message list from history + current turn
-  const sreBlock = sreContext ? `\n\n${sreContext}\n\nGround your response in this context. Cite specific services, incidents, and metrics above. If the context shows services are healthy, say so explicitly — do not speculate about outages.` : ''
-  // graphContext is always set (entity found, entity missing, or no entity) — always injected
-  const systemPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\nEffective role: ${ctx.effectiveRole}. Classified intent: ${classifiedIntent}.${connectorContext}\n\n${graphContext}${sreBlock}`
-  const messages: Message[] = [
-    { role: 'system', content: systemPrompt },
-    ...history.map(
-      (t): Message => ({
-        role: t.role as 'user' | 'assistant' | 'system',
-        content: t.content,
-      }),
-    ),
-  ]
 
   // --- MULTI-AGENT DELEGATION ---
   const toolMap = groupToolsByConnector(tools)
@@ -503,6 +451,7 @@ const context = resolvedAgentContext
       perimeterCtx,
       gateSink: config.gateSink,
       gateTimeoutMs: config.gateTimeoutMs,
+      maxSteps: config.maxSteps,
       budget,
       onGateEvent: (gateId, toolCallId, toolName, args) => {
         gatePendingCount++

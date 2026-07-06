@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import type { IConnectorBootstrap, ConnectorBootstrapResult, IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
@@ -18,9 +18,17 @@ function awsEnv(creds: AwsCredentials): NodeJS.ProcessEnv {
   return env
 }
 
-function runAws(args: string, env: NodeJS.ProcessEnv): unknown {
+// execFileSync with an argv array — no shell involved, so no interpolation
+// risk — replacing execSync's template-string command, which passed one
+// call site's argument (an ECS cluster ARN, sourced from a prior AWS API
+// response) straight into a shell string. Confirmed live via independent
+// review this was inconsistent with agent.ts in this same connector, which
+// was already fixed to this exact pattern for the same reason: an
+// AWS-API-returned value containing shell metacharacters would execute
+// arbitrary commands on the gateway host.
+function runAws(args: string[], env: NodeJS.ProcessEnv): unknown {
   try {
-    const out = execSync(`aws ${args} --output json`, { env, timeout: 30000 })
+    const out = execFileSync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
     return JSON.parse(out.toString())
   } catch {
     return null
@@ -43,7 +51,7 @@ export class AwsCloudwatchBootstrap implements IConnectorBootstrap {
     let entitiesUpserted = 0
 
     // EC2 instances
-    const ec2Data = runAws('ec2 describe-instances --query "Reservations[*].Instances[*]" --output json', env) as unknown[][][] | null
+    const ec2Data = runAws(['ec2', 'describe-instances', '--query', 'Reservations[*].Instances[*]'], env) as unknown[][][] | null
     if (Array.isArray(ec2Data)) {
       const instances = ec2Data.flat(2) as Array<{
         InstanceId: string; InstanceType: string; State: { Name: string };
@@ -83,11 +91,11 @@ export class AwsCloudwatchBootstrap implements IConnectorBootstrap {
     }
 
     // ECS clusters and services
-    const ecsClusters = runAws('ecs list-clusters', env) as { clusterArns?: string[] } | null
+    const ecsClusters = runAws(['ecs', 'list-clusters'], env) as { clusterArns?: string[] } | null
     if (Array.isArray(ecsClusters?.clusterArns)) {
       for (const arn of ecsClusters.clusterArns) {
         const clusterName = arn.split('/').pop() ?? arn
-        const servicesData = runAws(`ecs list-services --cluster ${arn}`, env) as { serviceArns?: string[] } | null
+        const servicesData = runAws(['ecs', 'list-services', '--cluster', arn], env) as { serviceArns?: string[] } | null
         if (Array.isArray(servicesData?.serviceArns)) {
           for (const svcArn of servicesData.serviceArns) {
             const svcName = svcArn.split('/').pop() ?? svcArn
@@ -119,7 +127,7 @@ export class AwsCloudwatchBootstrap implements IConnectorBootstrap {
     }
 
     // CloudWatch alarms
-    const alarmsData = runAws('cloudwatch describe-alarms --query "MetricAlarms[*]" --state-value ALARM', env) as Array<{
+    const alarmsData = runAws(['cloudwatch', 'describe-alarms', '--query', 'MetricAlarms[*]', '--state-value', 'ALARM'], env) as Array<{
       AlarmName: string; StateValue: string; MetricName: string; Namespace: string; AlarmDescription?: string
     }> | null
     if (Array.isArray(alarmsData)) {

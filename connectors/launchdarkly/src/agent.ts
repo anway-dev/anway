@@ -2,8 +2,35 @@ import type { ConnectorCreds } from '@anway/types'
 import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 
+interface LDEnvState { on?: boolean; targets?: unknown[]; rules?: unknown[] }
+interface LDFlag { key: string; name?: string; environments?: Record<string, LDEnvState> }
+
 const TOOLS: ConnectorTool[] = [
-  { definition: { name: 'get_flags', description: 'List feature flags', parameters: { type: 'object', properties: { project: { type: 'string' }, env: { type: 'string' } }, required: ['project', 'env'] } }, execute: () => Promise.resolve({ flags: [{ key:'new-checkout',name:'New Checkout',enabled:true,targeting:true }] }), write: false },
+  {
+    // Hardcoded fake data previously — confirmed live via independent review
+    // this is the only tool the orchestrator sees for this connector
+    // (write:true tools are filtered out of chat in V1). Real LaunchDarkly
+    // API v2.
+    definition: { name: 'get_flags', description: 'List feature flags', parameters: { type: 'object', properties: { project: { type: 'string' }, env: { type: 'string' } }, required: ['project', 'env'] } },
+    execute: async (params, creds) => {
+      const apiKey = (creds as ConnectorCreds).apiKey
+      if (!apiKey) throw new Error('LaunchDarkly API key not configured')
+      const env = String(params.env)
+      const res = await fetch(`https://app.launchdarkly.com/api/v2/flags/${String(params.project)}?env=${encodeURIComponent(env)}`, {
+        headers: { Authorization: String(apiKey) },
+      })
+      if (!res.ok) throw new Error(`LaunchDarkly get_flags failed: HTTP ${res.status}`)
+      const json = await res.json() as { items?: LDFlag[] }
+      return {
+        flags: (json.items ?? []).map(f => {
+          const envState = f.environments?.[env]
+          const hasTargeting = Boolean((envState?.targets?.length ?? 0) > 0 || (envState?.rules?.length ?? 0) > 0)
+          return { key: f.key, name: f.name ?? f.key, enabled: envState?.on ?? false, targeting: hasTargeting }
+        }),
+      }
+    },
+    write: false,
+  },
   {
     definition: { name: 'toggle_flag', description: 'Toggle a feature flag', parameters: { type: 'object', properties: { project: { type: 'string' }, flagKey: { type: 'string' }, env: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['project', 'flagKey', 'env', 'enabled'] } },
     execute: async (params, creds) => {

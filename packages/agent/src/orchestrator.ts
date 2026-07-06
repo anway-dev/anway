@@ -444,14 +444,47 @@ const context = resolvedAgentContext
     userId: ctx.userId,
   }
 
-  // Run all selected connector agents in parallel — hard 30s timeout per P1
+  // Run all selected connector agents in parallel — hard 30s timeout per P1,
+  // EXCEPT while a real L2 write gate is open on that agent's tool call.
+  // Confirmed live: the previous unconditional 30s abort fired while
+  // ConnectorAgent.run() was blocked inside pollGate() waiting on a human —
+  // no human can plausibly see a gate and click approve within 30s, so every
+  // write action attempted through chat effectively always resolved to
+  // "timed out" regardless of the (separate) gateTimeoutMs. gatePendingCount
+  // tracks how many tool calls across all agents in this session are
+  // currently gate-blocked; the timeout only actually aborts when it fires
+  // AND no gate is open, otherwise it reschedules.
   const AGENT_TIMEOUT_MS = 30_000
   const agentAbort = new AbortController()
-  const agentTimeout = setTimeout(() => agentAbort.abort('agent_timeout'), AGENT_TIMEOUT_MS)
+  let gatePendingCount = 0
+  let agentTimeout: ReturnType<typeof setTimeout> = setTimeout(() => {}, 0)
+  clearTimeout(agentTimeout)
+  const scheduleAgentTimeout = () => {
+    agentTimeout = setTimeout(() => {
+      if (gatePendingCount > 0) { scheduleAgentTimeout(); return }
+      agentAbort.abort('agent_timeout')
+    }, AGENT_TIMEOUT_MS)
+  }
+  scheduleAgentTimeout()
   // Composite signal: respect outer signal + agent timeout
   const agentSignal = signal
     ? AbortSignal.any([signal, agentAbort.signal])
     : agentAbort.signal
+
+  // Real-time event queue: onGateEvent fires deep inside a Promise this
+  // generator only awaits in bulk (Promise.allSettled below) — without a
+  // side channel, a gate_required event could never reach the client until
+  // every agent in the batch finished, which defeats the point of surfacing
+  // it for approval. This lets the main loop interleave queued events with
+  // agent completion instead of yielding nothing until everything settles.
+  const liveEvents: StreamEvent[] = []
+  let wakeResolve: (() => void) | null = null
+  let wake = new Promise<void>((r) => { wakeResolve = r })
+  const pushLiveEvent = (evt: StreamEvent) => {
+    liveEvents.push(evt)
+    wakeResolve?.()
+    wake = new Promise<void>((r) => { wakeResolve = r })
+  }
 
   // Build perimeter context for ConnectorAgent audit + gate wiring
   const perimeterCtx: PerimeterCtx = {
@@ -471,30 +504,45 @@ const context = resolvedAgentContext
       gateSink: config.gateSink,
       gateTimeoutMs: config.gateTimeoutMs,
       budget,
-      onGateEvent: (gateId, toolName, args) => {
-        // Yield gate_required SSE event — surfaced to client for approval
-        void (async () => {
-          // Gate events are yielded as findings via the audit/gate pipeline
-          // The ConnectorAgent polls internally; this callback is the signal to
-          // surface it to the client. We push a lightweight audit row.
-          await config.auditSink.append({
-            id: crypto.randomUUID(),
-            tenantId: ctx.tenantId,
-            userId: ctx.userId,
-            sessionId: ctx.sessionId,
-            eventType: 'gate_decision',
-            payload: { gateId, toolName, args, status: 'pending_approval' },
-            createdAt: new Date(),
-          }).catch(() => {})
-        })()
-        // Gate is handled inline inside ConnectorAgent.run() — push → pollGate → execute.
-        // onGateEvent fires the audit row; the agent blocks until the gate is resolved.
+      onGateEvent: (gateId, toolCallId, toolName, args) => {
+        gatePendingCount++
+        // Real gate_required event, pushed onto the live queue so the main
+        // loop below yields it immediately instead of only after every
+        // agent in this batch has finished (see liveEvents/pushLiveEvent
+        // above) — previously this only wrote an audit row, so the client
+        // had no signal a gate existed at all until the whole session
+        // either finished or hit the hard timeout.
+        pushLiveEvent({ type: 'gate_required', gateId, toolCallId, toolName, args })
+        config.auditSink.append({
+          id: crypto.randomUUID(),
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          sessionId: ctx.sessionId,
+          eventType: 'gate_decision',
+          payload: { gateId, toolName, args, status: 'pending_approval' },
+          createdAt: new Date(),
+        }).catch(() => {})
+      },
+      onGateResolved: () => {
+        gatePendingCount = Math.max(0, gatePendingCount - 1)
       },
     }
     return new ConnectorAgent(agentConfig).run(specialistCtx, agentSignal)
   })
 
-  const results = await Promise.allSettled(agentRuns)
+  // Race agent completion against the live event queue, yielding queued
+  // events (gate_required, etc.) as soon as they arrive instead of only
+  // after every agent in the batch settles.
+  const agentsSettled = Promise.allSettled(agentRuns)
+  let allDone = false
+  void agentsSettled.then(() => { allDone = true })
+  while (!allDone) {
+    await Promise.race([agentsSettled, wake])
+    while (liveEvents.length > 0) yield liveEvents.shift()!
+  }
+  while (liveEvents.length > 0) yield liveEvents.shift()!
+
+  const results = await agentsSettled
   clearTimeout(agentTimeout)
   const findings: AgentFinding[] = []
 

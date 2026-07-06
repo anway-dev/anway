@@ -59,10 +59,18 @@ export interface ConnectorAgentConfig {
   perimeterCtx: PerimeterCtx
   /** L2 gate sink for write actions. Omit to hard-block all writes (safe default). */
   gateSink?: IGateSink | undefined
-  /** Gate poll timeout in ms (default: 30000). */
+  // 30s was long enough for the poll mechanism itself but not for an actual
+  // human to see a gate_required event and click approve — confirmed live,
+  // the previous default made every chat-path write action time out before a
+  // person could plausibly react. A real approval needs minutes, not
+  // seconds; the orchestrator's own per-agent hard timeout no longer counts
+  // against this window (see onGateEvent/onGateResolved below).
+  /** Gate poll timeout in ms (default: 600000 / 10 minutes). */
   gateTimeoutMs?: number | undefined
-  /** Callback invoked when a gate event is created — orchestrator uses this to yield SSE events. */
-  onGateEvent?: ((gateId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+  /** Callback invoked when a gate event is created — orchestrator uses this to yield a real gate_required SSE event and to stop counting this agent against its own hard timeout while the gate is open. */
+  onGateEvent?: ((gateId: string, toolCallId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+  /** Callback invoked once the gate above is resolved (approved/rejected/timed out) — pairs with onGateEvent so the orchestrator can resume counting this agent against its hard timeout. */
+  onGateResolved?: ((gateId: string) => void) | undefined
   /** Token budget for metering all model calls in this agent. Shared across all agents. */
   budget?: TokenBudget | undefined
 }
@@ -227,7 +235,8 @@ export class ConnectorAgent {
   private perimeterCtx: PerimeterCtx
   private gateSink: IGateSink | undefined
   private gateTimeoutMs: number
-  private onGateEvent: ((gateId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+  private onGateEvent: ((gateId: string, toolCallId: string, toolName: string, args: Record<string, unknown>) => void) | undefined
+  private onGateResolved: ((gateId: string) => void) | undefined
   private budget: TokenBudget | undefined
 
   constructor(config: ConnectorAgentConfig) {
@@ -242,8 +251,9 @@ export class ConnectorAgent {
     this.auditSink = config.auditSink
     this.perimeterCtx = config.perimeterCtx
     this.gateSink = config.gateSink
-    this.gateTimeoutMs = config.gateTimeoutMs ?? 30_000
+    this.gateTimeoutMs = config.gateTimeoutMs ?? 600_000
     this.onGateEvent = config.onGateEvent
+    this.onGateResolved = config.onGateResolved
     this.budget = config.budget
   }
 
@@ -414,10 +424,17 @@ export class ConnectorAgent {
             createdAt: new Date(),
           })
 
-          // Notify orchestrator so it can yield a gate_required SSE event
-          this.onGateEvent?.(gateId, call.name, call.args)
+          // Notify orchestrator so it can (a) yield a real gate_required SSE
+          // event — the client previously got no signal at all that a write
+          // was waiting on them — and (b) stop counting this agent against
+          // its own hard per-agent timeout while genuinely waiting on a human,
+          // since that timeout firing mid-gate-wait made writes through chat
+          // effectively always resolve to "timed out" regardless of gateTimeoutMs.
+          this.onGateEvent?.(gateId, call.id, call.name, call.args)
 
-          const decision = await pollGate(this.gateSink, gateId, this.gateTimeoutMs)
+          const decision = await pollGate(this.gateSink, gateId, this.gateTimeoutMs, undefined, signal ? { signal } : undefined)
+
+          this.onGateResolved?.(gateId)
 
           if (decision._tag !== 'approved') {
             await this.auditSink.append({

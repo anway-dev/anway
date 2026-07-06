@@ -291,9 +291,24 @@ export class StructuralGraph implements IKnowledgeGraph {
   async resolveContextByName(name: string, tenantId: TenantId, depth = 2): Promise<AgentContext | null> {
     // Defense in depth: empty/whitespace input would match every row via ILIKE '%%'
     if (!name || name.trim().length === 0) return null
+    // Two real bugs here, confirmed live via independent review — this is
+    // the front door for every graph-first lookup in the system, so both
+    // mattered a lot:
+    // 1. `metadata->>'confidence' DESC` sorts the *text* representation of
+    //    the JSON value, not a number, and Postgres's DESC default is
+    //    NULLS FIRST — so any entity with no confidence metadata at all
+    //    (never scored) sorted ABOVE every entity that had a real score.
+    //    Cast to numeric and push nulls to the bottom explicitly.
+    // 2. A bare ILIKE '%name%' substring match with no preference for an
+    //    exact match meant a query for e.g. "api" could resolve to an
+    //    unrelated entity that merely contains "api" as a substring, ahead
+    //    of the entity actually named exactly that. Rank exact
+    //    (case-insensitive) matches first.
     const rows = await this.query<{ id: string }>(
-      `SELECT id FROM entities WHERE tenant_id = $1::uuid AND name ILIKE $2 ORDER BY metadata->>'confidence' DESC LIMIT 1`,
-      [tenantId, `%${name}%`],
+      `SELECT id FROM entities WHERE tenant_id = $1::uuid AND name ILIKE $2
+       ORDER BY (LOWER(name) = LOWER($3)) DESC, COALESCE((metadata->>'confidence')::numeric, 0) DESC
+       LIMIT 1`,
+      [tenantId, `%${name}%`, name],
     )
     if (rows.length === 0) return null
     return this.resolveContext(rows[0]!.id, tenantId, depth)

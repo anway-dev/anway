@@ -102,21 +102,93 @@ export async function gateDecideRoutes(app: FastifyInstance) {
 
       // SoD: look up gate owner + tool info before Redis/in-memory split — applies to both paths
       const gateRows = await withTenant(prisma, tenantId, (tx) =>
-        tx.$queryRaw<Array<{ user_id: string; tool_name: string; tool_args: Record<string, unknown> | null }>>`
-          SELECT user_id, tool_name, tool_args FROM gate_events
+        tx.$queryRaw<Array<{ user_id: string; tool_name: string; tool_args: Record<string, unknown> | null; connector_id: string }>>`
+          SELECT user_id, tool_name, tool_args, connector_id FROM gate_events
           WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending' LIMIT 1
         `
-      ).catch(() => [] as Array<{ user_id: string; tool_name: string; tool_args: Record<string, unknown> | null }>)
+      ).catch(() => [] as Array<{ user_id: string; tool_name: string; tool_args: Record<string, unknown> | null; connector_id: string }>)
+
+      if (gateRows.length === 0) {
+        return reply.code(404).send({ error: 'gate not found or already decided' })
+      }
+      // SoD must be checked before any vote is recorded below — moving this
+      // after the vote-insert (a real bug caught before it shipped) would
+      // let the requester's own vote count toward the approval threshold.
+      if (gateRows[0]!.user_id === userId) {
+        return reply.code(403).send({ error: 'cannot approve your own gate request' })
+      }
+
+      // Multi-approver support: gate_policies.approvers_required was stored
+      // but never enforced anywhere — every gate resolved on exactly one
+      // approval regardless of configured policy, confirmed live via
+      // independent review. Record this approver's vote in gate_approvals
+      // (one row per distinct approver, UNIQUE(gate_id, approver_id) so the
+      // same person can't inflate the count by voting twice), then only
+      // actually flip gate_events.status once enough distinct approvals
+      // exist. A single rejection still kills the gate immediately — a
+      // standard, safe default for reject semantics.
+      let fullyResolved = decision === 'rejected'
+      let votesReceived = 0
+      let votesRequired = 1
+      if (gateRows.length > 0) {
+        const alreadyVoted = await withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM gate_approvals WHERE gate_id = ${gateId}::uuid AND approver_id = ${userId}::uuid LIMIT 1
+          `
+        ).catch(() => [])
+        if (alreadyVoted.length > 0) {
+          return reply.code(409).send({ error: 'you have already voted on this gate' })
+        }
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            INSERT INTO gate_approvals (id, gate_id, tenant_id, approver_id, decision, decided_at)
+            VALUES (gen_random_uuid(), ${gateId}::uuid, ${tenantId}::uuid, ${userId}::uuid, ${decision}::text, NOW())
+            ON CONFLICT (gate_id, approver_id) DO NOTHING
+          `
+        ).catch(() => null)
+
+        if (decision === 'approved') {
+          const policies = await withTenant(prisma, tenantId, (tx) =>
+            tx.$queryRaw<Array<{ scope: string; approvers_required: number }>>`
+              SELECT scope, approvers_required FROM gate_policies
+              WHERE tenant_id = ${tenantId}::uuid AND scope IN (${gateRows[0]!.connector_id}, ${gateRows[0]!.tool_name}, '*')
+            `
+          ).catch(() => [])
+          const policy =
+            policies.find(p => p.scope === gateRows[0]!.connector_id) ??
+            policies.find(p => p.scope === gateRows[0]!.tool_name) ??
+            policies.find(p => p.scope === '*')
+          votesRequired = policy && policy.approvers_required > 0 ? policy.approvers_required : 1
+
+          const countRows = await withTenant(prisma, tenantId, (tx) =>
+            tx.$queryRaw<Array<{ count: bigint }>>`
+              SELECT COUNT(DISTINCT approver_id) AS count FROM gate_approvals
+              WHERE gate_id = ${gateId}::uuid AND decision = 'approved'
+            `
+          ).catch(() => [])
+          votesReceived = Number(countRows[0]?.count ?? 1)
+          fullyResolved = votesReceived >= votesRequired
+        }
+      }
+
+      // Not enough approvals yet — gate stays 'pending', nothing downstream
+      // is notified (a premature 'approved' status would let any consumer
+      // polling this gate proceed before the real threshold is met).
+      if (!fullyResolved) {
+        gateDecisionsTotal.inc({ decision: 'partial_approval' })
+        void withTenant(prisma, tenantId, (tx) =>
+          tx.$queryRaw`
+            INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, gen_random_uuid(),
+                    'gate_decision', ${JSON.stringify({ gateId, decision, votesReceived, votesRequired, mode: 'partial' })}::jsonb, NOW())
+          `
+        ).catch((err) => { request.log.warn({ err, gateId }, 'gate.decision audit write failed') })
+        return reply.send({ ok: true, gateId, decision, fullyApproved: false, votesReceived, votesRequired })
+      }
 
       if (redisUrl) {
-        // Redis path requires a gate_events row
-        if (gateRows.length === 0) {
-          return reply.code(404).send({ error: 'gate not found or already decided' })
-        }
-        if (gateRows[0]!.user_id === userId) {
-          return reply.code(403).send({ error: 'cannot approve your own gate request' })
-        }
-
+        // gateRows-empty and SoD are already checked above, before any vote
+        // is recorded.
         const affected = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
@@ -133,22 +205,17 @@ export async function gateDecideRoutes(app: FastifyInstance) {
           request.log.warn({ err, gateId }, 'failed to publish gate decision to Redis')
         }
       } else {
-        // In-memory path: apply SoD when a DB row exists (best-effort)
-        if (gateRows.length > 0 && gateRows[0]!.user_id === userId) {
-          return reply.code(403).send({ error: 'cannot approve your own gate request' })
-        }
-        // Persist decision to gate_events when a row exists, for audit trail + idempotency
-        if (gateRows.length > 0) {
-          const affected = await withTenant(prisma, tenantId, (tx) =>
-            tx.$executeRaw`
-              UPDATE gate_events
-              SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
-              WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
-            `
-          ).catch(() => 0)
-          if (Number(affected) === 0) {
-            return reply.code(404).send({ error: 'gate not found or already decided' })
-          }
+        // gateRows-empty and SoD are already checked above, before any vote
+        // is recorded. Persist decision to gate_events for audit trail + idempotency.
+        const affected = await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            UPDATE gate_events
+            SET status = ${decision}::text, decided_by = ${userId}::uuid, decided_at = NOW()
+            WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
+          `
+        ).catch(() => 0)
+        if (Number(affected) === 0) {
+          return reply.code(404).send({ error: 'gate not found or already decided' })
         }
         await getMemoryGateSink().record(gateId, decision, userId)
       }
@@ -196,7 +263,7 @@ export async function gateDecideRoutes(app: FastifyInstance) {
         }
       }
 
-      return { ok: true, gateId, decision }
+      return { ok: true, gateId, decision, fullyApproved: decision === 'approved', votesReceived, votesRequired }
     },
   )
 

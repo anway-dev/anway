@@ -41,11 +41,21 @@ async function loadK8sCredentials(tenantId: string): Promise<Record<string, unkn
 // ---------------------------------------------------------------------------
 // Gate atomic-consume — copies terraform.ts:124-150 reference pattern
 // ---------------------------------------------------------------------------
+// Binding on namespace alone (the original check) meant one approved gate
+// for "restart deployment X in prod" could also be consumed to authorize
+// restarting deployment Y, or scaling a different deployment entirely, in
+// that same namespace — confirmed live via independent review. Real gate
+// rows (see prisma/seed.ts's k8s_restart_deployment/scale_deployment
+// entries) carry a `deployment` or `node` key in tool_args alongside
+// namespace; bind on that too so an approval only ever authorizes the exact
+// resource it was requested for.
 async function consumeGate(
   gateId: string,
   tenantId: string,
   applierId: string,
   namespace: string,
+  resourceKey: 'deployment' | 'node',
+  resourceName: string,
 ): Promise<boolean> {
   const sentinel = '00000000-0000-0000-0000-000000000000'
   const consumed = await withTenant(prisma, tenantId, (tx) =>
@@ -55,7 +65,8 @@ async function consumeGate(
       WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
         AND status = 'approved'
         AND created_at > NOW() - INTERVAL '24 hours'
-        AND tool_args->>'namespace' = ${namespace}
+        AND (${namespace} = '' OR tool_args->>'namespace' = ${namespace})
+        AND tool_args->>${resourceKey} = ${resourceName}
         AND decided_by IS NOT NULL
         AND decided_by <> ${sentinel}::uuid
         AND decided_by <> ${applierId}::uuid
@@ -242,11 +253,12 @@ export async function k8sRoutes(app: FastifyInstance) {
         }
       }
 
-      // Gate atomic-consume — must have an approved gateId
+      // Gate atomic-consume — must have an approved gateId, bound to this
+      // exact deployment (see consumeGate above).
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before restart' })
       }
-      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace)
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace, 'deployment', name)
       if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before restart' })
       }
@@ -296,11 +308,11 @@ export async function k8sRoutes(app: FastifyInstance) {
         }
       }
 
-      // Gate atomic-consume
+      // Gate atomic-consume — bound to this exact deployment (see consumeGate above).
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before scale' })
       }
-      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace)
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace, 'deployment', name)
       if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before scale' })
       }
@@ -346,26 +358,17 @@ export async function k8sRoutes(app: FastifyInstance) {
         }
       }
 
-      // Gate atomic-consume — uses node name as scope for the gate tool_args match
+      // Gate atomic-consume. Previously matched only tool_name IN
+      // ('cordon_node', 'k8s.cordon') with no binding to which node — an
+      // approved gate for cordoning node A could cordon node B, confirmed
+      // live via independent review. Bind on the real node name too (see
+      // consumeGate above — this route has no `namespace`, so pass an empty
+      // string for that leg of the match and rely on the node-name bind).
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before cordon' })
       }
-      const sentinel = '00000000-0000-0000-0000-000000000000'
-      const consumed = await withTenant(prisma, user.tenantId, (tx) =>
-        tx.$executeRaw`
-          UPDATE gate_events
-          SET status = 'consumed', decided_at = COALESCE(decided_at, NOW())
-          WHERE id = ${gateId}::uuid AND tenant_id = ${user.tenantId}::uuid
-            AND status = 'approved'
-            AND created_at > NOW() - INTERVAL '24 hours'
-            AND tool_name IN ('cordon_node', 'k8s.cordon')
-            AND decided_by IS NOT NULL
-            AND decided_by <> ${sentinel}::uuid
-            AND decided_by <> ${user.sub}::uuid
-        `
-      ).catch(() => 0)
-
-      if (Number(consumed) === 0) {
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, '', 'node', name)
+      if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before cordon' })
       }
 

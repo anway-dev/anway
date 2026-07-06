@@ -298,10 +298,11 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
           await withTenant(prisma, event.tenantId as TenantId, (tx) =>
             tx.$executeRaw`
-              INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
+              INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
               VALUES (gen_random_uuid(), ${event.tenantId}::uuid, '00000000-0000-0000-0000-000000000002'::uuid,
                 '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_deploy_gate'},
                 ${JSON.stringify({ pipelineId, stageId: 'gate.deploy', service: dt.service, sha: dt.sha, triggeredBy: dt.triggeredBy })}::jsonb,
+                ${'pipeline'},
                 'pending', now())
             `
           ).catch(() => null)

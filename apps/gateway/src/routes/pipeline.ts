@@ -517,7 +517,9 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
       try {
         const stageType = stage['type'] as string
-        const stageName = stage['name'] as string
+        // Real stage rows only ever set `label` (confirmed live: `deploy-prod`'s stage
+        // object has id/type/label, no `name`) — `stage['name']` was always undefined.
+        const stageName = (stage['label'] as string | undefined) ?? (stage['name'] as string | undefined) ?? stageId
         const envLabel = stage['envLabel'] as string | undefined
         const tfEnv = (stage['tfEnv'] as string | undefined) ?? 'demo'
 
@@ -675,10 +677,16 @@ export async function pipelineRoutes(app: FastifyInstance) {
           }
 
           case 'deploy': {
-            // Gate enforcement: if the pipeline has a gate.<env> stage preceding this deploy,
+            // Gate enforcement: if the pipeline has a gate-<env> stage preceding this deploy,
             // it must have been approved before we allow execution.
-            const deployEnv = stage['env'] as string | undefined
-            const gateStageId = deployEnv ? `gate.${deployEnv}` : null
+            // Real stage rows (e.g. this pipeline's `deploy-prod`/`deploy-staging`) never set
+            // an `env` field — confirmed live, `stage['env']` is always undefined here, which
+            // made this whole block dead code and let `deploy-prod` run with zero gate check.
+            // Derive env from the stage id itself instead (`deploy-<env>` -> `<env>`), and match
+            // the real gate stage id convention (hyphen, e.g. `gate-prod`), not `gate.<env>`.
+            const deployEnv = (stage['env'] as string | undefined)
+              ?? (typeof stage['id'] === 'string' ? (stage['id'] as string).replace(/^deploy-/, '') : undefined)
+            const gateStageId = deployEnv ? `gate-${deployEnv}` : null
             if (gateStageId) {
               const hasGateStage = stages.some(s => s['id'] === gateStageId)
               if (hasGateStage) {
@@ -918,8 +926,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
                   const rollbackUserId = (request.user as { sub: string }).sub
                   await withTenant(prisma, tenantId, (tx) =>
                     tx.$executeRaw`
-                      INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
-                      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${rollbackUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'monitor_failed' })}::jsonb, 'pending', now())
+                      INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
+                      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${rollbackUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'monitor_failed' })}::jsonb, ${'pipeline'}, 'pending', now())
                     `
                   ).catch(() => null)
                   // Emit gate event to SSE
@@ -946,8 +954,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const gateUserId = (request.user as { sub: string }).sub
             await withTenant(prisma, tenantId, (tx) =>
               tx.$queryRaw`
-                INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
-                VALUES (gen_random_uuid(), ${tenantId}::uuid, ${gateUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_promote'}, ${JSON.stringify({ pipelineId: id, stageId, runId })}::jsonb, 'pending', now())
+                INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
+                VALUES (gen_random_uuid(), ${tenantId}::uuid, ${gateUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_promote'}, ${JSON.stringify({ pipelineId: id, stageId, runId })}::jsonb, ${'pipeline'}, 'pending', now())
               `,
             ).catch(() => null)
 
@@ -991,8 +999,8 @@ export async function pipelineRoutes(app: FastifyInstance) {
               const rollbackUserId = (request.user as { sub: string }).sub
               await withTenant(prisma, tenantId, (tx) =>
                 tx.$executeRaw`
-                  INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, status, created_at)
-                  VALUES (gen_random_uuid(), ${tenantId}::uuid, ${rollbackUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'manual' })}::jsonb, 'pending', now())
+                  INSERT INTO gate_events (id, tenant_id, user_id, session_id, tool_name, tool_args, connector_id, status, created_at)
+                  VALUES (gen_random_uuid(), ${tenantId}::uuid, ${rollbackUserId}::uuid, '00000000-0000-0000-0000-000000000000'::uuid, ${'pipeline_rollback'}, ${JSON.stringify({ pipelineId: id, stageId: 'rollback', reason: 'manual' })}::jsonb, ${'pipeline'}, 'pending', now())
                 `
               ).catch(() => null)
               await withTenant(prisma, tenantId, (tx) =>

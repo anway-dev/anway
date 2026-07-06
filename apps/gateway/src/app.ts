@@ -69,8 +69,16 @@ export async function buildApp() {
   // ingestion (/api/events/*) bursts higher (Alertmanager/CI fan out) → 600/min.
   const rlMax = Number(process.env['RATE_LIMIT_MAX'] ?? 300)
   await app.register(import('@fastify/rate-limit'), {
+    // /health* and /metrics must never be rate-limited: k8s liveness/readiness
+    // probes and the Prometheus scraper hit these constantly from the same
+    // source IP as real user traffic (behind a shared ingress/LB), and
+    // throttling them makes the orchestrator think pods are unhealthy and
+    // kill them. Confirmed live: a load test against staging got 429s on
+    // /health itself, including on plain sequential single requests once the
+    // per-IP budget was consumed by concurrent traffic.
     allowList: (req: { url: string }) =>
-      req.url.startsWith('/api/chat') || req.url.startsWith('/api/pipelines/'),
+      req.url.startsWith('/api/chat') || req.url.startsWith('/api/pipelines/') ||
+      req.url.startsWith('/health') || req.url.startsWith('/metrics'),
     max: (req: { url: string }) =>
       req.url.startsWith('/api/events/') ? rlMax * 2 : rlMax,
     timeWindow: '1 minute',

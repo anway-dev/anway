@@ -586,7 +586,10 @@ export async function pipelineRoutes(app: FastifyInstance) {
                   child.stderr!.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
                   child.on('close', (code: number) => code === 0 ? resolve() : reject(new Error(`docker build failed (${code})`)))
                   child.on('error', reject)
-                  setTimeout(() => { child.kill(); reject(new Error('docker build timed out')) }, 600_000)
+                  // 600s (10min) was too tight — confirmed live, a cold build of this
+                  // monorepo (35+ connector packages, each its own tsc build inside the
+                  // Dockerfile) was still only ~20% through the connector list at 263s.
+                  setTimeout(() => { child.kill(); reject(new Error('docker build timed out')) }, 1_800_000)
                 })
                 await new Promise<void>((resolve, reject) => {
                   const child = trackChild(spawn('docker', ['push', image], { stdio: ['ignore', 'pipe', 'pipe'] }))

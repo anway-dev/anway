@@ -27,6 +27,10 @@ export class ReviewAgent {
       { role: 'user', content: `PR: ${prTitle}\nDiff type: ${classification.content}\n${graphContext ? 'Context: ' + graphContext.primaryEntity.name : ''}\n\n${diffSummary}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return extractJson<ReviewFindings>(result.content) } catch { return { summary: '', blocking: [], nonBlocking: [], testPlan: [], approvalRecommendation: 'request_changes' } }
+    // See agents/product.ts writePRD for why this throws instead of
+    // returning a fabricated-looking empty stub (an empty findings list +
+    // "request_changes" looks like a real, if boring, review) on parse
+    // failure.
+    try { return extractJson<ReviewFindings>(result.content) } catch (e) { throw new Error(`ReviewAgent: failed to parse ReviewFindings JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
   }
 }

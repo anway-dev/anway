@@ -27,7 +27,9 @@ export class OncallAgent {
       { role: 'user', content: `Team: ${teamName}\nActivity: ${extraction.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 
-    try { return extractJson<ShiftBrief>(result.content) } catch { return { summary: '', openIncidents: [], recentDeploys: [], watchItems: [], handoffNotes: '' } }
+    // See agents/product.ts writePRD for why this throws instead of
+    // returning a fabricated-looking empty stub on parse failure.
+    try { return extractJson<ShiftBrief>(result.content) } catch (e) { throw new Error(`OncallAgent: failed to parse ShiftBrief JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
   }
 
   async investigateAlert(alertTitle: string, tenantId: TenantId): Promise<string> {

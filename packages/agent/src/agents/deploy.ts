@@ -26,6 +26,16 @@ export class DeployAgent {
       { role: 'user', content: `Service: ${service}\nEnv: ${env}\nSHA: ${sha}\nHistory: ${history.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1000, temperature: 0 })
 
-    try { return extractJson<DeployPlan>(result.content) } catch { return { service, environment: env, strategy: 'rolling', preChecks: [], postChecks: [], rollbackTriggers: [], estimatedDuration: '10m', confidence: 0.5 } }
+    // See agents/product.ts writePRD for why this throws instead of
+    // returning a fabricated-looking empty stub on parse failure.
+    let plan: DeployPlan
+    try { plan = extractJson<DeployPlan>(result.content) } catch (e) { throw new Error(`DeployAgent: failed to parse DeployPlan JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
+    // The LLM-supplied confidence was previously used verbatim, unvalidated —
+    // could be >1, negative, or not even a number if the model deviates from
+    // the requested schema. Clamp to the real 0.0-1.0 range this project's
+    // confidence values are documented to be everywhere else.
+    const rawConfidence = typeof plan.confidence === 'number' && Number.isFinite(plan.confidence) ? plan.confidence : 0.5
+    plan.confidence = Math.max(0, Math.min(1, rawConfidence))
+    return plan
   }
 }

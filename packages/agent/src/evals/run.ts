@@ -23,64 +23,70 @@ const TENANT = '00000000-0000-0000-0000-000000000001' as TenantId
  * response would be meaningless), then a separate LLM-as-judge call scores
  * the real output against a specific, checkable rubric.
  */
+// Agent methods now throw on a real JSON-parse failure instead of silently
+// returning a fabricated-looking empty stub (see agents/product.ts etc.) —
+// correct for production callers, which already try/catch this into a real
+// error response, but this eval loop had no such wrapping: an uncaught
+// throw here would abort every remaining case in the whole suite, not just
+// the one that failed. Record a real failing EvalResult instead so one bad
+// case doesn't take down the rest of the run.
 export async function runEvals(model: IModelProvider, kg: IKnowledgeGraph): Promise<EvalResult[]> {
   const results: EvalResult[] = []
+  const run = (id: string, agentAction: string, rubric: string, produce: () => Promise<unknown>) =>
+    produce().then(
+      (output) => judge(model, id, agentAction, rubric, output),
+      (e: unknown) => ({ id, agentAction, score: 0, passed: false, reasoning: `Agent threw before producing output: ${e instanceof Error ? e.message : String(e)}`, rawOutput: null }) satisfies EvalResult,
+    )
 
   const product = new ProductAgent(model, model, kg)
   for (const c of productEvals) {
-    const prd = await product.writePRD(c.input, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, prd))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => product.writePRD(c.input, TENANT)))
   }
 
   const techspec = new TechSpecAgent(model, model, kg)
   for (const c of techspecEvals) {
     const prd = { title: c.input.prdTitle, problem: '', goals: c.input.prdGoals, nonGoals: [], userStories: [], successMetrics: [], openQuestions: [] }
-    const spec = await techspec.writeTechSpec(prd, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, spec))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => techspec.writeTechSpec(prd, TENANT)))
   }
 
   const review = new ReviewAgent(model, model, kg)
   for (const c of reviewEvals) {
-    const findings = await review.review(c.input.diffSummary, c.input.prTitle, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, findings))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => review.review(c.input.diffSummary, c.input.prTitle, TENANT)))
   }
 
   const sre = new SREAgent(model, model, kg)
   for (const c of sreEvals) {
-    const ctx = await sre.assembleContext(c.input.alertTitle, c.input.alertDescription, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, { hypothesis: ctx.hypothesis }))
+    results.push(await run(c.id, c.agentAction, c.rubric, async () => {
+      const ctx = await sre.assembleContext(c.input.alertTitle, c.input.alertDescription, TENANT)
+      return { hypothesis: ctx.hypothesis }
+    }))
   }
 
   const bootstrap = new BootstrapAgent(model, model, kg)
   for (const c of bootstrapEvals) {
     const spec = { title: c.input.title, overview: '', architecture: c.input.architecture, components: c.input.components.map(name => ({ name, responsibility: '', technology: '' })), dataModel: '', apiChanges: [], securityConsiderations: [], testPlan: '', rolloutPlan: '', estimatedComplexity: 'medium' as const }
-    const plan = await bootstrap.planBootstrap(spec, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, plan))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => bootstrap.planBootstrap(spec, TENANT)))
   }
 
   const testAgent = new TestAgent(model, model, kg)
   for (const c of testEvals) {
     const spec = { title: c.input.title, overview: '', architecture: '', components: c.input.components.map(comp => ({ ...comp, responsibility: '' })), dataModel: '', apiChanges: c.input.apiChanges.map(a => ({ ...a, description: '', breaking: false })), securityConsiderations: [], testPlan: '', rolloutPlan: '', estimatedComplexity: 'medium' as const }
-    const testPlan = await testAgent.writeTestPlan(spec, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, testPlan))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => testAgent.writeTestPlan(spec, TENANT)))
   }
 
   const deploy = new DeployAgent(model, model, kg)
   for (const c of deployEvals) {
-    const plan = await deploy.planDeploy(c.input.service, c.input.env, c.input.sha, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, plan))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => deploy.planDeploy(c.input.service, c.input.env, c.input.sha, TENANT)))
   }
 
   const oncall = new OncallAgent(model, model, kg)
   for (const c of oncallEvals) {
-    const brief = await oncall.generateShiftBrief(c.input, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, brief))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => oncall.generateShiftBrief(c.input, TENANT)))
   }
 
   const ba = new BAAgent(model, model, kg)
   for (const c of baEvals) {
-    const report = await ba.analyze(c.input, TENANT)
-    results.push(await judge(model, c.id, c.agentAction, c.rubric, report))
+    results.push(await run(c.id, c.agentAction, c.rubric, () => ba.analyze(c.input, TENANT)))
   }
 
   return results

@@ -34,6 +34,8 @@ export class TechSpecAgent {
       { role: 'user', content: `PRD title: ${prd.title}\nGoals: ${prd.goals.join(', ')}\nExisting: ${extracted.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return extractJson<TechSpec>(result.content) } catch { return { title: prd.title, overview: '', architecture: '', components: [], dataModel: '', apiChanges: [], securityConsiderations: [], testPlan: '', rolloutPlan: '', estimatedComplexity: 'medium' } }
+    // See product.ts writePRD for why this throws instead of returning a
+    // fabricated-looking empty stub on parse failure.
+    try { return extractJson<TechSpec>(result.content) } catch (e) { throw new Error(`TechSpecAgent: failed to parse TechSpec JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
   }
 }

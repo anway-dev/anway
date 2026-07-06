@@ -45,6 +45,12 @@ export class ProductAgent {
       { role: 'user', content: `Feature request: ${featureRequest}\nExtracted: ${extraction.content}\n${graphBlock}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return extractJson<PRD>(result.content) } catch { return { title: featureRequest, problem: '', goals: [], nonGoals: [], userStories: [], successMetrics: [], openQuestions: [] } }
+    // Was silently returning an empty-but-real-looking PRD on parse failure,
+    // indistinguishable from the model genuinely producing a minimal one —
+    // confirmed live via independent review, callers (routes/lifecycle.ts)
+    // already correctly try/catch this call into a real 502 error response,
+    // so throwing here surfaces a genuine failure instead of a fabricated
+    // "success" the caller can't tell apart from real (if sparse) content.
+    try { return extractJson<PRD>(result.content) } catch (e) { throw new Error(`ProductAgent: failed to parse PRD JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
   }
 }

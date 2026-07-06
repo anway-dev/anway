@@ -27,6 +27,8 @@ export class BAAgent {
       { role: 'user', content: `Query: ${query}\nType: ${classification.content}\n${graphContext ? `Context: ${graphContext.primaryEntity.name} (${graphContext.primaryEntity.type}). Related: ${graphContext.relatedEntities.slice(0, 5).map(e => e.name).join(', ')}` : ''}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 1500, temperature: 0 })
 
-    try { return extractJson<AnalysisReport>(result.content) } catch { return { query, summary: '', metrics: [], insights: [], recommendations: [] } }
+    // See agents/product.ts writePRD for why this throws instead of
+    // returning a fabricated-looking empty stub on parse failure.
+    try { return extractJson<AnalysisReport>(result.content) } catch (e) { throw new Error(`BAAgent: failed to parse AnalysisReport JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
   }
 }

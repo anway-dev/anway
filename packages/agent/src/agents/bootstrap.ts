@@ -28,6 +28,8 @@ export class BootstrapAgent {
       { role: 'user', content: `Service: ${spec.title}\nArchitecture: ${spec.architecture}\nComponents: ${spec.components.map(c => c.name).join(', ')}\nStack: ${langExtraction.content}` },
     ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
 
-    try { return extractJson<BootstrapPlan>(result.content) } catch { return { service: spec.title, files: [], commands: [], prDescription: '' } }
+    // See product.ts writePRD for why this throws instead of returning a
+    // fabricated-looking empty stub on parse failure.
+    try { return extractJson<BootstrapPlan>(result.content) } catch (e) { throw new Error(`BootstrapAgent: failed to parse BootstrapPlan JSON from model response: ${e instanceof Error ? e.message : String(e)}`) }
   }
 }

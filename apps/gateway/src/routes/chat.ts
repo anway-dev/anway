@@ -678,9 +678,9 @@ export async function chatRoutes(app: FastifyInstance) {
             if (accumulatedAssistantText) {
               void withTenant(prisma, tenantId, (tx) =>
                 tx.$executeRaw`
-                  INSERT INTO session_turns (tenant_id, session_id, role, content)
-                  VALUES (${tenantId}::uuid, ${sessionId}, 'user', ${query}),
-                         (${tenantId}::uuid, ${sessionId}, 'assistant', ${accumulatedAssistantText})
+                  INSERT INTO session_turns (tenant_id, session_id, role, content, user_id)
+                  VALUES (${tenantId}::uuid, ${sessionId}, 'user', ${query}, ${userId}::uuid),
+                         (${tenantId}::uuid, ${sessionId}, 'assistant', ${accumulatedAssistantText}, ${userId}::uuid)
                   ON CONFLICT (tenant_id, session_id, role, content, created_at) DO NOTHING
                 `
               ).catch(() => { /* best-effort */ })

@@ -25,29 +25,36 @@ interface TurnRow {
   created_at: Date
 }
 
+// Every route below is scoped to tenant_id AND user_id — confirmed live via
+// independent review that session_turns had no user_id column at all, so any
+// authenticated user in a tenant could list, read, and delete every other
+// user's chat history. Rows written before the user_id column existed have
+// user_id = NULL and are now invisible to everyone rather than visible to
+// everyone — the safer default for a privacy fix, since there's no real
+// owner to attribute them to.
 export async function sessionRoutes(app: FastifyInstance) {
-  // Delete ALL sessions for the current tenant
+  // Delete ALL of the current user's own sessions
   app.delete('/api/sessions', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
     await withTenant(prisma, tenantId, (tx) =>
       tx.$executeRaw`
         DELETE FROM session_turns
-        WHERE tenant_id = ${tenantId}::uuid
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
       `
     ).catch(() => {})
     return reply.code(204).send()
   })
 
-  // List recent sessions for current tenant — derived from session_turns (no sessions table dependency).
+  // List recent sessions for the current user — derived from session_turns (no sessions table dependency).
   // session_turns.session_id stores client-generated text IDs (session-{ts}-{random}).
   // The sessions table uses UUIDs — incompatible with the client-generated IDs, so we derive
   // session metadata directly from the turns table.
   app.get('/api/sessions', {
     preHandler: [app.authenticate],
   }, async (request) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<SessionSummaryRow[]>`
         SELECT
@@ -57,7 +64,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           COUNT(*) FILTER (WHERE role = 'user') AS turn_count,
           (ARRAY_AGG(content ORDER BY created_at) FILTER (WHERE role = 'user'))[1] AS preview
         FROM session_turns
-        WHERE tenant_id = ${tenantId}::uuid
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
         GROUP BY session_id
         ORDER BY MAX(created_at) DESC
         LIMIT 50
@@ -76,7 +83,7 @@ export async function sessionRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/sessions/:id', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
     const { id } = request.params
     // Try sessions table first (UUID path), fall back to session_turns (text ID path)
     const isUuid = UUID_RE.test(id)
@@ -85,7 +92,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         ? tx.$queryRaw<SessionDetailRow[]>`
             SELECT id, created_at, updated_at, turn_count
             FROM sessions
-            WHERE tenant_id = ${tenantId}::uuid AND id = ${id}::uuid
+            WHERE tenant_id = ${tenantId}::uuid AND id = ${id}::uuid AND user_id = ${userId}::uuid
             LIMIT 1
           `
         : tx.$queryRaw<SessionDetailRow[]>`
@@ -95,7 +102,7 @@ export async function sessionRoutes(app: FastifyInstance) {
               MAX(created_at) AS updated_at,
               COUNT(*) FILTER (WHERE role = 'user') AS turn_count
             FROM session_turns
-            WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id}
+            WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id} AND user_id = ${userId}::uuid
             GROUP BY session_id
           `
     ).catch(() => [] as SessionDetailRow[])
@@ -113,13 +120,13 @@ export async function sessionRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/sessions/:id/turns', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
     const { id } = request.params
     // id is session_id (text, not UUID) — handles both UUID and text session ids
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<TurnRow[]>`
         SELECT id, role, content, created_at FROM session_turns
-        WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id}
+        WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id} AND user_id = ${userId}::uuid
         ORDER BY created_at ASC LIMIT 200
       `
     ).catch(() => [] as TurnRow[])
@@ -133,16 +140,16 @@ export async function sessionRoutes(app: FastifyInstance) {
     })
   })
 
-  // Delete all turns for a specific session
+  // Delete all turns for a specific session — only the owning user's turns
   app.delete<{ Params: { id: string } }>('/api/sessions/:id', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
     const { id } = request.params
     await withTenant(prisma, tenantId, (tx) =>
       tx.$executeRaw`
         DELETE FROM session_turns
-        WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id}
+        WHERE tenant_id = ${tenantId}::uuid AND session_id = ${id} AND user_id = ${userId}::uuid
       `
     ).catch(() => {})
     return reply.code(204).send()

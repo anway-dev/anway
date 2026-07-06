@@ -76,8 +76,22 @@ export async function buildApp() {
     // kill them. Confirmed live: a load test against staging got 429s on
     // /health itself, including on plain sequential single requests once the
     // per-IP budget was consumed by concurrent traffic.
+    // /api/pipelines/ stays exempt: its one genuinely expensive path (stage
+    // run — real docker build/helm/terraform subprocesses) already has its
+    // own, more appropriate protection (MAX_CONCURRENT_RUNS_PER_TENANT=3,
+    // a concurrency cap rather than a time-window one), and the rest of the
+    // prefix is cheap, legitimately-polled status GETs.
+    // /api/chat was ALSO on this list with no equivalent protection at all —
+    // confirmed live via independent review: the monthly token-budget check
+    // is skipped entirely when token_budget_monthly is null (unconfigured),
+    // and there was no per-IP/per-user request-count throttle either, so an
+    // unconfigured tenant had zero spend or request-frequency protection on
+    // the one endpoint that spawns real LLM calls and agent subprocess CLI
+    // calls per request. Removed from the allowlist — 300/min is generous
+    // for real chat usage (a user rarely sends more than a few queries a
+    // minute) while closing the unbounded-abuse gap.
     allowList: (req: { url: string }) =>
-      req.url.startsWith('/api/chat') || req.url.startsWith('/api/pipelines/') ||
+      req.url.startsWith('/api/pipelines/') ||
       req.url.startsWith('/health') || req.url.startsWith('/metrics'),
     max: (req: { url: string }) =>
       req.url.startsWith('/api/events/') ? rlMax * 2 : rlMax,

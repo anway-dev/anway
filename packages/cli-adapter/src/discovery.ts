@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { sanitizeCliEnv } from './env-guard.js'
 
 export interface DiscoveredCommand {
   name: string
@@ -23,7 +24,7 @@ export async function discoverSubcommands(
 ): Promise<DiscoveredCommand[]> {
   try {
     const { stdout } = await new Promise<{ stdout: string }>((resolve, reject) => {
-      execFile(binary, ['--help'], { env: { ...process.env, ...env }, encoding: 'utf-8', timeout: timeoutMs }, (err, stdout) => {
+      execFile(binary, ['--help'], { env: { ...process.env, ...sanitizeCliEnv(env) }, encoding: 'utf-8', timeout: timeoutMs }, (err, stdout) => {
         if (err) {
           // Try without --help flag for some CLIs
           reject(err)

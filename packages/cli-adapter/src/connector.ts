@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import type { ExecutableTool } from '@anway/agent'
 import { discoverSubcommands } from './discovery.js'
 import type { DiscoveredCommand } from './discovery.js'
+import { sanitizeCliEnv } from './env-guard.js'
 
 export type { DiscoveredCommand }
 export { discoverSubcommands }
@@ -91,7 +92,7 @@ export class CliConnector {
    */
   async discoverAndBuild(): Promise<ExecutableTool[]> {
     if (this.toolsCache) return this.toolsCache
-    const cmds = await discoverSubcommands(this.config.binary, this.config.env, this.config.timeoutMs)
+    const cmds = await discoverSubcommands(this.config.binary, sanitizeCliEnv(this.config.env), this.config.timeoutMs)
     this.toolsCache = this.buildTools(cmds.map((c) => c.name))
     return this.toolsCache
   }
@@ -105,7 +106,7 @@ export class CliConnector {
           this.config.binary,
           argv,
           {
-            env: { ...process.env, ...this.config.env },
+            env: { ...process.env, ...sanitizeCliEnv(this.config.env) },
             encoding: 'utf-8',
             maxBuffer: MAX_BUFFER,
             timeout: timeoutMs,

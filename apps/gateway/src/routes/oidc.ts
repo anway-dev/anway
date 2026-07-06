@@ -57,8 +57,36 @@ function getOidcConfig(): OidcEnv | null {
   }
 }
 
+// OIDC_ALLOWED_EMAIL_DOMAINS (comma-separated, e.g. "acme.com,acme.dev") gates
+// *new* user creation via OAuth — without it, any verified email from any
+// identity provider (a personal Gmail via Google login, any GitHub account)
+// was silently provisioned into the tenant as role 'dev', confirmed live via
+// independent review as an open self-registration hole. An already-provisioned
+// user (created some other way — the admin-only POST /api/access/users route)
+// can still link their OAuth identity regardless of domain, since they were
+// already deliberately granted access; this only blocks *new* accounts from
+// domains not on the allowlist. Unset entirely = existing behavior (open
+// self-registration) — deployments must opt in to the restriction, but the
+// gap is now closeable via config rather than only via code.
+function isAllowedOAuthDomain(email: string): boolean {
+  const allowlist = process.env['OIDC_ALLOWED_EMAIL_DOMAINS']
+  if (!allowlist) return true
+  const domain = email.split('@')[1]?.toLowerCase()
+  if (!domain) return false
+  const allowed = allowlist.split(',').map(d => d.trim().toLowerCase()).filter(Boolean)
+  return allowed.includes(domain)
+}
+
 async function upsertOAuthUser(tenantId: string, email: string, sub: string): Promise<{ id: string | null; role: string }> {
   try {
+    const existing = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<{ id: string; role: string }[]>`
+        SELECT id, role FROM users WHERE tenant_id = ${tenantId}::uuid AND email = ${email} LIMIT 1
+      `
+    )
+    if (existing.length === 0 && !isAllowedOAuthDomain(email)) {
+      return { id: null, role: 'dev' }
+    }
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<{ id: string; role: string }[]>`
         INSERT INTO users (id, tenant_id, email, role, oidc_sub)

@@ -88,8 +88,18 @@ export async function authRoutes(app: FastifyInstance) {
     if (process.env['LOCAL_AUTH_DISABLED'] === 'true') {
       return reply.code(404).send({ error: 'local auth disabled' })
     }
+    // Lock setup once ANY user exists — not just password-having ones. Confirmed
+    // live via independent review: gating only on password_hash IS NOT NULL left
+    // this endpoint permanently open, unauthenticated, in any OIDC-only
+    // deployment (every real user has password_hash NULL there, forever). Worse,
+    // the INSERT below does ON CONFLICT (tenant_id, email) DO UPDATE SET
+    // password_hash=..., role='admin' — so an attacker who knows an existing
+    // OIDC user's email could hijack that exact account into an
+    // attacker-controlled admin login. Once any user exists at all, the tenant
+    // is already initialized; further admin provisioning must go through the
+    // authenticated, admin-only POST /api/access/users route instead.
     const existing = await prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) as count FROM users WHERE password_hash IS NOT NULL
+      SELECT COUNT(*) as count FROM users
     `
     if (Number(existing[0]?.count ?? 0) > 0) {
       return reply.code(409).send({ error: 'setup already complete' })

@@ -367,7 +367,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
     '/api/pipelines',
     { preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')] },
     async (request, reply) => {
-      const { tenantId } = request.user as { tenantId: string }
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
       const { name: rawName, description: rawDesc, stages, context, serviceName } = request.body
       const name = rawName?.replace(/<[^>]*>/g, '').trim()
       const description = rawDesc ? rawDesc.replace(/<[^>]*>/g, '').trim() : ''
@@ -398,6 +398,14 @@ export async function pipelineRoutes(app: FastifyInstance) {
       ).catch(() => [] as Array<{ id: string }>)
 
       if (rows.length === 0) return reply.code(500).send({ error: 'create failed' })
+
+      await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, 'pipeline_created',
+            ${JSON.stringify({ pipelineId: rows[0]!.id, name, customStages: Boolean(stages) })}::jsonb, now())
+        `,
+      ).catch(() => null)
 
       return reply.code(201).send({
         id: rows[0]!.id,
@@ -471,7 +479,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
     '/api/pipelines/:id/stages/:stageId/run',
     { preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')] },
     async (request, reply) => {
-      const { tenantId } = request.user as { tenantId: string }
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
       const { id, stageId } = request.params
       const { input } = request.body ?? {}
 
@@ -592,6 +600,19 @@ export async function pipelineRoutes(app: FastifyInstance) {
           tx.$queryRaw`
             UPDATE pipelines SET status = ${pipelineStatus}, updated_at = now()
             WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+          `,
+        ).catch(() => null)
+        // Deploy/build/gate/monitor stage completions previously wrote no
+        // audit trail at all — confirmed live via independent review, in
+        // direct contrast to CLAUDE.md's "every action immutably logged"
+        // mandate for exactly this class of consequential write action.
+        // Single choke point: every stage type (build/test/deploy/gate/
+        // monitor/rollback) calls finishRun on completion.
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            INSERT INTO audit_events (id, tenant_id, user_id, event_type, payload, created_at)
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, ${userId}::uuid, 'pipeline_stage_completed',
+              ${JSON.stringify({ pipelineId: id, stageId, runId, status, output })}::jsonb, now())
           `,
         ).catch(() => null)
       }

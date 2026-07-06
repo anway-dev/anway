@@ -10,15 +10,20 @@ function connFromCreds(creds: Record<string, unknown>): SonarQubeConn | null {
   return { baseUrl: resolvedBase.replace(/\/$/, ''), token }
 }
 
-async function sonarGet(conn: SonarQubeConn, path: string): Promise<unknown | null> {
-  try {
-    const auth = Buffer.from(`${conn.token}:`).toString('base64')
-    const res = await fetch(`${conn.baseUrl}${path}`, {
-      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    })
-    if (!res.ok) return null
-    return await res.json() as unknown
-  } catch { return null }
+// Throws on a real failure (non-OK response, network error) instead of
+// returning null — confirmed live via independent review that
+// get_quality_metrics's empty-result fallback was
+// {coverage:0, duplication:0, bugs:0, vulnerabilities:0}: reporting "0
+// bugs, 0 vulnerabilities" on a real fetch failure is a textbook false
+// all-clear, arguably worse than an empty array since it looks like a
+// genuinely clean scan result rather than "we couldn't reach SonarQube".
+async function sonarGet(conn: SonarQubeConn, path: string): Promise<unknown> {
+  const auth = Buffer.from(`${conn.token}:`).toString('base64')
+  const res = await fetch(`${conn.baseUrl}${path}`, {
+    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`SonarQube API error: HTTP ${res.status}`)
+  return await res.json() as unknown
 }
 
 interface SonarQubeIssue {
@@ -42,15 +47,15 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { issues: [] }
+      if (!conn) throw new Error('SonarQube credentials not configured (token/apiKey)')
 
       const project = String(params.project ?? '').trim()
-      if (!project) return { issues: [] }
+      if (!project) throw new Error('SonarQube get_issues: project is required')
 
       const data = await sonarGet(
         conn,
         `/api/issues/search?componentKeys=${encodeURIComponent(project)}&resolved=false`,
-      ) as { issues?: SonarQubeIssue[] } | null
+      ) as { issues?: SonarQubeIssue[] }
 
       if (!data?.issues) return { issues: [] }
 
@@ -83,10 +88,10 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const conn = connFromCreds(creds)
-      if (!conn) return { coverage: 0, duplication: 0, bugs: 0, vulnerabilities: 0 }
+      if (!conn) throw new Error('SonarQube credentials not configured (token/apiKey)')
 
       const project = String(params.project ?? '').trim()
-      if (!project) return { coverage: 0, duplication: 0, bugs: 0, vulnerabilities: 0 }
+      if (!project) throw new Error('SonarQube get_quality_metrics: project is required')
 
       const data = await sonarGet(
         conn,
@@ -95,9 +100,9 @@ const TOOLS: ConnectorTool[] = [
         component?: {
           measures?: Array<{ metric: string; value: string }>
         }
-      } | null
+      }
 
-      if (!data?.component?.measures) return { coverage: 0, duplication: 0, bugs: 0, vulnerabilities: 0 }
+      if (!data?.component?.measures) throw new Error('SonarQube get_quality_metrics: no measures in response')
 
       const metrics: Record<string, number> = {}
       for (const m of data.component.measures) {

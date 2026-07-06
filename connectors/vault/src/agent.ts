@@ -2,10 +2,10 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 interface VaultCreds { baseUrl: string; token: string }
 
-function extractCreds(creds: Record<string, unknown>): VaultCreds | null {
+function extractCreds(creds: Record<string, unknown>): VaultCreds {
   const baseUrl = (creds['baseUrl'] as string | undefined) ?? 'http://localhost:8200'
   const token = (creds['token'] as string | undefined) ?? (creds['apiKey'] as string | undefined)
-  if (!token) return null
+  if (!token) throw new Error('Vault credentials not configured (token/apiKey)')
   return { baseUrl: baseUrl.replace(/\/$/, ''), token }
 }
 
@@ -16,19 +16,25 @@ function splitMount(fullPath: string): [string, string] {
   return [fullPath.slice(0, idx), fullPath.slice(idx + 1)]
 }
 
+// Real Vault semantics: a LIST on a path with no secrets yet returns 404 —
+// that's a legitimate "nothing here" signal, not an error, so it stays
+// { ok: false } rather than throwing. But a network exception, an auth
+// failure (401/403 — wrong/expired token), or a server error (5xx) are real
+// failures that previously collapsed into the exact same { ok: false, data:
+// null } as the legitimate empty-list case — confirmed live via independent
+// review, masking "Vault is unreachable or misconfigured" as "no secrets/
+// policies exist". Those now throw instead.
 async function vaultRequest(
   baseUrl: string, vaultPath: string, method: string, token: string,
 ): Promise<{ ok: boolean; data: unknown }> {
-  try {
-    const res = await fetch(`${baseUrl}${vaultPath}`, {
-      method,
-      headers: { 'X-Vault-Token': token },
-    })
-    const body = await res.json() as unknown
-    return { ok: res.ok, data: body }
-  } catch {
-    return { ok: false, data: null }
-  }
+  const res = await fetch(`${baseUrl}${vaultPath}`, {
+    method,
+    headers: { 'X-Vault-Token': token },
+  })
+  if (res.status === 401 || res.status === 403) throw new Error(`Vault auth failed: HTTP ${res.status}`)
+  if (res.status >= 500) throw new Error(`Vault server error: HTTP ${res.status}`)
+  const body = await res.json().catch(() => null) as unknown
+  return { ok: res.ok, data: body }
 }
 
 const TOOLS: ConnectorTool[] = [
@@ -45,7 +51,6 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { keys: [], lastUpdated: null }
       const fullPath = String(params.path ?? '')
       const [mount, subpath] = splitMount(fullPath)
 
@@ -83,7 +88,6 @@ const TOOLS: ConnectorTool[] = [
     },
     execute: async (_params, creds) => {
       const c = extractCreds(creds)
-      if (!c) return { policies: [] }
       const result = await vaultRequest(c.baseUrl, '/v1/sys/policies/acl', 'GET', c.token)
       if (!result.ok) return { policies: [] }
       const policies = (result.data as { data?: { keys?: string[] } })?.data?.keys ?? []

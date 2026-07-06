@@ -46,25 +46,6 @@ const STAGE_ICONS: Record<string, string> = {
   prd: "📄", spec: "📐", tests: "🧪", collection: "⚡", deploy: "🚀", metrics: "📊",
 };
 
-const DEMO_ARTIFACTS: ArtifactRow[] = [
-  {
-    id: 'demo-prd-1',
-    kind: 'prd',
-    status: 'approved',
-    title: 'CSV export for audit log',
-    parentId: null,
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'demo-techspec-1',
-    kind: 'techspec',
-    status: 'review',
-    title: 'CSV export — TechSpec',
-    parentId: 'demo-prd-1',
-    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-];
-
 interface Props {
   onNodeClick: (node: StageNode, action?: string) => void;
   activeNodeId: string | null;
@@ -103,23 +84,18 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newFeatureInput, setNewFeatureInput] = useState("");
+  const [createError, setCreateError] = useState("");
 
   useEffect(() => {
+    // No fallback to demo data on an empty/failed response — "no PRDs yet" is
+    // a genuinely valid real state, and silently substituting fake data with
+    // no visual marker (confirmed live via independent review) is exactly the
+    // "mock fallback" failure mode CLAUDE.md's grounding architecture exists
+    // to prevent. A real empty result now renders a real empty state instead.
     fetch("/api/lifecycle/artifacts")
       .then((r) => r.ok ? r.json() as Promise<ArtifactRow[]> : [])
       .then((rows) => {
-        if (!Array.isArray(rows) || rows.length === 0) {
-          // Fallback — use demo data when API returns empty
-          const prds = DEMO_ARTIFACTS.filter((r) => r.kind === "prd");
-          const techSpecs = DEMO_ARTIFACTS.filter((r) => r.kind === "techspec");
-          const built = prds.map((prd) => {
-            const ts = techSpecs.find((s) => s.parentId === prd.id) ?? null;
-            return buildFeatureFromArtifacts(prd, ts);
-          });
-          setFeatures(built);
-          if (built.length > 0) setSelectedFeature(built[0]);
-          return;
-        }
+        if (!Array.isArray(rows)) rows = [];
         const prds = rows.filter((r) => r.kind === "prd");
         const techSpecs = rows.filter((r) => r.kind === "techspec");
         const built = prds.map((prd) => {
@@ -136,6 +112,7 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
   async function createPrd() {
     if (!newFeatureInput.trim()) return;
     setCreating(true);
+    setCreateError("");
     try {
       const resp = await fetch("/api/lifecycle/prd", {
         method: "POST",
@@ -151,12 +128,16 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
         const built = prds.map((prd) => buildFeatureFromArtifacts(prd, specs.find((s) => s.parentId === prd.id) ?? null));
         setFeatures(built);
         if (built.length > 0) setSelectedFeature(built[built.length - 1]);
+      } else {
+        const body = await resp.json().catch(() => ({})) as { error?: string };
+        setCreateError(body.error ?? `Failed to create PRD (${resp.status})`);
       }
     } catch {
-      // Fallback — append demo PRD when LLM not configured
-      const newFeature = buildFeatureFromArtifacts(DEMO_ARTIFACTS[0]!, null);
-      setFeatures(prev => [...prev, newFeature]);
-      setNewFeatureInput("");
+      // Real failure — surface it rather than silently injecting fake demo
+      // content as if the request had succeeded (confirmed live via
+      // independent review this previously masked a real error, e.g. no LLM
+      // provider configured, as a successful PRD creation).
+      setCreateError("Network error — is the gateway running, and is an LLM provider configured?");
     } finally {
       setCreating(false);
     }
@@ -201,6 +182,7 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
               {creating ? "Generating…" : "+ Create PRD"}
             </button>
           </div>
+          {createError && <div style={{ fontSize: "11px", color: "#ef4444" }}>{createError}</div>}
         </div>
       </div>
     );
@@ -258,6 +240,7 @@ export function LifecycleView({ onNodeClick, activeNodeId }: Props) {
             {creating ? "Generating…" : "+ New Feature"}
           </button>
         </div>
+        {createError && <div style={{ fontSize: "11px", color: "#ef4444", marginTop: "6px" }}>{createError}</div>}
       </div>
 
       {/* Lifecycle nodes */}

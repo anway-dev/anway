@@ -24,31 +24,68 @@ const COLLECTIONS = [
   },
 ];
 
-const MOCK_RESPONSE = {
-  status: 201,
-  time: "234ms",
-  size: "847 B",
-  body: JSON.stringify({
-    id: "pay_01H8XQZM3YPQR4T5V6W7X8Y9Z",
-    status: "pending",
-    amount: 4999,
-    currency: "USD",
-    method: { brand: "visa", last4: "4242", expiry: "12/27" },
-    requiresAction: false,
-    createdAt: "2024-01-15T14:32:11.000Z",
-  }, null, 2),
-};
+interface RealResponse {
+  status: number
+  statusText: string
+  timeMs: number
+  sizeBytes: number
+  body: string
+  headers: Array<[string, string]>
+  error?: string
+}
 
 export function ApiClientView() {
   const [method, setMethod] = useState("POST");
   const [url, setUrl] = useState("https://api.acme.dev/v2/payments/quick-checkout");
   const [activeTab, setActiveTab] = useState<"body" | "headers" | "auth">("body");
-  const [responseTab, setResponseTab] = useState<"body" | "headers" | "tests">("body");
+  const [responseTab, setResponseTab] = useState<"body" | "headers">("body");
   const [body, setBody] = useState(JSON.stringify({ userId: "usr_abc123", methodId: "pm_xyz789", amount: 4999, currency: "USD", idempotencyKey: "req_01HXYZ" }, null, 2));
-  const [sent, setSent] = useState(false);
+  const [headerRows, setHeaderRows] = useState<Array<[string, string]>>([["Content-Type", "application/json"]]);
+  const [sending, setSending] = useState(false);
+  const [response, setResponse] = useState<RealResponse | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<string | null>("POST /v2/payments/quick-checkout");
 
-  const handleSend = () => setSent(true);
+  // A real request — this previously always set a `sent` flag and rendered a
+  // hardcoded MOCK_RESPONSE (fake payment JSON) regardless of what
+  // method/url/body/headers were actually configured, confirmed live via
+  // independent review. No fetch was ever made at all.
+  async function handleSend() {
+    setSending(true);
+    setResponse(null);
+    const started = performance.now();
+    try {
+      const headers: Record<string, string> = {};
+      for (const [k, v] of headerRows) if (k.trim()) headers[k] = v;
+      const hasBody = method !== "GET" && method !== "DELETE" && body.trim().length > 0;
+      const resp = await fetch(url, {
+        method,
+        headers,
+        body: hasBody ? body : undefined,
+      });
+      const text = await resp.text();
+      const timeMs = Math.round(performance.now() - started);
+      setResponse({
+        status: resp.status,
+        statusText: resp.statusText,
+        timeMs,
+        sizeBytes: new Blob([text]).size,
+        body: text,
+        headers: Array.from(resp.headers.entries()),
+      });
+    } catch (e) {
+      setResponse({
+        status: 0,
+        statusText: "Request failed",
+        timeMs: Math.round(performance.now() - started),
+        sizeBytes: 0,
+        body: "",
+        headers: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -88,11 +125,6 @@ export function ApiClientView() {
             </div>
           ))}
         </div>
-        <div style={{ padding: "12px 16px", borderTop: "1px solid #1a1a1a" }}>
-          <button style={{ width: "100%", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#10b981", padding: "6px", borderRadius: "6px", cursor: "pointer", fontSize: "11px" }}>
-            ✦ AI Generate Collection
-          </button>
-        </div>
       </div>
 
       {/* Middle: Request builder */}
@@ -115,12 +147,10 @@ export function ApiClientView() {
           />
           <button
             onClick={handleSend}
-            style={{ background: "#10b981", border: "none", color: "#000", padding: "8px 16px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: 700, flexShrink: 0 }}
+            disabled={sending || !url.trim()}
+            style={{ background: "#10b981", border: "none", color: "#000", padding: "8px 16px", borderRadius: "6px", cursor: sending ? "default" : "pointer", fontSize: "12px", fontWeight: 700, flexShrink: 0, opacity: sending ? 0.6 : 1 }}
           >
-            Send ↵
-          </button>
-          <button style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#10b981", padding: "8px 10px", borderRadius: "6px", cursor: "pointer", fontSize: "11px", flexShrink: 0 }}>
-            ✦ AI
+            {sending ? "Sending…" : "Send ↵"}
           </button>
         </div>
 
@@ -149,13 +179,28 @@ export function ApiClientView() {
           )}
           {activeTab === "headers" && (
             <div style={{ padding: "16px" }}>
-              {[["Authorization", "Bearer {{API_TOKEN}}"], ["Content-Type", "application/json"], ["X-Request-ID", "{{$random.uuid}}"]].map(([k, v]) => (
-                <div key={k} style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                  <input defaultValue={k} style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#888", padding: "7px 10px", borderRadius: "4px", fontSize: "11px", outline: "none", fontFamily: "monospace" }} />
-                  <input defaultValue={v} style={{ flex: 2, background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#e5e5e5", padding: "7px 10px", borderRadius: "4px", fontSize: "11px", outline: "none", fontFamily: "monospace" }} />
+              {headerRows.map(([k, v], i) => (
+                <div key={i} style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                  <input
+                    value={k}
+                    onChange={(e) => setHeaderRows(rows => rows.map((r, ri) => ri === i ? [e.target.value, r[1]] : r))}
+                    style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#888", padding: "7px 10px", borderRadius: "4px", fontSize: "11px", outline: "none", fontFamily: "monospace" }}
+                  />
+                  <input
+                    value={v}
+                    onChange={(e) => setHeaderRows(rows => rows.map((r, ri) => ri === i ? [r[0], e.target.value] : r))}
+                    style={{ flex: 2, background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#e5e5e5", padding: "7px 10px", borderRadius: "4px", fontSize: "11px", outline: "none", fontFamily: "monospace" }}
+                  />
+                  <button
+                    onClick={() => setHeaderRows(rows => rows.filter((_, ri) => ri !== i))}
+                    style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "12px", padding: "0 6px" }}
+                  >×</button>
                 </div>
               ))}
-              <button style={{ background: "transparent", border: "1px dashed #2a2a2a", color: "#555", padding: "6px 12px", borderRadius: "4px", cursor: "pointer", fontSize: "11px", marginTop: "4px" }}>
+              <button
+                onClick={() => setHeaderRows(rows => [...rows, ["", ""]])}
+                style={{ background: "transparent", border: "1px dashed #2a2a2a", color: "#555", padding: "6px 12px", borderRadius: "4px", cursor: "pointer", fontSize: "11px", marginTop: "4px" }}
+              >
                 + Add Header
               </button>
             </div>
@@ -179,24 +224,26 @@ export function ApiClientView() {
 
       {/* Right: Response */}
       <div style={{ width: "380px", background: "#0e0e0e", borderLeft: "1px solid #1a1a1a", display: "flex", flexDirection: "column" }}>
-        {!sent ? (
+        {!response ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: "32px", marginBottom: "12px" }}>⚡</div>
-              <div style={{ fontSize: "13px", color: "#555" }}>Send a request to see the response</div>
+              <div style={{ fontSize: "13px", color: "#555" }}>{sending ? "Sending…" : "Send a request to see the response"}</div>
             </div>
           </div>
         ) : (
           <>
-            {/* Response meta */}
+            {/* Response meta — real status/timing/size from the actual fetch */}
             <div style={{ padding: "14px 16px", borderBottom: "1px solid #1a1a1a", display: "flex", gap: "16px", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", color: "#10b981", fontWeight: 700 }}>201 Created</span>
-              <span style={{ fontSize: "11px", color: "#888" }}>{MOCK_RESPONSE.time}</span>
-              <span style={{ fontSize: "11px", color: "#888" }}>{MOCK_RESPONSE.size}</span>
+              <span style={{ fontSize: "12px", color: response.error || response.status >= 400 ? "#ef4444" : "#10b981", fontWeight: 700 }}>
+                {response.error ? "Failed" : `${response.status} ${response.statusText}`}
+              </span>
+              <span style={{ fontSize: "11px", color: "#888" }}>{response.timeMs}ms</span>
+              {!response.error && <span style={{ fontSize: "11px", color: "#888" }}>{response.sizeBytes} B</span>}
             </div>
 
             <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", padding: "0 16px" }}>
-              {(["body", "headers", "tests"] as const).map((tab) => (
+              {(["body", "headers"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setResponseTab(tab)}
@@ -209,13 +256,14 @@ export function ApiClientView() {
 
             <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
               {responseTab === "body" && (
-                <pre style={{ fontFamily: "monospace", fontSize: "11px", color: "#10b981", lineHeight: "1.7", margin: 0, whiteSpace: "pre-wrap" }}>
-                  {MOCK_RESPONSE.body}
+                <pre style={{ fontFamily: "monospace", fontSize: "11px", color: response.error ? "#ef4444" : "#10b981", lineHeight: "1.7", margin: 0, whiteSpace: "pre-wrap" }}>
+                  {response.error ?? response.body}
                 </pre>
               )}
               {responseTab === "headers" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  {[["Content-Type", "application/json"], ["X-Request-ID", "01HXYZ..."], ["Cache-Control", "no-store"], ["X-RateLimit-Remaining", "98"]].map(([k, v]) => (
+                  {response.headers.length === 0 && <div style={{ fontSize: "11px", color: "#555" }}>No headers.</div>}
+                  {response.headers.map(([k, v]) => (
                     <div key={k} style={{ display: "flex", gap: "12px", fontSize: "11px" }}>
                       <span style={{ color: "#888", minWidth: "160px" }}>{k}</span>
                       <span style={{ color: "#d1d5db", fontFamily: "monospace" }}>{v}</span>
@@ -223,23 +271,6 @@ export function ApiClientView() {
                   ))}
                 </div>
               )}
-              {responseTab === "tests" && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {[["Status is 201", true], ["Response has id field", true], ["id starts with pay_", true], ["requiresAction is boolean", true], ["Response time < 500ms", true]].map(([name, pass]) => (
-                    <div key={String(name)} style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "11px" }}>
-                      <span style={{ color: pass ? "#10b981" : "#ef4444" }}>{pass ? "✓" : "✗"}</span>
-                      <span style={{ color: pass ? "#d1d5db" : "#ef4444" }}>{String(name)}</span>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: "8px", fontSize: "11px", color: "#555" }}>5 / 5 assertions passed</div>
-                </div>
-              )}
-            </div>
-
-            <div style={{ padding: "10px 16px", borderTop: "1px solid #1a1a1a" }}>
-              <button style={{ width: "100%", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#10b981", padding: "6px", borderRadius: "6px", cursor: "pointer", fontSize: "11px" }}>
-                ✦ AI: Generate assertions from this response
-              </button>
             </div>
           </>
         )}

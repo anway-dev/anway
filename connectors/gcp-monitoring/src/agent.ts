@@ -40,19 +40,23 @@ function gcloudEnv(creds: Record<string, unknown>): NodeJS.ProcessEnv {
   return env
 }
 
+// Throws on a real failure (gcloud CLI missing/not authenticated, nonzero
+// exit) instead of returning null — confirmed live via independent review
+// that collapsing every real failure into null (which every tool then
+// treated as an empty result) masks a real GCP auth/outage failure as "no
+// metrics/alarms/events". The one legitimate exception (get_alarms's
+// alpha incidents call, which is documented as allowed to fail and degrade
+// gracefully) wraps its own call in a local try/catch below rather than
+// relying on this function to swallow errors for everyone.
 async function runGcloud(args: string[], env: NodeJS.ProcessEnv): Promise<unknown> {
-  try {
-    const project = env['CLOUDSDK_CORE_PROJECT']
-    const projArgs = project ? ['--project', project] : []
-    const { stdout } = await execFileAsync(
-      'gcloud',
-      [...args, ...projArgs, '--format=json'],
-      { env, timeout: 30000 },
-    )
-    return JSON.parse(stdout)
-  } catch {
-    return null
-  }
+  const project = env['CLOUDSDK_CORE_PROJECT']
+  const projArgs = project ? ['--project', project] : []
+  const { stdout } = await execFileAsync(
+    'gcloud',
+    [...args, ...projArgs, '--format=json'],
+    { env, timeout: 30000 },
+  )
+  return JSON.parse(stdout)
 }
 
 /** Parse a human-readable window like "1h", "30m", "5m" into milliseconds. */
@@ -180,11 +184,19 @@ const TOOLS: ConnectorTool[] = [
         }>
       }>
 
-      // Try to get open incidents for firing state (alpha command, may fail)
-      const incidentsR = await runGcloud(
-        ['alpha', 'monitoring', 'incidents', 'list', '--filter', 'state=open'],
-        env,
-      )
+      // Try to get open incidents for firing state (alpha command, may fail —
+      // this is the one intentional exception to runGcloud now throwing on
+      // error: incidents are a real optional enrichment, not the primary
+      // data this tool exists to return, so this call keeps its own local
+      // try/catch instead of letting a real failure here take down the
+      // whole tool.
+      let incidentsR: unknown = null
+      try {
+        incidentsR = await runGcloud(
+          ['alpha', 'monitoring', 'incidents', 'list', '--filter', 'state=open'],
+          env,
+        )
+      } catch { /* optional enrichment — degrade gracefully */ }
       const incidents: Array<{ policyName?: string; state?: string; summary?: string }> =
         Array.isArray(incidentsR) ? incidentsR as typeof incidents : []
 
@@ -225,8 +237,9 @@ const TOOLS: ConnectorTool[] = [
       description:
         'Get Google Cloud service health events via the Personalized Service Health API. ' +
         'Uses gcloud auth print-access-token for authentication, then calls the REST API. ' +
-        'Returns an empty array if the API call fails, the Service Health API is not enabled, ' +
-        'or no project is configured in credentials.',
+        'Throws a real error if the API call fails, the Service Health API ' +
+        'is not enabled, or no project is configured in credentials — ' +
+        'rather than silently reporting no active events.',
       parameters: {
         type: 'object',
         properties: {},
@@ -235,45 +248,41 @@ const TOOLS: ConnectorTool[] = [
     execute: async (_params, creds) => {
       const env = gcloudEnv(creds)
       const project = env['CLOUDSDK_CORE_PROJECT']
-      if (!project) return { events: [] }
+      if (!project) throw new Error('GCP Monitoring get_health_events: no project configured in credentials')
 
-      try {
-        // Get OAuth access token via gcloud (execFile, no interpolated args —
-        // this call takes no parameters at all, nothing to inject).
-        const { stdout: tokenOut } = await execFileAsync(
-          'gcloud', ['auth', 'print-access-token'], { env, timeout: 15000 },
-        )
-        const token = tokenOut.trim()
-        if (!token) return { events: [] }
+      // Get OAuth access token via gcloud (execFile, no interpolated args —
+      // this call takes no parameters at all, nothing to inject).
+      const { stdout: tokenOut } = await execFileAsync(
+        'gcloud', ['auth', 'print-access-token'], { env, timeout: 15000 },
+      )
+      const token = tokenOut.trim()
+      if (!token) throw new Error('GCP Monitoring get_health_events: gcloud produced no access token')
 
-        // Call Personalized Service Health API directly via fetch — no need
-        // to shell out to curl for an authenticated HTTPS GET.
-        // Endpoint: https://cloud.google.com/service-health/docs/reference/rest/v1/projects.locations.events/list
-        const url = `https://servicehealth.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/global/events`
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-        if (!res.ok) return { events: [] }
-        const r = await res.json() as {
-          events?: Array<{
-            title?: string
-            description?: string
-            category?: string
-            state?: string
-            detailedState?: string
-            affectedProducts?: string[]
-            affectedLocations?: string[]
-          }>
-        }
-
-        const events = (r.events ?? []).map(e => ({
-          service: e.affectedProducts?.join(', ') ?? e.category ?? 'GCP',
-          region:  e.affectedLocations?.join(', ') ?? 'global',
-          status:  e.state ?? e.detailedState ?? 'unknown',
-          message: e.description ?? e.title ?? 'No description',
-        }))
-        return { events }
-      } catch {
-        return { events: [] }
+      // Call Personalized Service Health API directly via fetch — no need
+      // to shell out to curl for an authenticated HTTPS GET.
+      // Endpoint: https://cloud.google.com/service-health/docs/reference/rest/v1/projects.locations.events/list
+      const url = `https://servicehealth.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/global/events`
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error(`GCP Monitoring get_health_events failed: HTTP ${res.status}`)
+      const r = await res.json() as {
+        events?: Array<{
+          title?: string
+          description?: string
+          category?: string
+          state?: string
+          detailedState?: string
+          affectedProducts?: string[]
+          affectedLocations?: string[]
+        }>
       }
+
+      const events = (r.events ?? []).map(e => ({
+        service: e.affectedProducts?.join(', ') ?? e.category ?? 'GCP',
+        region:  e.affectedLocations?.join(', ') ?? 'global',
+        status:  e.state ?? e.detailedState ?? 'unknown',
+        message: e.description ?? e.title ?? 'No description',
+      }))
+      return { events }
     },
     write: false,
   },

@@ -26,13 +26,18 @@ function awsEnv(creds: Record<string, unknown>): NodeJS.ProcessEnv {
   return env
 }
 
+// Throws on a real failure (aws CLI missing/not authenticated, nonzero
+// exit — including AWS Health's own "not entitled, needs Business/
+// Enterprise support" error, which get_health_events below previously
+// documented as returning an empty array for — instead of returning null.
+// Confirmed live via independent review that collapsing every real failure
+// into the same null (which every tool then treated as an empty result)
+// masks a real AWS auth/outage/entitlement failure as "no
+// metrics/alarms/events". A genuine 200-equivalent-but-empty response is a
+// separate, real case each tool below still handles on its own.
 async function runAws(args: string[], env: NodeJS.ProcessEnv): Promise<unknown> {
-  try {
-    const { stdout } = await execFileAsync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
-    return JSON.parse(stdout)
-  } catch {
-    return null
-  }
+  const { stdout } = await execFileAsync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
+  return JSON.parse(stdout)
 }
 
 /** Parse a human-readable window like "1h", "30m", "5m" into milliseconds. */
@@ -167,7 +172,8 @@ const TOOLS: ConnectorTool[] = [
       description:
         'Get AWS Health events (Personal Health Dashboard). ' +
         'Calls aws health describe-events. Requires Business or Enterprise ' +
-        'support plan — returns empty array if the account is not entitled.',
+        'support plan — throws a real error (not entitled) if the account ' +
+        'lacks that plan, rather than silently reporting no active events.',
       parameters: { type: 'object', properties: {} },
     },
     execute: async (_params, creds) => {

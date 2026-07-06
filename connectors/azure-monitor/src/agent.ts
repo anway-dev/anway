@@ -27,13 +27,16 @@ function azEnv(creds: Record<string, unknown>): NodeJS.ProcessEnv {
   return env
 }
 
+// Throws on a real failure (az CLI missing/not authenticated, nonzero exit,
+// malformed JSON) instead of returning null — confirmed live via
+// independent review that collapsing "not authenticated" and "genuinely no
+// data" into the same null (which every tool then treated as an empty
+// result) masks a real Azure auth/outage failure as "no metrics/alarms/
+// events". A genuine 200-equivalent-but-empty response is a separate, real
+// case each tool below still handles on its own.
 async function runAz(args: string[], env: NodeJS.ProcessEnv): Promise<unknown> {
-  try {
-    const { stdout } = await execFileAsync('az', [...args, '--output', 'json'], { env, timeout: 30000 })
-    return JSON.parse(stdout)
-  } catch {
-    return null
-  }
+  const { stdout } = await execFileAsync('az', [...args, '--output', 'json'], { env, timeout: 30000 })
+  return JSON.parse(stdout)
 }
 
 /** Parse a human-readable window like "1h", "30m", "5m" into milliseconds. */
@@ -240,7 +243,7 @@ const TOOLS: ConnectorTool[] = [
         (creds['subscriptionId'] as string | undefined) ??
         (creds['subscription_id'] as string | undefined)
 
-      if (!subId) return { events: [] }
+      if (!subId) throw new Error('Azure Monitor get_health_events: subscriptionId not configured (creds or param)')
 
       // Microsoft.ResourceHealth events endpoint — canonical source for Azure
       // Service Health events. Filtered to eventSource eq 'ServiceHealth' to

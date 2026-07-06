@@ -16,6 +16,14 @@ export class InMemoryGateSink implements IGateSink {
   }
 
   async record(gateId: string, decision: 'approved' | 'rejected', _userId: string): Promise<void> {
+    // Only record a decision for a gate that was genuinely push()ed first —
+    // confirmed live via independent review: this previously set *any*
+    // gateId key unconditionally, so a caller could "approve" a gate that
+    // never existed at all. The one real caller (gate-decide-route.ts)
+    // already guards this itself (a real gate_events row must exist
+    // before calling record), but this class is exported and reusable —
+    // the guard belongs here too, not only in one caller.
+    if (!this.store.has(gateId)) return
     this.store.set(gateId, decision)
   }
 

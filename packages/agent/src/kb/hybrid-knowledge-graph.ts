@@ -55,19 +55,40 @@ export class HybridKnowledgeGraph implements IKnowledgeGraph {
     return this.structural.deleteEntitiesByOrgPrefix(type, orgPrefix, keepNames, tenantId)
   }
 
+  // Previously: with Graphiti configured, this returned Graphiti facts only
+  // and never touched StructuralGraph.search() at all; without Graphiti, it
+  // returned [] unconditionally — confirmed live via independent review
+  // that StructuralGraph.search() is a real, working pgvector semantic
+  // search over kb_entries (embedding <=> vector, with an ILIKE fallback),
+  // but it was completely orphaned by the Hybrid implementation actually
+  // selected in production (createKnowledgeGraph picks Hybrid whenever
+  // AGENT_SERVICE_URL is set). Now queries both and merges: Graphiti's
+  // temporal facts first (more precise for "what changed recently"-style
+  // queries), then fills remaining slots with semantic structural hits not
+  // already represented, deduped by content.
   async search(query: string, tenantId: TenantId, topK: number): Promise<KBEntry[]> {
-    if (this.graphiti) {
-      const facts = await this.graphiti.getFacts(query)
-      return facts.slice(0, topK).map(f => ({
-        id: '',
-        tenantId,
-        source: 'graphiti',
-        fetchedAt: new Date(),
-        ttlSeconds: 3600,
-        freshnessScore: 1.0,
-        content: f.claim,
-      }))
+    const structuralHits = await this.structural.search(query, tenantId, topK).catch(() => [] as KBEntry[])
+    if (!this.graphiti) return structuralHits
+
+    const facts = await this.graphiti.getFacts(query).catch(() => [] as Fact[])
+    const graphitiEntries: KBEntry[] = facts.slice(0, topK).map(f => ({
+      id: '',
+      tenantId,
+      source: 'graphiti',
+      fetchedAt: new Date(),
+      ttlSeconds: 3600,
+      freshnessScore: 1.0,
+      content: f.claim,
+    }))
+
+    const seen = new Set(graphitiEntries.map(e => e.content))
+    const merged = [...graphitiEntries]
+    for (const hit of structuralHits) {
+      if (merged.length >= topK) break
+      if (seen.has(hit.content)) continue
+      merged.push(hit)
+      seen.add(hit.content)
     }
-    return []
+    return merged.slice(0, topK)
   }
 }

@@ -567,7 +567,7 @@ export async function chatRoutes(app: FastifyInstance) {
     const embedder = ProviderFactory.createEmbedder(providerConfig)
     const knowledgeGraph: IKnowledgeGraph = createKnowledgeGraph(TenantId(tenantId), embedder ?? undefined)
     const connectorTools = await getToolsForTenant(prisma, tenantId)
-    const deployTools = makeDeployTools(tenantId, userId, provider, knowledgeGraph)
+    const deployTools = makeDeployTools(tenantId, userId, role, provider, knowledgeGraph)
     const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)

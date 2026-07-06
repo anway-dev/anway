@@ -3,10 +3,12 @@ import { DeployAgent } from '@anway/agent'
 import { TenantId } from '@anway/types'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { decideGate } from '../gate/decide-gate.js'
 
 export function makeDeployTools(
   tenantId: string,
   userId: string,
+  role: string,
   provider: IModelProvider,
   kg: IKnowledgeGraph,
 ): ExecutableTool[] {
@@ -120,56 +122,39 @@ export function makeDeployTools(
         required: ['gate_id'],
       },
       async run(args: Record<string, unknown>) {
+        // Approving a gate is itself a privileged write action — confirmed
+        // live via independent review that this tool previously had no role
+        // check at all (any authenticated user, including 'dev', could
+        // approve a colleague's pending deploy/scale/restart gate) and
+        // duplicated a simplified, diverging copy of the gate-decision logic
+        // that bypassed gate_policies.approvers_required entirely and never
+        // wrote an audit_events row. Now delegates to the same decideGate()
+        // used by the dedicated /api/gate/:gateId/decide route so both paths
+        // enforce identical role/SoD/multi-approver/audit semantics.
+        if (role !== 'admin' && role !== 'sre') {
+          return { error: 'Approving a gate requires admin or sre role.' }
+        }
+
         const gateId = args['gate_id'] as string
         const reason = (args['reason'] as string | undefined) ?? 'Approved via chat'
 
-        // SoD + cross-user check: read gate before updating
-        const pending = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ id: string; user_id: string }>>`
-            SELECT id, user_id FROM gate_events
-            WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
-            LIMIT 1
-          `
-        ).catch(() => [])
-
-        if (pending.length === 0) {
-          return { error: `Gate ${gateId} not found or already resolved.` }
-        }
-        if (pending[0]!.user_id === userId) {
-          return { error: 'Cannot approve your own gate request — requires a different approver.' }
+        const result = await decideGate(tenantId, userId, gateId, 'approved')
+        if (!result.ok) {
+          return { error: result.error }
         }
 
-        const rows = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ id: string; status: string }>>`
-            UPDATE gate_events
-            SET status = 'approved',
-                decided_by = ${userId}::uuid,
-                decided_at = NOW(),
-                tool_args = tool_args || ${JSON.stringify({ approvedBy: userId, reason, approvedAt: new Date().toISOString() })}::jsonb
-            WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'pending'
-            RETURNING id, status
-          `
-        ).catch(() => [])
-
-        if (rows.length === 0) {
-          return { error: `Gate ${gateId} could not be approved.` }
+        return {
+          ok: true,
+          gateId,
+          status: result.decision,
+          fullyApproved: result.fullyApproved,
+          votesReceived: result.votesReceived,
+          votesRequired: result.votesRequired,
+          reason,
+          message: result.fullyApproved
+            ? 'Gate approved. Next pipeline stage will run automatically.'
+            : `Vote recorded (${result.votesReceived}/${result.votesRequired} approvals) — waiting on additional approver(s).`,
         }
-
-        // Update Redis decision key so pollGate() unblocks the waiting orchestrator run
-        const redisUrl = process.env['REDIS_URL']
-        if (redisUrl) {
-          const { createClient } = await import('redis')
-          const redis = createClient({ url: redisUrl })
-          try {
-            await redis.connect()
-            await redis.set(`gate:${gateId}:decision`, 'approved')
-          } catch { /* Redis may be unavailable — pollGate will timeout */ }
-          finally {
-            try { await redis.disconnect() } catch { /* ignore */ }
-          }
-        }
-
-        return { ok: true, gateId, status: 'approved', reason, message: 'Gate approved. Next pipeline stage will run automatically.' }
       },
     },
   ]

@@ -114,6 +114,14 @@ RUN pnpm --filter anway-gateway build
 FROM node:22 AS runtime
 WORKDIR /app
 
+# The runtime container has no .git (excluded by .dockerignore for build-context
+# size/security) and no git binary — pipeline.ts's resolveGitSha() previously
+# always fell back to the literal string 'latest' in exactly this environment,
+# silently reinstating the mutable-tag bug it was meant to fix. Bake the real
+# commit SHA in at build time instead, read via process.env.GIT_SHA.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 # Install gh CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget curl ca-certificates \

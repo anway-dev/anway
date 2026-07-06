@@ -122,17 +122,26 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
     setSelectedModel("");
     const needsKey = selectedManifest?.fields.some(f => f.key === 'apiKey' && f.required);
     if (needsKey && apiKey.length > 0 && apiKey.length < 10) { setModels([]); return; }
-    fetch('/api/settings/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) }) })
-      .then(r => r.ok ? r.json() : { models: [] })
-      .then((data: ModelList) => {
-        const list = data.models ?? [];
-        setModels(list);
-        if (initialModelRef.current && list.includes(initialModelRef.current)) {
-          setSelectedModel(initialModelRef.current);
-          initialModelRef.current = '';
-        }
-      })
-      .catch(() => setModels([]));
+    // Debounced: this fires a real POST carrying the in-progress apiKey to the
+    // server on every keystroke once it crossed 10 chars — for a live "which
+    // models does this key unlock" preview, but that means a partial/mistyped
+    // key gets transmitted repeatedly while the user is still typing. A short
+    // debounce cuts that down to one request per real pause, not one per
+    // keystroke, without giving up the live-preview feature.
+    const handle = setTimeout(() => {
+      fetch('/api/settings/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: selectedProvider, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}) }) })
+        .then(r => r.ok ? r.json() : { models: [] })
+        .then((data: ModelList) => {
+          const list = data.models ?? [];
+          setModels(list);
+          if (initialModelRef.current && list.includes(initialModelRef.current)) {
+            setSelectedModel(initialModelRef.current);
+            initialModelRef.current = '';
+          }
+        })
+        .catch(() => setModels([]));
+    }, 600)
+    return () => clearTimeout(handle)
   }, [selectedProvider, baseUrl, apiKey, selectedManifest]);
 
   async function handleSave() {

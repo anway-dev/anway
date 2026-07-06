@@ -8,7 +8,7 @@ import { providerRegistry } from '@anway/agent'
 import { encryptJson, decryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
-import dns from 'node:dns/promises'
+import { isSafeURL } from '../utils/safe-url.js'
 import { CONNECTOR_CATALOG } from './connectors.js'
 
 let _settingsPub: import('redis').RedisClientType | null = null
@@ -34,33 +34,9 @@ function manifestModels(manifest: { models: string[] | 'dynamic'; modelsEndpoint
   return []  // dynamic models resolved client-side
 }
 
-function isSafeBaseUrl(raw: string): boolean {
-  try {
-    const u = new URL(raw)
-    if (!['http:', 'https:'].includes(u.protocol)) return false
-    const host = u.hostname.replace(/^\[|\]$/g, '')  // strip IPv6 brackets
-    // Block RFC-1918 private ranges + loopback IPs. localhost blocked too — consistency with 127.0.0.1
-    if (host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === 'localhost') return false
-    // Block IPv4-mapped IPv6 loopback
-    if (host.startsWith('::ffff:127.') || host.startsWith('::ffff:10.') || host.startsWith('::ffff:172.') || host.startsWith('::ffff:192.') || host.startsWith('::ffff:169.')) return false
-    // Block decimal-encoded IPs
-    if (/^\d+$/.test(host)) return false
-    if (/^(169\.254\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(host)) return false
-    return true
-  } catch { return false }
-}
-
-async function isSafeURL(raw: string): Promise<boolean> {
-  if (!isSafeBaseUrl(raw)) return false
-  try {
-    const u = new URL(raw)
-    const addresses = await dns.resolve4(u.hostname).catch(() => [])
-    for (const ip of addresses) {
-      if (/^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(ip)) return false
-    }
-    return true
-  } catch { return false }
-}
+// isSafeBaseUrl/isSafeURL moved to ../utils/safe-url.ts — shared with
+// connectors.ts's /api/connectors/:type/test route, which previously had no
+// SSRF guard at all.
 
 export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import('redis').RedisClientType }) {
   app.get('/api/settings/provider-manifests', async () => {

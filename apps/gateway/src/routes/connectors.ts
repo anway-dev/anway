@@ -7,6 +7,7 @@ import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
 import { decryptJson } from '../utils/crypto.js'
+import { isSafeURL } from '../utils/safe-url.js'
 import { testK8sConnectivity } from '@anway/connector-k8s'
 import { createKnowledgeGraph } from '../kb/index.js'
 
@@ -426,7 +427,13 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
   // POST /api/connectors/:type/test — validates credentials before saving
   app.post<{ Params: { type: string }; Body: { credentials: Record<string, unknown> } }>(
     '/api/connectors/:type/test',
-    { preHandler: [app.authenticate] },
+    // Admin-only + SSRF-guarded: this route lets an authenticated caller make
+    // the gateway issue an arbitrary outbound HTTP request (any authenticated
+    // user, no role check, no isSafeURL guard at all previously — confirmed
+    // live via independent review). Without the guard it reaches cloud
+    // metadata endpoints (169.254.169.254) and internal-only services, and
+    // leaks their reachability/status back to the caller.
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
     async (request, reply) => {
       const { type } = request.params
       const { credentials } = request.body
@@ -441,13 +448,17 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
       } else {
         const urlVal = (credentials['url'] ?? credentials['server'] ?? credentials['baseUrl'] ?? credentials['site'] ?? credentials['env_url']) as string | undefined
         if (urlVal && typeof urlVal === 'string') {
-          try {
-            const res = await fetch(urlVal, { signal: AbortSignal.timeout(5000), method: 'HEAD' })
-            result = (res.ok || res.status < 500)
-              ? { ok: true, message: `Reachable (HTTP ${res.status})` }
-              : { ok: false, error: `HTTP ${res.status} from ${urlVal}` }
-          } catch (e) {
-            result = { ok: false, error: String(e).slice(0, 200) }
+          if (!(await isSafeURL(urlVal))) {
+            result = { ok: false, error: 'URL resolves to a private/internal address — refusing to test' }
+          } else {
+            try {
+              const res = await fetch(urlVal, { signal: AbortSignal.timeout(5000), method: 'HEAD' })
+              result = (res.ok || res.status < 500)
+                ? { ok: true, message: `Reachable (HTTP ${res.status})` }
+                : { ok: false, error: `HTTP ${res.status} from ${urlVal}` }
+            } catch (e) {
+              result = { ok: false, error: String(e).slice(0, 200) }
+            }
           }
         } else {
           result = { ok: true, message: 'Credentials saved — bootstrap will verify connectivity' }

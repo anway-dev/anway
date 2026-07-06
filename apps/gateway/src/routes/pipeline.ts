@@ -38,12 +38,21 @@ const REPO_ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..',
 // Default to the real current commit SHA instead, so every build/deploy
 // produces a genuinely immutable tag and every deploy is a real rolling
 // restart, not a no-op that happens to report done=true.
-function resolveGitSha(): string {
+function resolveGitSha(warn?: (msg: string) => void): string {
+  // Runtime env var wins when present — this is how the gateway container itself
+  // gets a real sha (baked in at image-build time via the Dockerfile's GIT_SHA
+  // ARG/ENV, since the runtime container has no .git and no git binary at all).
+  const envSha = process.env['GIT_SHA']
+  if (envSha && envSha !== 'unknown') return envSha
   try {
     const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf-8' })
     const sha = result.stdout?.trim()
     if (result.status === 0 && sha) return sha
   } catch { /* fall through */ }
+  // Confirmed live: silently falling back to 'latest' here reinstated the exact
+  // mutable-tag no-op bug this function exists to fix, with zero visibility.
+  // Loudly warn instead of failing silently.
+  warn?.('WARNING: could not resolve a real git SHA (no GIT_SHA env var, no git binary/repo) — falling back to the mutable "latest" tag. Redeploys to an already-running release may silently no-op.')
   return 'latest'
 }
 
@@ -365,6 +374,17 @@ export async function pipelineRoutes(app: FastifyInstance) {
 
       if (!name) return reply.code(400).send({ error: 'name required' })
 
+      // Custom stages are admin-only: a dev/sre-role caller could otherwise define a
+      // pipeline with a deploy stage and no preceding gate stage at all, completely
+      // bypassing the V1 mandatory-gate contract (the deploy-stage handler only enforces
+      // a gate when one exists in the stage list — it can't invent one). The default,
+      // env-derived stage list (loadStagesForTenant/buildStagesFromEnvs) always inserts a
+      // gate before every non-first environment, so non-admins never lose real
+      // functionality by being restricted to it.
+      const { role } = request.user as { role?: string }
+      if (stages && role !== 'admin') {
+        return reply.code(403).send({ error: 'only admin may define custom pipeline stages' })
+      }
       const resolvedStages = stages ?? await loadStagesForTenant(tenantId)
       const stagesJson = JSON.stringify(resolvedStages)
       const meta = JSON.stringify({ context: context ?? '', serviceName: serviceName ?? '' })
@@ -592,7 +612,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const gitSha = (pipelineMeta?.['gitSha'] as string | undefined)
               ?? input
               ?? process.env['GITHUB_SHA']
-              ?? resolveGitSha()
+              ?? resolveGitSha((msg) => sse({ type: 'log', line: msg }))
 
             const registry = process.env['DOCKER_REGISTRY'] ?? ''
             const githubToken = process.env['GITHUB_TOKEN'] ?? ''
@@ -639,9 +659,14 @@ export async function pipelineRoutes(app: FastifyInstance) {
                 // (confirmed live: "connectors/argocd/package.json: not found" once
                 // the context path itself was resolving correctly). Only the
                 // Dockerfile's own path stays scoped to the app subdirectory.
-                sse({ type: 'log', line: `→ docker build . -f ${appDir}/Dockerfile -t ${image}` })
+                // Bake the real commit sha into the gateway image as GIT_SHA (see
+                // Dockerfile ARG/ENV) so resolveGitSha() can read it back at runtime
+                // instead of falling back to 'latest' inside the container, where
+                // there's no .git and no git binary.
+                const buildArgs = appDir === 'apps/gateway' ? ['--build-arg', `GIT_SHA=${gitSha}`] : []
+                sse({ type: 'log', line: `→ docker build . -f ${appDir}/Dockerfile -t ${image}${buildArgs.length ? ' ' + buildArgs.join(' ') : ''}` })
                 await new Promise<void>((resolve, reject) => {
-                  const child = trackChild(spawn('docker', ['build', '.', '-t', image, '-f', `${appDir}/Dockerfile`], {
+                  const child = trackChild(spawn('docker', ['build', '.', '-t', image, '-f', `${appDir}/Dockerfile`, ...buildArgs], {
                     cwd: REPO_ROOT,
                     stdio: ['ignore', 'pipe', 'pipe'],
                   }))
@@ -743,33 +768,41 @@ export async function pipelineRoutes(app: FastifyInstance) {
           }
 
           case 'deploy': {
-            // Gate enforcement: if the pipeline has a gate-<env> stage preceding this deploy,
-            // it must have been approved before we allow execution.
-            // Real stage rows (e.g. this pipeline's `deploy-prod`/`deploy-staging`) never set
-            // an `env` field — confirmed live, `stage['env']` is always undefined here, which
-            // made this whole block dead code and let `deploy-prod` run with zero gate check.
-            // Derive env from the stage id itself instead (`deploy-<env>` -> `<env>`), and match
-            // the real gate stage id convention (hyphen, e.g. `gate-prod`), not `gate.<env>`.
-            const deployEnv = (stage['env'] as string | undefined)
-              ?? (typeof stage['id'] === 'string' ? (stage['id'] as string).replace(/^deploy-/, '') : undefined)
-            const gateStageId = deployEnv ? `gate-${deployEnv}` : null
+            // Gate enforcement: find the nearest preceding stage of type 'gate' in the
+            // real ordered stage list, rather than guessing a gate stage id from a naming
+            // convention. Confirmed live (independent review, two different reviewers):
+            // stage-id string-matching broke one or the other of the two real
+            // stage-generation paths every time — the seeded demo pipeline uses hyphen ids
+            // with no env/name fields ('gate-prod'), while buildStagesFromEnvs (the actual
+            // default path for POST /api/pipelines with no explicit stages, and for
+            // env-derived tenant pipelines) uses dot ids with env set ('gate.prod'). No
+            // single naming pattern covers both, and guessing wrong silently skips the
+            // entire gate check — a real prod-deploy-with-zero-gate regression introduced
+            // by the previous (naming-based) version of this fix. Structural lookup by
+            // stage type is convention-agnostic and can't silently miss either shape.
+            const deployIdx = stages.findIndex(s => s['id'] === stageId)
+            let gateStage: Record<string, unknown> | null = null
+            for (let i = deployIdx - 1; i >= 0; i--) {
+              const s = stages[i] as Record<string, unknown>
+              if (s['type'] === 'gate' || s['gate'] === true) { gateStage = s; break }
+              if (s['type'] === 'deploy') break // entered a different env's promotion chain
+            }
+            const gateStageId = gateStage ? (gateStage['id'] as string) : null
+            const deployEnv = (stage['env'] as string | undefined) ?? envLabel ?? stageId
             if (gateStageId) {
-              const hasGateStage = stages.some(s => s['id'] === gateStageId)
-              if (hasGateStage) {
-                // Atomically consume the gate before deploy starts — prevents concurrent deploys
-                // both seeing 'approved' and proceeding before either marks it consumed.
-                const consumed = await withTenant(prisma, tenantId, (tx) =>
-                  tx.$executeRaw`
-                    UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
-                    WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
-                      AND stage_id = ${gateStageId} AND status = 'approved'
-                  `
-                ).catch(() => 0)
-                if (Number(consumed) === 0) {
-                  sse({ type: 'error', message: `Gate ${gateStageId} must be approved before deploying to ${deployEnv}` })
-                  await finishRun('failed', { error: 'gate_required', gateStageId })
-                  break
-                }
+              // Atomically consume the gate before deploy starts — prevents concurrent deploys
+              // both seeing 'approved' and proceeding before either marks it consumed.
+              const consumed = await withTenant(prisma, tenantId, (tx) =>
+                tx.$executeRaw`
+                  UPDATE pipeline_stage_runs SET status = 'consumed', finished_at = now()
+                  WHERE pipeline_id = ${id}::uuid AND tenant_id = ${tenantId}::uuid
+                    AND stage_id = ${gateStageId} AND status = 'approved'
+                `
+              ).catch(() => 0)
+              if (Number(consumed) === 0) {
+                sse({ type: 'error', message: `Gate ${gateStageId} must be approved before deploying to ${deployEnv}` })
+                await finishRun('failed', { error: 'gate_required', gateStageId })
+                break
               }
             }
 
@@ -777,7 +810,7 @@ export async function pipelineRoutes(app: FastifyInstance) {
             const imageTag = (pipelineMeta?.['imageTag'] as string | undefined)
               ?? (input && !['fail','failed'].includes(input) ? input : undefined)
               ?? process.env['DEPLOY_IMAGE_TAG']
-              ?? resolveGitSha()
+              ?? resolveGitSha((msg) => sse({ type: 'log', line: msg }))
 
             // Derive namespace from stage ID or pipeline metadata
             const helmNamespace = (pipelineMeta?.['namespace'] as string | undefined)
@@ -846,7 +879,17 @@ export async function pipelineRoutes(app: FastifyInstance) {
               ...(jwtSecret ? ['--set-string', `gateway.secrets.JWT_SECRET=${jwtSecret}`] : []),
             ]
 
-            sse({ type: 'log', line: `→ helm ${helmArgs.join(' ')}` })
+            // Redact secret values before this reaches the client — this line is streamed
+            // over SSE (and Redis pub/sub) to any dev-role caller watching the deploy.
+            // Confirmed live: the real ANWAY_ENCRYPTION_KEY/JWT_SECRET values were being
+            // sent verbatim, which is the master key protecting every tenant's stored
+            // credentials — a direct secret leak to anyone who can trigger a deploy.
+            const redactedHelmArgs = helmArgs.map(a =>
+              a.startsWith('gateway.secrets.ANWAY_ENCRYPTION_KEY=') || a.startsWith('gateway.secrets.JWT_SECRET=')
+                ? a.replace(/=.*/, '=***REDACTED***')
+                : a
+            )
+            sse({ type: 'log', line: `→ helm ${redactedHelmArgs.join(' ')}` })
 
             await new Promise<void>((resolve, reject) => {
               const child = trackChild(spawn('helm', helmArgs, {

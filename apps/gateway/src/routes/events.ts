@@ -67,7 +67,18 @@ function verifyDatadogSignature(body: Buffer, signature: string, secret: string)
   } catch { return false }
 }
 
-function verifyWebhookSignatures(request: FastifyRequest): boolean {
+type SignatureCheck = 'unconfigured' | 'no-signature' | 'valid' | 'invalid'
+
+// Previously returned a plain boolean, which collapsed "no secret configured"
+// and "signature header present and genuinely valid" into the same `true` —
+// confirmed live via independent review that this made HMAC auth dead code:
+// authenticateEvent always fell through to app.authenticate() (JWT) after a
+// `true` result, but a real GitHub/Datadog webhook sender never carries a
+// JWT, so a correctly-signed webhook could reject a forged signature but
+// could never itself succeed end-to-end. Returning a distinguishable
+// 'valid' result lets the caller actually authenticate the request instead
+// of always deferring to a JWT check that such senders can never satisfy.
+function verifyWebhookSignatures(request: FastifyRequest): SignatureCheck {
   const rawBody: Buffer | undefined = (request as unknown as { rawBodyString?: Buffer }).rawBodyString
   const body = rawBody ?? Buffer.from(JSON.stringify(request.body))
   const ghSecret = process.env['GITHUB_WEBHOOK_SECRET']
@@ -76,15 +87,18 @@ function verifyWebhookSignatures(request: FastifyRequest): boolean {
   const ddSig = request.headers['dd-request-signature'] as string | undefined
 
   // No secrets configured — nothing to verify (caller authenticated via other means)
-  if (!ghSecret && !ddSecret) return true
+  if (!ghSecret && !ddSecret) return 'unconfigured'
 
   if (ghSecret && hubSig) {
-    if (!verifyGitHubSignature(body, hubSig, ghSecret)) return false
+    return verifyGitHubSignature(body, hubSig, ghSecret) ? 'valid' : 'invalid'
   }
   if (ddSecret && ddSig) {
-    if (!verifyDatadogSignature(body, ddSig, ddSecret)) return false
+    return verifyDatadogSignature(body, ddSig, ddSecret) ? 'valid' : 'invalid'
   }
-  return true
+  // Secret(s) configured but no matching signature header on this request —
+  // not necessarily an attack (e.g. a real logged-in user hitting the same
+  // route with a JWT), so defer to JWT auth rather than rejecting outright.
+  return 'no-signature'
 }
 
 let _pub: import('redis').RedisClientType | null = null
@@ -136,11 +150,21 @@ export async function eventRoutes(app: FastifyInstance) {
       request.user = { sub: 'webhook', tenantId: webhookTenant, role: 'system' } as typeof request.user
       return
     }
-    // No static token — verify HMAC for connector webhooks (GitHub/Datadog)
-    if (!verifyWebhookSignatures(request)) {
+    // HMAC for connector webhooks (GitHub/Datadog) — a genuinely invalid
+    // signature is rejected immediately; a genuinely valid one authenticates
+    // the request directly (these senders never carry a JWT, so falling
+    // through to app.authenticate would 401 every real webhook — see
+    // verifyWebhookSignatures' comment for the bug this replaced).
+    const sig = verifyWebhookSignatures(request)
+    if (sig === 'invalid') {
       return reply.code(401).send({ error: 'invalid signature' })
     }
-    // Fall through to JWT auth for standard user requests
+    if (sig === 'valid') {
+      const tenantId = process.env['ANWAY_WEBHOOK_TENANT'] ?? '00000000-0000-0000-0000-000000000001'
+      request.user = { sub: 'webhook', tenantId, role: 'system' } as typeof request.user
+      return
+    }
+    // 'unconfigured' or 'no-signature' — fall through to JWT auth for standard user requests
     return app.authenticate(request, reply)
   }
 

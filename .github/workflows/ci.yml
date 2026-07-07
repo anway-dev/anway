@@ -61,7 +61,18 @@ jobs:
       # db:migrate` (which wraps `prisma migrate dev`, an interactive
       # command that prompts on drift — wrong for CI). `migrate deploy`
       # applies existing migrations in order, no prompts, real schema.
-      - run: npx prisma migrate deploy --schema apps/gateway/prisma/schema.prisma
+      #
+      # Confirmed live via independent review: bare `npx prisma` has no
+      # locally pinned version to resolve on a fresh CI runner (pnpm does
+      # not hoist apps/gateway's `prisma@^6.0.0` devDependency into the
+      # workspace root's node_modules/.bin) and falls back to installing
+      # `prisma@latest` (7.x) on the fly — the exact incompatibility this
+      # session already hit locally verifying this same command (7.x
+      # dropped the inline `datasource.url` schema format this project's
+      # schema.prisma uses). `pnpm --filter anway-gateway exec` resolves
+      # the workspace's own pinned 6.19.3 binary instead. Verified locally:
+      # `pnpm --filter anway-gateway exec prisma --version` reports 6.19.3.
+      - run: pnpm --filter anway-gateway exec prisma migrate deploy --schema apps/gateway/prisma/schema.prisma
       # Confirmed live via independent review: this job previously never
       # ran any test suite at all — only typechecks and docker builds. A
       # real regression in any package's logic could merge without a
@@ -74,12 +85,21 @@ jobs:
     # non-mocked model calls scored by an LLM-as-judge against specific
     # rubrics. Confirmed live via independent review (finding I8) that this
     # suite existed but was never wired into CI at all. Gated on a model
-    # key actually being configured as a repo/org secret — cli.ts already
-    # documents itself as "CI-usable once a model key is provisioned in
-    # that environment"; skip gracefully rather than failing when none is
-    # set (e.g. on a fork's PR without secrets access).
+    # key actually being configured as a repo/org secret; skip gracefully
+    # rather than failing when none is set (e.g. on a fork's PR without
+    # secrets access).
+    #
+    # Confirmed live via independent review (critical, second pass): the
+    # `secrets` context is NOT allowed in a job-level `if:` — GitHub Actions
+    # only permits `github`, `needs`, `vars`, and `inputs` contexts there.
+    # The original `if: ${{ secrets.X != '' || ... }}` on this job made the
+    # ENTIRE workflow file invalid — every job, including `check`, failed
+    # in 0 seconds with "workflow file issue" on every push since this job
+    # was added, so none of that work was ever actually validated by CI.
+    # Fixed the standard way: no job-level `if`, a dedicated step computes
+    # a boolean output from the secrets (env: has no context restriction),
+    # and the real eval step is gated on that step's output instead.
     runs-on: ubuntu-latest
-    if: ${{ secrets.DEEPSEEK_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -90,7 +110,20 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check for a configured model provider key
+        id: check_key
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$DEEPSEEK_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          fi
       - run: pnpm --filter @anway/agent run eval
+        if: steps.check_key.outputs.has_key == 'true'
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

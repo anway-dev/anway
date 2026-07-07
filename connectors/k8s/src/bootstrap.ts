@@ -81,13 +81,43 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
     try {
       const api = kc.makeApiClient(CoreV1Api)
 
-      // 1. List all pods across all namespaces
-      const podsResp = await api.listPodForAllNamespaces()
-      const pods = podsResp.items ?? []
-
+      // 1. List all services across all namespaces first — the real,
+      // authoritative set of K8s DNS names (`<name>.<namespace>.svc.cluster.local`)
+      // that step 3 below matches pod env vars against for DEPENDS_ON.
+      const svcsResp = await api.listServiceForAllNamespaces()
       const namespaces = new Set<string>()
       let entitiesUpserted = 0
       let relationshipsUpserted = 0
+      const serviceIdByNsName = new Map<string, string>()
+
+      for (const svc of svcsResp.items ?? []) {
+        const selector = svc.spec?.selector ?? {}
+        const selectorStr = Object.entries(selector).map(([k, v]) => `${k}=${v}`).join(',')
+        const ns = svc.metadata?.namespace ?? 'default'
+        const name = svc.metadata?.name ?? 'unknown'
+        if (selectorStr) {
+          namespaces.add(ns)
+          const svcId = await this.kg.upsertEntity({
+            type: 'Service',
+            name,
+            metadata: {
+              namespace: ns,
+              connectorCoordinates: { k8s: { resourceIds: { namespace: ns, selector: selectorStr } } },
+            },
+          }, tenantId)
+          serviceIdByNsName.set(`${ns}/${name}`, svcId)
+          entitiesUpserted++
+        }
+      }
+
+      // 2. List all pods across all namespaces
+      const podsResp = await api.listPodForAllNamespaces()
+      const pods = podsResp.items ?? []
+
+      // K8s DNS pattern for same-cluster service refs: `<svc>.<ns>.svc.cluster.local`
+      // or `<svc>.<ns>.svc`. Captures svc+ns so the match is checked against
+      // real Service entities rather than any arbitrary substring hit.
+      const dnsRefPattern = /\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.svc(?:\.cluster\.local)?\b/gi
 
       for (const pod of pods) {
         const ns = pod.metadata?.namespace ?? 'default'
@@ -107,25 +137,32 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
         await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'HOSTED_IN', toEntityId: nsId, metadata: {} }, tenantId)
         entitiesUpserted++
         relationshipsUpserted++
-      }
 
-      // 2. List all services across all namespaces
-      const svcsResp = await api.listServiceForAllNamespaces()
-      for (const svc of svcsResp.items ?? []) {
-        const selector = svc.spec?.selector ?? {}
-        const selectorStr = Object.entries(selector).map(([k, v]) => `${k}=${v}`).join(',')
-        if (selectorStr) {
-          const ns = svc.metadata?.namespace ?? 'default'
-          namespaces.add(ns)
-          await this.kg.upsertEntity({
-            type: 'Service',
-            name: svc.metadata?.name ?? 'unknown',
-            metadata: {
-              namespace: ns,
-              connectorCoordinates: { k8s: { resourceIds: { namespace: ns, selector: selectorStr } } },
-            },
-          }, tenantId)
-          entitiesUpserted++
+        // 3. Service→DEPENDS_ON→Service — real, derivable at bootstrap time
+        // from container env var values that reference another real
+        // Service's K8s DNS name (e.g.
+        // `PAYMENTS_URL=http://payments-api.prod.svc.cluster.local`).
+        // Confirmed live via independent connector-bootstrap audit:
+        // CLAUDE.md documents this relationship for the K8s connector but
+        // bootstrap.ts never created it. Matched only against Service
+        // entities already known from the real /services listing above —
+        // an unmatched hostname is skipped rather than fabricating a Service.
+        const seenTargets = new Set<string>()
+        for (const container of pod.spec?.containers ?? []) {
+          for (const env of container.env ?? []) {
+            const value = env.value
+            if (!value) continue
+            for (const match of value.matchAll(dnsRefPattern)) {
+              const [, refName, refNs] = match
+              const targetKey = `${refNs}/${refName}`
+              if (targetKey === `${ns}/${appLabel}` || seenTargets.has(targetKey)) continue
+              const targetId = serviceIdByNsName.get(targetKey)
+              if (!targetId) continue // referenced host not a known Service — skip rather than fabricate
+              seenTargets.add(targetKey)
+              await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'DEPENDS_ON', toEntityId: targetId, metadata: {} }, tenantId)
+              relationshipsUpserted++
+            }
+          }
         }
       }
 

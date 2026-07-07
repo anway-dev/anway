@@ -41,7 +41,10 @@ describe('GET /api/gate/policies', () => {
     if (res.statusCode === 200) {
       expect(Array.isArray(JSON.parse(res.body))).toBe(true)
     }
-  })
+    // Real Postgres roundtrip — under `pnpm test`'s full-monorepo parallel
+    // load (~70 concurrent test suites), observed exceeding vitest's
+    // default 5000ms; passes well under 1s in isolation.
+  }, 15_000)
 })
 
 describe('PUT /api/gate/policies', () => {

@@ -65,7 +65,11 @@ describe('POST /api/auth/login', () => {
     })
     // 401 when credentials don't match; 400 when DB unavailable
     expect([401, 400]).toContain(response.statusCode)
-  })
+    // Real Postgres roundtrip — under `pnpm test`'s full-monorepo parallel
+    // load (~70 concurrent test suites competing for CPU/DB connections),
+    // observed exceeding vitest's default 5000ms; passes well under 1s in
+    // isolation. Not a logic bug — genuine resource contention headroom.
+  }, 15_000)
 
   it('returns 400 when email is missing', async () => {
     const response = await app.inject({

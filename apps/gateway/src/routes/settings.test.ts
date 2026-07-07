@@ -47,7 +47,10 @@ describe('GET /api/settings/connectors/:type', () => {
     })
     // DB-dependent: 404 when connector row missing; 500/503 when DB unavailable
     expect([404, 500, 503]).toContain(res.statusCode)
-  })
+    // Real Postgres roundtrip — under `pnpm test`'s full-monorepo parallel
+    // load (~70 concurrent test suites), observed exceeding vitest's
+    // default 5000ms; passes well under 1s in isolation.
+  }, 15_000)
 
   it('returns non-password fields after PUT', async () => {
     // First PUT credentials with url + password
@@ -78,5 +81,8 @@ describe('GET /api/settings/connectors/:type', () => {
     expect(body.credentials['url']).toBe('https://prom.example.com')
     expect(body.credentials['user']).toBe('admin')
     expect(body.credentials['password']).toBeUndefined()
-  })
+    // Two real Postgres roundtrips (PUT + GET) — under `pnpm test`'s
+    // full-monorepo parallel load (~70 concurrent test suites), observed
+    // exceeding vitest's default 5000ms; passes well under 1s in isolation.
+  }, 15_000)
 })

@@ -21,7 +21,22 @@ import { LinearAgent } from './agent.js'
 
 
 const fixtureRoutes: FixtureRoute[] = [
-  { method: 'POST', path: '/', status: 200, body: {'data': {'teams': {'nodes': [{'id': 'team-1', 'name': 'Payments', 'key': 'PAY'}]}, 'issues': {'nodes': [{'id': 'issue-1', 'title': 'API timeout', 'state': {'name': 'In Progress'}}]}}} }
+  // Fixture matches by method+path only (no request-body routing), so this
+  // single response is returned for the teams/projects/issues GraphQL calls
+  // alike — it must carry every field any of the three queries reads.
+  {
+    method: 'POST', path: '/', status: 200, body: {
+      data: {
+        teams: { nodes: [{ id: 'team-1', name: 'Payments', key: 'PAY' }] },
+        projects: { nodes: [] },
+        issues: {
+          nodes: [
+            { id: 'issue-1', identifier: 'PAY-1', title: 'API timeout', state: { name: 'In Progress' }, team: { id: 'team-1' } },
+          ],
+        },
+      },
+    },
+  },
 ]
 
 describe('linear — fixture HTTP server', () => {
@@ -40,6 +55,25 @@ describe('linear — fixture HTTP server', () => {
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(kg.entities.some(e => e.name === 'Payments'), 'expected entity Payments not extracted').toBe(true)
+  })
+
+  // Regression test for finding A5 (connector bootstrap audit): CLAUDE.md
+  // documents Ticket→OWNED_BY→Team for this connector, but bootstrap.ts
+  // never created it despite every Linear issue carrying a real `team`
+  // field. Also covers the sibling A2-class bug found in the same file: the
+  // outer try/catch used to swallow every real thrown error from
+  // graphqlQuery back into an empty *successful* bootstrap result.
+  it('creates Ticket→OWNED_BY→Team using the real team id on the issue', async () => {
+    const kg = new FakeKG()
+    const result = await new LinearBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { apiKey: 'fixture-key', baseUrl: fixture.baseUrl },
+    )
+    expect(result.relationshipsUpserted).toBeGreaterThan(0)
+    expect(kg.relationships.some(r =>
+      r.relType === 'OWNED_BY' &&
+      r.fromEntityId === 'Ticket:PAY-1: API timeout' &&
+      r.toEntityId === 'Team:Payments',
+    )).toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

@@ -10,6 +10,39 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Real Postgres (pgvector-enabled, matching infra/docker-compose.dev.yml's
+    # image exactly) + Redis service containers — previously `pnpm test` ran
+    # with no DB/cache at all, so every DB-dependent gateway test fell back
+    # to its own tolerant `expect([200, 500, 503])`-style assertion instead
+    # of asserting real persisted data. With real services + real applied
+    # migrations, those same tests now exercise the real path.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: anway_test
+          POSTGRES_USER: anway
+          POSTGRES_PASSWORD: anway_test_secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U anway -d anway_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://anway:anway_test_secret@localhost:5432/anway_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-test-secret-not-for-real-use-32chars
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,22 +57,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx tsc --noEmit -p apps/gateway/tsconfig.json
       - run: npx tsc --noEmit -p apps/web/tsconfig.json
+      # Non-interactive equivalent of `pnpm --filter anway-gateway run
+      # db:migrate` (which wraps `prisma migrate dev`, an interactive
+      # command that prompts on drift — wrong for CI). `migrate deploy`
+      # applies existing migrations in order, no prompts, real schema.
+      - run: npx prisma migrate deploy --schema apps/gateway/prisma/schema.prisma
       # Confirmed live via independent review: this job previously never
       # ran any test suite at all — only typechecks and docker builds. A
       # real regression in any package's logic could merge without a
       # single vitest/pytest assertion running in CI.
-      #
-      # Known residual gap (disclosed, not silently accepted): no real
-      # Postgres/Redis service containers are configured here yet, so
-      # DB-dependent gateway tests fall back to their own tolerant
-      # `expect([200, 500, 503])`-style assertions (already written this
-      # way throughout apps/gateway/src to survive a genuinely-unavailable
-      # DB) rather than asserting real persisted data. This still catches
-      # the large majority of real regressions (all connector suites, the
-      # full packages/agent suite, and every non-DB gateway assertion), and
-      # is a strict improvement over zero tests running at all — but wiring
-      # real service containers + Prisma migrations here is real follow-up
-      # work, not done in this pass.
       - run: pnpm test
       - run: docker build -f apps/gateway/Dockerfile . -t anway-gateway:ci
       - run: docker build -f apps/web/Dockerfile . -t anway-web:ci

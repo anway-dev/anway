@@ -30,7 +30,12 @@ describe('rate-limit middleware', () => {
   it('allows requests under the limit', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/auth/methods' })
     expect(r.statusCode).toBe(200)
-  })
+    // /api/auth/methods queries the real DB (setupRequired check) — the
+    // first real query against a freshly-migrated CI Postgres container
+    // (cold connection pool, no prior warm-up) can exceed vitest's default
+    // 5000ms; observed live at ~4.8s in that exact scenario. Passes in
+    // well under 1s once the pool is warm.
+  }, 15_000)
 
   it('rejects with 429 once limit is exceeded on a non-exempt route', async () => {
     // RATE_LIMIT_MAX=3 set above — exhaust with 3 requests, then expect 429

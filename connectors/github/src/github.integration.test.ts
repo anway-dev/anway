@@ -34,9 +34,18 @@ describe('github — fixture HTTP server', () => {
     const agent = new GithubAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
+    // get_prs (tools[0]) requires `repo` — omitting it and calling with no
+    // creds is no longer a no-op empty result, it's a real thrown error
+    // (missing token), so pass real params matching the fixture routes.
     const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const result = await firstTool.execute({ repo: 'test-org/payments' }, { baseUrl: fixture.baseUrl, token: 'fixture-token' }) as { prs: unknown[] }
+    expect(result.prs).toBeDefined()
+  })
+
+  it('agent tools throw on missing token instead of returning an empty result', async () => {
+    const agent = new GithubAgent()
+    const firstTool = agent.tools[0]!
+    await expect(firstTool.execute({ repo: 'test-org/payments' }, { baseUrl: fixture.baseUrl })).rejects.toThrow('GitHub credentials not configured')
   })
 
   it('fixture server received at least one request', () => {

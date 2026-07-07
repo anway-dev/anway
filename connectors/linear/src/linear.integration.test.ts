@@ -31,9 +31,18 @@ describe('linear — fixture HTTP server', () => {
     const agent = new LinearAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
+    // get_issues (tools[0]) requires `team` and reads creds.apiKey (not
+    // `token`) — omitting either is no longer a no-op empty result, it's a
+    // real thrown error.
     const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const result = await firstTool.execute({ team: 'PAY' }, { baseUrl: fixture.baseUrl, apiKey: 'fixture-key' }) as { issues: unknown[] }
+    expect(result.issues).toBeDefined()
+  })
+
+  it('agent tools throw on missing apiKey instead of returning an empty result', async () => {
+    const agent = new LinearAgent()
+    const firstTool = agent.tools[0]!
+    await expect(firstTool.execute({ team: 'PAY' }, { baseUrl: fixture.baseUrl })).rejects.toThrow('Linear API key not configured')
   })
 
   it('fixture server received at least one request', () => {

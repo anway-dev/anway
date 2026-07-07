@@ -4,6 +4,11 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const LINEAR_API = 'https://api.linear.app/graphql'
 
+// creds.baseUrl override — bootstrap.ts's graphqlQuery already respects this
+// (defaults to LINEAR_API); this file previously hardcoded LINEAR_API
+// unconditionally on all 3 tools below, so no fixture-server test or
+// self-hosted GraphQL-compatible endpoint could ever reach these calls.
+
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_issues', description: 'List issues for a team', parameters: { type: 'object', properties: { team: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['team'] } },
@@ -11,7 +16,7 @@ const TOOLS: ConnectorTool[] = [
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('Linear API key not configured')
       const query = `query { issues(filter: { team: { key: { eq: "${params.team}" } } }, first: ${params.limit ?? 25}) { nodes { id title state { name } priority assignee { name } } } }`
-      const res = await fetch(LINEAR_API, {
+      const res = await fetch((creds as ConnectorCreds).baseUrl || LINEAR_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ query }),
@@ -30,7 +35,7 @@ const TOOLS: ConnectorTool[] = [
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('Linear API key not configured')
       const query = `query { projects(first: ${params.first ?? 10}, filter: { teams: { key: { eq: "${params.team}" } } }) { nodes { id name description state { name } } } }`
-      const res = await fetch(LINEAR_API, {
+      const res = await fetch((creds as ConnectorCreds).baseUrl || LINEAR_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ query }),
@@ -48,7 +53,7 @@ const TOOLS: ConnectorTool[] = [
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('Linear API key not configured')
       const mutation = `mutation CreateIssue($title: String!, $teamId: String!) { issueCreate(input: { title: $title, teamId: $teamId }) { success issue { id identifier title url } } }`
-      const res = await fetch(LINEAR_API, {
+      const res = await fetch((creds as ConnectorCreds).baseUrl || LINEAR_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ query: mutation, variables: { title: String(params.title), teamId: String(params.teamId) } }),

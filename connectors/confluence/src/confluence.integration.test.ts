@@ -129,23 +129,21 @@ describe('confluence — fixture HTTP server', () => {
 
   // ── search_pages — error path / empty on failure ───────────────────
 
-  it('search_pages returns empty on missing creds', async () => {
+  it('search_pages throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new ConfluenceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
 
-    const result = await tool.execute({ query: 'payments' }, {}) as { pages: unknown[] }
-    expect(result.pages).toEqual([])
+    await expect(tool.execute({ query: 'payments' }, {})).rejects.toThrow('Confluence credentials not configured')
   })
 
-  it('search_pages returns empty when query is blank', async () => {
+  it('search_pages throws when query is blank (real usage error, not an empty result)', async () => {
     const agent = new ConfluenceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { query: '   ' },
       { baseUrl: fixture.baseUrl, email: 'test@test.com', apiToken: 'fixture-token' },
-    ) as { pages: unknown[] }
-    expect(result.pages).toEqual([])
+    )).rejects.toThrow('Confluence search_pages: query is required')
   })
 
   // ── fixture server audit ───────────────────────────────────────────

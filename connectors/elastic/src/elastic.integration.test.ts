@@ -252,36 +252,29 @@ describe('elastic — fixture HTTP server', () => {
     expect(result.unit).toBe('ms') // duration → ms unit derivation
   })
 
-  it('get_metrics returns empty on missing creds', async () => {
+  it('get_metrics throws when host is unreachable (real connection failure, not an empty result)', async () => {
     // extractCreds() never returns null — it defaults baseUrl to the real
     // localhost:9200 and allows an unauthenticated request (a legitimate,
-    // real Elasticsearch deployment mode). "Missing creds" only produces an
-    // empty result because that connection fails — so it must point at an
-    // explicitly unreachable host, not rely on nothing real listening on the
-    // default port (which breaks this test on any machine actually running
-    // a local, unauthenticated Elasticsearch instance).
+    // real Elasticsearch deployment mode). So this must point at an
+    // explicitly unreachable host to exercise a real failure, not rely on
+    // nothing listening on the default port.
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       { baseUrl: 'http://127.0.0.1:1' },
-    ) as { points: unknown[]; unit: string }
-
-    expect(result.points).toEqual([])
-    expect(result.unit).toBe('value')
+    )).rejects.toThrow()
   })
 
-  it('get_metrics returns empty on empty service', async () => {
+  it('get_metrics throws on empty service (real usage error, not an empty result)', async () => {
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: '', window: '1h' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { points: unknown[] }
-
-    expect(result.points).toEqual([])
+    )).rejects.toThrow('Elastic get_metrics: service is required')
   })
 
   // ── get_alerts ──────────────────────────────────────────────────────
@@ -347,14 +340,13 @@ describe('elastic — fixture HTTP server', () => {
     expect(result.alerts.length).toBe(2)
   })
 
-  it('get_alerts returns empty on missing creds', async () => {
+  it('get_alerts throws when host is unreachable (real connection failure, not an empty result)', async () => {
     // See the equivalent get_metrics comment above — must point at an
     // explicitly unreachable host, not rely on the real default port.
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
 
-    const result = await tool.execute({}, { baseUrl: 'http://127.0.0.1:1' }) as { alerts: unknown[] }
-    expect(result.alerts).toEqual([])
+    await expect(tool.execute({}, { baseUrl: 'http://127.0.0.1:1' })).rejects.toThrow()
   })
 
   // ── get_logs ────────────────────────────────────────────────────────
@@ -390,30 +382,26 @@ describe('elastic — fixture HTTP server', () => {
     expect(result.lines.length).toBe(3) // fixture has 3 hits
   })
 
-  it('get_logs returns empty on missing creds', async () => {
+  it('get_logs throws when host is unreachable (real connection failure, not an empty result)', async () => {
     // See the equivalent get_metrics comment above — must point at an
     // explicitly unreachable host, not rely on the real default port.
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'gateway', query: 'error' },
       { baseUrl: 'http://127.0.0.1:1' },
-    ) as { lines: unknown[] }
-
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow()
   })
 
-  it('get_logs returns empty on empty service param', async () => {
+  it('get_logs throws on empty service param (real usage error, not an empty result)', async () => {
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: '', query: 'error' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { lines: unknown[] }
-
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow('Elastic get_logs: service is required')
   })
 
   // ── Basic auth mode ─────────────────────────────────────────────────
@@ -464,40 +452,34 @@ describe('elastic — fixture HTTP server', () => {
 
   // ── Error handling ──────────────────────────────────────────────────
 
-  it('get_metrics returns empty on ES error response (connection refused)', async () => {
+  it('get_metrics throws on connection refused (real failure, not an empty result)', async () => {
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       { baseUrl: 'http://127.0.0.1:1', token: 'fixture-token' },
-    ) as { points: unknown[] }
-
-    expect(result.points).toEqual([])
+    )).rejects.toThrow()
   })
 
-  it('get_alerts returns empty on connection refused', async () => {
+  it('get_alerts throws on connection refused (real failure, not an empty result)', async () => {
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       {},
       { baseUrl: 'http://127.0.0.1:1', token: 'fixture-token' },
-    ) as { alerts: unknown[] }
-
-    expect(result.alerts).toEqual([])
+    )).rejects.toThrow()
   })
 
-  it('get_logs returns empty on connection refused', async () => {
+  it('get_logs throws on connection refused (real failure, not an empty result)', async () => {
     const agent = new ElasticAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'gateway', query: 'error' },
       { baseUrl: 'http://127.0.0.1:1', token: 'fixture-token' },
-    ) as { lines: unknown[] }
-
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow()
   })
 
   // ── Request tracking ────────────────────────────────────────────────

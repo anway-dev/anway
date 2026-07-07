@@ -38,13 +38,16 @@ describe('rate-limit middleware', () => {
   }, 15_000)
 
   it('rejects with 429 once limit is exceeded on a non-exempt route', async () => {
-    // RATE_LIMIT_MAX=3 set above — exhaust with 3 requests, then expect 429
+    // RATE_LIMIT_MAX=3 set above — exhaust with 3 requests, then expect 429.
+    // Same cold-connection-pool latency as the test above, compounded across
+    // several sequential real-DB-touching requests — confirmed live under
+    // `pnpm test`'s full monorepo parallel load.
     for (let i = 0; i < 3; i++) {
       await app.inject({ method: 'GET', url: '/api/auth/methods' }).catch(() => {})
     }
     const r = await app.inject({ method: 'GET', url: '/api/auth/methods' })
     expect(r.statusCode).toBe(429)
-  })
+  }, 15_000)
 
   it('never rate-limits /health even after the limit is exhausted', async () => {
     // Exhaust the same per-IP budget via a non-exempt route first...
@@ -54,5 +57,5 @@ describe('rate-limit middleware', () => {
     // ...then confirm /health is still untouched by the limiter.
     const r = await app.inject({ method: 'GET', url: '/health' })
     expect(r.statusCode).toBe(200)
-  })
+  }, 15_000)
 })

@@ -5,6 +5,14 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 interface LDEnvState { on?: boolean; targets?: unknown[]; rules?: unknown[] }
 interface LDFlag { key: string; name?: string; environments?: Record<string, LDEnvState> }
 
+// creds.baseUrl override — bootstrap.ts already respects this (defaults to
+// https://app.launchdarkly.com); these tools previously hardcoded that URL
+// unconditionally, so no fixture-server test or self-hosted LD-compatible
+// endpoint could ever reach these calls.
+function ldBase(creds: Record<string, unknown>): string {
+  return (creds['baseUrl'] as string | undefined) || 'https://app.launchdarkly.com'
+}
+
 const TOOLS: ConnectorTool[] = [
   {
     // Hardcoded fake data previously — confirmed live via independent review
@@ -16,7 +24,7 @@ const TOOLS: ConnectorTool[] = [
       const apiKey = (creds as ConnectorCreds).apiKey
       if (!apiKey) throw new Error('LaunchDarkly API key not configured')
       const env = String(params.env)
-      const res = await fetch(`https://app.launchdarkly.com/api/v2/flags/${String(params.project)}?env=${encodeURIComponent(env)}`, {
+      const res = await fetch(`${ldBase(creds)}/api/v2/flags/${String(params.project)}?env=${encodeURIComponent(env)}`, {
         headers: { Authorization: String(apiKey) },
       })
       if (!res.ok) throw new Error(`LaunchDarkly get_flags failed: HTTP ${res.status}`)
@@ -36,7 +44,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const apiKey = (creds as ConnectorCreds).apiKey
       if (!apiKey) throw new Error('LaunchDarkly API key not configured')
-      const res = await fetch(`https://app.launchdarkly.com/api/v2/flags/${String(params.project)}/${String(params.flagKey)}`, {
+      const res = await fetch(`${ldBase(creds)}/api/v2/flags/${String(params.project)}/${String(params.flagKey)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json; domain-model=launchdarkly.semanticpatch',

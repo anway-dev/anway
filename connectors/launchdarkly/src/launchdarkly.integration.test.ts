@@ -32,9 +32,24 @@ describe('launchdarkly — fixture HTTP server', () => {
     const agent = new LaunchdarklyAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
+    // get_flags (tools[0]) requires project+env and reads creds.apiKey (not
+    // `token`) — omitting either is no longer a no-op empty result, it's a
+    // real thrown error.
     const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const result = await firstTool.execute(
+      { project: 'payments', env: 'production' },
+      { baseUrl: fixture.baseUrl, apiKey: 'fixture-key' },
+    ) as { flags: unknown[] }
+    expect(result.flags).toBeDefined()
+  })
+
+  it('agent tools throw on missing apiKey instead of returning an empty result', async () => {
+    const agent = new LaunchdarklyAgent()
+    const firstTool = agent.tools[0]!
+    await expect(firstTool.execute(
+      { project: 'payments', env: 'production' },
+      { baseUrl: fixture.baseUrl },
+    )).rejects.toThrow('LaunchDarkly API key not configured')
   })
 
   it('fixture server received at least one request', () => {

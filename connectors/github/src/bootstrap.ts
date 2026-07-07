@@ -3,6 +3,8 @@ import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
 interface GitHubRepo { id: number; name: string; full_name: string; language?: string; default_branch: string }
+interface GitHubContributor { login: string; contributions: number }
+interface GitHubTeamMember { login: string }
 
 export class GitHubBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
@@ -34,6 +36,12 @@ export class GitHubBootstrap implements IConnectorBootstrap {
       }
 
       let entitiesUpserted = 0
+      let relationshipsUpserted = 0
+      // Real team-membership edges only need to be resolved once per team,
+      // not once per repo that references it (CODEOWNERS commonly repeats
+      // the same team across many paths/files).
+      const resolvedTeams = new Set<string>()
+
       for (const repo of repos) {
         await this.kg.upsertEntity({
           type: 'Repo',
@@ -46,32 +54,91 @@ export class GitHubBootstrap implements IConnectorBootstrap {
         }, tenantId)
         entitiesUpserted++
 
+        // Real committers — confirmed live via independent review that
+        // CLAUDE.md documents this connector extracting
+        // "Engineer (committers)" but no code ever created an Engineer
+        // entity at all. Contributors API needs only the same repo-read
+        // scope already required for the rest of this bootstrap.
+        try {
+          const contributors = await this.fetchJson<GitHubContributor[]>(
+            baseUrl, `/repos/${org}/${repo.name}/contributors?per_page=100`, token,
+          )
+          if (Array.isArray(contributors)) {
+            for (const c of contributors) {
+              if (!c.login) continue
+              await this.kg.upsertEntity({
+                type: 'Engineer', name: c.login,
+                metadata: { source: 'github', org },
+              }, tenantId)
+              entitiesUpserted++
+            }
+          }
+        } catch { /* contributors may be empty/unavailable for an empty repo */ }
+
         // Try to fetch CODEOWNERS
         try {
           const ownersResp = await this.fetchJson<{ content?: string; encoding?: string }>(baseUrl, `/repos/${org}/${repo.name}/contents/CODEOWNERS`, token)
           if (ownersResp?.content && ownersResp?.encoding === 'base64') {
             const decoded = Buffer.from(ownersResp.content, 'base64').toString('utf-8')
-            const teams = new Set<string>()
+            // Real CODEOWNERS syntax mixes team refs (@org/team-slug) and
+            // individual reviewer refs (@username) on the same line —
+            // confirmed live via independent review that the previous
+            // regex treated every @-mention as a Team, so a CODEOWNERS
+            // file listing an individual reviewer (a very common pattern)
+            // created a bogus Team entity named after that person. Only a
+            // "/"-qualified ref is a real GitHub team.
+            const teamSlugs = new Set<string>()
             for (const line of decoded.split('\n')) {
-              const m = line.match(/^\S+\s+(@\S+)/)
-              if (m) {
-                const team = m[1]!.replace(/^@/, '')
-                teams.add(team)
+              const trimmed = line.trim()
+              if (!trimmed || trimmed.startsWith('#')) continue
+              const mentions = trimmed.match(/@[\w-]+\/[\w-]+/g) ?? []
+              for (const mention of mentions) {
+                teamSlugs.add(mention.replace(/^@/, ''))
               }
             }
-            for (const team of teams) {
+            for (const teamSlug of teamSlugs) {
+              const teamName = teamSlug.split('/')[1]!
               await this.kg.upsertEntity({
-                type: 'Team', name: team,
+                type: 'Team', name: teamName,
                 metadata: { source: 'github', org, repo: repo.name },
               }, tenantId)
               entitiesUpserted++
+
+              // Engineer -[:MEMBER_OF]-> Team — real team membership from
+              // GitHub's Teams API, resolved once per distinct team.
+              if (!resolvedTeams.has(teamSlug)) {
+                resolvedTeams.add(teamSlug)
+                try {
+                  const members = await this.fetchJson<GitHubTeamMember[]>(
+                    baseUrl, `/orgs/${org}/teams/${teamName}/members?per_page=100`, token,
+                  )
+                  if (Array.isArray(members)) {
+                    for (const member of members) {
+                      if (!member.login) continue
+                      const engId = await this.kg.upsertEntity({
+                        type: 'Engineer', name: member.login,
+                        metadata: { source: 'github', org },
+                      }, tenantId)
+                      entitiesUpserted++
+                      const teamId = await this.kg.upsertEntity({
+                        type: 'Team', name: teamName,
+                        metadata: { source: 'github', org },
+                      }, tenantId)
+                      await this.kg.upsertRelationship({
+                        fromEntityId: engId, relType: 'MEMBER_OF', toEntityId: teamId,
+                      }, tenantId)
+                      relationshipsUpserted++
+                    }
+                  }
+                } catch { /* team membership requires org read scope — may not be granted */ }
+              }
             }
           }
         } catch { /* CODEOWNERS may not exist */ }
       }
 
       const hints = [`GitHub bootstrap: ${repos.length} repos indexed`]
-      return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: hints }
+      return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
     } catch {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['GitHub bootstrap: API call failed'] }
     }

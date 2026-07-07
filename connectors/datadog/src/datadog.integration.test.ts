@@ -23,7 +23,8 @@ import { DatadogAgent } from './agent.js'
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/api/v1/monitor', status: 200, body: [{'id': 1, 'name': 'High Error Rate', 'type': 'metric alert', 'tags': ['service:payments-api']}] },
   { method: 'GET', path: '/api/v1/dashboard', status: 200, body: {'dashboards': [{'id': 'abc-123', 'title': 'Payments Dashboard'}]} },
-  { method: 'GET', path: '/api/v1/query', status: 200, body: {'series': [{'metric': 'aws.ec2.cpuutilization', 'pointlist': [[1700000000, 42.5]]}]} }
+  { method: 'GET', path: '/api/v1/query', status: 200, body: {'series': [{'metric': 'aws.ec2.cpuutilization', 'pointlist': [[1700000000, 42.5]]}]} },
+  { method: 'GET', path: '/api/v2/services/definitions', status: 200, body: {'data': [{'type': 'service-definition', 'attributes': {'name': 'payments-api'}}]} },
 ]
 
 describe('datadog — fixture HTTP server', () => {
@@ -42,6 +43,26 @@ describe('datadog — fixture HTTP server', () => {
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(kg.entities.some(e => e.name === 'High Error Rate'), 'expected entity High Error Rate not extracted').toBe(true)
+  })
+
+  // Regression test for finding A5 (connector bootstrap audit): bootstrap
+  // previously declared but never incremented relationshipsUpserted (0
+  // upsertRelationship calls in the whole file), and never fetched
+  // dashboards at all despite CLAUDE.md documenting "Alert, Dashboard" as
+  // this connector's entities and a fixture route already anticipating it.
+  it('extracts Dashboard entities and creates Service→MONITORED_BY→Alert from monitor service: tags', async () => {
+    const kg = new FakeKG()
+    const result = await new DatadogBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { apiKey: "fixture-key", appKey: "fixture-app-key", baseUrl: fixture.baseUrl }
+    )
+    expect(kg.entities.some(e => e.type === 'Dashboard' && e.name === 'Payments Dashboard'), 'expected Dashboard entity').toBe(true)
+    expect(kg.entities.some(e => e.type === 'Service' && e.name === 'payments-api'), 'expected Service entity').toBe(true)
+    expect(result.relationshipsUpserted).toBeGreaterThan(0)
+    expect(kg.relationships.some(r =>
+      r.relType === 'MONITORED_BY' &&
+      r.fromEntityId === 'Service:payments-api' &&
+      r.toEntityId === 'Alert:High Error Rate',
+    )).toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

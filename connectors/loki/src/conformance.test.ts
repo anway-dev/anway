@@ -26,5 +26,10 @@ describe('loki conformance', () => {
     )
     expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
     expect(result.episodeHints).toBeDefined()
-  })
+    // No baseUrl in payload — bootstrap.ts falls back to a real network call
+    // against http://localhost:3100 (its documented default), not a fixture.
+    // Same real-I/O-under-load class as the other loki tests: confirmed
+    // live failing under `pnpm test`'s full monorepo parallel load with
+    // vitest's default 5000ms, passing clean in isolation.
+  }, 15_000)
 })

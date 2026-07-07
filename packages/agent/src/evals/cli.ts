@@ -14,17 +14,50 @@ import type { IModelProvider } from '../interfaces/provider.js'
 import type { IKnowledgeGraph } from '../interfaces/knowledge-graph.js'
 import { runEvals, summarize } from './run.js'
 
-function resolveProvider(): IModelProvider {
+interface NamedProvider { name: string; provider: IModelProvider }
+
+/** Every configured provider, in priority order — used to pick the primary
+ * (index 0) and, separately, an independent judge (see resolveJudgeProvider). */
+function resolveAllProviders(): NamedProvider[] {
+  const providers: NamedProvider[] = []
   if (process.env['DEEPSEEK_API_KEY']) {
-    return new OpenAIProvider({ type: 'deepseek', apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-chat', cheapModel: 'deepseek-chat' })
+    providers.push({ name: 'deepseek', provider: new OpenAIProvider({ type: 'deepseek', apiKey: process.env['DEEPSEEK_API_KEY'], baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-chat', cheapModel: 'deepseek-chat' }) })
   }
   if (process.env['ANTHROPIC_API_KEY']) {
-    return new AnthropicProvider({ type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] })
+    providers.push({ name: 'anthropic', provider: new AnthropicProvider({ type: 'anthropic', apiKey: process.env['ANTHROPIC_API_KEY'] }) })
   }
   if (process.env['OPENAI_API_KEY']) {
-    return new OpenAIProvider({ type: 'openai', apiKey: process.env['OPENAI_API_KEY'] })
+    providers.push({ name: 'openai', provider: new OpenAIProvider({ type: 'openai', apiKey: process.env['OPENAI_API_KEY'] }) })
   }
-  throw new Error('No model provider configured — set DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY')
+  return providers
+}
+
+/**
+ * Resolves both the primary (agent-under-test) and judge providers from a
+ * *single* resolveAllProviders() call. Confirmed live via independent
+ * review that calling resolveAllProviders() a second time to pick the
+ * judge (as an earlier draft of this fix did) constructs brand-new
+ * provider instances even for the same configured API key — a `!==`
+ * object-identity check against those fresh instances is always true, so
+ * with only one real provider configured it wrongly reported "using X as
+ * an independent judge" while actually handing back a second, functionally
+ * identical instance of the exact same model. Comparing by config `name`
+ * from one shared provider list is the only way to correctly detect "is
+ * there a genuinely different model available".
+ */
+function resolvePrimaryAndJudge(): { primary: IModelProvider; judge: IModelProvider } {
+  const providers = resolveAllProviders()
+  if (providers.length === 0) {
+    throw new Error('No model provider configured — set DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY')
+  }
+  const primary = providers[0]!
+  const distinct = providers.find(p => p.name !== primary.name)
+  if (distinct) {
+    console.log(`Using ${distinct.name} as an independent judge model (agent under test: ${primary.name}).`)
+    return { primary: primary.provider, judge: distinct.provider }
+  }
+  console.log(`Only one model provider configured (${primary.name}) — judge will use the same model as the agent under test (self-grading bias risk, see runEvals() doc comment).`)
+  return { primary: primary.provider, judge: primary.provider }
 }
 
 // Evals score model output quality, not KB integration — a graph that
@@ -47,8 +80,8 @@ const noopGraph: IKnowledgeGraph = {
 }
 
 async function main(): Promise<void> {
-  const provider = resolveProvider()
-  const results = await runEvals(provider, noopGraph)
+  const { primary: provider, judge: judgeProvider } = resolvePrimaryAndJudge()
+  const results = await runEvals(provider, noopGraph, judgeProvider)
   for (const r of results) {
     console.log(`\n[${r.passed ? 'PASS' : 'FAIL'}] ${r.id} — score ${r.score}/10`)
     console.log(`  ${r.reasoning}`)

@@ -23,10 +23,17 @@ export class BootstrapAgent {
       { role: 'user', content: `TechSpec: ${spec.title}. Architecture: ${spec.architecture}. ${graphContext ? 'Existing: ' + graphContext.relatedEntities.map(e => e.name).join(', ') : ''}` },
     ], [], { model: this.cheapModel.cheapModelId, maxTokens: 100, temperature: 0 })
 
+    // Confirmed live via independent review (eval harness's own live run
+    // caught this): 2000 tokens (the cap most other agents' single-field
+    // JSON outputs fit comfortably within) was too tight for this specific
+    // schema — `files[].template` holds real per-file scaffold content for
+    // potentially several files — and the real model's output was observed
+    // truncating mid-array at ~6600-6900 characters across repeated live
+    // runs, producing invalid JSON every time.
     const result = await this.mainModel.chat([
       { role: 'system', content: 'Generate a bootstrap plan in JSON matching { service: string, files: [{path, description, template}], commands: string[], prDescription: string }. Return ONLY valid JSON.' },
       { role: 'user', content: `Service: ${spec.title}\nArchitecture: ${spec.architecture}\nComponents: ${spec.components.map(c => c.name).join(', ')}\nStack: ${langExtraction.content}` },
-    ], [], { model: this.mainModel.modelId, maxTokens: 2000, temperature: 0 })
+    ], [], { model: this.mainModel.modelId, maxTokens: 4000, temperature: 0 })
 
     // See product.ts writePRD for why this throws instead of returning a
     // fabricated-looking empty stub on parse failure.

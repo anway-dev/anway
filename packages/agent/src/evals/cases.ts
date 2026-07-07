@@ -120,11 +120,25 @@ export const oncallEvals: EvalCase<string>[] = [
     id: 'oncall-shift-brief',
     agentAction: 'OncallAgent.generateShiftBrief',
     input: 'payments-team',
+    // Rubric corrected after this eval — added to close finding I8's "no
+    // primary-chat-path coverage" gap — caught a real live fabrication bug:
+    // OncallAgent's cheap-model extraction stage was unconditionally
+    // instructed to "summarise recent activity" even with zero real
+    // episode data, so it invented a plausible-sounding narrative that the
+    // main model's own anti-hallucination check couldn't detect (fixed in
+    // oncall.ts). This eval harness's noopGraph always resolves to no
+    // context, so "genuine synthesis" and "actionable guidance" are not
+    // achievable outcomes here — the ONLY correct, honest response to a
+    // genuinely empty knowledge graph is stating that plainly. The
+    // previous rubric implicitly rewarded a rich-sounding narrative
+    // regardless of whether real data backed it, punishing the honest
+    // "no data" response this eval's own harness makes the only truthful
+    // one.
     rubric: [
-      '- summary is a genuine synthesis, not a restatement of "no data available" without any structure',
-      '- if no real incidents/deploys were available in context, the brief says so explicitly rather than fabricating specific incident titles or deploy SHAs',
-      '- handoffNotes gives actionable guidance for the next on-call engineer, not a generic platitude',
-      '- watchItems (if any) are concrete and specific, not generic ("keep an eye on things")',
+      '- since this eval harness never provides real incident/deploy/episode data, the response must explicitly say no real activity data was available, not fabricate specific incident titles, severities, deploy SHAs, or counts',
+      '- openIncidents and recentDeploys are empty arrays, not invented entries',
+      '- summary and handoffNotes acknowledge the lack of real data honestly rather than inventing a plausible-sounding narrative to fill the gap',
+      '- watchItems (if any) are empty or genuinely generic-but-honest ("no data available to identify watch items"), not fabricated specifics',
     ].join('\n'),
   },
 ]
@@ -139,6 +153,34 @@ export const baEvals: EvalCase<string>[] = [
       '- metrics array entries (if any) have plausible labels relevant to a checkout flow (e.g. conversion rate, drop-off, error rate), not generic placeholders',
       '- recommendations are specific and actionable, not generic business platitudes',
       '- summary does not claim false certainty about performance trends it cannot know without real data',
+    ].join('\n'),
+  },
+]
+
+// Primary chat path — the actual user-facing entry point (createOrchestrator
+// + runSession), not a single specialist agent method. Previously had zero
+// eval coverage at all (finding I8) despite being the most common real
+// query shape (general questions with no specific service/tool match).
+export const chatEvals: EvalCase<string>[] = [
+  {
+    id: 'chat-general-no-data',
+    agentAction: 'runSession (chat path)',
+    input: 'What is the current error rate for the payments-api service?',
+    rubric: [
+      '- since no real knowledge graph or connector data is available in this eval harness, the response must not fabricate a specific error rate percentage, timestamp, or trend — that would be a real anti-hallucination violation per CLAUDE.md\'s grounding rule',
+      '- the response explicitly acknowledges it has no current data for payments-api, rather than confidently answering as if it does',
+      '- the response is not empty and is not a bare refusal — it should explain what it would need (a connected monitoring source) or suggest a next step',
+      '- the response does not claim to have checked a specific dashboard, log, or metric source it never actually queried',
+    ].join('\n'),
+  },
+  {
+    id: 'chat-general-howto-question',
+    agentAction: 'runSession (chat path)',
+    input: 'What should I check first when a deploy causes a spike in 500 errors?',
+    rubric: [
+      '- this is a general engineering knowledge question, not a request for live data — the response should engage with it substantively (e.g. recent deploy diff, error logs, rollback readiness), not deflect entirely for lack of live data',
+      '- response does not fabricate specifics about this workspace\'s actual services, deploys, or incidents (no real ones exist in this eval) — general guidance is fine, invented specifics are not',
+      '- response is coherent and on-topic for the question asked',
     ].join('\n'),
   },
 ]

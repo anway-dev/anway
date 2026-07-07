@@ -24,8 +24,51 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx tsc --noEmit -p apps/gateway/tsconfig.json
       - run: npx tsc --noEmit -p apps/web/tsconfig.json
+      # Confirmed live via independent review: this job previously never
+      # ran any test suite at all — only typechecks and docker builds. A
+      # real regression in any package's logic could merge without a
+      # single vitest/pytest assertion running in CI.
+      #
+      # Known residual gap (disclosed, not silently accepted): no real
+      # Postgres/Redis service containers are configured here yet, so
+      # DB-dependent gateway tests fall back to their own tolerant
+      # `expect([200, 500, 503])`-style assertions (already written this
+      # way throughout apps/gateway/src to survive a genuinely-unavailable
+      # DB) rather than asserting real persisted data. This still catches
+      # the large majority of real regressions (all connector suites, the
+      # full packages/agent suite, and every non-DB gateway assertion), and
+      # is a strict improvement over zero tests running at all — but wiring
+      # real service containers + Prisma migrations here is real follow-up
+      # work, not done in this pass.
+      - run: pnpm test
       - run: docker build -f apps/gateway/Dockerfile . -t anway-gateway:ci
       - run: docker build -f apps/web/Dockerfile . -t anway-web:ci
+  evals:
+    # Agent output-quality evals (packages/agent/src/evals) — real,
+    # non-mocked model calls scored by an LLM-as-judge against specific
+    # rubrics. Confirmed live via independent review (finding I8) that this
+    # suite existed but was never wired into CI at all. Gated on a model
+    # key actually being configured as a repo/org secret — cli.ts already
+    # documents itself as "CI-usable once a model key is provisioned in
+    # that environment"; skip gracefully rather than failing when none is
+    # set (e.g. on a fork's PR without secrets access).
+    runs-on: ubuntu-latest
+    if: ${{ secrets.DEEPSEEK_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @anway/agent run eval
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   build-and-push:
     # Only runs for the pipeline's workflow_dispatch trigger (apps/gateway/src/routes/pipeline.ts's
     # "Strategy A" build path — dispatches this workflow with { inputs: { sha } } and expects real

@@ -11,7 +11,8 @@ import { DeployAgent } from '../agents/deploy.js'
 import { OncallAgent } from '../agents/oncall.js'
 import { BAAgent } from '../agents/ba.js'
 import { judge } from './judge.js'
-import { productEvals, techspecEvals, reviewEvals, sreEvals, bootstrapEvals, testEvals, deployEvals, oncallEvals, baEvals } from './cases.js'
+import { runChatEval } from './chat-eval.js'
+import { productEvals, techspecEvals, reviewEvals, sreEvals, bootstrapEvals, testEvals, deployEvals, oncallEvals, baEvals, chatEvals } from './cases.js'
 import type { EvalResult } from './types.js'
 
 const TENANT = '00000000-0000-0000-0000-000000000001' as TenantId
@@ -22,6 +23,15 @@ const TENANT = '00000000-0000-0000-0000-000000000001' as TenantId
  * intentionally not mocked, since eval scores against a mocked/canned
  * response would be meaningless), then a separate LLM-as-judge call scores
  * the real output against a specific, checkable rubric.
+ *
+ * `judgeModel` defaults to `model` for backward compatibility, but passing
+ * a genuinely different model is strongly preferred — confirmed live via
+ * independent review (finding I8) that the same model instance grading its
+ * own output is a real self-grading bias risk (a model tends to be more
+ * lenient toward its own phrasing/reasoning style than an independent
+ * judge would be), not a true independent quality check. cli.ts picks a
+ * second distinct provider for judging whenever more than one API key is
+ * configured.
  */
 // Agent methods now throw on a real JSON-parse failure instead of silently
 // returning a fabricated-looking empty stub (see agents/product.ts etc.) —
@@ -30,11 +40,11 @@ const TENANT = '00000000-0000-0000-0000-000000000001' as TenantId
 // throw here would abort every remaining case in the whole suite, not just
 // the one that failed. Record a real failing EvalResult instead so one bad
 // case doesn't take down the rest of the run.
-export async function runEvals(model: IModelProvider, kg: IKnowledgeGraph): Promise<EvalResult[]> {
+export async function runEvals(model: IModelProvider, kg: IKnowledgeGraph, judgeModel: IModelProvider = model): Promise<EvalResult[]> {
   const results: EvalResult[] = []
   const run = (id: string, agentAction: string, rubric: string, produce: () => Promise<unknown>) =>
     produce().then(
-      (output) => judge(model, id, agentAction, rubric, output),
+      (output) => judge(judgeModel, id, agentAction, rubric, output),
       (e: unknown) => ({ id, agentAction, score: 0, passed: false, reasoning: `Agent threw before producing output: ${e instanceof Error ? e.message : String(e)}`, rawOutput: null }) satisfies EvalResult,
     )
 
@@ -87,6 +97,14 @@ export async function runEvals(model: IModelProvider, kg: IKnowledgeGraph): Prom
   const ba = new BAAgent(model, model, kg)
   for (const c of baEvals) {
     results.push(await run(c.id, c.agentAction, c.rubric, () => ba.analyze(c.input, TENANT)))
+  }
+
+  // Primary chat path (createOrchestrator + runSession) — see chatEvals'
+  // doc comment in cases.ts. Uses its own runner (runChatEval), not the
+  // generic `run()` helper above, since it exercises the real streaming
+  // entry point rather than a single specialist-agent method call.
+  for (const c of chatEvals) {
+    results.push(await runChatEval(model, judgeModel, c.id, c.input, c.rubric))
   }
 
   return results

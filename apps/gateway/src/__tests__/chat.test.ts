@@ -228,7 +228,16 @@ describe('runSession — streaming and audit', () => {
 
     const doneEvent = events.find((e) => e.type === 'done')
     expect(doneEvent).toBeDefined()
-    expect(doneEvent).toMatchObject({ type: 'done', inputTokens: 42, outputTokens: 17 })
+    // 42/17 is the synthesis stream call's own usage — the `done` event now
+    // reports a real cumulative total across the whole session (intent
+    // classification + entity extraction + every ConnectorAgent + synthesis),
+    // not just the final call's tokens (see orchestrator.ts's totalInputTokens/
+    // totalOutputTokens comment — this session's fix for a real gateway
+    // undercount of token_usage_daily/monthly-budget enforcement). This mock
+    // provider's chat() (used for both intent classification and entity
+    // extraction) returns usage: {inputTokens:1, outputTokens:1} each call,
+    // so the real total is 42+1+1=44 / 17+1+1=19.
+    expect(doneEvent).toMatchObject({ type: 'done', inputTokens: 44, outputTokens: 19 })
   })
 
   it('perimeter-blocked tool calls are audited as tool_call_blocked in ConnectorAgent', async () => {

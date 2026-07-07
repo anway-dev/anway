@@ -75,6 +75,24 @@ describe('opsgenie — fixture HTTP server', () => {
     expect(kg.entities.some(e => e.name === 'alice@acme.dev'), 'expected engineer alice@acme.dev not extracted from on-call').toBe(true)
   })
 
+  // Regression test for finding A5 (connector bootstrap audit): the real
+  // ONCALL relationship this bootstrap creates (correctly, using real
+  // upsertEntity-returned ids — unlike PagerDuty's separate bug) was still
+  // undercounted, since the final return hardcoded relationshipsUpserted: 0
+  // regardless of how many edges were actually created.
+  it('accurately reports relationshipsUpserted for the real Team→ONCALL→Engineer edge created', async () => {
+    const kg = new FakeKG()
+    const result = await new OpsGenieBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { apiKey: 'fixture-key', baseUrl: fixture.baseUrl },
+    )
+    expect(result.relationshipsUpserted).toBeGreaterThan(0)
+    expect(kg.relationships.some(r =>
+      r.relType === 'ONCALL' &&
+      r.fromEntityId === 'Team:Platform' &&
+      r.toEntityId === 'Engineer:alice@acme.dev',
+    )).toBe(true)
+  })
+
   // ── agent tools ────────────────────────────────────────────────────
 
   it('agent has exactly 4 tools (2 read, 2 write)', () => {

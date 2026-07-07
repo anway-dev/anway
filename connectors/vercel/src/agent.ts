@@ -19,6 +19,14 @@ function vercelAuth(creds: ConnectorCreds): string {
   return `Bearer ${String(apiKey)}`
 }
 
+// creds.baseUrl override — bootstrap.ts already respects this (defaults to
+// https://api.vercel.com); these tools previously hardcoded that URL
+// unconditionally, so no fixture-server test or self-hosted Vercel-
+// compatible endpoint could ever reach these calls.
+function vercelBase(creds: Record<string, unknown>): string {
+  return (creds['baseUrl'] as string | undefined) || 'https://api.vercel.com'
+}
+
 const TOOLS: ConnectorTool[] = [
   {
     // Hardcoded fake data previously — confirmed live via independent review
@@ -31,7 +39,7 @@ const TOOLS: ConnectorTool[] = [
     definition: { name: 'get_pipelines', description: 'List pipelines', parameters: { type: 'object', properties: { service: { type: 'string' } }, required: ['service'] } },
     execute: async (params, creds) => {
       const auth = vercelAuth(creds as ConnectorCreds)
-      const res = await fetch(`https://api.vercel.com/v6/deployments?app=${encodeURIComponent(String(params.service))}&limit=20`, {
+      const res = await fetch(`${vercelBase(creds)}/v6/deployments?app=${encodeURIComponent(String(params.service))}&limit=20`, {
         headers: { Authorization: auth },
       })
       if (!res.ok) throw new Error(`Vercel get_pipelines failed: HTTP ${res.status}`)
@@ -53,7 +61,7 @@ const TOOLS: ConnectorTool[] = [
       const auth = vercelAuth(creds as ConnectorCreds)
       // `pipeline` here is a Vercel deployment id — the closest real concept
       // to a single "build" this platform has.
-      const res = await fetch(`https://api.vercel.com/v13/deployments/${encodeURIComponent(String(params.pipeline))}`, {
+      const res = await fetch(`${vercelBase(creds)}/v13/deployments/${encodeURIComponent(String(params.pipeline))}`, {
         headers: { Authorization: auth },
       })
       if (!res.ok) throw new Error(`Vercel get_builds failed: HTTP ${res.status}`)
@@ -76,7 +84,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const apiKey = (creds as ConnectorCreds).apiKey
       if (!apiKey) throw new Error('Vercel API key not configured')
-      const res = await fetch('https://api.vercel.com/v13/deployments', {
+      const res = await fetch(`${vercelBase(creds)}/v13/deployments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

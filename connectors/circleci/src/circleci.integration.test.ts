@@ -8,7 +8,8 @@ import { CircleciAgent } from './agent.js'
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/me', status: 200, body: {'login': 'test-user', 'id': 'user-1'} },
   { method: 'GET', path: '/pipeline', status: 200, body: {'items': [{'id': 'pipe-1', 'project_slug': 'gh/acme/payments', 'state': 'created'}]} },
-  { method: 'GET', path: '/project/gh/anway', status: 200, body: [{'slug': 'gh/anway/payments', 'name': 'payments'}] }
+  { method: 'GET', path: '/project/gh/anway', status: 200, body: [{'slug': 'gh/anway/payments', 'name': 'payments'}] },
+  { method: 'GET', path: '/project/gh/acme/payments/pipeline', status: 200, body: {'items': [{'id': 'pipe-1', 'state': 'created'}]} },
 ]
 
 describe('circleci — fixture HTTP server', () => {
@@ -33,9 +34,18 @@ describe('circleci — fixture HTTP server', () => {
     const agent = new CircleciAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
+    // get_pipelines (tools[0]) requires `service` and reads creds.apiKey
+    // (not `token`) — omitting either is no longer a no-op empty result,
+    // it's a real thrown error.
     const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const result = await firstTool.execute({ service: 'gh/acme/payments' }, { baseUrl: fixture.baseUrl, apiKey: 'fixture-key' }) as { pipelines: unknown[] }
+    expect(result.pipelines).toBeDefined()
+  })
+
+  it('agent tools throw on missing apiKey instead of returning an empty result', async () => {
+    const agent = new CircleciAgent()
+    const firstTool = agent.tools[0]!
+    await expect(firstTool.execute({ service: 'gh/acme/payments' }, { baseUrl: fixture.baseUrl })).rejects.toThrow('CircleCI API key not configured')
   })
 
   it('fixture server received at least one request', () => {

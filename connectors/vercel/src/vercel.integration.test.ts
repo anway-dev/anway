@@ -32,9 +32,18 @@ describe('vercel — fixture HTTP server', () => {
     const agent = new VercelAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
+    // get_pipelines (tools[0]) requires `service` and reads creds.apiKey
+    // (not `token`) — omitting either is no longer a no-op empty result,
+    // it's a real thrown error.
     const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const result = await firstTool.execute({ service: 'payments-frontend' }, { baseUrl: fixture.baseUrl, apiKey: 'fixture-key' }) as { pipelines: unknown[] }
+    expect(result.pipelines).toBeDefined()
+  })
+
+  it('agent tools throw on missing apiKey instead of returning an empty result', async () => {
+    const agent = new VercelAgent()
+    const firstTool = agent.tools[0]!
+    await expect(firstTool.execute({ service: 'payments-frontend' }, { baseUrl: fixture.baseUrl })).rejects.toThrow('Vercel API key not configured')
   })
 
   it('fixture server received at least one request', () => {

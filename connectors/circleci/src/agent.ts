@@ -12,6 +12,14 @@ function ccHeaders(creds: ConnectorCreds): Record<string, string> {
   return { 'Circle-Token': String(apiKey) }
 }
 
+// creds.baseUrl override — bootstrap.ts already respects this (defaults to
+// https://circleci.com/api/v2); these tools previously hardcoded that URL
+// unconditionally, so no fixture-server test or self-hosted CircleCI-
+// compatible endpoint could ever reach these calls.
+function ccBase(creds: Record<string, unknown>): string {
+  return (creds['baseUrl'] as string | undefined) || 'https://circleci.com/api/v2'
+}
+
 const TOOLS: ConnectorTool[] = [
   {
     // Hardcoded fake data previously — confirmed live via independent review
@@ -20,7 +28,7 @@ const TOOLS: ConnectorTool[] = [
     definition: { name: 'get_pipelines', description: 'List pipelines', parameters: { type: 'object', properties: { service: { type: 'string' } }, required: ['service'] } },
     execute: async (params, creds) => {
       const headers = ccHeaders(creds as ConnectorCreds)
-      const res = await fetch(`https://circleci.com/api/v2/project/${String(params.service)}/pipeline`, { headers })
+      const res = await fetch(`${ccBase(creds)}/project/${String(params.service)}/pipeline`, { headers })
       if (!res.ok) throw new Error(`CircleCI get_pipelines failed: HTTP ${res.status}`)
       const json = await res.json() as { items?: CCPipelineItem[] }
       return {
@@ -44,9 +52,10 @@ const TOOLS: ConnectorTool[] = [
       const pipelineId = String(params.pipeline)
       const limit = params.limit ? Number(params.limit) : 20
 
+      const base = ccBase(creds)
       const [pipelineRes, workflowsRes] = await Promise.all([
-        fetch(`https://circleci.com/api/v2/pipeline/${pipelineId}`, { headers }),
-        fetch(`https://circleci.com/api/v2/pipeline/${pipelineId}/workflow`, { headers }),
+        fetch(`${base}/pipeline/${pipelineId}`, { headers }),
+        fetch(`${base}/pipeline/${pipelineId}/workflow`, { headers }),
       ])
       if (!pipelineRes.ok) throw new Error(`CircleCI get_builds (pipeline) failed: HTTP ${pipelineRes.status}`)
       if (!workflowsRes.ok) throw new Error(`CircleCI get_builds (workflows) failed: HTTP ${workflowsRes.status}`)
@@ -57,7 +66,7 @@ const TOOLS: ConnectorTool[] = [
       const builds: Array<{ id: string; sha: string; status: string; duration: number | null; startedAt: string | null }> = []
       for (const wf of workflowsJson.items ?? []) {
         if (builds.length >= limit) break
-        const jobsRes = await fetch(`https://circleci.com/api/v2/workflow/${wf.id}/job`, { headers })
+        const jobsRes = await fetch(`${base}/workflow/${wf.id}/job`, { headers })
         if (!jobsRes.ok) continue
         const jobsJson = await jobsRes.json() as { items?: CCJobItem[] }
         for (const job of jobsJson.items ?? []) {

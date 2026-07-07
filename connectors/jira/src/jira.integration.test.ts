@@ -32,9 +32,21 @@ describe('jira — fixture HTTP server', () => {
     const agent = new JiraAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
+    // get_issues (tools[0]) requires `project` and reads creds.email +
+    // creds.apiKey (not `token`) — omitting either is no longer a no-op
+    // empty result, it's a real thrown error.
     const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    const result = await firstTool.execute(
+      { project: 'PAY' },
+      { baseUrl: fixture.baseUrl, email: 'test@test.com', apiKey: 'fixture-key' },
+    ) as { issues: unknown[] }
+    expect(result.issues).toBeDefined()
+  })
+
+  it('agent tools throw on missing credentials instead of returning an empty result', async () => {
+    const agent = new JiraAgent()
+    const firstTool = agent.tools[0]!
+    await expect(firstTool.execute({ project: 'PAY' }, { baseUrl: fixture.baseUrl })).rejects.toThrow('Jira API credentials not configured')
   })
 
   it('fixture server received at least one request', () => {

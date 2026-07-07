@@ -36,7 +36,11 @@ describe('loki — integration (real Docker)', () => {
     )
     expect(result.entitiesUpserted).toBeGreaterThan(0)
     expect(result.episodeHints).toBeDefined()
-  })
+    // Real Docker container + real HTTP calls — no explicit timeout here
+    // previously meant vitest's default 5000ms, which this pre-existing
+    // (not touched by this session's fix) test can exceed under load
+    // alongside other concurrent Docker-based test suites.
+  }, 30_000)
 
   it('agent tools are callable against real service', async () => {
     const agent = new LokiAgent()

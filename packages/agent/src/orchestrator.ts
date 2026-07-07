@@ -4,7 +4,7 @@ import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
 import type { IModelProvider, ToolDefinition } from './interfaces/provider.js'
 import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
 import { extractJson } from './agents/extract-json.js'
-import { createTokenMeterMiddleware } from './middleware/token-meter.js'
+import { createTokenMeterMiddleware, reconcileTokenUsage } from './middleware/token-meter.js'
 import type { TokenBudget } from './middleware/token-meter.js'
 import type { AgentPerimeter } from './perimeter/engine.js'
 import type { IGateSink } from './gate/gate.js'
@@ -176,10 +176,9 @@ export async function* runSession(
       temperature: 0,
       ...(signal ? { signal } : {}),
     })
-    // Increment budget immediately after intent classification
-    budget.sessionUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
-    budget.tenantDailyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
-    budget.tenantMonthlyUsed += (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0)
+    // checkTokens already reserved intentEstimatedTokens synchronously —
+    // reconcile against the real usage (see token-meter.ts).
+    reconcileTokenUsage(budget, intentEstimatedTokens, (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0))
     totalInputTokens += intentResp?.usage?.inputTokens ?? 0
     totalOutputTokens += intentResp?.usage?.outputTokens ?? 0
     const parsed = extractJson<{ intent?: unknown }>(intentResp.content)
@@ -270,10 +269,9 @@ export async function* runSession(
     }
 
     const entityResp = await model.chat(entityExtractMsgs, [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
-    // Increment budget immediately
-    budget.sessionUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
-    budget.tenantDailyUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
-    budget.tenantMonthlyUsed += (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0)
+    // checkTokens already reserved entityEstimatedTokens synchronously —
+    // reconcile against the real usage (see token-meter.ts).
+    reconcileTokenUsage(budget, entityEstimatedTokens, (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0))
     totalInputTokens += entityResp?.usage?.inputTokens ?? 0
     totalOutputTokens += entityResp?.usage?.outputTokens ?? 0
     const entityName = entityResp.content.trim()
@@ -536,15 +534,22 @@ const context = resolvedAgentContext
     }
   }
 
-  // Accumulate agent token usage before synthesis
+  // Accumulate agent token usage for reporting only — each ConnectorAgent
+  // already reserved+reconciled its own real usage directly into the shared
+  // `budget` object internally (see connector-agent.ts), synchronously per
+  // model call. Re-adding finding.inputTokens/outputTokens into `budget`
+  // here as well (as this code previously did) double-counted every
+  // connector agent's spend into session/daily/monthly enforcement —
+  // confirmed live via independent review, effectively halving the real
+  // configured limits for any query that used connector agents. totalInputTokens/
+  // totalOutputTokens is a separate reporting accumulator (fed to the `done`
+  // event / token_usage_daily) that connector-agent.ts never touches, so it
+  // still needs this sum.
   let agentInputTokens = 0, agentOutputTokens = 0
   for (const finding of findings) {
     agentInputTokens += finding.inputTokens ?? 0
     agentOutputTokens += finding.outputTokens ?? 0
   }
-  budget.sessionUsed += agentInputTokens + agentOutputTokens
-  budget.tenantDailyUsed += agentInputTokens + agentOutputTokens
-  budget.tenantMonthlyUsed += agentInputTokens + agentOutputTokens
   totalInputTokens += agentInputTokens
   totalOutputTokens += agentOutputTokens
 
@@ -586,9 +591,9 @@ const context = resolvedAgentContext
   }
 
   clearTimeout(synthTimeout)
-  budget.sessionUsed += inputTokens + outputTokens
-  budget.tenantDailyUsed += inputTokens + outputTokens
-  budget.tenantMonthlyUsed += inputTokens + outputTokens
+  // synthTokenCheck already reserved estimatedTokens synchronously —
+  // reconcile against the real usage (see token-meter.ts).
+  reconcileTokenUsage(budget, estimatedTokens, inputTokens + outputTokens)
   totalInputTokens += inputTokens
   totalOutputTokens += outputTokens
   auditSink.append({ id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId, sessionId: ctx.sessionId, eventType: 'synthesis_complete', payload: { inputTokens, outputTokens, agentCount: findings.length }, createdAt: new Date() }).catch(() => {})
@@ -713,11 +718,9 @@ async function* synthesisOnlyFallback(
     }
   } catch (e) {
     yield { type: 'error' as const, code: 'UPSTREAM_ERROR' as const, message: e instanceof Error ? e.message : String(e) }
-    if (budget) {
-      budget.sessionUsed += inputTokens + outputTokens
-      budget.tenantDailyUsed += inputTokens + outputTokens
-      budget.tenantMonthlyUsed += inputTokens + outputTokens
-    }
+    // checkTokens (if present) already reserved estimatedTokens synchronously
+    // — reconcile against the real usage (see token-meter.ts).
+    if (budget && checkTokens) reconcileTokenUsage(budget, estimatedTokens, inputTokens + outputTokens)
     yield { type: 'done' as const, inputTokens: priorInputTokens + inputTokens, outputTokens: priorOutputTokens + outputTokens }
     return
   }
@@ -726,11 +729,7 @@ async function* synthesisOnlyFallback(
   // reported only its own tokens in `done` — silently dropping the
   // intent-classification + entity-extraction tokens already spent earlier
   // in runSession before this fallback was chosen.
-  if (budget) {
-    budget.sessionUsed += inputTokens + outputTokens
-    budget.tenantDailyUsed += inputTokens + outputTokens
-    budget.tenantMonthlyUsed += inputTokens + outputTokens
-  }
+  if (budget) reconcileTokenUsage(budget, estimatedTokens, inputTokens + outputTokens)
   if (persistence) {
     const { sessionMemory, auditSink, ctx } = persistence
     await sessionMemory.append(ctx.sessionId, {

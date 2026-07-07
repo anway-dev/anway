@@ -8,7 +8,7 @@ import { createPerimeterMiddleware } from '../middleware/perimeter.js'
 import { isWriteAction, pollGate } from '../gate/gate.js'
 import type { IGateSink } from '../gate/gate.js'
 import { connectorIdFromTool } from '../tools/naming.js'
-import { createTokenMeterMiddleware } from '../middleware/token-meter.js'
+import { createTokenMeterMiddleware, reconcileTokenUsage } from '../middleware/token-meter.js'
 import type { TokenBudget } from '../middleware/token-meter.js'
 
 // ---------------------------------------------------------------------------
@@ -335,9 +335,16 @@ export class ConnectorAgent {
     const MAX_STEPS = this.maxSteps
 
     for (let step = 0; step < MAX_STEPS; step++) {
-      // Token metering — block before reaching the LLM if budget exceeded
+      // Token metering — block before reaching the LLM if budget exceeded.
+      // createTokenMeterMiddleware synchronously reserves estimatedTokens
+      // into this.budget as part of the check itself (closes a real TOCTOU
+      // race: multiple ConnectorAgents run concurrently via Promise.all
+      // against this same shared budget object — see token-meter.ts's doc
+      // comment). Must reconcile with the real usage below, including on a
+      // failed model call (reservation still needs releasing).
+      let estimatedTokens = 0
       if (this.budget) {
-        const estimatedTokens = Math.ceil(JSON.stringify(messages).length / 4) + 2000
+        estimatedTokens = Math.ceil(JSON.stringify(messages).length / 4) + 2000
         const checkTokens = createTokenMeterMiddleware(this.budget)
         const tokenCheck = await checkTokens({ estimatedTokens, messages, model: this.model.cheapModelId })
         if ('_tag' in tokenCheck && tokenCheck._tag === 'TokenHardBlock') {
@@ -363,6 +370,9 @@ export class ConnectorAgent {
           ...(signal ? { signal } : {}),
         })
       } catch (e) {
+        // Release the reservation — the call never happened, so 0 tokens
+        // were actually spent, but estimatedTokens was already reserved above.
+        if (this.budget) reconcileTokenUsage(this.budget, estimatedTokens, 0)
         return {
           agentType: this.agentType,
           toolsUsed,
@@ -377,12 +387,10 @@ export class ConnectorAgent {
 
       agentInputTokens += resp.usage?.inputTokens ?? 0
       agentOutputTokens += resp.usage?.outputTokens ?? 0
-      // Increment shared budget immediately so concurrent agents see each other's spend
+      // Reconcile the reservation against the real usage.
       if (this.budget) {
         const usedThisCall = (resp.usage?.inputTokens ?? 0) + (resp.usage?.outputTokens ?? 0)
-        this.budget.sessionUsed += usedThisCall
-        this.budget.tenantDailyUsed += usedThisCall
-        this.budget.tenantMonthlyUsed += usedThisCall
+        reconcileTokenUsage(this.budget, estimatedTokens, usedThisCall)
       }
 
       // No tool calls → agent produced final summary

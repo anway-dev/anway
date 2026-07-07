@@ -26,5 +26,8 @@ describe('vault conformance', () => {
     )
     expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
     expect(result.episodeHints).toBeDefined()
-  })
+    // bootstrap.ts retries up to 5x with a 1s backoff when no real Vault dev
+    // server is reachable at the default localhost:8200 (exceeds vitest's
+    // default 5000ms test timeout in an environment with no Vault running).
+  }, 10_000)
 })

@@ -289,30 +289,26 @@ describe('GcpMonitoringAgent — tool tests (mocked execFile, argv array)', () =
       expect(result.points).toHaveLength(2)
     })
 
-    it('returns empty points when execFile errors', async () => {
+    it('throws when execFile errors (real CLI failure, not an empty result)', async () => {
       mockError('command not found')
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: 'i-bad', metric: 'compute.googleapis.com/instance/cpu/utilization', window: '5m' },
         creds(),
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('command not found')
     })
 
-    it('returns empty points when gcloud returns invalid JSON', async () => {
+    it('throws when gcloud returns invalid JSON (real parse failure, not an empty result)', async () => {
       mockRawStdout('not json')
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: 'i-abc', metric: 'compute.googleapis.com/instance/cpu/utilization', window: '5m' },
         creds(),
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow()
     })
 
     it('returns empty points when result is not an array', async () => {
@@ -328,17 +324,15 @@ describe('GcpMonitoringAgent — tool tests (mocked execFile, argv array)', () =
       expect(result.points).toEqual([])
     })
 
-    it('returns empty points when creds are missing (gcloud CLI will fail)', async () => {
+    it('throws when creds are missing (gcloud CLI will fail — real failure, not an empty result)', async () => {
       mockError('Unable to locate credentials')
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: 'i-abc', metric: 'compute.googleapis.com/instance/cpu/utilization', window: '5m' },
         {}, // no creds
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('Unable to locate credentials')
     })
 
     it('a resource value containing shell metacharacters is never shell-interpreted', async () => {
@@ -445,14 +439,12 @@ describe('GcpMonitoringAgent — tool tests (mocked execFile, argv array)', () =
       expect(args).not.toContain('--filter')
     })
 
-    it('returns empty alarms on policies CLI failure', async () => {
+    it('throws on policies CLI failure (the primary data — real failure, not an empty result)', async () => {
       mockErrorOnce('PermissionDenied')
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_alarms')!
-      const result = await tool.execute({}, creds()) as { alarms: unknown[] }
-
-      expect(result.alarms).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('PermissionDenied')
     })
 
     it('returns empty alarms when policies result is not an array', async () => {
@@ -513,41 +505,35 @@ describe('GcpMonitoringAgent — tool tests (mocked execFile, argv array)', () =
       expect(init.headers!['Authorization']).toBe('Bearer ya29.fake-token-xyz')
     })
 
-    it('returns empty events when access token command fails', async () => {
+    it('throws when access token command fails (real CLI failure, not an empty result)', async () => {
       mockError('gcloud not authenticated')
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, creds()) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
-      // fetch should never have been called (execFile threw, caught before fetch)
+      await expect(tool.execute({}, creds())).rejects.toThrow('gcloud not authenticated')
+      // fetch should never have been called (execFile threw before fetch)
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
-    it('returns empty events when Service Health API call fails', async () => {
+    it('throws when Service Health API call fails (real failure, not an empty result)', async () => {
       mockRawStdout('ya29.fake-token')
-      mockFetch.mockResolvedValue({ ok: false })
+      mockFetch.mockResolvedValue({ ok: false, status: 500 })
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, creds()) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('GCP Monitoring get_health_events failed')
     })
 
-    it('returns empty events when no project is configured', async () => {
+    it('throws when no project is configured (real usage error, not an empty result)', async () => {
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, {}) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
-      // Neither execFile nor fetch should have been called (no project → early return)
+      await expect(tool.execute({}, {})).rejects.toThrow('no project configured')
+      // Neither execFile nor fetch should have been called (no project → early throw)
       expect(execFile).not.toHaveBeenCalled()
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
-    it('returns empty events on invalid API JSON response', async () => {
+    it('throws on invalid API JSON response (real parse failure, not an empty result)', async () => {
       mockRawStdout('ya29.fake-token')
       mockFetch.mockResolvedValue({
         ok: true,
@@ -556,9 +542,7 @@ describe('GcpMonitoringAgent — tool tests (mocked execFile, argv array)', () =
 
       const agent = new GcpMonitoringAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, creds()) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('Unexpected token in JSON')
     })
 
     it('uses GOOGLE_APPLICATION_CREDENTIALS from creds for auth token call', async () => {

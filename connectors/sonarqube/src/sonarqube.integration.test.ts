@@ -177,41 +177,35 @@ describe('sonarqube — fixture HTTP server', () => {
       expect(result.issues[3].line).toBe(0)
     })
 
-    it('returns empty on missing creds', async () => {
+    it('throws on missing creds (real failure, not an empty result)', async () => {
       const agent = new SonarqubeAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-      const result = await tool.execute(
+      await expect(tool.execute(
         { project: 'com.example:payments-api' },
         {},
-      ) as { issues: unknown[] }
-
-      expect(result.issues).toEqual([])
+      )).rejects.toThrow('SonarQube credentials not configured')
     })
 
-    it('returns empty on missing token (null creds)', async () => {
+    it('throws on missing token (null creds) — real failure, not an empty result', async () => {
       const agent = new SonarqubeAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-      const result = await tool.execute(
+      await expect(tool.execute(
         { project: 'com.example:payments-api' },
         { baseUrl: fixture.baseUrl },  // baseUrl present but no token
-      ) as { issues: unknown[] }
-
-      expect(result.issues).toEqual([])
+      )).rejects.toThrow('SonarQube credentials not configured')
     })
 
-    it('returns empty when API returns 404 (no matching fixture route)', async () => {
+    it('throws when API returns 404 (no matching fixture route) — real failure, not an empty result', async () => {
       const agent = new SonarqubeAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
       // Use a baseUrl that will 404 on every request (no fixture routes)
-      const result = await tool.execute(
+      await expect(tool.execute(
         { project: 'com.example:payments-api' },
         { baseUrl: 'http://127.0.0.1:19999', token: 'test-token' },
-      ) as { issues: unknown[] }
-
-      expect(result.issues).toEqual([])
+      )).rejects.toThrow()
     })
   })
 
@@ -233,29 +227,25 @@ describe('sonarqube — fixture HTTP server', () => {
       expect(result.vulnerabilities).toBe(0)
     })
 
-    it('returns zeros on missing creds', async () => {
+    it('throws on missing creds instead of a false "0 bugs, 0 vulnerabilities" all-clear', async () => {
       const agent = new SonarqubeAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_quality_metrics')!
 
-      const result = await tool.execute(
+      await expect(tool.execute(
         { project: 'com.example:payments-api' },
         {},
-      ) as { coverage: number; duplication: number; bugs: number; vulnerabilities: number }
-
-      expect(result).toEqual({ coverage: 0, duplication: 0, bugs: 0, vulnerabilities: 0 })
+      )).rejects.toThrow('SonarQube credentials not configured')
     })
 
-    it('returns zeros when API errors (no matching fixture route)', async () => {
+    it('throws when API errors instead of a false "0 bugs, 0 vulnerabilities" all-clear', async () => {
       const agent = new SonarqubeAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_quality_metrics')!
 
       // URL that will fail to connect/respond
-      const result = await tool.execute(
+      await expect(tool.execute(
         { project: 'com.example:payments-api' },
         { baseUrl: 'http://127.0.0.1:19999', token: 'test-token' },
-      ) as { coverage: number; duplication: number; bugs: number; vulnerabilities: number }
-
-      expect(result).toEqual({ coverage: 0, duplication: 0, bugs: 0, vulnerabilities: 0 })
+      )).rejects.toThrow()
     })
   })
 

@@ -107,13 +107,11 @@ describe('vault — fixture HTTP server', () => {
     expect(result.lastUpdated).toBeNull()
   })
 
-  it('get_secret_metadata returns empty on missing creds', async () => {
+  it('get_secret_metadata throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new VaultAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_secret_metadata')!
 
-    const result = await tool.execute({ path: 'secret/myapp' }, {}) as { keys: unknown[]; lastUpdated: null }
-    expect(result.keys).toEqual([])
-    expect(result.lastUpdated).toBeNull()
+    await expect(tool.execute({ path: 'secret/myapp' }, {})).rejects.toThrow('Vault credentials not configured')
   })
 
   it('get_secret_metadata returns empty keys on LIST failure (404)', async () => {
@@ -145,24 +143,22 @@ describe('vault — fixture HTTP server', () => {
     expect(result.policies).toEqual(['admin', 'readonly', 'deployer'])
   })
 
-  it('list_policies returns empty on missing creds', async () => {
+  it('list_policies throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new VaultAgent()
     const tool = agent.tools.find(t => t.definition.name === 'list_policies')!
 
-    const result = await tool.execute({}, {}) as { policies: unknown[] }
-    expect(result.policies).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('Vault credentials not configured')
   })
 
-  it('list_policies returns empty on server error', async () => {
+  it('list_policies throws on a real connection failure instead of returning an empty result', async () => {
     const agent = new VaultAgent()
     const tool = agent.tools.find(t => t.definition.name === 'list_policies')!
 
-    // Point at a port that doesn't respond → connection refused → caught → empty
-    const result = await tool.execute(
+    // Point at a port that doesn't respond — a genuine connection failure.
+    await expect(tool.execute(
       {},
       { baseUrl: 'http://127.0.0.1:1', token: 'fixture-token' },
-    ) as { policies: unknown[] }
-    expect(result.policies).toEqual([])
+    )).rejects.toThrow()
   })
 
   // ── request tracking ───────────────────────────────────────────────

@@ -154,23 +154,21 @@ describe('terraform — fixture HTTP server', () => {
     expect(api.lastRun).toBe('2026-06-30T16:00:00Z')
   })
 
-  it('get_workspaces returns empty on missing creds', async () => {
+  it('get_workspaces throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new TerraformAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_workspaces')!
 
-    const result = await tool.execute({}, {}) as { workspaces: unknown[] }
-    expect(result.workspaces).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('Terraform Cloud credentials not configured')
   })
 
-  it('get_workspaces returns empty on org fetch 500', async () => {
+  it('get_workspaces throws on org fetch 500 (real failure, not an empty result)', async () => {
     const agent = new TerraformAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_workspaces')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       {},
       { baseUrl: fixture.baseUrl + '/http-500', token: 'fixture-token' },
-    ) as { workspaces: unknown[] }
-    expect(result.workspaces).toEqual([])
+    )).rejects.toThrow('Terraform Cloud API failed: HTTP 500')
   })
 
   // ── get_run ────────────────────────────────────────────────────────
@@ -223,48 +221,44 @@ describe('terraform — fixture HTTP server', () => {
     expect(result.run!.appliedAt).toBeNull()
   })
 
-  it('get_run returns null on 404 (nonexistent workspace)', async () => {
+  it('get_run throws on 404 (nonexistent workspace) — real failure, not an empty result', async () => {
     const agent = new TerraformAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_run')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { workspaceId: 'nonexistent' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { run: unknown }
-    expect(result.run).toBeNull()
+    )).rejects.toThrow('Terraform Cloud API failed: HTTP 404')
   })
 
-  it('get_run returns null on HTTP 500', async () => {
+  it('get_run throws on HTTP 500 (real failure, not an empty result)', async () => {
     const agent = new TerraformAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_run')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { workspaceId: 'ws-payments' },
       { baseUrl: fixture.baseUrl + '/http-500', token: 'fixture-token' },
-    ) as { run: unknown }
-    expect(result.run).toBeNull()
+    )).rejects.toThrow('Terraform Cloud API failed: HTTP 500')
   })
 
-  it('get_run returns null on missing creds', async () => {
+  it('get_run throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new TerraformAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_run')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { workspaceId: 'ws-payments' },
       {},
-    ) as { run: unknown }
-    expect(result.run).toBeNull()
+    )).rejects.toThrow('Terraform Cloud credentials not configured')
   })
 
-  it('get_run returns null on missing workspaceId param', async () => {
+  it('get_run throws on missing workspaceId param (real usage error, not an empty result)', async () => {
     const agent = new TerraformAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_run')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       {},
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { run: unknown }
-    expect(result.run).toBeNull()
+    )).rejects.toThrow('Terraform get_run: workspaceId is required')
   })
 
   // ── request tracking ───────────────────────────────────────────────

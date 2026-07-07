@@ -177,64 +177,54 @@ describe('sentry — fixture HTTP server', () => {
     expect(result.issues).toEqual([])
   })
 
-  it('get_issues returns empty array on HTTP 404', async () => {
+  it('get_issues throws on HTTP 404 (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: 'nonexistent' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token', org: 'acme' },
-    ) as { issues: unknown[] }
-
-    expect(result.issues).toEqual([])
+    )).rejects.toThrow('Sentry get_issues failed: HTTP 404')
   })
 
-  it('get_issues returns empty array on HTTP 500', async () => {
+  it('get_issues throws on HTTP 500 (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: 'payments-api' },
       { baseUrl: fixture.baseUrl + '/http-500', token: 'fixture-token', org: 'acme' },
-    ) as { issues: unknown[] }
-
-    expect(result.issues).toEqual([])
+    )).rejects.toThrow('Sentry get_issues failed: HTTP 500')
   })
 
-  it('get_issues returns empty array when missing token', async () => {
+  it('get_issues throws when missing token (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: 'payments-api' },
       { baseUrl: fixture.baseUrl, org: 'acme' },
-    ) as { issues: unknown[] }
-
-    expect(result.issues).toEqual([])
+    )).rejects.toThrow('Sentry credentials not configured')
   })
 
-  it('get_issues returns empty array when missing org', async () => {
+  it('get_issues throws when missing org (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: 'payments-api' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { issues: unknown[] }
-
-    expect(result.issues).toEqual([])
+    )).rejects.toThrow('Sentry credentials not configured')
   })
 
-  it('get_issues returns empty array when empty project param', async () => {
+  it('get_issues throws when empty project param (real usage error, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_issues')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: '' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token', org: 'acme' },
-    ) as { issues: unknown[] }
-
-    expect(result.issues).toEqual([])
+    )).rejects.toThrow('Sentry get_issues: project is required')
   })
 
   it('get_issues URL-encodes org and project path segments', async () => {
@@ -299,64 +289,54 @@ describe('sentry — fixture HTTP server', () => {
     expect(result.events[0]!.stack).toBe('')
   })
 
-  it('get_events returns empty array on HTTP 404', async () => {
+  it('get_events throws on HTTP 404 (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_events')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { issueId: 'nonexistent' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token', org: 'acme' },
-    ) as { events: unknown[] }
-
-    expect(result.events).toEqual([])
+    )).rejects.toThrow('Sentry get_events failed: HTTP 404')
   })
 
-  it('get_events returns empty array on HTTP 500', async () => {
+  it('get_events throws on HTTP 500 (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_events')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { issueId: 's-1' },
       { baseUrl: fixture.baseUrl + '/http-500', token: 'fixture-token', org: 'acme' },
-    ) as { events: unknown[] }
-
-    expect(result.events).toEqual([])
+    )).rejects.toThrow('Sentry get_events failed: HTTP 500')
   })
 
-  it('get_events returns empty array when missing token', async () => {
+  it('get_events throws when missing token (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_events')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { issueId: 's-1' },
       { baseUrl: fixture.baseUrl, org: 'acme' },
-    ) as { events: unknown[] }
-
-    expect(result.events).toEqual([])
+    )).rejects.toThrow('Sentry credentials not configured')
   })
 
-  it('get_events returns empty array when missing org', async () => {
+  it('get_events throws when missing org (real failure, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_events')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { issueId: 's-1' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { events: unknown[] }
-
-    expect(result.events).toEqual([])
+    )).rejects.toThrow('Sentry credentials not configured')
   })
 
-  it('get_events returns empty array when empty issueId param', async () => {
+  it('get_events throws when empty issueId param (real usage error, not an empty result)', async () => {
     const agent = new SentryAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_events')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { issueId: '' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token', org: 'acme' },
-    ) as { events: unknown[] }
-
-    expect(result.events).toEqual([])
+    )).rejects.toThrow('Sentry get_events: issueId is required')
   })
 
   it('get_events URL-encodes issueId path segment', async () => {

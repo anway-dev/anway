@@ -245,72 +245,56 @@ describe('snyk — fixture HTTP server', () => {
 
   // ── get_vulnerabilities — missing credentials ────────────────────────
 
-  it('get_vulnerabilities returns empty on missing token', async () => {
+  it('get_vulnerabilities throws on missing token (real failure, not an empty result)', async () => {
     const agent = new SnykAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_vulnerabilities')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: 'proj-1' },
       {},
-    ) as { vulns: unknown[] }
-
-    expect(result.vulns).toEqual([])
+    )).rejects.toThrow('Snyk credentials not configured')
   })
 
-  it('get_vulnerabilities returns empty when only token present (no baseUrl)', async () => {
+  it('get_vulnerabilities throws when only token present (no baseUrl) — real network failure, not empty', async () => {
     const agent = new SnykAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_vulnerabilities')!
 
-    // Token present but no baseUrl — defaults to https://api.snyk.io.
-    // Will fail connection in test env (no real API), caught by resolveProject try/catch.
-    const result = await tool.execute(
+    // Token present but no baseUrl — defaults to https://api.snyk.io, which
+    // genuinely fails to connect in this test environment. The org-list
+    // fetch that failure occurs in now throws rather than silently
+    // returning null (see resolveProject's comment in agent.ts).
+    await expect(tool.execute(
       { project: 'proj-1' },
       { token: 'some-token' },
-    ) as { vulns: unknown[] }
-
-    expect(result.vulns).toEqual([])
+    )).rejects.toThrow()
   })
 
   // ── get_vulnerabilities — API error (500) ────────────────────────────
 
-  it('get_vulnerabilities returns empty when issues endpoint returns 500', async () => {
+  it('get_vulnerabilities throws when the org-list fetch fails (real connection failure, not empty)', async () => {
     // We can't route "proj-err" through resolveProject because it's not in any org's
-    // project list. Instead, add a direct route for a project ID we know exists
-    // but whose POST endpoint errors.
-    // Use a known project ID (proj-1 exists in org-1) but with a modified baseUrl
-    // that points to a bad path — actually, the fixture server will return 500 for
-    // POST /v1/org/org-1/project/proj-err/issues only. Since proj-err isn't in any
-    // project list fixture, resolveProject returns null and we never hit it.
-    //
-    // The real test: add a project that exists in the fixture project list but whose
-    // issues POST returns 500. We already have that setup — proj-err isn't listed
-    // so resolveProject returns null immediately. To truly test the 500 path we'd
-    // need a project that resolves but whose issues POST errors.
-    //
-    // Test with connection refused instead (points to a port that doesn't respond):
+    // project list. Instead, test with connection refused (points to a port
+    // that doesn't respond) — this fails in resolveProject's org-list fetch,
+    // which now throws rather than silently returning null.
     const agent = new SnykAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_vulnerabilities')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: 'proj-1' },
       { baseUrl: 'http://127.0.0.1:54321', token: 'fixture-token' },
-    ) as { vulns: unknown[] }
-
-    expect(result.vulns).toEqual([])
+    )).rejects.toThrow()
   })
 
   // ── get_vulnerabilities — empty project param ────────────────────────
 
-  it('get_vulnerabilities returns empty when project param is empty', async () => {
+  it('get_vulnerabilities throws when project param is empty (real usage error, not an empty result)', async () => {
     const agent = new SnykAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_vulnerabilities')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { project: '' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { vulns: unknown[] }
-
-    expect(result.vulns).toEqual([])
+    )).rejects.toThrow('Snyk get_vulnerabilities: project is required')
   })
 
   // ── request tracking ─────────────────────────────────────────────────

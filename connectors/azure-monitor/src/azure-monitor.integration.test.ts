@@ -335,43 +335,37 @@ describe('AzureMonitorAgent — tool tests (mocked execFile, argv array)', () =>
       expect(args).toContain('PT5M') // 1h default → ≤1h → PT5M
     })
 
-    it('returns empty points when execFile errors', async () => {
+    it('throws when execFile errors (real CLI failure, not an empty result)', async () => {
       mockError('command not found')
 
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: '/sub/res/rg/vm', metric: 'CPU', window: '5m' },
         creds(),
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('command not found')
     })
 
-    it('returns empty points when az CLI returns invalid JSON', async () => {
+    it('throws when az CLI returns invalid JSON (real parse failure, not an empty result)', async () => {
       mockRawStdout('not json')
 
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: '/sub/res/rg/vm', metric: 'CPU', window: '5m' },
         creds(),
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow()
     })
 
-    it('returns empty points when creds are missing (az CLI auth fails)', async () => {
+    it('throws when creds are missing (az CLI auth fails — real failure, not an empty result)', async () => {
       mockError('Please run az login to setup account')
 
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: '/sub/res/rg/vm', metric: 'CPU', window: '5m' },
         {}, // no creds
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('Please run az login to setup account')
     })
 
     it('a resource value containing shell metacharacters is never shell-interpreted', async () => {
@@ -476,14 +470,12 @@ describe('AzureMonitorAgent — tool tests (mocked execFile, argv array)', () =>
       expect(result.alarms).toEqual([])
     })
 
-    it('returns empty alarms on CLI failure', async () => {
+    it('throws on CLI failure (real failure, not an empty result)', async () => {
       mockError('AccessDenied')
 
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_alarms')!
-      const result = await tool.execute({}, creds()) as { alarms: unknown[] }
-
-      expect(result.alarms).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('AccessDenied')
     })
 
     it('does not append service filter to CLI command (filtering is client-side)', async () => {
@@ -580,33 +572,27 @@ describe('AzureMonitorAgent — tool tests (mocked execFile, argv array)', () =>
       expect(urlArg).toContain('/subscriptions/from-params/')
     })
 
-    it('returns empty events when no subscriptionId available', async () => {
+    it('throws when no subscriptionId available (real usage error, not an empty result)', async () => {
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, {}) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, {})).rejects.toThrow('subscriptionId not configured')
       expect(execFile).not.toHaveBeenCalled()
     })
 
-    it('returns empty events on CLI failure', async () => {
+    it('throws on CLI failure (real failure, not an empty result)', async () => {
       mockError('Resource provider not registered')
 
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, creds()) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('Resource provider not registered')
     })
 
-    it('returns empty events on invalid JSON response', async () => {
+    it('throws on invalid JSON response (real parse failure, not an empty result)', async () => {
       mockRawStdout('not json')
 
       const agent = new AzureMonitorAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, creds()) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow()
     })
 
     it('handles missing properties gracefully', async () => {

@@ -194,43 +194,37 @@ describe('AwsHealthAgent — tool tests (mocked execFile, argv array)', () => {
       expect(args).toContain(`Name=InstanceId,Value=${injected}`)
     })
 
-    it('returns empty points when execFile errors', async () => {
+    it('throws when execFile errors (real CLI failure, not an empty result)', async () => {
       mockExecFileError('command not found')
 
       const agent = new AwsHealthAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: 'i-bad', metric: 'CPUUtilization', window: '5m' },
         creds(),
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('command not found')
     })
 
-    it('returns empty points when AWS returns invalid JSON', async () => {
+    it('throws when AWS returns invalid JSON (real parse failure, not an empty result)', async () => {
       mockExecFileRawStdout('not json')
 
       const agent = new AwsHealthAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: 'i-abc', metric: 'CPUUtilization', window: '5m' },
         creds(),
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow()
     })
 
-    it('returns empty points when creds are missing (aws CLI will fail)', async () => {
+    it('throws when creds are missing (aws CLI will fail — real failure, not an empty result)', async () => {
       mockExecFileError('Unable to locate credentials')
 
       const agent = new AwsHealthAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_cloud_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { resource: 'i-abc', metric: 'CPUUtilization', window: '5m' },
         {}, // no creds
-      ) as { points: unknown[] }
-
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('Unable to locate credentials')
     })
   })
 
@@ -281,14 +275,12 @@ describe('AwsHealthAgent — tool tests (mocked execFile, argv array)', () => {
       expect(args).not.toContain('--alarm-name-prefix')
     })
 
-    it('returns empty alarms on CLI failure', async () => {
+    it('throws on CLI failure (real failure, not an empty result)', async () => {
       mockExecFileError('AccessDenied')
 
       const agent = new AwsHealthAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_alarms')!
-      const result = await tool.execute({}, creds()) as { alarms: unknown[] }
-
-      expect(result.alarms).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('AccessDenied')
     })
   })
 
@@ -316,14 +308,12 @@ describe('AwsHealthAgent — tool tests (mocked execFile, argv array)', () => {
       })
     })
 
-    it('returns empty events on subscription-not-entitled error (graceful)', async () => {
+    it('throws on subscription-not-entitled error (real failure, documented honestly, not silently empty)', async () => {
       mockExecFileError('User is not subscribed to AWS Health')
 
       const agent = new AwsHealthAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, creds()) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, creds())).rejects.toThrow('User is not subscribed to AWS Health')
     })
 
     it('returns empty events when health returns empty events array', async () => {
@@ -336,14 +326,12 @@ describe('AwsHealthAgent — tool tests (mocked execFile, argv array)', () => {
       expect(result.events).toEqual([])
     })
 
-    it('returns empty events on missing AWS creds', async () => {
+    it('throws on missing AWS creds (real failure, not an empty result)', async () => {
       mockExecFileError('Unable to locate credentials')
 
       const agent = new AwsHealthAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_health_events')!
-      const result = await tool.execute({}, {}) as { events: unknown[] }
-
-      expect(result.events).toEqual([])
+      await expect(tool.execute({}, {})).rejects.toThrow('Unable to locate credentials')
     })
   })
 

@@ -23,7 +23,14 @@ import { PagerdutyAgent } from './agent.js'
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/users', status: 200, body: {'users': [{'id': 'U1', 'name': 'Alice', 'email': 'alice@test.com'}]} },
   { method: 'GET', path: '/teams', status: 200, body: {'teams': [{'id': 'T1', 'name': 'Platform', 'summary': 'Platform team'}]} },
-  { method: 'GET', path: '/oncalls', status: 200, body: {'oncalls': []} }
+  {
+    method: 'GET', path: '/oncalls', status: 200,
+    body: { oncalls: [{ user: { id: 'U1', summary: 'Alice' }, escalation_policy: { id: 'EP1', summary: 'Platform Escalation' } }] },
+  },
+  {
+    method: 'GET', path: '/escalation_policies/EP1', status: 200,
+    body: { escalation_policy: { teams: [{ id: 'T1', summary: 'Platform team' }] } },
+  },
 ]
 
 describe('pagerduty — fixture HTTP server', () => {
@@ -44,6 +51,29 @@ describe('pagerduty — fixture HTTP server', () => {
     // Bootstrap creates Engineer entities from /users and Team entities from /teams
     expect(kg.entities.some(e => e.name === 'Alice'), 'expected engineer Alice not extracted').toBe(true)
     expect(kg.entities.some(e => e.name === 'Platform'), 'expected team Platform not extracted').toBe(true)
+  })
+
+  // Regression test for a real critical bug found by an independent
+  // connector-bootstrap audit: ONCALL relationships were previously created
+  // with fabricated string IDs (`Team:${summary}`, `Engineer:${summary}`)
+  // instead of the real IDs upsertEntity returns. Against the real
+  // StructuralGraph, upsertEntity returns a random UUID — every ONCALL edge
+  // pointed at a non-existent entity in production, silently broken and
+  // masked in tests only because FakeKnowledgeGraph's test double happens
+  // to return exactly `${type}:${name}` as its id (coincidentally matching
+  // the old fabricated format for *some* inputs, but not derived from a
+  // real upsert at all).
+  it('creates Team→ONCALL→Engineer using the real entity IDs upsertEntity returned, resolved via the escalation policy', async () => {
+    const kg = new FakeKG()
+    const result = await new PagerdutyBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any, 'test-connector', { token: "fixture-key", baseUrl: fixture.baseUrl }
+    )
+    expect(result.relationshipsUpserted).toBeGreaterThan(0)
+    expect(kg.relationships.some(r =>
+      r.relType === 'ONCALL' &&
+      r.fromEntityId === 'Team:Platform' &&
+      r.toEntityId === 'Engineer:Alice',
+    )).toBe(true)
   })
 
   it('agent tools query fixture server', async () => {

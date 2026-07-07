@@ -8,7 +8,10 @@ interface PdUser { id: string; name: string; email: string }
 interface PdTeam { id: string; name: string }
 interface PdOncall {
   user?: { id: string; summary: string }
-  escalation_policy?: { summary: string }
+  escalation_policy?: { id: string; summary: string }
+}
+interface PdEscalationPolicy {
+  teams?: Array<{ id: string; summary: string }>
 }
 
 function connFromPayload(payload: Record<string, unknown>): PdConn | null {
@@ -45,11 +48,20 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
     let relationshipsUpserted = 0
     const hints: string[] = []
 
-    // 1. Users → Engineer entities
+    // 1. Users → Engineer entities. Capture the REAL entity id upsertEntity
+    // returns, keyed by PagerDuty's own user id — confirmed live via
+    // independent review that the ONCALL relationship below previously used
+    // fabricated string IDs (`Engineer:${summary}`) instead of these real
+    // ids. Against the real StructuralGraph, upsertEntity returns a random
+    // UUID (not `${type}:${name}`), so every ONCALL edge pointed at a
+    // non-existent entity — silently broken in production, masked in tests
+    // only because FakeKnowledgeGraph's test double happens to return
+    // exactly `${type}:${name}` as its id.
+    const engineerIdByPdUserId = new Map<string, string>()
     const usersResp = await pdGet(conn, '/users?limit=100') as { users?: PdUser[] }
     const users = usersResp.users ?? []
     for (const user of users) {
-      await this.kg.upsertEntity({
+      const engineerId = await this.kg.upsertEntity({
         type: 'Engineer',
         name: user.name,
         metadata: {
@@ -59,15 +71,17 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
           connectorCoordinates: { pagerduty: { resourceIds: { userId: user.id } } },
         },
       }, tenantId)
+      engineerIdByPdUserId.set(user.id, engineerId)
       entitiesUpserted++
       hints.push(`PagerDuty engineer ${user.name}`)
     }
 
-    // 2. Teams → Team entities
+    // 2. Teams → Team entities. Same real-id capture as above.
+    const teamIdByPdTeamId = new Map<string, string>()
     const teamsResp = await pdGet(conn, '/teams?limit=100') as { teams?: PdTeam[] }
     const teams = teamsResp.teams ?? []
     for (const team of teams) {
-      await this.kg.upsertEntity({
+      const teamId = await this.kg.upsertEntity({
         type: 'Team',
         name: team.name,
         metadata: {
@@ -76,23 +90,54 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
           connectorCoordinates: { pagerduty: { resourceIds: { teamId: team.id } } },
         },
       }, tenantId)
+      teamIdByPdTeamId.set(team.id, teamId)
       entitiesUpserted++
       hints.push(`PagerDuty team ${team.name}`)
     }
 
-    // 3. Oncalls → Team ONCALL Engineer
+    // 3. Oncalls → Team ONCALL Engineer. PagerDuty's /oncalls response does
+    // not include team info directly — only a lightweight escalation_policy
+    // reference (id + summary). The real team association lives on the
+    // escalation policy itself (`GET /escalation_policies/{id}` returns a
+    // `teams` array) — confirmed live via independent review that the
+    // previous code used `escalation_policy.summary` as if it WERE a team
+    // name, which is conceptually wrong (an escalation policy is not a
+    // team, though one commonly maps to one or more). Resolved properly
+    // here, with each distinct escalation policy fetched at most once.
+    const teamsByEscalationPolicyId = new Map<string, PdEscalationPolicy['teams']>()
     const oncallsResp = await pdGet(conn, '/oncalls?limit=100') as { oncalls?: PdOncall[] }
     const oncalls = oncallsResp.oncalls ?? []
     for (const oncall of oncalls) {
-      const userSummary = oncall.user?.summary
-      if (!userSummary) continue
-      const teamSummary = oncall.escalation_policy?.summary ?? 'unknown'
-      await this.kg.upsertRelationship({
-        fromEntityId: `Team:${teamSummary}`,
-        relType: 'ONCALL',
-        toEntityId: `Engineer:${userSummary}`,
-      }, tenantId)
-      relationshipsUpserted++
+      const pdUserId = oncall.user?.id
+      const epId = oncall.escalation_policy?.id
+      if (!pdUserId || !epId) continue
+      const engineerId = engineerIdByPdUserId.get(pdUserId)
+      if (!engineerId) continue
+
+      if (!teamsByEscalationPolicyId.has(epId)) {
+        try {
+          const epResp = await pdGet(conn, `/escalation_policies/${epId}`) as { escalation_policy?: PdEscalationPolicy }
+          teamsByEscalationPolicyId.set(epId, epResp.escalation_policy?.teams ?? [])
+        } catch {
+          // A single escalation policy failing to resolve shouldn't abort
+          // the whole bootstrap — real primary data (users, teams) already
+          // succeeded above; this only affects how many ONCALL edges we can
+          // draw.
+          teamsByEscalationPolicyId.set(epId, [])
+        }
+      }
+      const epTeams = teamsByEscalationPolicyId.get(epId) ?? []
+
+      for (const epTeam of epTeams) {
+        const teamId = teamIdByPdTeamId.get(epTeam.id)
+        if (!teamId) continue // team referenced by the policy but not in our /teams listing — skip rather than fabricate
+        await this.kg.upsertRelationship({
+          fromEntityId: teamId,
+          relType: 'ONCALL',
+          toEntityId: engineerId,
+        }, tenantId)
+        relationshipsUpserted++
+      }
     }
 
     hints.push(`PagerDuty bootstrap: ${users.length} users, ${teams.length} teams, ${oncalls.length} oncalls`)

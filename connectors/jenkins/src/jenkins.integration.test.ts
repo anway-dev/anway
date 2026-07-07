@@ -110,12 +110,11 @@ describe('jenkins — fixture HTTP server', () => {
     expect(result.pipelines).toHaveLength(5)
   })
 
-  it('get_pipelines returns empty on missing creds', async () => {
+  it('get_pipelines throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new JenkinsAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_pipelines')!
 
-    const result = await tool.execute({}, {}) as { pipelines: unknown[] }
-    expect(result.pipelines).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('Jenkins credentials not configured')
   })
 
   it('get_builds returns real parsed data from fixture', async () => {
@@ -158,24 +157,21 @@ describe('jenkins — fixture HTTP server', () => {
     expect(limitedPath, 'expected tree range {0,1} for limit=2').toBeDefined()
   })
 
-  it('get_builds returns empty for nonexistent job (404)', async () => {
+  it('get_builds throws for nonexistent job (404 is a real failure, not empty)', async () => {
     const agent = new JenkinsAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_builds')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { pipeline: 'nonexistent' },
       { baseUrl: fixture.baseUrl, user: 'admin', apiToken: 'test-token' },
-    ) as { builds: unknown[] }
-
-    expect(result.builds).toEqual([])
+    )).rejects.toThrow('Jenkins API failed: HTTP 404')
   })
 
-  it('get_builds returns empty on missing creds', async () => {
+  it('get_builds throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new JenkinsAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_builds')!
 
-    const result = await tool.execute({ pipeline: 'test' }, {}) as { builds: unknown[] }
-    expect(result.builds).toEqual([])
+    await expect(tool.execute({ pipeline: 'test' }, {})).rejects.toThrow('Jenkins credentials not configured')
   })
 
   it('fixture server received pipeline + build requests', () => {

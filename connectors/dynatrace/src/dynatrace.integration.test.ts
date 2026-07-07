@@ -174,30 +174,24 @@ describe('dynatrace — fixture HTTP server', () => {
     expect(req!.path).toContain('metricSelector=builtin%3Aservice.requestCount.total')
   })
 
-  it('get_metrics returns empty points on HTTP 500', async () => {
+  it('get_metrics throws on HTTP 500 (real failure, not an empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
 
-    const result = (await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       { host: fixture.baseUrl + '/http-500', token: 'fixture-token' },
-    )) as { points: unknown[]; unit: string }
-
-    expect(result.points).toEqual([])
-    expect(result.unit).toBe('builtin:service.requestCount.total')
+    )).rejects.toThrow('Dynatrace get_metrics failed: HTTP 500')
   })
 
-  it('get_metrics returns empty on missing creds', async () => {
+  it('get_metrics throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
 
-    const result = (await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       {},
-    )) as { points: unknown[]; unit: string }
-
-    expect(result.points).toEqual([])
-    expect(result.unit).toBe('unknown')
+    )).rejects.toThrow('Dynatrace credentials not configured')
   })
 
   it('get_metrics defaults invalid window to now-1h', async () => {
@@ -309,24 +303,21 @@ describe('dynatrace — fixture HTTP server', () => {
     expect(req!.path).toContain('from=now-24h')
   })
 
-  it('get_alerts returns empty on HTTP 500', async () => {
+  it('get_alerts throws on HTTP 500 (real failure, not an empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
 
-    const result = (await tool.execute(
+    await expect(tool.execute(
       {},
       { host: fixture.baseUrl + '/http-500', token: 'fixture-token' },
-    )) as { alerts: unknown[] }
-
-    expect(result.alerts).toEqual([])
+    )).rejects.toThrow('Dynatrace get_alerts failed: HTTP 500')
   })
 
-  it('get_alerts returns empty on missing creds', async () => {
+  it('get_alerts throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
 
-    const result = (await tool.execute({}, {})) as { alerts: unknown[] }
-    expect(result.alerts).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('Dynatrace credentials not configured')
   })
 
   // ── get_logs ───────────────────────────────────────────────────────
@@ -422,40 +413,34 @@ describe('dynatrace — fixture HTTP server', () => {
     expect(req!.path).toContain('test+%5C%22injection%5C%22')
   })
 
-  it('get_logs returns empty on HTTP 500', async () => {
+  it('get_logs throws on HTTP 500 (real failure, not an empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
-    const result = (await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', query: 'error' },
       { host: fixture.baseUrl + '/http-500', token: 'fixture-token' },
-    )) as { lines: unknown[] }
-
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow('Dynatrace get_logs failed: HTTP 500')
   })
 
-  it('get_logs returns empty on missing creds', async () => {
+  it('get_logs throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
-    const result = (await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', query: 'error' },
       {},
-    )) as { lines: unknown[] }
-
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow('Dynatrace credentials not configured')
   })
 
-  it('get_logs returns empty when service is empty string', async () => {
+  it('get_logs throws when service is empty string (real usage error, not empty result)', async () => {
     const agent = new DynatraceAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
 
-    const result = (await tool.execute(
+    await expect(tool.execute(
       { service: '', query: 'error' },
       { host: fixture.baseUrl, token: 'fixture-token' },
-    )) as { lines: unknown[] }
-
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow('Dynatrace get_logs: service is required')
   })
 
   // ── auth header (resolves from both host/baseUrl and token/apiKey) ──

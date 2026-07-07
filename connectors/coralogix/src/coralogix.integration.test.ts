@@ -143,28 +143,26 @@ describe('coralogix — fixture HTTP server', () => {
     }
   }, 10_000)
 
-  it('get_metrics returns empty points on HTTP 500', async () => {
+  it('get_metrics throws on HTTP 500 (real failure, not an empty result)', async () => {
     const errFixture = await startFixtureServer(errorRoutes)
     try {
       const agent = new CoralogixAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { service: 'payments-api', window: '1h' },
         { baseUrl: errFixture.baseUrl, apiKey: 'fixture-key' },
-      ) as { points: unknown[]; unit: string }
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('Coralogix get_metrics failed: HTTP 500')
     } finally {
       await errFixture.close()
     }
   }, 10_000)
 
-  it('get_metrics returns empty on missing apiKey', async () => {
+  it('get_metrics throws on missing apiKey (real failure, not an empty result)', async () => {
     const agent = new CoralogixAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' }, {},
-    ) as { points: unknown[]; unit: string }
-    expect(result.points).toEqual([])
+    )).rejects.toThrow('Coralogix credentials not configured')
   })
 
   // ── get_alerts (uses shared fixture) ─────────────────────────────────
@@ -211,25 +209,23 @@ describe('coralogix — fixture HTTP server', () => {
     expect(result.alerts[0]!.severity).toBe('critical')
   })
 
-  it('get_alerts returns empty on HTTP 500', async () => {
+  it('get_alerts throws on HTTP 500 (real failure, not an empty result)', async () => {
     const errFixture = await startFixtureServer(errorRoutes)
     try {
       const agent = new CoralogixAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         {}, { baseUrl: errFixture.baseUrl, apiKey: 'fixture-key' },
-      ) as { alerts: unknown[] }
-      expect(result.alerts).toEqual([])
+      )).rejects.toThrow('Coralogix get_alerts failed: HTTP 500')
     } finally {
       await errFixture.close()
     }
   }, 10_000)
 
-  it('get_alerts returns empty on missing apiKey', async () => {
+  it('get_alerts throws on missing apiKey (real failure, not an empty result)', async () => {
     const agent = new CoralogixAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
-    const result = await tool.execute({}, {}) as { alerts: unknown[] }
-    expect(result.alerts).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('Coralogix credentials not configured')
   })
 
   // ── get_logs (own fixture — DataPrime path collision with get_metrics) ─
@@ -310,28 +306,26 @@ describe('coralogix — fixture HTTP server', () => {
     }
   }, 10_000)
 
-  it('get_logs returns empty on HTTP 500', async () => {
+  it('get_logs throws on HTTP 500 (real failure, not an empty result)', async () => {
     const errFixture = await startFixtureServer(errorRoutes)
     try {
       const agent = new CoralogixAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { service: 'payments-api', query: 'error' },
         { baseUrl: errFixture.baseUrl, apiKey: 'fixture-key' },
-      ) as { lines: unknown[] }
-      expect(result.lines).toEqual([])
+      )).rejects.toThrow('Coralogix get_logs failed: HTTP 500')
     } finally {
       await errFixture.close()
     }
   }, 10_000)
 
-  it('get_logs returns empty on missing apiKey', async () => {
+  it('get_logs throws on missing apiKey (real failure, not an empty result)', async () => {
     const agent = new CoralogixAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', query: 'error' }, {},
-    ) as { lines: unknown[] }
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow('Coralogix credentials not configured')
   })
 
   // ── smoke ────────────────────────────────────────────────────────────

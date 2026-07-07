@@ -164,24 +164,22 @@ describe('argocd — fixture HTTP server', () => {
     expect(result.pipelines).toHaveLength(5)
   })
 
-  it('get_pipelines returns empty on missing creds', async () => {
+  it('get_pipelines throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new ArgocdAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_pipelines')!
 
-    const result = await tool.execute({}, {}) as { pipelines: unknown[] }
-    expect(result.pipelines).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('ArgoCD credentials not configured')
   })
 
-  it('get_pipelines returns empty when baseUrl is 500', async () => {
+  it('get_pipelines throws on a real connection failure instead of returning an empty result', async () => {
     const agent = new ArgocdAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_pipelines')!
 
-    // Point at a port that doesn't respond → connection refused → caught → empty
-    const result = await tool.execute(
+    // Point at a port that doesn't respond — a genuine connection failure.
+    await expect(tool.execute(
       {},
       { baseUrl: 'http://127.0.0.1:1', token: 'fixture-token' },
-    ) as { pipelines: unknown[] }
-    expect(result.pipelines).toEqual([])
+    )).rejects.toThrow()
   })
 
   // ── get_builds ─────────────────────────────────────────────────────
@@ -239,24 +237,21 @@ describe('argocd — fixture HTTP server', () => {
     expect(result.builds).toEqual([])
   })
 
-  it('get_builds returns empty for nonexistent app (404)', async () => {
+  it('get_builds throws for nonexistent app (404 is a real failure, not empty)', async () => {
     const agent = new ArgocdAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_builds')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { pipeline: 'nonexistent' },
       { baseUrl: fixture.baseUrl, token: 'fixture-token' },
-    ) as { builds: unknown[] }
-
-    expect(result.builds).toEqual([])
+    )).rejects.toThrow('ArgoCD get_builds failed: HTTP 404')
   })
 
-  it('get_builds returns empty on missing creds', async () => {
+  it('get_builds throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new ArgocdAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_builds')!
 
-    const result = await tool.execute({ pipeline: 'test' }, {}) as { builds: unknown[] }
-    expect(result.builds).toEqual([])
+    await expect(tool.execute({ pipeline: 'test' }, {})).rejects.toThrow('ArgoCD credentials not configured')
   })
 
   // ── trigger_deploy — unchanged, verify it still works ──────────────

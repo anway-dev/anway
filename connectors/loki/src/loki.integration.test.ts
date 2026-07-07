@@ -42,9 +42,23 @@ describe('loki — integration (real Docker)', () => {
     const agent = new LokiAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
-    const firstTool = tools[0]!
-      const result = await firstTool.execute({}, { baseUrl })
-      expect(result).toBeDefined()
+    // loki.get_labels has no required params — query_logs (tools[0]) requires
+    // `query`, and calling it with none no longer silently returns an empty
+    // result; it sends a malformed LogQL query to the real Loki container and
+    // throws on the resulting HTTP 400, which is real-failure behavior, not
+    // what this test is meant to exercise.
+    const labelsTool = tools.find(t => t.definition.name === 'loki.get_labels')!
+    const result = await labelsTool.execute({}, { baseUrl }) as { labels: string[] }
+    expect(result.labels).toBeDefined()
+  })
+
+  it('query_logs throws on a real HTTP failure instead of returning an empty result', async () => {
+    const agent = new LokiAgent()
+    const queryTool = agent.tools.find(t => t.definition.name === 'loki.query_logs')!
+    // Pointing at a real but wrong port on the same host — a genuine
+    // connection failure, not a fixture.
+    await expect(queryTool.execute({ query: '{job="nonexistent"}' }, { baseUrl: 'http://127.0.0.1:1' }))
+      .rejects.toThrow()
   })
 })
 

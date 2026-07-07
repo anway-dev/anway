@@ -33,9 +33,19 @@ describe('datadog — fixture HTTP server', () => {
     const agent = new DatadogAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
-    const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    // get_alerts — no required params, unlike get_metrics (needs service+window)
+    const alertsTool = tools.find(t => t.definition.name === 'get_alerts')!
+    // Real creds shape (apiKey/app_key), matching ConnectorCreds — a wrong
+    // shape here now throws instead of silently returning an empty result,
+    // which is exactly the case this test is meant to prove works.
+    const result = await alertsTool.execute({}, { baseUrl: fixture.baseUrl, apiKey: 'fixture-key', app_key: 'fixture-app-key' }) as { alerts: unknown[] }
+    expect(result.alerts).toBeDefined()
+  })
+
+  it('agent tools throw on missing creds instead of returning an empty result', async () => {
+    const agent = new DatadogAgent()
+    const alertsTool = agent.tools.find(t => t.definition.name === 'get_alerts')!
+    await expect(alertsTool.execute({}, { baseUrl: fixture.baseUrl })).rejects.toThrow('Datadog credentials not configured')
   })
 
   it('fixture server received at least one request', () => {

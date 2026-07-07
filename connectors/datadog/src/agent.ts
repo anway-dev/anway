@@ -16,7 +16,12 @@ async function ddApi(path: string, creds: Record<string, unknown>, body?: Record
   const apiKey = (creds as ConnectorCreds).apiKey
   const appKey = (creds as ConnectorCreds).app_key
   if (typeof apiKey !== 'string' || typeof appKey !== 'string') throw new Error('Datadog credentials not configured (apiKey/app_key)')
-  const resp = await fetch(`${DD_API}${path}`, {
+  // Previously hardcoded DD_API unconditionally, ignoring creds.baseUrl —
+  // unlike bootstrap.ts's ddApi, which already respects an override. That
+  // asymmetry meant no on-prem/self-hosted Datadog-compatible endpoint or
+  // fixture-server test could ever reach these tools' real HTTP calls.
+  const base = (creds['baseUrl'] as string | undefined) || DD_API
+  const resp = await fetch(`${base}${path}`, {
     method: body ? 'POST' : 'GET',
     headers: { 'DD-API-KEY': apiKey, 'DD-APPLICATION-KEY': appKey, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),

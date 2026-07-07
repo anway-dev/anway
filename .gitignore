@@ -41,5 +41,9 @@ Thumbs.db
 # Coverage
 coverage/
 
+# Python
+__pycache__/
+*.pyc
+
 # Prisma generated
 apps/gateway/prisma/generated/

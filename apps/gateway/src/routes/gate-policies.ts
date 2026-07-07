@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
+import { auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
 
 interface GatePolicyRow {
   id: string
@@ -41,7 +42,7 @@ export async function gatePolicyRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string; sub: string }
       const { tenantId, sub: userId } = user
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
 
       const { scope, approversRequired, autoApproveThreshold } = request.body
       if (typeof scope !== 'string' || scope.length === 0 || scope.length > 128) {

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { buildApp } from '../app.js'
 import { initMetrics } from '../metrics.js'
+import { prisma } from '../db/client.js'
+import { withTenant } from '../db/prisma.js'
 
 process.env['JWT_SECRET'] = 'test-secret'
 
@@ -37,7 +39,36 @@ describe('GET /api/settings/connectors/:type', () => {
       headers: { authorization: `Bearer ${tokenFor('dev')}` },
     })
     expect(res.statusCode).toBe(403)
-  })
+  }, 15_000)
+
+  // Regression test found during live product verification: a real dev-role
+  // token hitting this exact route produced a correct 403 but wrote ZERO
+  // audit_events row — CLAUDE.md documents "every hard block (access
+  // denied)" as immutably logged. Fixed in plugins/rbac.ts's requireRole
+  // (the shared preHandler this route uses).
+  it('audits the denied attempt with a real audit_events row', async () => {
+    const tenantId = '00000000-0000-0000-0000-000000000001'
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/settings/connectors/prometheus',
+      headers: { authorization: `Bearer ${tokenFor('dev')}` },
+    })
+    expect(res.statusCode).toBe(403)
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ event_type: string; payload: Record<string, unknown> }>>`
+        SELECT event_type, payload FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND user_id = '00000000-0000-0000-0000-000000000002'::uuid
+          AND event_type = 'access_denied'
+        ORDER BY created_at DESC LIMIT 1
+      `
+    )
+    expect(rows.length).toBe(1)
+    expect(rows[0]!.payload).toMatchObject({
+      resource: '/api/settings/connectors/prometheus',
+      outcome: 'blocked',
+      actual: 'dev',
+    })
+  }, 15_000)
 
   it('returns 404 when connector not configured', async () => {
     const res = await app.inject({

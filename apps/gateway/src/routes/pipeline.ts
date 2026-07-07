@@ -7,6 +7,7 @@ import { withTenant } from '../db/prisma.js'
 import { decryptJson } from '../utils/crypto.js'
 import { UUID_RE } from '../utils/validators.js'
 import { requireRole } from '../plugins/rbac.js'
+import { appendAuditEvent } from './audit.js'
 
 // Module-level EventEmitter for single-pod SSE fan-out (no Redis)
 import { EventEmitter } from 'node:events'
@@ -330,6 +331,13 @@ export async function pipelineRoutes(app: FastifyInstance) {
       // functionality by being restricted to it.
       const { role } = request.user as { role?: string }
       if (stages && role !== 'admin') {
+        await appendAuditEvent({
+          tenantId, userId,
+          action: 'access_denied',
+          resource: request.url,
+          outcome: 'blocked',
+          metadata: { method: request.method, reason: 'custom pipeline stages are admin-only', actual: role ?? 'none' },
+        }).catch(() => {})
         return reply.code(403).send({ error: 'only admin may define custom pipeline stages' })
       }
       const resolvedStages = stages ?? await loadStagesForTenant(tenantId)

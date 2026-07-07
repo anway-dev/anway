@@ -246,9 +246,13 @@ export async function k8sRoutes(app: FastifyInstance) {
             LIMIT 1
           `
         ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
-        if (perimeterQueryFailed) return reply.code(403).send({ error: 'perimeter check failed' })
+        if (perimeterQueryFailed) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.restart', 'blocked: perimeter check failed', `${namespace}/${name}`)
+          return reply.code(403).send({ error: 'perimeter check failed' })
+        }
         const allowed = perimeters[0]?.write_scopes ?? []
         if (!allowed.includes('*') && !allowed.includes(namespace)) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.restart', 'blocked: namespace not in perimeter', `${namespace}/${name}`)
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }
@@ -301,9 +305,13 @@ export async function k8sRoutes(app: FastifyInstance) {
             LIMIT 1
           `
         ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
-        if (perimeterQueryFailed) return reply.code(403).send({ error: 'perimeter check failed' })
+        if (perimeterQueryFailed) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.scale', 'blocked: perimeter check failed', `${namespace}/${name}`)
+          return reply.code(403).send({ error: 'perimeter check failed' })
+        }
         const allowed = perimeters[0]?.write_scopes ?? []
         if (!allowed.includes('*') && !allowed.includes(namespace)) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.scale', 'blocked: namespace not in perimeter', `${namespace}/${name}`)
           return reply.code(403).send({ error: 'namespace not in your perimeter' })
         }
       }
@@ -351,9 +359,13 @@ export async function k8sRoutes(app: FastifyInstance) {
             LIMIT 1
           `
         ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
-        if (perimeterQueryFailed) return reply.code(403).send({ error: 'perimeter check failed' })
+        if (perimeterQueryFailed) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.cordon', 'blocked: perimeter check failed', name)
+          return reply.code(403).send({ error: 'perimeter check failed' })
+        }
         const allowed = perimeters[0]?.write_scopes ?? []
         if (!allowed.includes('*') && !allowed.includes(name)) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.cordon', 'blocked: node not in perimeter', name)
           return reply.code(403).send({ error: 'node not in your perimeter' })
         }
       }

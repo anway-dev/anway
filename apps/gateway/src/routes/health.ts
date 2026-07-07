@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../db/client.js'
 import { isDraining } from '../lifecycle.js'
+import { auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
 
 const startTime = Date.now()
 
@@ -64,8 +65,8 @@ export async function healthRoutes(app: FastifyInstance) {
   try {
     // Debug routes must not exist in production — schema introspection leak.
     if (process.env['NODE_ENV'] === 'production') return reply.code(404).send({ error: 'not found' })
+    if (await auditAndDenyIfNotAdmin(_request, reply, { error: 'admin required' })) return
     const user = _request.user as { role?: string; tenantId?: string }
-    if (user.role !== 'admin') return reply.code(403).send({ error: 'admin required' })
     const { prisma } = await import('../db/client.js')
     const { withTenant } = await import('../db/prisma.js')
     const tenantId = user.tenantId ?? '00000000-0000-0000-0000-000000000001'

@@ -4,6 +4,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { UUID_RE } from '../utils/validators.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
+import { auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
 
 export async function accessRoutes(app: FastifyInstance) {
   // GET /api/access/users — list all users in tenant (admin only)
@@ -12,7 +13,7 @@ export async function accessRoutes(app: FastifyInstance) {
     { preHandler: [app.authenticate] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const rows = await withTenant(prisma, user.tenantId, (tx) =>
         tx.$queryRaw<{ id: string; email: string; role: string; created_at: Date }[]>`
           SELECT id, email, role, created_at FROM users ORDER BY email
@@ -28,7 +29,7 @@ export async function accessRoutes(app: FastifyInstance) {
     { preHandler: [app.authenticate] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const { userId } = request.params
       if (!UUID_RE.test(userId)) return reply.code(400).send({ error: 'invalid userId' })
       const rows = await withTenant(prisma, user.tenantId, (tx) =>
@@ -76,7 +77,7 @@ export async function accessRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string; sub: string }
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const { userId } = request.params
       if (!UUID_RE.test(userId)) return reply.code(400).send({ error: 'invalid userId' })
 
@@ -171,7 +172,7 @@ export async function accessRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const { email, role } = request.body
       const newId = crypto.randomUUID()
       const rows = await withTenant(prisma, user.tenantId, (tx) =>
@@ -204,7 +205,7 @@ export async function accessRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const { userId } = request.params
       if (!UUID_RE.test(userId)) return reply.code(400).send({ error: 'invalid userId' })
       const { role } = request.body

@@ -7,7 +7,7 @@ import type { PrismaClient } from '@prisma/client'
 import { providerRegistry } from '@anway/agent'
 import { encryptJson, decryptJson } from '../utils/crypto.js'
 import { effectiveCredentials } from '../utils/credentials.js'
-import { requireRole } from '../plugins/rbac.js'
+import { requireRole, auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
 import { isSafeURL } from '../utils/safe-url.js'
 import { CONNECTOR_CATALOG } from './connectors.js'
 
@@ -68,9 +68,7 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
   app.post<{ Body: { provider: string; apiKey?: string; baseUrl?: string; defaultModel?: string; cheapModel?: string } }>(
     '/api/settings/provider', { preHandler: [app.authenticate] }, async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
-      if (user.role !== 'admin') {
-        return reply.code(403).send({ error: 'admin role required' })
-      }
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const { provider, apiKey, baseUrl, defaultModel, cheapModel } = request.body
       if (!VALID_PROVIDERS.has(provider)) {
         return reply.code(400).send({ error: `invalid provider: ${provider}. Valid: ${[...VALID_PROVIDERS].join(', ')}` })

@@ -130,9 +130,19 @@ export async function auditRoutes(app: FastifyInstance) {
   app.get('/api/audit/export', {
     preHandler: [app.authenticate],
   }, async (request, reply) => {
-    const user = request.user as { tenantId: string; role?: string }
+    const user = request.user as { tenantId: string; role?: string; sub?: string }
     const { tenantId } = user
-    if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+    if (user.role !== 'admin') {
+      await appendAuditEvent({
+        tenantId,
+        ...(user.sub ? { userId: user.sub } : {}),
+        action: 'access_denied',
+        resource: request.url,
+        outcome: 'blocked',
+        metadata: { method: request.method, required: ['admin'], actual: user.role ?? 'none' },
+      }).catch(() => {})
+      return reply.code(403).send({ error: 'admin role required' })
+    }
 
     const q = request.query as Record<string, string>
     let from: Date | undefined

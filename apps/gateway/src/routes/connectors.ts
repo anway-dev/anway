@@ -4,7 +4,7 @@ import { withTenant } from '../db/prisma.js'
 import { createClient } from 'redis'
 import { UUID_RE } from '../utils/validators.js'
 import { effectiveCredentials } from '../utils/credentials.js'
-import { requireRole } from '../plugins/rbac.js'
+import { requireRole, auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
 import { decryptJson } from '../utils/crypto.js'
 import { isSafeURL } from '../utils/safe-url.js'
@@ -238,7 +238,7 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
     async (request, reply) => {
       const user = request.user as { tenantId: string; role?: string }
       const { tenantId } = user
-      if (user.role !== 'admin') return reply.code(403).send({ error: 'admin role required' })
+      if (await auditAndDenyIfNotAdmin(request, reply)) return
       const { id } = request.params
       if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
       // Try connector_config first (settings-based), then connectors table (MCP/CLI adapters)

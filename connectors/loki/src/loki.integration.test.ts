@@ -54,7 +54,13 @@ describe('loki — integration (real Docker)', () => {
     const labelsTool = tools.find(t => t.definition.name === 'loki.get_labels')!
     const result = await labelsTool.execute({}, { baseUrl }) as { labels: string[] }
     expect(result.labels).toBeDefined()
-  })
+    // Real Docker container + real HTTP call — same class of flake as the
+    // sibling "bootstrap runs without throwing" test above, just not
+    // caught by that fix since it's a separate `it()` block with its own
+    // default 5000ms timeout. Confirmed live: failed under `pnpm test`'s
+    // full monorepo parallel load (concurrent Docker-based suites), passes
+    // clean in isolation.
+  }, 15_000)
 
   it('query_logs throws on a real HTTP failure instead of returning an empty result', async () => {
     const agent = new LokiAgent()

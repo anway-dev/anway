@@ -405,20 +405,28 @@ All components follow this palette. Inline styles only.
 
 ---
 
-## Current Prototype State (`apps/web`)
+## Current State (`apps/web`)
 
-Mock data only. Purpose: design validation + demos.
+**No longer mock-data-only** — this section previously described a
+design-validation prototype; that framing is stale. `apps/web` is a real
+Next.js frontend backed by the real Fastify gateway (`apps/gateway`) and
+the real agent harness (`packages/agent`). `lib/mock.ts` no longer exists
+in the codebase. `app/api/*` (23 route directories, including `chat` and
+`providers`) are real server-side route handlers that proxy to the
+gateway — not client-side mocks. See "LLM API Calls Are Server-Side"
+below: the plan that section used to describe as pending is fully
+implemented.
 
 | File | What it is |
 |------|-----------|
 | `app/page.tsx` | App shell, sidebar nav, view switcher |
-| `lib/mock.ts` | All mock data |
+| `lib/server-auth.ts` | Server-side auth header resolution for API routes |
 | `components/lifecycle.tsx` | PRD→Metrics horizontal stage flow |
 | `components/editor-view.tsx` | One-window coding — editor + findings + gate |
 | `components/ai-panel.tsx` | Right-side AI chat panel |
 | `components/apiclient.tsx` | API client — collections + request builder + response |
 | `components/connectors.tsx` | Connector grid with category filter |
-| `components/orchestrator-chat.tsx` | God-mode orchestrator — terminal aesthetic, live execution trace |
+| `components/orchestrator-chat.tsx` | Orchestrator chat — terminal aesthetic, live execution trace |
 | `components/cloud-view.tsx` | Cloud health — AWS/GCP/Azure resources, security, config |
 | `components/incident-view.tsx` | Incident War Room — timeline, metrics, deploys, PRs, runbook |
 | `components/service-catalog.tsx` | Service Catalog — dep graph, metrics, incident history |
@@ -429,34 +437,48 @@ Mock data only. Purpose: design validation + demos.
 | `components/access-view.tsx` | User provisioning + perimeter config |
 | `components/kb-view.tsx` | Knowledge base explorer |
 | `components/intake-view.tsx` | Signal routing + L1 Assist config |
+| `components/approvals-view.tsx` | Pending gate approvals — added since the table above was last accurate |
+| `components/environments-view.tsx` | Environment config (staging/preprod/prod) |
+| `components/k8s-view.tsx` | Kubernetes cluster view |
+| `components/login-page.tsx` | Real auth login (local + OIDC) |
+| `components/model-config.tsx` | Model/provider config UI — reads status from `/api/providers`, never holds a raw key client-side |
+| `components/onboarding-modal.tsx` | First-run onboarding |
+| `components/pipeline-view.tsx` | Pipeline runs — real stage/gate execution |
+| `components/projects-view.tsx` | Project/service registry |
+| `components/provider-config.tsx` | Per-tenant LLM provider selection |
+| `components/settings-view.tsx` | Tenant/connector settings |
 
-### Next Steps (prototype)
+### Next Steps
 1. ~~Build `OrchestratorChat`~~ ✓ Done
 2. ~~Wire `EditorView`~~ ✓ Done
 3. ~~Build `WorkflowView`~~ ✓ Done
 4. ~~Build Incident War Room + Service Catalog~~ ✓ Done
 5. ~~Build Automations (triggers + crons)~~ ✓ Done
-6. Build real `@anway/agent` harness in `packages/agent`
-7. Wire `/api/chat` + `/api/providers` route handlers for real LLM calls
+6. ~~Build real `@anway/agent` harness in `packages/agent`~~ ✓ Done
+7. ~~Wire `/api/chat` + `/api/providers` route handlers for real LLM calls~~ ✓ Done
 
-### Nav Order (current)
-1. Chat — orchestrator, primary surface
+### Nav Order (current — see `apps/web/app/page.tsx`'s `NAV` array, the source of truth)
+1. Anway — orchestrator chat, primary surface
 2. Signals — live alerts
 3. War Room — incident triage
 4. Services — service catalog + dep graph
-5. Routing — signal routing / L1 Assist
-6. Lifecycle — PRD→Metrics stage flow
-7. Editor — one-window coding
-8. Knowledge — KB explorer
-9. Workflows — autonomy dial + gate config
-10. Automations — event triggers + cron monitors
-11. API Client
-12. Connectors
-13. Audit
-14. Access
-15. Models
-16. Cloud
-17. K8s
+5. Projects — project/service registry
+6. Pipeline — real pipeline runs (stages, gates)
+7. Environments — staging/preprod/prod config
+8. Routing — signal routing / L1 Assist
+9. Lifecycle — PRD→Metrics stage flow
+10. Editor — one-window coding
+11. Knowledge — KB explorer
+12. Workflows — autonomy dial + gate config
+13. Approvals — pending gate approvals
+14. Automations — event triggers + cron monitors
+15. API Client
+16. Connectors
+17. Audit
+18. Access
+19. Settings — tenant/connector/provider config (folds in what was previously a separate "Models" entry)
+20. Cloud
+21. K8s
 
 ### Future Prototype Enhancements
 
@@ -481,26 +503,27 @@ npm run dev
 
 Active branch: `claude/claude-md-docs-k210H`
 
-## Pending Architecture Work
+## LLM API Calls Are Server-Side (implemented)
 
-### LLM API calls must be server-side (not yet implemented)
-Currently `OrchestratorChat` and `ModelConfig` use mock data. Real LLM calls must go server-side:
+This section previously listed server-side LLM proxying as pending work.
+It's done: `apps/web/app/api/chat/route.ts` and `apps/web/app/api/providers/route.ts`
+exist and proxy to the real gateway (`GATEWAY_URL`, default
+`http://localhost:8510`), `apps/web/.env.local.example` documents the
+provider env vars, and `ModelConfig`/`OrchestratorChat` read real
+status/stream real responses through these routes — no client-side mock
+data or client-held API keys remain.
 
 ```
-Browser → POST /api/chat → Route Handler (server)
-                              ↓ reads key from process.env
-                              → LLM provider API
+Browser → POST /api/chat (Next.js route handler, server-side)
+                              ↓ forwards to gateway with resolved auth header
+                              → apps/gateway's /api/chat (real orchestrator)
                               ← streams response back to browser
 ```
 
-Tasks:
-1. Create `apps/web/app/api/chat/route.ts` — POST handler, reads model config from env, calls provider, streams response
-2. Create `apps/web/app/api/providers/route.ts` — GET handler, returns which providers are configured (status only, no keys exposed)
-3. Create `apps/web/.env.local` template — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `OLLAMA_ENDPOINT`, `LMSTUDIO_ENDPOINT`
-4. Update `ModelConfig` UI — remove API key input from client, show "configured via env var" status fetched from `/api/providers`
-5. Update `OrchestratorChat` — replace mock streaming with `fetch('/api/chat', { method: 'POST', body: ... })` + ReadableStream
-
-**Security rule:** API keys never in client bundle, never in localStorage, never in any client-side state. Only `process.env` on server. Route handlers are the only place keys are read.
+**Security rule (still a standing invariant, not a completed task):** API
+keys never in the client bundle, never in localStorage, never in any
+client-side state. Only `process.env` on the server. Route handlers and
+the gateway are the only places keys are read.
 
 ---
 
@@ -736,7 +759,16 @@ Cloud is not AWS, GCP, or Azure. Cloud is wherever the org runs. A connector exi
 
 Every cloud connector follows the same acquisition strategy above (MCP → CLI → SDK). AWS CLI (`aws`), GCloud CLI (`gcloud`), Azure CLI (`az`) are all first-class targets. Do not hard-code assumptions about which cloud a workspace uses — connector configuration at provisioning time declares what the org has.
 
-**Do not build a connector abstraction layer now.** Defer until 3+ connectors exist and the pattern is clear.
+**Connector abstraction layer:** the original deferral condition here was
+"until 3+ connectors exist and the pattern is clear" — that threshold has
+long since passed (35+ connectors under `connectors/*`, all following the
+same established shape: `agent.ts` exports a `TOOLS: ConnectorTool[]` +
+`IConnectorAgent` class, `bootstrap.ts` exports an `IConnectorBootstrap`
+class, consistent creds-extraction/error-throwing conventions). Whether to
+extract a shared abstraction now is a real architecture decision for the
+team to make deliberately, not something to infer from this stale
+placeholder — this note is left here only to correct the outdated
+condition, not to prescribe the decision.
 
 ---
 
@@ -1114,12 +1146,14 @@ Events      Redis Pub/Sub  (already in stack, zero ops cost)
             → Kafka        (upgrade when: >10 connectors concurrent + need durable replay)
 ```
 
-### Implementation notes (not yet built)
+### Implementation notes
 
-- **Sync layer**: connector agents push events into KB on schedule + on-demand per query
-- **Context injection**: orchestrator retrieves relevant KB subgraph per query, injects as grounded context into agent prompts — relevance-ranked, not raw dump
-- **Freshness daemon**: background job scores all KB entries, triggers re-sync on decay below threshold
-- **Do not build now** — prototype uses mock data. KB + storage is the next major backend milestone after harness is established.
+This subsection previously listed the sync layer, context injection, and
+freshness daemon as "not yet built" — stale. All three exist and are real:
+
+- **Sync layer**: `apps/gateway/src/graph-builder/subscriber.ts` — event-driven, subscribes to connector lifecycle events (see Graph Builder Agent trigger table above), not schedule-polled
+- **Context injection**: `IKnowledgeGraph.resolveContext`/`resolveContextByName` (`packages/agent/src/kb/structural-graph.ts`), called from the orchestrator's entity-extraction path before agent dispatch
+- **Freshness daemon**: `apps/gateway/src/kb/freshness-daemon.ts`, scheduled via `apps/gateway/src/jobs/scheduler.ts`
 
 ---
 

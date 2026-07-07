@@ -89,6 +89,11 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
       let entitiesUpserted = 0
       let relationshipsUpserted = 0
       const serviceIdByNsName = new Map<string, string>()
+      // Real selectors per namespace — used below to find which real
+      // Service(s) actually own a given pod (by label subset match), so the
+      // DEPENDS_ON self-reference guard checks real ownership instead of
+      // assuming a pod's `app` label always equals its owning Service's name.
+      const serviceSelectorsByNs = new Map<string, Array<{ name: string; selector: Record<string, string> }>>()
 
       for (const svc of svcsResp.items ?? []) {
         const selector = svc.spec?.selector ?? {}
@@ -107,6 +112,9 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
           }, tenantId)
           serviceIdByNsName.set(`${ns}/${name}`, svcId)
           entitiesUpserted++
+          const list = serviceSelectorsByNs.get(ns) ?? []
+          list.push({ name, selector: selector as Record<string, string> })
+          serviceSelectorsByNs.set(ns, list)
         }
       }
 
@@ -118,6 +126,13 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
       // or `<svc>.<ns>.svc`. Captures svc+ns so the match is checked against
       // real Service entities rather than any arbitrary substring hit.
       const dnsRefPattern = /\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.svc(?:\.cluster\.local)?\b/gi
+
+      // Bootstrap-scoped (not per-pod) — confirmed live via independent
+      // review: a per-pod Set meant N replica pods of the same service each
+      // re-upserted the same DEPENDS_ON edge and re-incremented
+      // relationshipsUpserted, inflating the reported count even though the
+      // graph itself stayed correct (upsertRelationship is a real merge).
+      const seenEdges = new Set<string>()
 
       for (const pod of pods) {
         const ns = pod.metadata?.namespace ?? 'default'
@@ -147,7 +162,25 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
         // bootstrap.ts never created it. Matched only against Service
         // entities already known from the real /services listing above —
         // an unmatched hostname is skipped rather than fabricating a Service.
-        const seenTargets = new Set<string>()
+        //
+        // Self-reference guard uses the real Service(s) this pod's labels
+        // actually satisfy the selector for (subset match against every
+        // real Service in this namespace from step 1), not just the pod's
+        // own `app` label — confirmed live via independent review (second
+        // pass) that a pod's `app` label commonly differs from its owning
+        // Service's real name (e.g. Service "payments" selecting
+        // `app=payments-api`), so the old `${ns}/${appLabel}`-only check
+        // could let a pod's real self-reference through as a spurious
+        // DEPENDS_ON edge between two different entity records for the
+        // same running workload.
+        const ownServiceKeys = new Set([`${ns}/${appLabel}`])
+        for (const candidate of serviceSelectorsByNs.get(ns) ?? []) {
+          const keys = Object.keys(candidate.selector)
+          if (keys.length > 0 && keys.every(k => labels[k] === candidate.selector[k])) {
+            ownServiceKeys.add(`${ns}/${candidate.name}`)
+          }
+        }
+
         for (const container of pod.spec?.containers ?? []) {
           for (const env of container.env ?? []) {
             const value = env.value
@@ -155,10 +188,12 @@ export class KubernetesBootstrap implements IConnectorBootstrap {
             for (const match of value.matchAll(dnsRefPattern)) {
               const [, refName, refNs] = match
               const targetKey = `${refNs}/${refName}`
-              if (targetKey === `${ns}/${appLabel}` || seenTargets.has(targetKey)) continue
+              if (ownServiceKeys.has(targetKey)) continue
               const targetId = serviceIdByNsName.get(targetKey)
               if (!targetId) continue // referenced host not a known Service — skip rather than fabricate
-              seenTargets.add(targetKey)
+              const edgeKey = `${svcId}->${targetId}`
+              if (seenEdges.has(edgeKey)) continue
+              seenEdges.add(edgeKey)
               await this.kg.upsertRelationship({ fromEntityId: svcId, relType: 'DEPENDS_ON', toEntityId: targetId, metadata: {} }, tenantId)
               relationshipsUpserted++
             }

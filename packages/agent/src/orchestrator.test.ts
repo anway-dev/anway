@@ -339,6 +339,75 @@ describe('runSession', () => {
     expect(errorEvent).toBeDefined()
   })
 
+  // Regression test for a token-budget reservation leak found by independent
+  // review (second pass, after the token-meter race fix): checkTokens
+  // reserves estimatedTokens synchronously, and reconcileTokenUsage is
+  // supposed to true it up against real usage on every path that reserved —
+  // but the intent-classification step's model.chat() call only reconciled
+  // on success, leaving the reservation permanently stuck in budget.sessionUsed
+  // forever if that one call failed (audit-logged and swallowed by the
+  // outer try/catch, session continues with classifiedIntent='general').
+  //
+  // Property under test: regardless of which step's model call fails, the
+  // net delta this session applies to budget.sessionUsed must exactly equal
+  // the real total tokens reported in the final `done` event — a failed
+  // step must contribute exactly 0 net (reserve then fully release), a
+  // successful step must contribute exactly its own actual usage. A leak
+  // would inflate sessionUsed above the done event's real total.
+  it('does not leak a token reservation when the intent-classification model call fails', async () => {
+    let chatCallCount = 0
+    const flakyIntentProvider: IModelProvider = {
+      modelId: 'mock-model',
+      cheapModelId: 'mock-model-cheap',
+      async chat(_messages, _tools, _opts): Promise<ChatResponse> {
+        chatCallCount++
+        if (chatCallCount === 1) {
+          // Intent classification — fails.
+          throw new Error('simulated upstream failure on intent classification')
+        }
+        // Entity extraction — succeeds with known, real usage.
+        return { content: 'payments-api', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
+      },
+      async *stream(_messages, _tools, _opts) {
+        yield { type: 'text_delta', content: 'Fallback synthesis response.' }
+        yield { type: 'done', inputTokens: 20, outputTokens: 10 }
+      },
+      formatToolCall(): Message { return { role: 'assistant', content: '' } },
+      formatToolResult(): Message { return { role: 'user', content: '' } },
+    }
+
+    const budget: TokenBudget = {
+      perQueryHardLimit: 1_000_000,
+      perSessionLimit: 1_000_000,
+      perTenantDailyLimit: 100_000_000,
+      perTenantMonthlyLimit: 1_000_000_000,
+      sessionUsed: 0,
+      tenantDailyUsed: 0,
+      tenantMonthlyUsed: 0,
+    }
+    const orch = createOrchestrator({
+      model: flakyIntentProvider,
+      tools: [],
+      perimeter: makePermissivePerimeter(),
+      auditSink: new InMemoryAuditSink(),
+      sessionMemory: new InMemorySessionMemory(),
+      knowledgeGraph: makeMockKG(),
+      budget,
+    })
+    const events = await collectEvents(runSession(orch, 'What is the deploy status?', makeCtx()))
+    const doneEvent = events.find((e) => e.type === 'done')
+    expect(doneEvent).toBeDefined()
+    if (doneEvent?.type === 'done') {
+      // The failed intent-classification call must contribute exactly 0 net
+      // to the budget (reservation fully released) — sessionUsed must equal
+      // exactly the real total the session actually reports, not that total
+      // plus a stuck intent-classification reservation.
+      expect(budget.sessionUsed).toBe(doneEvent.inputTokens + doneEvent.outputTokens)
+      expect(budget.tenantDailyUsed).toBe(doneEvent.inputTokens + doneEvent.outputTokens)
+      expect(budget.tenantMonthlyUsed).toBe(doneEvent.inputTokens + doneEvent.outputTokens)
+    }
+  })
+
   // P2 — perimeter enforced inside ConnectorAgent: restricted perimeter produces PERIMETER_BLOCKED
   it('restricted perimeter produces agent_finding with PERIMETER_BLOCKED error', async () => {
     const toolName = 'blocked-connector.read_data'

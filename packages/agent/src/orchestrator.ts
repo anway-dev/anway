@@ -170,12 +170,22 @@ export async function* runSession(
     }
 
     let intentResp: Awaited<ReturnType<typeof model.chat>> | null = null
-    intentResp = await model.chat(intentMessages, [], {
-      model: cheapModel,
-      maxTokens: 100,
-      temperature: 0,
-      ...(signal ? { signal } : {}),
-    })
+    try {
+      intentResp = await model.chat(intentMessages, [], {
+        model: cheapModel,
+        maxTokens: 100,
+        temperature: 0,
+        ...(signal ? { signal } : {}),
+      })
+    } catch (chatErr) {
+      // checkTokens already reserved intentEstimatedTokens synchronously —
+      // a failed model call still must release that reservation (confirmed
+      // live via independent review: this path previously left it reserved
+      // forever on any model.chat failure, since reconcile only ran after
+      // a successful response).
+      reconcileTokenUsage(budget, intentEstimatedTokens, 0)
+      throw chatErr
+    }
     // checkTokens already reserved intentEstimatedTokens synchronously —
     // reconcile against the real usage (see token-meter.ts).
     reconcileTokenUsage(budget, intentEstimatedTokens, (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0))
@@ -268,7 +278,16 @@ export async function* runSession(
       return
     }
 
-    const entityResp = await model.chat(entityExtractMsgs, [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+    let entityResp: Awaited<ReturnType<typeof model.chat>>
+    try {
+      entityResp = await model.chat(entityExtractMsgs, [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+    } catch (chatErr) {
+      // Same leaked-reservation class as intent classification above —
+      // release the real reservation before this failure propagates to the
+      // outer catch.
+      reconcileTokenUsage(budget, entityEstimatedTokens, 0)
+      throw chatErr
+    }
     // checkTokens already reserved entityEstimatedTokens synchronously —
     // reconcile against the real usage (see token-meter.ts).
     reconcileTokenUsage(budget, entityEstimatedTokens, (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0))
@@ -584,6 +603,14 @@ const context = resolvedAgentContext
       break
     } catch (e) {
       if (attempt === SYNTH_MAX_RETRIES) {
+        // Confirmed live via independent review: this final-failure path
+        // returned before either the estimatedTokens reservation was
+        // released or synthTimeout was cleared — both leaked on every
+        // synthesis call that exhausted its retries. clearTimeout on an
+        // already-fired timer is a documented no-op, so this is safe
+        // regardless of which fired first (the abort or this catch).
+        clearTimeout(synthTimeout)
+        reconcileTokenUsage(budget, estimatedTokens, 0)
         yield { type: 'error' as const, code: 'UPSTREAM_ERROR' as const, message: e instanceof Error ? e.message : String(e) }
         return
       }
@@ -729,7 +756,15 @@ async function* synthesisOnlyFallback(
   // reported only its own tokens in `done` — silently dropping the
   // intent-classification + entity-extraction tokens already spent earlier
   // in runSession before this fallback was chosen.
-  if (budget) reconcileTokenUsage(budget, estimatedTokens, inputTokens + outputTokens)
+  //
+  // Guard must match the error path above (`budget && checkTokens`, not
+  // `budget` alone) — confirmed live via independent review (second pass):
+  // a reservation only ever happened `if (checkTokens)` at line 726, so
+  // reconciling whenever just `budget` is truthy would apply
+  // `actual - estimated` against a reservation that was never made when a
+  // caller passes budget without checkTokens, silently corrupting the
+  // budget counters instead of leaving them untouched.
+  if (budget && checkTokens) reconcileTokenUsage(budget, estimatedTokens, inputTokens + outputTokens)
   if (persistence) {
     const { sessionMemory, auditSink, ctx } = persistence
     await sessionMemory.append(ctx.sessionId, {

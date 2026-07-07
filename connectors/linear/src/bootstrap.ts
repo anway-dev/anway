@@ -9,7 +9,20 @@ async function graphqlQuery(token: string, baseUrl: string, query: string): Prom
     body: JSON.stringify({ query }),
   })
   if (!res.ok) throw new Error(`Linear API ${res.status}`)
-  return (await res.json()) as Record<string, unknown>
+  const body = (await res.json()) as Record<string, unknown> & { errors?: Array<{ message: string }> }
+  // GraphQL reports many real failures (bad query, field errors, rate
+  // limits) as HTTP 200 with a top-level `errors` array — this is how the
+  // spec, and Linear's API specifically, signal partial/total failure, not
+  // via HTTP status. Confirmed live via independent review: the non-OK
+  // check above didn't catch this, so a real GraphQL-level failure (e.g.
+  // the `team { id }` field this session just added being rejected by an
+  // API version mismatch) fell through to the caller's `?.data?.X?.nodes ?? []`
+  // as an indistinguishable empty success — same failure class already
+  // fixed for the HTTP-status case.
+  if (body.errors && body.errors.length > 0) {
+    throw new Error(`Linear GraphQL error: ${body.errors.map(e => e.message).join('; ')}`)
+  }
+  return body
 }
 
 interface TeamNode { id: string; name: string; key: string }

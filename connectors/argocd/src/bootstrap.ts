@@ -16,15 +16,31 @@ export class ArgocdBootstrap implements IConnectorBootstrap {
         env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin' },
       })
       stdout = result.stdout
-    } catch {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['ArgoCD CLI not available'] }
+    } catch (err) {
+      // ENOENT (binary genuinely not on PATH) is a legitimate empty result —
+      // an org that hasn't installed the argocd CLI has no apps to report,
+      // same class as vault's documented 404-is-empty-list case. Any other
+      // failure (non-zero exit from a real auth/connection error, or a
+      // 15s timeout) is a real outage that must not look identical to
+      // "not installed" — confirmed live via independent connector-bootstrap
+      // review that this catch previously swallowed both cases the same way.
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['ArgoCD CLI not available'] }
+      }
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`ArgoCD bootstrap: 'argocd app list' failed: ${msg}`)
     }
 
     let apps: { metadata?: { name?: string }; spec?: { destination?: { namespace?: string } }; status?: { sync?: { status?: string } } }[]
     try {
       apps = JSON.parse(stdout)
-    } catch {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['ArgoCD bootstrap: failed to parse app list'] }
+    } catch (err) {
+      // The CLI ran and exited 0 (we only get here past the ENOENT/exit-code
+      // catch above) but returned output that isn't valid JSON — a real,
+      // unexpected-format bug, not "no apps configured". Must throw, not
+      // silently report an empty success.
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`ArgoCD bootstrap: 'argocd app list' returned non-JSON output: ${msg}`)
     }
 
     let entitiesUpserted = 0

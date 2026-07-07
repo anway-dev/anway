@@ -4,6 +4,21 @@ import type { FixtureRoute, FixtureServer } from '@anway/agent/testing'
 import { PagerdutyBootstrap } from './bootstrap.js'
 import { PagerdutyAgent } from './agent.js'
 
+/**
+ * "integration test" naming note: this suite runs against an in-process
+ * fixture HTTP server (startFixtureServer), not a real deployed instance of
+ * the SaaS API — the fixture's response shapes are authored by the same
+ * person/session writing the connector implementation being tested. A
+ * systematic misunderstanding of the real API's actual response shape would
+ * be baked into both the fixture and the implementation identically, so
+ * this suite passing does not by itself prove the real integration works.
+ * It does correctly catch: request URL/param construction bugs, response
+ * parsing bugs given a *correctly guessed* shape, and the error-handling
+ * behavior (missing creds, non-OK HTTP, etc.) exercised in this file. A stronger real-API-contract check exists in the sibling
+ * pagerduty.prism.test.ts (validates requests against the real published
+ * OpenAPI/AsyncAPI spec via Prism, not a self-authored fixture).
+ */
+
 
 const fixtureRoutes: FixtureRoute[] = [
   { method: 'GET', path: '/users', status: 200, body: {'users': [{'id': 'U1', 'name': 'Alice', 'email': 'alice@test.com'}]} },

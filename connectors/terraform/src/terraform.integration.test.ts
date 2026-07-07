@@ -4,6 +4,21 @@ import type { FixtureRoute, FixtureServer } from '@anway/agent/testing'
 import { TerraformBootstrap } from './bootstrap.js'
 import { TerraformAgent } from './agent.js'
 
+/**
+ * "integration test" naming note: this suite runs against an in-process
+ * fixture HTTP server (startFixtureServer), not a real deployed instance of
+ * the SaaS API — the fixture's response shapes are authored by the same
+ * person/session writing the connector implementation being tested. A
+ * systematic misunderstanding of the real API's actual response shape would
+ * be baked into both the fixture and the implementation identically, so
+ * this suite passing does not by itself prove the real integration works.
+ * It does correctly catch: request URL/param construction bugs, response
+ * parsing bugs given a *correctly guessed* shape, and the error-handling
+ * behavior (missing creds, non-OK HTTP, etc.) exercised in this file. No stronger real-API-contract test exists for this connector yet
+ * (see connectors/{github,jira,confluence,pagerduty,slack} for the Prism-based
+ * pattern this could be upgraded to).
+ */
+
 
 // ── JSON:API-shaped fixtures for Terraform Cloud ─────────────────────
 // Real TFC response shape: { data: [{ id, type, attributes: {...} }] }

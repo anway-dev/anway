@@ -161,36 +161,33 @@ describe('notion — fixture HTTP server', () => {
 
   // -- search_pages: missing credentials --
 
-  it('search_pages returns empty on missing creds', async () => {
+  it('search_pages throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new NotionAgent()
     const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
 
-    const result = await tool.execute({ query: 'runbook' }, {}) as { pages: unknown[] }
-    expect(result.pages).toEqual([])
+    await expect(tool.execute({ query: 'runbook' }, {})).rejects.toThrow('Notion credentials not configured')
   })
 
-  it('search_pages returns empty on empty token', async () => {
+  it('search_pages throws on empty token (real failure, not an empty result)', async () => {
     const agent = new NotionAgent()
     const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { query: 'runbook' },
       { token: '', baseUrl: fixture.baseUrl },
-    ) as { pages: unknown[] }
-    expect(result.pages).toEqual([])
+    )).rejects.toThrow('Notion credentials not configured')
   })
 
   // -- search_pages: empty query --
 
-  it('search_pages returns empty on empty query', async () => {
+  it('search_pages throws on empty query (real usage error, not an empty result)', async () => {
     const agent = new NotionAgent()
     const tool = agent.tools.find(t => t.definition.name === 'search_pages')!
 
-    const result = await tool.execute(
+    await expect(tool.execute(
       { query: '  ' },
       { token: 'fixture-token', baseUrl: fixture.baseUrl },
-    ) as { pages: unknown[] }
-    expect(result.pages).toEqual([])
+    )).rejects.toThrow('Notion search_pages: query is required')
   })
 
   // -- search_pages: apiKey alias for token --

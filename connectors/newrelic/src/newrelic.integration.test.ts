@@ -195,24 +195,22 @@ describe('newrelic — get_metrics', () => {
     expect(nrql).toContain('`apm.service.error.count`')
   })
 
-  it('returns empty on missing accountId', async () => {
+  it('throws on missing accountId (real failure, not an empty result)', async () => {
     const agent = new NewrelicAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       { baseUrl: fixture.baseUrl, apiKey: 'key' }, // no accountId
-    ) as { points: unknown[] }
-    expect(result.points).toEqual([])
+    )).rejects.toThrow('New Relic credentials not configured (accountId)')
   })
 
-  it('returns empty on missing apiKey', async () => {
+  it('throws on missing apiKey (real failure, not an empty result)', async () => {
     const agent = new NewrelicAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       {},
-    ) as { points: unknown[] }
-    expect(result.points).toEqual([])
+    )).rejects.toThrow('New Relic credentials not configured (apiKey)')
   })
 })
 
@@ -283,11 +281,10 @@ describe('newrelic — get_alerts', () => {
     expect(nrql).toContain("priority = 'CRITICAL'")
   })
 
-  it('returns empty on missing creds', async () => {
+  it('throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new NewrelicAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
-    const result = await tool.execute({}, {}) as { alerts: unknown[] }
-    expect(result.alerts).toEqual([])
+    await expect(tool.execute({}, {})).rejects.toThrow('New Relic credentials not configured')
   })
 })
 
@@ -359,14 +356,13 @@ describe('newrelic — get_logs', () => {
     expect(nrql).toContain('LIMIT 20')
   })
 
-  it('returns empty on missing creds', async () => {
+  it('throws on missing creds (real failure, not an empty result)', async () => {
     const agent = new NewrelicAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', query: 'error' },
       {},
-    ) as { lines: unknown[] }
-    expect(result.lines).toEqual([])
+    )).rejects.toThrow('New Relic credentials not configured')
   })
 })
 
@@ -376,62 +372,58 @@ describe('newrelic — get_logs', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('newrelic — error handling', () => {
-  it('returns empty on GraphQL-level errors (HTTP 200 + errors array)', async () => {
+  it('throws on GraphQL-level errors (HTTP 200 + errors array) — real failure, not empty', async () => {
     const fixture = await startFixtureServer([
       { method: 'POST', path: '/graphql', status: 200, body: graphqlErrorBody },
     ])
     try {
       const agent = new NewrelicAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { service: 'payments-api', window: '1h' },
         creds(fixture.baseUrl),
-      ) as { points: unknown[] }
-      expect(result.points).toEqual([])
+      )).rejects.toThrow('New Relic NerdGraph GraphQL error')
     } finally {
       await fixture.close()
     }
   }, 10_000)
 
-  it('returns empty on HTTP 500', async () => {
+  it('throws on HTTP 500 (real failure, not an empty result)', async () => {
     const fixture = await startFixtureServer([
       { method: 'POST', path: '/graphql', status: 500, body: {} },
     ])
     try {
       const agent = new NewrelicAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_alerts')!
-      const result = await tool.execute({}, creds(fixture.baseUrl)) as { alerts: unknown[] }
-      expect(result.alerts).toEqual([])
+      await expect(tool.execute({}, creds(fixture.baseUrl))).rejects.toThrow('New Relic NerdGraph query failed: HTTP 500')
     } finally {
       await fixture.close()
     }
   }, 10_000)
 
-  it('returns empty on HTTP 404 (wrong endpoint)', async () => {
+  it('throws on HTTP 404 (wrong endpoint) — real failure, not an empty result', async () => {
     const fixture = await startFixtureServer([
       { method: 'POST', path: '/graphql', status: 404, body: {} },
     ])
     try {
       const agent = new NewrelicAgent()
       const tool = agent.tools.find(t => t.definition.name === 'get_logs')!
-      const result = await tool.execute(
+      await expect(tool.execute(
         { service: 'payments-api', query: 'error' },
         creds(fixture.baseUrl),
-      ) as { lines: unknown[] }
-      expect(result.lines).toEqual([])
+      )).rejects.toThrow('New Relic NerdGraph query failed: HTTP 404')
     } finally {
       await fixture.close()
     }
   }, 10_000)
 
-  it('returns empty on network error (bogus URL)', async () => {
+  it('throws on network error (bogus URL) — real failure, not an empty result', async () => {
     const agent = new NewrelicAgent()
     const tool = agent.tools.find(t => t.definition.name === 'get_metrics')!
-    const result = await tool.execute(
+    await expect(tool.execute(
       { service: 'payments-api', window: '1h' },
       { baseUrl: 'http://127.0.0.1:19999', apiKey: 'key', accountId: '12345' },
-    ) as { points: unknown[] }
-    expect(result.points).toEqual([])
+    )).rejects.toThrow()
   })
 })
 

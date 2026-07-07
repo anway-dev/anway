@@ -4,13 +4,21 @@ import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 const PD_API = 'https://api.pagerduty.com'
 
+// creds.baseUrl override — bootstrap.ts already respects this (defaults to
+// PD_API); this file previously hardcoded PD_API unconditionally on all 4
+// tools below, so no fixture-server test or self-hosted PagerDuty-compatible
+// endpoint could ever reach these calls.
+function pdBase(creds: Record<string, unknown>): string {
+  return (creds as ConnectorCreds).baseUrl || PD_API
+}
+
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_active_incidents', description: 'List active incidents', parameters: { type: 'object', properties: { service: { type: 'string', optional: true } } } },
     execute: async (params, creds) => {
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('PagerDuty API key not configured')
-      const url = `${PD_API}/incidents?statuses[]=triggered&statuses[]=acknowledged${params.service ? `&service_ids[]=${params.service}` : ''}`
+      const url = `${pdBase(creds)}/incidents?statuses[]=triggered&statuses[]=acknowledged${params.service ? `&service_ids[]=${params.service}` : ''}`
       const res = await fetch(url, { headers: { Authorization: `Token token=${token}`, Accept: 'application/vnd.pagerduty+json;version=2' } })
       if (!res.ok) throw new Error(`PagerDuty get_active_incidents failed: HTTP ${res.status}`)
       const json = await res.json() as { incidents?: Array<{ id: string; title: string; severity: string; created_at: string; status: string }> }
@@ -23,7 +31,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('PagerDuty API key not configured')
-      const res = await fetch(`${PD_API}/oncalls?team_ids[]=${params.team}&include[]=users`, {
+      const res = await fetch(`${pdBase(creds)}/oncalls?team_ids[]=${params.team}&include[]=users`, {
         headers: { Authorization: `Token token=${token}`, Accept: 'application/vnd.pagerduty+json;version=2' },
       })
       if (!res.ok) throw new Error(`PagerDuty get_oncall failed: HTTP ${res.status}`)
@@ -38,7 +46,7 @@ const TOOLS: ConnectorTool[] = [
     execute: async (params, creds) => {
       const token = (creds as ConnectorCreds).apiKey
       if (!token) throw new Error('PagerDuty API key not configured')
-      const res = await fetch(`${PD_API}/incidents`, {
+      const res = await fetch(`${pdBase(creds)}/incidents`, {
         method: 'POST',
         headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anway-bot@anway.io' },
         body: JSON.stringify({ incident: { type: 'incident', title: String(params.title ?? ''), service: { id: String(params.serviceId ?? ''), type: 'service_reference' }, urgency: params.severity || 'high' } }),
@@ -57,7 +65,7 @@ const TOOLS: ConnectorTool[] = [
       if (!token) throw new Error('PagerDuty API key not configured')
       const alertId = String(params.alertId ?? '')
       if (!alertId) throw new Error('alertId is required')
-      const res = await fetch(`${PD_API}/alerts/${alertId}`, {
+      const res = await fetch(`${pdBase(creds)}/alerts/${alertId}`, {
         method: 'PUT',
         headers: { Authorization: `Token token=${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.pagerduty+json;version=2', From: 'anway-bot@anway.io' },
         body: JSON.stringify({ alerts: [{ id: alertId, status: 'acknowledged' }] }),

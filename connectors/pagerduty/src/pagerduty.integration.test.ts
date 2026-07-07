@@ -35,9 +35,18 @@ describe('pagerduty — fixture HTTP server', () => {
     const agent = new PagerdutyAgent()
     const tools = agent.tools
     expect(tools.length).toBeGreaterThan(0)
-    const firstTool = tools[0]!
-    const result = await firstTool.execute({}, { baseUrl: fixture.baseUrl, token: 'fixture-token' })
-    expect(result).toBeDefined()
+    // get_oncall — real fixture route (/oncalls) exists; get_active_incidents
+    // (tools[0]) has no matching /incidents fixture route and reads
+    // creds.apiKey (not `token`), so it's exercised separately below.
+    const oncallTool = tools.find(t => t.definition.name === 'get_oncall')!
+    const result = await oncallTool.execute({ team: 'T1' }, { baseUrl: fixture.baseUrl, apiKey: 'fixture-key' }) as { engineer: unknown }
+    expect(result).toHaveProperty('engineer')
+  })
+
+  it('agent tools throw on missing apiKey instead of returning an empty result', async () => {
+    const agent = new PagerdutyAgent()
+    const oncallTool = agent.tools.find(t => t.definition.name === 'get_oncall')!
+    await expect(oncallTool.execute({ team: 'T1' }, { baseUrl: fixture.baseUrl })).rejects.toThrow('PagerDuty API key not configured')
   })
 
   it('fixture server received at least one request', () => {

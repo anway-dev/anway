@@ -19,7 +19,14 @@ export class EcsBootstrap implements IConnectorBootstrap {
             source: 'ecs',
             cluster,
             connectorId,
-            connectorCoordinates: { ecs: { cluster, service: svc } },
+            // Confirmed live via product verification (while wiring the
+            // editor's real deploy flow): this previously put `cluster`/
+            // `service` directly under `ecs`, not matching the documented
+            // ConnectorCoordinates shape (`resourceIds: Record<string,
+            // string>`) that k8s's bootstrap already follows — a caller
+            // reading `connectorCoordinates.ecs.resourceIds.cluster` (the
+            // shape every other connector uses) would get undefined.
+            connectorCoordinates: { ecs: { resourceIds: { cluster, service: svc } } },
           },
         },
         tenantId,

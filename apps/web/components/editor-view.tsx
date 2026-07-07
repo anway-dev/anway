@@ -47,21 +47,58 @@ interface TestCase {
   reason?: string;
 }
 
-interface DeployTarget {
-  id: string;
+// Resolved from the selected service's real connectorCoordinates
+// (k8s/eks/gke -> {namespace, selector} carrying the deployment name in
+// the selector's app= value; ecs -> {cluster, service}). Deploy targets
+// the service's own real k8s/ECS coordinates, not Terraform — Terraform
+// is infra-provisioning, not "deploy this edited service".
+interface ResolvedDeployTarget {
+  platform: "k8s" | "ecs";
+  namespace?: string;
+  deployment?: string;
+  cluster?: string;
+  service?: string;
   label: string;
-  platform: string;
-  tfEnv: string;
-  connectorType: string;
-  meta: Record<string, string>;
 }
 
 interface DeployState {
-  phase: "idle" | "detecting" | "picking" | "planning" | "confirming" | "applying" | "done" | "error";
+  phase: "idle" | "no-target" | "building" | "build-error" | "requesting-gate" | "awaiting-approval" | "gate-rejected" | "deploying" | "done" | "error";
   lines: string[];
-  exitCode?: number;
-  targets?: DeployTarget[];
-  selectedTarget?: DeployTarget;
+  image?: string;
+}
+
+// Shared by both the commit and deploy gate flows — a real write action
+// (git push / k8s or ECS deploy) requires a genuinely different admin to
+// approve than the one requesting it (separation of duties), via the
+// existing Approvals view — this poll just waits for that to happen.
+async function requestAndAwaitGate(
+  action: string,
+  target: string,
+  onPhase: (phase: "requesting-gate" | "awaiting-approval" | "gate-rejected" | "error") => void,
+): Promise<string | null> {
+  onPhase("requesting-gate");
+  const createRes = await fetch("/api/gate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, target }),
+  }).catch(() => null);
+  if (!createRes?.ok) { onPhase("error"); return null; }
+  const { id, autoApproved } = await createRes.json();
+  if (autoApproved) return id;
+
+  onPhase("awaiting-approval");
+  // Poll for up to 10 minutes — a real, different admin approves this via
+  // the Approvals view. No fixed short timeout: approval is a human action.
+  for (let i = 0; i < 300; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const statusRes = await fetch(`/api/gate/${id}`).catch(() => null);
+    if (!statusRes?.ok) continue;
+    const gate = await statusRes.json();
+    if (gate.status === "approved") return id;
+    if (gate.status === "rejected") { onPhase("gate-rejected"); return null; }
+  }
+  onPhase("error");
+  return null;
 }
 
 // Demo project path — the real chaotic payments-api
@@ -143,6 +180,13 @@ export function EditorView() {
   const [fileContent, setFileContent] = useState("");
   const [filename, setFilename]         = useState("");
   const [language, setLanguage]         = useState("javascript");
+  const [originalContent, setOriginalContent] = useState(""); // tracks unsaved-edit state
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  // Commit (real git add+commit+push — gated, same SoD flow as deploy)
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitPhase, setCommitPhase] = useState<"idle" | "requesting-gate" | "awaiting-approval" | "gate-rejected" | "committing" | "done" | "error">("idle");
+  const [commitError, setCommitError] = useState("");
 
   // Analysis
   const [state, setState]             = useState<EditorState>("idle");
@@ -157,9 +201,11 @@ export function EditorView() {
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
   const [generatedTestCode, setGeneratedTestCode] = useState("");
 
-  // Deploy
+  // Deploy — real k8s/ECS deploy targeting the selected service's own
+  // connector coordinates, not Terraform (infra-provisioning is a
+  // different concern from "deploy this edited service").
   const [deploy, setDeploy] = useState<DeployState>({ phase: "idle", lines: [] });
-  const [gateId, setGateId] = useState<string | null>(null);
+  const [projectRoot, setProjectRoot] = useState("");
 
   // UI
   const [bottomTab, setBottomTab]   = useState<BottomTab>("problems");
@@ -183,6 +229,7 @@ export function EditorView() {
       if (!resp.ok) return;
       const tree: FileEntry[] = await resp.json();
       setFileTree(tree);
+      setProjectRoot(rootPath); // used as the real build context for POST /api/editor/build
     } catch { /* ignore */ }
   }, []);
 
@@ -204,8 +251,10 @@ export function EditorView() {
       if (!resp.ok) { setState("writing"); return; }
       const data = await resp.json();
       setFileContent(data.content ?? "");
+      setOriginalContent(data.content ?? "");
       setFilename(data.filename ?? "");
       setLanguage(data.language ?? "plaintext");
+      setSaveStatus("idle");
       setState("writing");
     } catch {
       setState("writing");
@@ -234,8 +283,10 @@ export function EditorView() {
     if (resp?.ok) {
       const data = await resp.json();
       setFileContent(data.content ?? "");
+      setOriginalContent(data.content ?? "");
       setFilename(data.filename ?? "server.js");
       setLanguage(data.language ?? "javascript");
+      setSaveStatus("idle");
       setActiveFile({ name: "server.js", path: mainFile, isDir: false, depth: 1, active: true });
     } else {
       // Gateway unreachable — show explicit error, not fake code
@@ -267,6 +318,11 @@ export function EditorView() {
         const tryPath = `${diskPath}/${guess}`;
         const resp = await fetch(`/api/editor/file?path=${encodeURIComponent(tryPath)}`).catch(() => null);
         if (resp?.ok) {
+          // Confirmed live via product verification: this never set
+          // activeFile, so Save/Commit (which both require it) silently
+          // no-op'd for any file opened via this picker instead of a
+          // tree click.
+          setActiveFile({ name: guess.split("/").pop() ?? guess, path: tryPath, isDir: false, depth: 1, active: true });
           await loadFile(tryPath);
           return;
         }
@@ -288,13 +344,24 @@ export function EditorView() {
         const resp = await fetch(`/api/editor/files?path=${encodeURIComponent(tryPath)}`).catch(() => null);
         if (resp?.ok) {
           await loadTree(tryPath);
-          // Load entry point
-          const entryResp = await fetch(`/api/editor/file?path=${encodeURIComponent(`${tryPath}/index.ts`)}`).catch(() => null)
-            ?? await fetch(`/api/editor/file?path=${encodeURIComponent(`${tryPath}/src/index.ts`)}`).catch(() => null);
-          if (entryResp?.ok) {
-            const d = await entryResp.json();
-            setFileContent(d.content ?? ""); setFilename(d.filename ?? "index.ts"); setLanguage(d.language ?? "typescript");
+          // Load entry point. Confirmed live: `fetch(...).catch(() => null)
+          // ?? fetch(...)` never fell through to the second attempt — `??`
+          // sees a Promise object (always truthy) on the left, not the
+          // resolved value, so "src/index.ts" was dead code. Try each
+          // candidate sequentially instead.
+          let entryPath: string | null = null;
+          for (const entryGuess of ["index.ts", "src/index.ts"]) {
+            const candidatePath = `${tryPath}/${entryGuess}`;
+            const entryResp = await fetch(`/api/editor/file?path=${encodeURIComponent(candidatePath)}`).catch(() => null);
+            if (entryResp?.ok) {
+              const d = await entryResp.json();
+              setFileContent(d.content ?? ""); setOriginalContent(d.content ?? ""); setFilename(d.filename ?? "index.ts"); setLanguage(d.language ?? "typescript");
+              setSaveStatus("idle");
+              entryPath = candidatePath;
+              break;
+            }
           }
+          if (entryPath) setActiveFile({ name: entryPath.split("/").pop() ?? entryPath, path: entryPath, isDir: false, depth: 1, active: true });
           setState("writing"); return;
         }
       }
@@ -302,11 +369,37 @@ export function EditorView() {
     }
 
     if (source === "github" && githubUrl) {
-      // Clone via gateway — for now show message
-      setFileContent(`# GitHub import\n# URL: ${githubUrl}\n# Clone support coming — connect GitHub connector first.`);
-      setFilename("README");
-      setLanguage("markdown");
-      setState("writing");
+      // Real clone (was a placeholder message — no clone endpoint existed).
+      const provider = gitCreds[0]?.provider;
+      if (!provider) {
+        setFileContent(`# Clone requires a stored git credential\n# Add one in the Source Control panel (left sidebar), then retry.`);
+        setFilename("README"); setLanguage("markdown"); setState("writing");
+        return;
+      }
+      try {
+        const res = await fetch("/api/editor/clone", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repoUrl: githubUrl, provider }),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          setFileContent(`# Clone failed\n# ${body.error ?? "unknown error"}\n${body.detail ?? ""}`);
+          setFilename("README"); setLanguage("markdown"); setState("writing");
+          return;
+        }
+        await loadTree(body.path);
+        const mainGuesses = ["index.ts", "index.js", "src/index.ts", "src/index.js", "main.ts", "main.go", "README.md"];
+        for (const guess of mainGuesses) {
+          const tryPath = `${body.path}/${guess}`;
+          const resp = await fetch(`/api/editor/file?path=${encodeURIComponent(tryPath)}`).catch(() => null);
+          if (resp?.ok) { await loadFile(tryPath); return; }
+        }
+        setState("writing");
+      } catch (err) {
+        setFileContent(`# Clone failed\n# ${String(err)}`);
+        setFilename("README"); setLanguage("markdown"); setState("writing");
+      }
     }
   }
 
@@ -434,72 +527,149 @@ export function EditorView() {
     });
   }
 
-  // ── Deploy via Terraform ───────────────────────────────────────────────────
+  // ── Save (real file write — was completely missing) ───────────────────────
 
-  async function detectAndDeploy() {
-    setDeploy({ phase: "detecting", lines: [] });
-    setBottomTab("terminal");
-
+  async function saveFile() {
+    if (!activeFile) return;
+    setSaveStatus("saving");
     try {
-      const resp = await fetch("/api/terraform/detect");
-      const targets: DeployTarget[] = resp.ok ? await resp.json() : [];
-
-      if (targets.length === 0) {
-        setDeploy({ phase: "error", lines: ["No deployment targets found. Connect a cloud or Kubernetes connector first."] });
-        return;
-      }
-
-      // Single meaningful target → auto-plan
-      const real = targets.filter(t => t.platform !== "docker");
-      if (real.length === 1) {
-        await runTerraformPlan(real[0]!, targets);
-        return;
-      }
-
-      // Multiple → show picker
-      setDeploy({ phase: "picking", lines: [], targets });
-    } catch (err) {
-      setDeploy({ phase: "error", lines: [String(err)] });
+      const res = await fetch("/api/editor/file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: activeFile.path, content: fileContent }),
+      });
+      if (!res.ok) { setSaveStatus("error"); return; }
+      setOriginalContent(fileContent);
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
     }
   }
 
-  async function runTerraformPlan(target: DeployTarget, targets?: DeployTarget[]) {
-    setDeploy({ phase: "planning", lines: [], selectedTarget: target, targets });
-    setBottomTab("terminal");
+  // Ctrl/Cmd+S saves the active file.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        saveFile();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile, fileContent]);
 
-    await readSSE(
-      `/api/terraform/${target.tfEnv}/plan`,
-      { signal: undefined },
-      (event) => {
-        const e = event as Record<string, unknown>;
-        if (e.line) setDeploy(prev => ({ ...prev, lines: [...prev.lines, e.line as string] }));
-        if (e.done) setDeploy(prev => ({ ...prev, phase: "confirming", exitCode: e.exitCode as number }));
-      },
-    ).catch((err) => {
-      setDeploy(prev => ({ ...prev, phase: "error", lines: [...prev.lines, String(err)] }));
-    });
+  // ── Commit & push (real git — was collected credentials but never used) ───
+
+  async function commitAndPush() {
+    if (!activeFile || !commitMessage.trim()) return;
+    const provider = gitCreds[0]?.provider;
+    if (!provider) { setCommitPhase("error"); setCommitError("no git credentials configured — add one above"); return; }
+
+    setCommitError("");
+    const gateId = await requestAndAwaitGate(
+      "editor.commit",
+      activeFile.path,
+      (phase) => setCommitPhase(phase),
+    );
+    if (!gateId) return; // requestAndAwaitGate already set the terminal phase
+
+    setCommitPhase("committing");
+    try {
+      const res = await fetch("/api/editor/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: activeFile.path, message: commitMessage, provider, gateId }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setCommitPhase("error"); setCommitError(body.error ?? "commit failed"); return; }
+      setCommitPhase("done");
+      setCommitMessage("");
+    } catch (err) {
+      setCommitPhase("error");
+      setCommitError(String(err));
+    }
   }
 
-  async function runTerraformApply() {
-    const target = deploy.selectedTarget;
-    if (!target) return;
-    setDeploy(prev => ({ ...prev, phase: "applying" }));
+  // ── Deploy (real k8s/ECS — was a dead Terraform flow that always 403'd) ───
 
+  function resolveDeployTarget(): ResolvedDeployTarget | null {
+    const coords = selectedService?.connectorCoordinates as Record<string, { resourceIds?: Record<string, string> }> | undefined;
+    if (!coords) return null;
+    for (const k8sKey of ["k8s", "eks", "gke"]) {
+      const c = coords[k8sKey]?.resourceIds;
+      if (c?.namespace) {
+        // selector is `app=<name>` or `app.kubernetes.io/name=<name>` — the
+        // real deployment name this bootstrap resolved (see connectors/k8s's
+        // bootstrap.ts). Fall back to the entity's own name if unparseable.
+        const match = c.selector?.match(/=(.+)$/);
+        const deployment = match?.[1] ?? selectedService!.name;
+        return { platform: "k8s", namespace: c.namespace, deployment, label: `${c.namespace}/${deployment} (k8s)` };
+      }
+    }
+    const ecs = coords["ecs"]?.resourceIds;
+    if (ecs?.cluster && ecs?.service) {
+      return { platform: "ecs", cluster: ecs.cluster, service: ecs.service, label: `${ecs.cluster}/${ecs.service} (ECS)` };
+    }
+    return null;
+  }
+
+  async function buildAndDeploy() {
+    const target = resolveDeployTarget();
+    if (!target) { setDeploy({ phase: "no-target", lines: ["Selected service has no real k8s/ECS connector coordinates — open it via the Service picker, not Disk/GitHub."] }); return; }
+    if (!projectRoot) { setDeploy({ phase: "error", lines: ["No project root loaded to build from."] }); return; }
+
+    setDeploy({ phase: "building", lines: [] });
+    setBottomTab("terminal");
+
+    const imageName = target.platform === "k8s" ? target.deployment! : target.service!;
+    let builtImage = "";
     await readSSE(
-      `/api/terraform/${target.tfEnv}/apply`,
+      "/api/editor/build",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gateId }),
+        body: JSON.stringify({ servicePath: projectRoot, imageName }),
       },
       (event) => {
         const e = event as Record<string, unknown>;
         if (e.line) setDeploy(prev => ({ ...prev, lines: [...prev.lines, e.line as string] }));
-        if (e.done) setDeploy(prev => ({ ...prev, phase: e.exitCode === 0 ? "done" : "error", exitCode: e.exitCode as number }));
+        if (e.type === "error") setDeploy(prev => ({ ...prev, phase: "build-error", lines: [...prev.lines, e.message as string] }));
+        if (e.type === "done" && e.image) builtImage = e.image as string;
       },
     ).catch((err) => {
-      setDeploy(prev => ({ ...prev, phase: "error", lines: [...prev.lines, String(err)] }));
+      setDeploy(prev => ({ ...prev, phase: "build-error", lines: [...prev.lines, String(err)] }));
     });
+    if (!builtImage) return; // build-error phase already set
+
+    setDeploy(prev => ({ ...prev, image: builtImage }));
+    const gateTarget = target.platform === "k8s" ? `${target.namespace}/${target.deployment}` : `${target.cluster}/${target.service}`;
+    const gateId = await requestAndAwaitGate(
+      target.platform === "k8s" ? "k8s.deploy" : "ecs.deploy",
+      gateTarget,
+      (phase) => setDeploy(prev => ({ ...prev, phase })),
+    );
+    if (!gateId) return;
+
+    setDeploy(prev => ({ ...prev, phase: "deploying" }));
+    const deployUrl = target.platform === "k8s"
+      ? `/api/k8s/deployments/${target.namespace}/${target.deployment}/deploy`
+      : `/api/ecs/services/${target.cluster}/${target.service}/deploy`;
+    try {
+      const res = await fetch(deployUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: builtImage, gateId }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setDeploy(prev => ({ ...prev, phase: "error", lines: [...prev.lines, body.error ?? "deploy failed", body.detail ?? ""] }));
+        return;
+      }
+      setDeploy(prev => ({ ...prev, phase: "done" }));
+    } catch (err) {
+      setDeploy(prev => ({ ...prev, phase: "error", lines: [...prev.lines, String(err)] }));
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -596,7 +766,7 @@ export function EditorView() {
                   placeholder="https://github.com/org/repo"
                   style={{ width: "100%", background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "11px", padding: "6px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box", fontFamily: "monospace" }}
                 />
-                <div style={{ fontSize: "10px", color: "#555", marginTop: "5px", fontFamily: "sans-serif" }}>Requires GitHub connector — connect via Connectors</div>
+                <div style={{ fontSize: "10px", color: "#555", marginTop: "5px", fontFamily: "sans-serif" }}>Real git clone — requires a stored credential (Source Control panel) for this repo&apos;s provider</div>
               </div>
             )}
 
@@ -699,6 +869,71 @@ export function EditorView() {
             {activityTab === "git" && (
               <>
                 <div style={{ padding: "8px 12px", fontSize: "10px", color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "sans-serif", borderBottom: "1px solid #1a1a1a" }}>Source Control</div>
+
+                {/* Real commit — was entirely missing; the token this panel
+                    collects below was previously never actually used. Gated
+                    the same way as deploy: a different admin must approve
+                    via the Approvals view before the push executes. */}
+                <div style={{ padding: "10px 12px", borderBottom: "1px solid #1a1a1a" }}>
+                  <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "6px" }}>Commit &amp; Push</div>
+                  {!activeFile ? (
+                    <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif" }}>Open a file first</div>
+                  ) : gitCreds.length === 0 ? (
+                    <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif" }}>Add git credentials below first</div>
+                  ) : (
+                    <>
+                      <textarea
+                        value={commitMessage}
+                        onChange={e => setCommitMessage(e.target.value)}
+                        placeholder="Commit message"
+                        rows={2}
+                        style={{ width: "100%", background: "#1e1e1e", border: "1px solid #3a3a3a", color: "#d4d4d4", fontSize: "11px", padding: "6px 8px", borderRadius: "3px", outline: "none", boxSizing: "border-box", fontFamily: "sans-serif", resize: "vertical", marginBottom: "6px" }}
+                      />
+                      {commitPhase === "idle" && (
+                        <button
+                          onClick={commitAndPush}
+                          disabled={!commitMessage.trim() || fileContent !== originalContent}
+                          style={{ width: "100%", background: !commitMessage.trim() || fileContent !== originalContent ? "rgba(255,255,255,0.04)" : "#0e639c", border: "none", color: !commitMessage.trim() || fileContent !== originalContent ? "#555" : "#fff", padding: "6px", borderRadius: "3px", cursor: !commitMessage.trim() || fileContent !== originalContent ? "default" : "pointer", fontSize: "11px", fontFamily: "sans-serif" }}
+                        >
+                          Commit &amp; Push
+                        </button>
+                      )}
+                      {fileContent !== originalContent && commitPhase === "idle" && (
+                        <div style={{ fontSize: "9px", color: "#cca700", marginTop: "4px", fontFamily: "sans-serif" }}>Save your edit first</div>
+                      )}
+                      {commitPhase === "requesting-gate" && (
+                        <div style={{ fontSize: "10px", color: "#0078d4", fontFamily: "sans-serif" }}><span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Requesting approval…</div>
+                      )}
+                      {commitPhase === "awaiting-approval" && (
+                        <div style={{ fontSize: "10px", color: "#cca700", fontFamily: "sans-serif", lineHeight: "1.4" }}>
+                          <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Waiting for a different admin to approve in the Approvals view.
+                        </div>
+                      )}
+                      {commitPhase === "committing" && (
+                        <div style={{ fontSize: "10px", color: "#0078d4", fontFamily: "sans-serif" }}><span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Pushing…</div>
+                      )}
+                      {commitPhase === "done" && (
+                        <div style={{ fontSize: "10px", color: "#10b981", fontFamily: "sans-serif", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span>✓ Pushed</span>
+                          <button onClick={() => setCommitPhase("idle")} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "10px" }}>OK</button>
+                        </div>
+                      )}
+                      {commitPhase === "gate-rejected" && (
+                        <div style={{ fontSize: "10px", color: "#f44747", fontFamily: "sans-serif", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span>✗ Approval rejected</span>
+                          <button onClick={() => setCommitPhase("idle")} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "10px" }}>OK</button>
+                        </div>
+                      )}
+                      {commitPhase === "error" && (
+                        <div style={{ fontSize: "10px", color: "#f44747", fontFamily: "sans-serif" }}>
+                          ✗ {commitError || "commit failed"}
+                          <button onClick={() => setCommitPhase("idle")} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "10px", marginLeft: "6px" }}>OK</button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <div style={{ padding: "10px 12px" }}>
                   <div style={{ fontSize: "11px", color: "#888", fontFamily: "sans-serif", marginBottom: "8px" }}>Git Credentials</div>
                   <div style={{ fontSize: "10px", color: "#555", fontFamily: "sans-serif", marginBottom: "8px", lineHeight: "1.5" }}>
@@ -779,7 +1014,25 @@ export function EditorView() {
                   Open a project using the project picker in the top-right corner.
                 </div>
               )}
-              {fileContent && state !== "loading" && (
+              {/* Real editable buffer — previously the code area was entirely
+                  read-only (plain <span> rendering), so there was no way to
+                  actually type an edit at all. Shown before analysis, where
+                  editing is the natural action; the annotated read-only view
+                  below takes over once findings exist to highlight. */}
+              {fileContent && state === "writing" && (
+                <textarea
+                  value={fileContent}
+                  onChange={e => { setFileContent(e.target.value); setSaveStatus("idle"); }}
+                  spellCheck={false}
+                  style={{
+                    width: "100%", height: "100%", minHeight: "300px", boxSizing: "border-box",
+                    background: "transparent", border: "none", outline: "none", resize: "none",
+                    color: "#d4d4d4", fontSize: "13px", fontFamily: "monospace", lineHeight: "19px",
+                    padding: "8px 12px", tabSize: 2,
+                  }}
+                />
+              )}
+              {fileContent && state !== "loading" && state !== "writing" && (
                 <div style={{ padding: "8px 0", minWidth: "520px" }}>
                   {codeLines.map((lineText, idx) => {
                     const lineNum = idx + 1;
@@ -824,11 +1077,6 @@ export function EditorView() {
                       </div>
                     );
                   })}
-                  {state === "writing" && (
-                    <div style={{ display: "flex", alignItems: "center", minHeight: "19px", paddingLeft: "62px" }}>
-                      <span style={{ display: "inline-block", width: "1px", height: "14px", background: "#d4d4d4", animation: "blink 1.2s step-end infinite" }} />
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -851,11 +1099,22 @@ export function EditorView() {
               {state === "writing" && fileContent && (
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", textAlign: "center" }}>
                   <div style={{ fontSize: "28px", marginBottom: "10px", opacity: 0.3 }}>✦</div>
-                  <div style={{ fontSize: "12px", color: "#666", fontFamily: "sans-serif", lineHeight: "1.6" }}>AI review finds bugs and generates tests</div>
-                  <div style={{ fontSize: "10px", color: "#444", marginTop: "8px", fontFamily: "sans-serif" }}>Analysis · Tests · Terraform deploy</div>
+                  <div style={{ fontSize: "12px", color: "#666", fontFamily: "sans-serif", lineHeight: "1.6" }}>Edit, save, then AI review finds bugs and generates tests</div>
+                  <div style={{ fontSize: "10px", color: "#444", marginTop: "8px", fontFamily: "sans-serif" }}>Edit · Save · Analysis · Tests · Deploy</div>
+                  {fileContent !== originalContent && (
+                    <div style={{ fontSize: "10px", color: "#cca700", marginTop: "10px", fontFamily: "sans-serif" }}>● Unsaved changes</div>
+                  )}
+                  <button
+                    onClick={saveFile}
+                    disabled={fileContent === originalContent || saveStatus === "saving"}
+                    style={{ marginTop: "10px", background: fileContent === originalContent ? "rgba(255,255,255,0.04)" : "rgba(16,185,129,0.15)", border: `1px solid ${fileContent === originalContent ? "#2a2a2a" : "rgba(16,185,129,0.4)"}`, color: fileContent === originalContent ? "#555" : "#10b981", padding: "6px 14px", borderRadius: "3px", cursor: fileContent === originalContent ? "default" : "pointer", fontSize: "11px", fontFamily: "sans-serif" }}
+                  >
+                    {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" && fileContent === originalContent ? "✓ Saved" : "Save (⌘S)"}
+                  </button>
+                  {saveStatus === "error" && <div style={{ fontSize: "10px", color: "#f44747", marginTop: "6px", fontFamily: "sans-serif" }}>Save failed</div>}
                   <button
                     onClick={runAnalysis}
-                    style={{ marginTop: "16px", background: "rgba(0,120,212,0.15)", border: "1px solid rgba(0,120,212,0.4)", color: "#0078d4", padding: "6px 14px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}
+                    style={{ marginTop: "10px", background: "rgba(0,120,212,0.15)", border: "1px solid rgba(0,120,212,0.4)", color: "#0078d4", padding: "6px 14px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}
                   >
                     Analyze now ✦
                   </button>
@@ -976,68 +1235,55 @@ export function EditorView() {
                         {failCount === 0 ? (
                           <>
                             {deploy.phase === "idle" && (
-                              <button onClick={detectAndDeploy} style={{ width: "100%", background: "#16825d", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "5px" }}>
-                                Deploy ✦
+                              <button onClick={buildAndDeploy} style={{ width: "100%", background: "#16825d", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "5px" }}>
+                                Build &amp; Deploy ✦
                               </button>
                             )}
-                            {deploy.phase === "detecting" && (
+                            {deploy.phase === "no-target" && (
+                              <div>
+                                <div style={{ fontSize: "11px", color: "#cca700", fontFamily: "sans-serif", marginBottom: "6px", lineHeight: "1.5" }}>{deploy.lines[0]}</div>
+                                <button onClick={() => setDeploy({ phase: "idle", lines: [] })} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>OK</button>
+                              </div>
+                            )}
+                            {deploy.phase === "building" && (
                               <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Detecting targets…
+                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Building image — see terminal…
                               </div>
                             )}
-                            {deploy.phase === "picking" && deploy.targets && (
+                            {deploy.phase === "build-error" && (
                               <div>
-                                <div style={{ fontSize: "10px", color: "#cca700", fontFamily: "sans-serif", marginBottom: "6px" }}>Multiple deployment targets found — pick one:</div>
-                                {deploy.targets.map(t => (
-                                  <button
-                                    key={t.id}
-                                    onClick={() => runTerraformPlan(t, deploy.targets)}
-                                    style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2a", color: "#d4d4d4", padding: "7px 10px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif", marginBottom: "4px", textAlign: "left", display: "flex", alignItems: "center", gap: "6px" }}
-                                  >
-                                    <span style={{ fontSize: "10px", color: t.platform === "docker" ? "#888" : "#10b981" }}>
-                                      {t.platform === "k8s" ? "⎈" : t.platform === "ecs" ? "▣" : t.platform === "gitops" ? "⬡" : "◻"}
-                                    </span>
-                                    <span>{t.label}</span>
-                                  </button>
-                                ))}
-                                <button onClick={() => setDeploy({ phase: "idle", lines: [] })} style={{ width: "100%", background: "transparent", border: "1px solid #333", color: "#666", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>Cancel</button>
+                                <div style={{ fontSize: "11px", color: "#f44747", fontFamily: "sans-serif", marginBottom: "5px" }}>✗ Build failed — see terminal</div>
+                                <button onClick={buildAndDeploy} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>Retry</button>
                               </div>
                             )}
-                            {deploy.phase === "planning" && (
-                              <div>
-                                <div style={{ fontSize: "10px", color: "#666", fontFamily: "sans-serif", marginBottom: "4px" }}>
-                                  → {deploy.selectedTarget?.label}
-                                </div>
-                                <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
-                                  <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Planning…
-                                </div>
-                              </div>
-                            )}
-                            {deploy.phase === "confirming" && (
-                              <div>
-                                <div style={{ fontSize: "10px", color: "#cca700", fontFamily: "sans-serif", marginBottom: "6px" }}>
-                                  Plan ready for <strong>{deploy.selectedTarget?.label}</strong> — review in terminal, then apply:
-                                </div>
-                                <button onClick={runTerraformApply} style={{ width: "100%", background: "#16825d", border: "none", color: "#fff", padding: "7px", borderRadius: "3px", cursor: "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "sans-serif", marginBottom: "5px" }}>
-                                  terraform apply ✓
-                                </button>
-                                <button onClick={() => setDeploy({ phase: "idle", lines: [] })} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "5px", borderRadius: "3px", cursor: "pointer", fontSize: "11px", fontFamily: "sans-serif" }}>
-                                  Cancel
-                                </button>
-                              </div>
-                            )}
-                            {deploy.phase === "applying" && (
+                            {deploy.phase === "requesting-gate" && (
                               <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Applying to {deploy.selectedTarget?.label}…
+                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Requesting deploy approval…
+                              </div>
+                            )}
+                            {deploy.phase === "awaiting-approval" && (
+                              <div style={{ fontSize: "11px", color: "#cca700", fontFamily: "sans-serif", lineHeight: "1.5" }}>
+                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Built <code>{deploy.image}</code>. Waiting for a different admin to approve in the Approvals view (self-approval is rejected by design).
+                              </div>
+                            )}
+                            {deploy.phase === "gate-rejected" && (
+                              <div>
+                                <div style={{ fontSize: "11px", color: "#f44747", fontFamily: "sans-serif", marginBottom: "5px" }}>✗ Deploy approval rejected</div>
+                                <button onClick={() => setDeploy({ phase: "idle", lines: [] })} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>OK</button>
+                              </div>
+                            )}
+                            {deploy.phase === "deploying" && (
+                              <div style={{ fontSize: "11px", color: "#0078d4", fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: "6px" }}>
+                                <span style={{ animation: "pulse-dot 0.8s infinite" }}>●</span> Deploying {deploy.image}…
                               </div>
                             )}
                             {deploy.phase === "done" && (
-                              <div style={{ fontSize: "11px", color: "#10b981", fontFamily: "sans-serif" }}>✓ Deployed to {deploy.selectedTarget?.label}</div>
+                              <div style={{ fontSize: "11px", color: "#10b981", fontFamily: "sans-serif" }}>✓ Deployed {deploy.image}</div>
                             )}
                             {deploy.phase === "error" && (
                               <div>
                                 <div style={{ fontSize: "11px", color: "#f44747", fontFamily: "sans-serif", marginBottom: "5px" }}>✗ Failed — see terminal</div>
-                                <button onClick={detectAndDeploy} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>Retry</button>
+                                <button onClick={buildAndDeploy} style={{ width: "100%", background: "transparent", border: "1px solid #555", color: "#a6a6a6", padding: "4px", borderRadius: "3px", cursor: "pointer", fontSize: "10px", fontFamily: "sans-serif" }}>Retry</button>
                               </div>
                             )}
                           </>

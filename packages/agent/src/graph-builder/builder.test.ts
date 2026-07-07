@@ -7,6 +7,7 @@ import type { TenantId } from '@anway/types'
 
 function makeMockKG(): IKnowledgeGraph {
   const entities = new Map<string, string>() // name → id
+  const entitiesById = new Map<string, EntitySpec>()
   let entityCounter = 0
   const relationships: RelationshipSpec[] = []
 
@@ -17,13 +18,14 @@ function makeMockKG(): IKnowledgeGraph {
       if (existing) return existing
       const id = `entity-${++entityCounter}`
       entities.set(key, id)
+      entitiesById.set(id, spec)
       return id
     }),
     upsertRelationship: vi.fn(async (rel: RelationshipSpec): Promise<string> => {
       relationships.push(rel)
       return `rel-${relationships.length}`
     }),
-    addEpisode: vi.fn(),
+    addEpisode: vi.fn(async () => {}),
     getFacts: vi.fn(),
     getEntity: vi.fn(),
     getRelationships: vi.fn(),
@@ -31,6 +33,16 @@ function makeMockKG(): IKnowledgeGraph {
     resolveContext: vi.fn(),
     resolveContextByName: vi.fn(),
     getEntityByExternalRef: vi.fn(),
+    getEntitiesByConnectorType: vi.fn(async (connectorType: string) => {
+      const out: Array<{ id: string; tenantId: string; type: string; name: string; metadata: Record<string, unknown> }> = []
+      for (const [id, spec] of entitiesById) {
+        const coords = (spec.metadata as { connectorCoordinates?: Record<string, unknown> } | undefined)?.connectorCoordinates
+        if (coords && connectorType in coords) {
+          out.push({ id, tenantId: 't-1', type: spec.type, name: spec.name, metadata: spec.metadata ?? {} })
+        }
+      }
+      return out
+    }),
   } as unknown as IKnowledgeGraph
 }
 
@@ -311,6 +323,57 @@ describe('GraphBuilderAgent', () => {
       const a = new GraphBuilderAgent(kg, emptyModel)
       const name = await a.extractServiceName('no service here', 't-1' as TenantId)
       expect(name).toBeNull()
+    })
+  })
+
+  // Regression test for a gap found while auditing the connector bootstrap
+  // contract: CLAUDE.md documents (Connector)-[:PROVIDES]->(Service) as part
+  // of the canonical Structural Graph schema, but nothing created it —
+  // ConnectorBootstrapResult only ever reported counts, not which entities
+  // were touched. Fixed via getEntitiesByConnectorType + linkConnectorProvides.
+  describe('handle(connector_registered) — Connector PROVIDES edges', () => {
+    it('links the Connector entity to every entity the bootstrap tagged with its connector type', async () => {
+      const fakeBootstrap = {
+        bootstrap: vi.fn(async (tenantId: TenantId, connectorId: string) => {
+          // Simulate a real bootstrap upserting a Service entity carrying
+          // connectorCoordinates for this connector type, exactly as every
+          // real connector bootstrap.ts does.
+          await kg.upsertEntity(
+            { type: 'Service', name: 'payments-api', metadata: { connectorCoordinates: { pagerduty: { resourceIds: {} } } } },
+            tenantId,
+          )
+          return { entitiesUpserted: 1, relationshipsUpserted: 0, episodeHints: [`bootstrapped from ${connectorId}`] }
+        }),
+      }
+      const registry = new Map([['pagerduty', fakeBootstrap]])
+      const withBootstrap = new GraphBuilderAgent(kg, model, undefined, registry as any)
+
+      await withBootstrap.handle({
+        type: 'connector_registered', connectorId: 'conn-1', connectorType: 'pagerduty', tenantId: 't-1', payload: {},
+      })
+
+      // entity-1 is the Connector entity (upserted first, in onConnectorRegistered);
+      // entity-2 is the Service entity the fake bootstrap upserted.
+      expect(kg.upsertRelationship).toHaveBeenCalledWith(
+        expect.objectContaining({ fromEntityId: 'entity-1', relType: 'PROVIDES', toEntityId: 'entity-2' }),
+        't-1',
+      )
+    })
+
+    it('does not fail the already-successful bootstrap if linking PROVIDES edges fails', async () => {
+      const mockLogger = { error: vi.fn(), warn: vi.fn() }
+      const fakeBootstrap = { bootstrap: vi.fn(async () => ({ entitiesUpserted: 1, relationshipsUpserted: 0, episodeHints: ['ok'] })) }
+      const registry = new Map([['pagerduty', fakeBootstrap]])
+      const badKg = { ...kg, getEntitiesByConnectorType: vi.fn().mockRejectedValue(new Error('query failed')) } as unknown as IKnowledgeGraph
+      const withBootstrap = new GraphBuilderAgent(badKg, model, mockLogger, registry as any)
+
+      await expect(withBootstrap.handle({
+        type: 'connector_registered', connectorId: 'conn-1', connectorType: 'pagerduty', tenantId: 't-1', payload: {},
+      })).resolves.toBeUndefined()
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error), connectorType: 'pagerduty' }),
+        'GraphBuilder: linking Connector PROVIDES edges failed',
+      )
     })
   })
 

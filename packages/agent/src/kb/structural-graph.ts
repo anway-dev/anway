@@ -344,4 +344,15 @@ export class StructuralGraph implements IKnowledgeGraph {
     )
     return rows[0]?.id ?? null
   }
+
+  // Same `metadata->'connectorCoordinates' ? $2` containment check already
+  // used by markConnectorEntitiesStale — every entity a given connector
+  // type's bootstrap touched.
+  async getEntitiesByConnectorType(connectorType: string, tenantId: TenantId): Promise<Entity[]> {
+    return this.query<Entity>(
+      `SELECT id, tenant_id AS "tenantId", type, name, metadata FROM entities
+       WHERE tenant_id = $1::uuid AND metadata->'connectorCoordinates' ? $2`,
+      [tenantId, connectorType],
+    )
+  }
 }

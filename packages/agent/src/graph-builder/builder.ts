@@ -92,7 +92,7 @@ export class GraphBuilderAgent {
 
   private async onConnectorRegistered(event: GraphEvent & { type: 'connector_registered' }): Promise<void> {
     const tenantId = this.tid(event.tenantId)
-    await this.kg.upsertEntity(
+    const connectorId = await this.kg.upsertEntity(
       {
         type: 'Connector',
         name: event.connectorId,
@@ -118,10 +118,34 @@ export class GraphBuilderAgent {
           source: 'graph-builder',
           timestamp: new Date(),
         }).catch(() => {})
+        await this.linkConnectorProvides(connectorId, event.connectorType, tenantId)
       } catch (err) {
         this.logger?.error({ err, connectorType: event.connectorType }, 'GraphBuilder: bootstrap failed')
         throw err
       }
+    }
+  }
+
+  // (Connector)-[:PROVIDES]->(Entity) — documented in CLAUDE.md's canonical
+  // Structural Graph schema ("connector feeds data about this service") but
+  // never created anywhere: ConnectorBootstrapResult only reports counts,
+  // not the entity list, so nothing downstream of a bootstrap run knew which
+  // real entities to link the Connector to. Resolved here via
+  // getEntitiesByConnectorType — every entity whose metadata carries this
+  // connector type's coordinates (set by the bootstrap's own upsertEntity
+  // calls) gets a PROVIDES edge from the Connector entity. Best-effort: a
+  // failure here must not fail the bootstrap that already succeeded.
+  private async linkConnectorProvides(connectorId: string, connectorType: string, tenantId: TenantId): Promise<void> {
+    try {
+      const entities = await this.kg.getEntitiesByConnectorType(connectorType, tenantId)
+      for (const entity of entities) {
+        await this.kg.upsertRelationship(
+          { fromEntityId: connectorId, relType: 'PROVIDES', toEntityId: entity.id },
+          tenantId,
+        )
+      }
+    } catch (err) {
+      this.logger?.error({ err, connectorType }, 'GraphBuilder: linking Connector PROVIDES edges failed')
     }
   }
 
@@ -431,6 +455,13 @@ export class GraphBuilderAgent {
       source: 'graph-builder',
       timestamp: new Date(),
     }).catch(() => {})
+    // Same (type, name) upsert key as onConnectorRegistered — resolves the
+    // same Connector entity row rather than creating a duplicate.
+    const connectorId = await this.kg.upsertEntity(
+      { type: 'Connector', name: event.connectorId, metadata: { connectorType: event.connectorType } },
+      tenantId,
+    )
+    await this.linkConnectorProvides(connectorId, event.connectorType, tenantId)
   }
 
   // -- helpers ---------------------------------------------------------------

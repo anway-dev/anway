@@ -100,4 +100,12 @@ export interface IKnowledgeGraph {
   upsertRelationship(rel: RelationshipSpec, tenantId: TenantId): Promise<string>
   /** Delete Repo entities whose names start with `org/` but are NOT in `keepNames`. Returns deleted count. */
   deleteEntitiesByOrgPrefix(type: string, orgPrefix: string, keepNames: string[], tenantId: TenantId): Promise<number>
+  /**
+   * Every entity whose metadata.connectorCoordinates carries this connector
+   * type — i.e. every entity this connector's bootstrap touched. Used to
+   * create the documented (Connector)-[:PROVIDES]->(Entity) edge after a
+   * bootstrap completes, without requiring IConnectorBootstrap.bootstrap()
+   * to return the actual entity list (its result type only reports counts).
+   */
+  getEntitiesByConnectorType(connectorType: string, tenantId: TenantId): Promise<Entity[]>
 }

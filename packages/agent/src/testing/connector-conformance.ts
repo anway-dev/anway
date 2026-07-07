@@ -52,6 +52,7 @@ export class FakeKnowledgeGraph implements IKnowledgeGraph {
   async markConnectorEntitiesStale(_c: string, _t: TenantId): Promise<number> { throw new Error('conformance: markConnectorEntitiesStale not expected') }
   async getEntityByExternalRef(_e: string, _t: TenantId): Promise<string | null> { throw new Error('conformance: getEntityByExternalRef not expected') }
   async deleteEntitiesByOrgPrefix(_type: string, _org: string, _keep: string[], _t: TenantId): Promise<number> { return 0 }
+  async getEntitiesByConnectorType(_c: string, _t: TenantId): Promise<Entity[]> { throw new Error('conformance: getEntitiesByConnectorType not expected in bootstrap') }
 }
 
 export interface ConformanceConfig {

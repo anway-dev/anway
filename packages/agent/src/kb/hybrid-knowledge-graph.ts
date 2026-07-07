@@ -54,6 +54,9 @@ export class HybridKnowledgeGraph implements IKnowledgeGraph {
   deleteEntitiesByOrgPrefix(type: string, orgPrefix: string, keepNames: string[], tenantId: TenantId): Promise<number> {
     return this.structural.deleteEntitiesByOrgPrefix(type, orgPrefix, keepNames, tenantId)
   }
+  getEntitiesByConnectorType(connectorType: string, tenantId: TenantId): Promise<Entity[]> {
+    return this.structural.getEntitiesByConnectorType(connectorType, tenantId)
+  }
 
   // Previously: with Graphiti configured, this returned Graphiti facts only
   // and never touched StructuralGraph.search() at all; without Graphiti, it

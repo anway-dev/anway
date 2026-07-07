@@ -59,6 +59,7 @@ const noopGraph: IKnowledgeGraph = {
   markConnectorEntitiesStale: async () => 0,
   getEntityByExternalRef: async () => null,
   deleteEntitiesByOrgPrefix: async () => 0,
+  getEntitiesByConnectorType: async () => [],
 }
 
 /**

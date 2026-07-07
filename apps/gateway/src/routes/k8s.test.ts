@@ -110,6 +110,91 @@ describe('k8s write endpoints', () => {
     })
   })
 
+  describe('POST /api/k8s/deployments/:namespace/:name/deploy', () => {
+    it('returns 400 when image is missing', async () => {
+      const app = buildTestApp()
+      await app.register(k8sRoutes)
+      await app.ready()
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/k8s/deployments/default/myapp/deploy',
+        payload: { gateId: '00000000-0000-0000-0000-000000000001' },
+      })
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('returns 403 when no gateId provided', async () => {
+      const app = buildTestApp()
+      await app.register(k8sRoutes)
+      await app.ready()
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/k8s/deployments/default/myapp/deploy',
+        payload: { image: 'myapp:v2' },
+      })
+      expect(res.statusCode).toBe(403)
+      const body = JSON.parse(res.body) as { error: string }
+      expect(body.error).toContain('gate approval required')
+    })
+
+    it('returns 403 when gateId is not approved (0 rows consumed)', async () => {
+      const { withTenant } = await import('../db/prisma.js')
+      const mockWT = withTenant as ReturnType<typeof vi.fn>
+      mockWT.mockImplementation(async (_p: unknown, _t: string, fn: (tx: unknown) => unknown) => {
+        return fn({
+          $queryRaw: vi.fn().mockResolvedValue([]),
+          $executeRaw: vi.fn().mockResolvedValue(0),
+        })
+      })
+
+      const app = buildTestApp()
+      await app.register(k8sRoutes)
+      await app.ready()
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/k8s/deployments/default/myapp/deploy',
+        payload: { image: 'myapp:v2', gateId: '00000000-0000-0000-0000-000000000001' },
+      })
+      expect(res.statusCode).toBe(403)
+    })
+
+    it('runs kubectl set image on a valid gate — real regression for the missing deploy-new-image action (product verification found restart/scale never changed the image at all)', async () => {
+      const { withTenant } = await import('../db/prisma.js')
+      const mockWT = withTenant as ReturnType<typeof vi.fn>
+      mockWT.mockImplementation(async (_p: unknown, _t: string, fn: (tx: unknown) => unknown) => {
+        return fn({
+          $queryRaw: vi.fn().mockResolvedValue([{ credentials_enc: 'enc', connector_type: 'k8s' }]),
+          $executeRaw: vi.fn().mockResolvedValue(1),
+        })
+      })
+      mockSpawnSync.mockReturnValue({ stdout: 'deployment.apps/myapp image updated', status: 0 })
+
+      const app = buildTestApp()
+      await app.register(k8sRoutes)
+      await app.ready()
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/k8s/deployments/default/myapp/deploy',
+        payload: { image: 'myapp:v2', gateId: '00000000-0000-0000-0000-000000000001' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body) as { ok: boolean; action: string; image: string }
+      expect(body.ok).toBe(true)
+      expect(body.action).toBe('deploy')
+      expect(body.image).toBe('myapp:v2')
+      // Real kubectl invocation — `*=image` sets every container by default.
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'kubectl',
+        expect.arrayContaining(['set', 'image', 'deployment/myapp', '*=myapp:v2', '-n', 'default']),
+        expect.anything(),
+      )
+    })
+  })
+
   describe('POST /api/k8s/deployments/:namespace/:name/scale', () => {
     it('returns 400 for negative replicas', async () => {
       const app = buildTestApp()

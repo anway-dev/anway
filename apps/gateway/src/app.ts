@@ -30,6 +30,7 @@ import { oidcRoutes } from './routes/oidc.js'
 import { sessionRoutes } from './routes/sessions.js'
 import { terraformRoutes } from './routes/terraform.js'
 import { editorRoutes } from './routes/editor.js'
+import { ecsRoutes } from './routes/ecs.js'
 import { pipelineRoutes } from './routes/pipeline.js'
 import { environmentRoutes } from './routes/environments.js'
 import { slackCommandRoutes } from './routes/slack-commands.js'
@@ -123,6 +124,7 @@ export async function buildApp() {
   await app.register(sessionRoutes)
   await app.register(terraformRoutes)
   await app.register(editorRoutes)
+  await app.register(ecsRoutes)
   await app.register(pipelineRoutes)
   await app.register(environmentRoutes)
   await app.register(slackCommandRoutes)

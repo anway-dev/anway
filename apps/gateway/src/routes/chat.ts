@@ -128,7 +128,7 @@ export function providerConfigFromEnv(type: string): ProviderConfig | null {
 // Providers that run without an API key (local endpoints)
 const KEYLESS_PROVIDERS = new Set(['ollama', 'lmstudio'])
 
-async function providerConfigForTenant(
+export async function providerConfigForTenant(
   tenantId: string,
   client: PrismaClient,
 ): Promise<ProviderConfig | null> {

@@ -89,6 +89,33 @@ const TOOLS: ConnectorTool[] = [
     },
     write: true,
   },
+  {
+    definition: {
+      name: 'deploy_deployment',
+      description: 'Set a new container image on a deployment (kubectl set image)',
+      parameters: {
+        type: 'object',
+        properties: {
+          deployment: { type: 'string' },
+          image: { type: 'string' },
+          container: { type: 'string', optional: true, description: 'Container name, or omit to set the image on every container (*)' },
+          namespace: { type: 'string', optional: true },
+        },
+        required: ['deployment', 'image'],
+      },
+    },
+    // Matches apps/gateway/src/routes/k8s.ts's real POST .../deploy route
+    // (same real-kubectl-call, gate-consume, audit pattern as
+    // restart_deployment/scale_deployment above — reachable directly only
+    // through that route in V1, same as its siblings).
+    execute: async (params, creds) => {
+      const ns = params.namespace as string ?? 'default'
+      const containerTarget = (params.container as string | undefined)?.trim() || '*'
+      const r = kubectl(['set', 'image', `deployment/${String(params.deployment)}`, `${containerTarget}=${String(params.image)}`, '-n', ns], creds)
+      return { ok: r.status === 0, output: r.stdout || (r.status !== 0 ? 'kubectl set image failed' : '') }
+    },
+    write: true,
+  },
 ]
 
 export class K8sAgent implements IConnectorAgent {

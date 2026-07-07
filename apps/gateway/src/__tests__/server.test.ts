@@ -43,7 +43,10 @@ describe('GET /health/ready', () => {
     expect([200, 503]).toContain(response.statusCode)
     const body = JSON.parse(response.body) as { status: string }
     expect(['ok', 'not_ready']).toContain(body.status)
-  })
+    // Real Postgres roundtrip — same class of flake as other real-DB tests
+    // in this session under `pnpm test`'s full monorepo parallel load;
+    // passes in ~500ms in isolation.
+  }, 15_000)
 })
 
 describe('GET /metrics', () => {

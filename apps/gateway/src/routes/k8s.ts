@@ -76,6 +76,39 @@ async function consumeGate(
   return Number(consumed) > 0
 }
 
+// Alternate consume check for the new /deploy route below (a direct,
+// non-chat editor action — restart/scale/cordon above are only ever
+// approvable via a chat-triggered ConnectorAgent gate, which naturally
+// carries namespace+deployment in tool_args from the tool call's own real
+// args; there is no equivalent chat step for a direct "click deploy in the
+// editor" request). The only gate-creation route reachable outside chat
+// (POST /api/gate in gate-decide-route.ts) writes `target`/`requestedBy`
+// into tool_args, not `namespace`/`deployment` — so this checks that shape
+// instead, binding on the same real `<namespace>/<name>` string this file's
+// own auditK8sAction already uses for its `target` field.
+async function consumeGateByTarget(
+  gateId: string,
+  tenantId: string,
+  applierId: string,
+  target: string,
+): Promise<boolean> {
+  const sentinel = '00000000-0000-0000-0000-000000000000'
+  const consumed = await withTenant(prisma, tenantId, (tx) =>
+    tx.$executeRaw`
+      UPDATE gate_events
+      SET status = 'consumed', decided_at = COALESCE(decided_at, NOW())
+      WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
+        AND status = 'approved'
+        AND created_at > NOW() - INTERVAL '24 hours'
+        AND tool_args->>'target' = ${target}
+        AND decided_by IS NOT NULL
+        AND decided_by <> ${sentinel}::uuid
+        AND decided_by <> ${applierId}::uuid
+    `
+  ).catch(() => 0)
+  return Number(consumed) > 0
+}
+
 async function auditK8sAction(
   tenantId: string,
   userId: string,
@@ -278,6 +311,73 @@ export async function k8sRoutes(app: FastifyInstance) {
         return reply.send({ ok: true, action: 'restart', deployment: name, namespace, output: result.stdout })
       }
       return reply.code(500).send({ ok: false, error: 'kubectl rollout restart failed', output: result.stdout })
+    },
+  )
+
+  // POST /api/k8s/deployments/:namespace/:name/deploy — sets a new container
+  // image on a real deployment (`kubectl set image`), the actual missing
+  // piece for "edit code, build, deploy to k8s": restart/scale above only
+  // ever operate on the deployment's EXISTING image. Confirmed live via
+  // product verification that no route anywhere changes a deployment's
+  // image at all. Same perimeter + atomic gate-consume + audit pattern as
+  // restart/scale immediately above — this is a real external-effecting
+  // write action, gated identically.
+  app.post<{ Params: { namespace: string; name: string }; Body: { image: string; container?: string; gateId?: string } }>(
+    '/api/k8s/deployments/:namespace/:name/deploy',
+    { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
+    async (request, reply) => {
+      const user = request.user as { tenantId: string; sub: string; role?: string }
+      const { namespace, name } = request.params
+      const { image, container, gateId } = request.body ?? {}
+
+      if (!image || typeof image !== 'string') {
+        return reply.code(400).send({ error: 'image is required' })
+      }
+
+      // Perimeter check (non-admin)
+      if (user.role !== 'admin') {
+        let perimeterQueryFailed = false
+        const perimeters = await withTenant(prisma, user.tenantId, (tx) =>
+          tx.$queryRaw<{ write_scopes: string[] }[]>`
+            SELECT write_scopes FROM user_perimeters
+            WHERE tenant_id = ${user.tenantId}::uuid AND user_id = ${user.sub}::uuid
+              AND connector_name = ANY(ARRAY['k8s','eks','gke']::text[])
+            LIMIT 1
+          `
+        ).catch(() => { perimeterQueryFailed = true; return [] as { write_scopes: string[] }[] })
+        if (perimeterQueryFailed) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.deploy', 'blocked: perimeter check failed', `${namespace}/${name}`)
+          return reply.code(403).send({ error: 'perimeter check failed' })
+        }
+        const allowed = perimeters[0]?.write_scopes ?? []
+        if (!allowed.includes('*') && !allowed.includes(namespace)) {
+          await auditK8sAction(user.tenantId, user.sub, 'k8s.deploy', 'blocked: namespace not in perimeter', `${namespace}/${name}`)
+          return reply.code(403).send({ error: 'namespace not in your perimeter' })
+        }
+      }
+
+      if (!gateId) {
+        return reply.code(403).send({ error: 'gate approval required before deploy' })
+      }
+      const gateOk = await consumeGateByTarget(gateId, user.tenantId, user.sub, `${namespace}/${name}`)
+      if (!gateOk) {
+        return reply.code(403).send({ error: 'gate approval required before deploy' })
+      }
+
+      // `*=image` sets the image for every container in the pod spec — real
+      // kubectl syntax, avoids requiring the caller to already know the
+      // exact container name for the common single-container-per-pod case.
+      const containerTarget = container?.trim() || '*'
+      const creds = await loadK8sCredentials(user.tenantId)
+      const result = kubectl(['set', 'image', `deployment/${name}`, `${containerTarget}=${image}`, '-n', namespace], creds)
+      const ok = result.status === 0
+
+      await auditK8sAction(user.tenantId, user.sub, 'k8s.deploy', ok ? 'success' : 'failure', `${namespace}/${name} -> ${image}`)
+
+      if (ok) {
+        return reply.send({ ok: true, action: 'deploy', deployment: name, namespace, image, output: result.stdout })
+      }
+      return reply.code(500).send({ ok: false, error: 'kubectl set image failed', output: result.stdout })
     },
   )
 

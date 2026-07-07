@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole } from '../plugins/rbac.js'
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
@@ -9,6 +9,10 @@ import { writeFile, rm } from 'node:fs/promises'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { encryptJson, decryptJson } from '../utils/crypto.js'
+import { ProviderFactory } from '@anway/agent'
+import type { IModelProvider } from '@anway/agent'
+import { providerConfigForTenant, resolveProviderConfig } from './chat.js'
+import { appendAuditEvent } from './audit.js'
 
 // Restrict file access to these root directories
 const ALLOWED_ROOTS: string[] = [
@@ -24,6 +28,33 @@ function isAllowedPath(target: string): boolean {
   })
 }
 
+// Walks up from a file path looking for a `.git` directory, never leaving
+// the editor's own allowed roots (so a crafted path can't walk out to some
+// unrelated repo on the host).
+function findGitRoot(startPath: string): string | null {
+  let dir = existsSync(startPath) && statSync(startPath).isDirectory() ? startPath : path.dirname(startPath)
+  for (let i = 0; i < 50; i++) {
+    if (!isAllowedPath(dir)) return null
+    if (existsSync(path.join(dir, '.git'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+  return null
+}
+
+function gitExec(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('git', args, { cwd, env: { ...process.env } })
+    let stdout = ''
+    let stderr = ''
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }))
+    proc.on('error', reject)
+  })
+}
+
 function detectLanguage(filename: string): string {
   const ext = path.extname(filename).toLowerCase()
   const map: Record<string, string> = {
@@ -36,42 +67,29 @@ function detectLanguage(filename: string): string {
   return map[ext] ?? 'plaintext'
 }
 
-function buildLlmClient(): ((messages: object[]) => Promise<string>) | null {
-  // Try Anthropic first
-  if (process.env['ANTHROPIC_API_KEY']) {
-    return async (messages) => {
-      // Dynamic import — types not guaranteed at compile time
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sdk = await import('@anthropic-ai/sdk' as any).catch(() => null) as any
-      if (!sdk) throw new Error('Anthropic SDK not installed')
-      const client = new sdk.default({ apiKey: process.env['ANTHROPIC_API_KEY'] })
-      const response = await client.messages.create({
-        model: process.env['ANTHROPIC_MODEL'] ?? 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        messages,
-      })
-      return response.content[0]?.text ?? ''
-    }
-  }
-  // Try OpenAI-compatible (OpenAI / Groq / LM Studio / Ollama)
-  if (process.env['OPENAI_API_KEY'] || process.env['OPENAI_BASE_URL']) {
-    return async (messages) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sdk = await import('openai' as any).catch(() => null) as any
-      if (!sdk) throw new Error('OpenAI SDK not installed')
-      const client = new sdk.default({
-        apiKey: process.env['OPENAI_API_KEY'] ?? 'no-key',
-        baseURL: process.env['OPENAI_BASE_URL'],
-      })
-      const res = await client.chat.completions.create({
-        model: process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
-        max_tokens: 2048,
-        messages,
-      })
-      return res.choices[0]?.message?.content ?? ''
-    }
-  }
-  return null
+// Confirmed live via product verification: this used to hand-roll direct
+// @anthropic-ai/sdk / openai SDK calls gated on raw ANTHROPIC_API_KEY /
+// OPENAI_API_KEY env vars only — completely bypassing this tenant's actual
+// configured provider (provider_config table, same one chat.ts resolves).
+// In this exact dev environment neither of those two env vars is set (the
+// tenant is configured for DeepSeek via provider_config), so analyze/
+// run-tests silently never had a real model — analyze degraded to
+// static-only and run-tests errored outright. CLAUDE.md's model-agnostic
+// mandate ("Orchestrator and agents call IModelProvider — never a provider
+// SDK directly") applies here exactly like everywhere else in the app.
+async function resolveEditorModel(tenantId: string): Promise<IModelProvider | null> {
+  const dbConfig = await providerConfigForTenant(tenantId, prisma)
+  const config = dbConfig ?? resolveProviderConfig()
+  if (!config) return null
+  return ProviderFactory.create(config)
+}
+
+async function callEditorLlm(model: IModelProvider, prompt: string, systemPrompt?: string): Promise<string> {
+  const messages = systemPrompt
+    ? [{ role: 'system' as const, content: systemPrompt }, { role: 'user' as const, content: prompt }]
+    : [{ role: 'user' as const, content: prompt }]
+  const resp = await model.chat(messages, [], { model: model.modelId, maxTokens: 2048, temperature: 0.2 })
+  return resp.content
 }
 
 interface FileEntry {
@@ -166,12 +184,326 @@ export async function editorRoutes(app: FastifyInstance) {
     },
   )
 
+  // POST /api/editor/file — save edited content back to disk.
+  // Previously did not exist at all: the editor could read files, run LLM
+  // analysis and generated tests against an in-browser edit buffer, but had
+  // no way to ever persist an edit — confirmed live via product
+  // verification. Same ALLOWED_ROOTS containment as the read routes above;
+  // real-file-write is audited (a real write action to the local
+  // filesystem, distinct from the git commit/push write below).
+  const MAX_SAVE_BYTES = 2 * 1024 * 1024 // 2MB — generous for source files, guards against accidental huge payloads
+  app.post<{ Body: { path: string; content: string } }>(
+    '/api/editor/file',
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { path: reqPath, content } = request.body
+
+      if (!reqPath || content === undefined) {
+        return reply.code(400).send({ error: 'path and content required' })
+      }
+      if (Buffer.byteLength(content, 'utf-8') > MAX_SAVE_BYTES) {
+        return reply.code(413).send({ error: `content exceeds ${MAX_SAVE_BYTES} byte limit` })
+      }
+      if (!isAllowedPath(reqPath)) {
+        return reply.code(403).send({ error: 'path not allowed' })
+      }
+      // Existing target must be a real file (never silently create through a
+      // directory path or overwrite something that isn't a plain file).
+      if (existsSync(reqPath)) {
+        const s = await stat(reqPath)
+        if (!s.isFile()) return reply.code(400).send({ error: 'path must be a file' })
+      } else if (!existsSync(path.dirname(reqPath))) {
+        return reply.code(400).send({ error: 'parent directory does not exist' })
+      }
+
+      await writeFile(reqPath, content, 'utf-8')
+
+      await appendAuditEvent({
+        tenantId,
+        userId,
+        action: 'editor.file_saved',
+        resource: reqPath,
+        outcome: 'action_executed',
+        metadata: { bytes: Buffer.byteLength(content, 'utf-8') },
+      }).catch(() => {})
+
+      return reply.send({ ok: true, path: reqPath, bytes: Buffer.byteLength(content, 'utf-8') })
+    },
+  )
+
+  // POST /api/editor/clone — clone a real git repo (using the user's stored
+  // credentials) into a scratch workspace so the editor can point at a repo
+  // that isn't already checked out on disk, not just the fixed ALLOWED_ROOTS
+  // default. Clones under /tmp/anway-editor/<sanitized>, which is itself one
+  // of the two ALLOWED_ROOTS, so every subsequent read/save/commit call
+  // against the cloned path passes the same containment check as everything
+  // else in this file.
+  const CLONE_ROOT = '/tmp/anway-editor'
+  app.post<{ Body: { repoUrl: string; provider: string; branch?: string } }>(
+    '/api/editor/clone',
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { repoUrl, provider, branch } = request.body
+      if (!repoUrl || !provider) return reply.code(400).send({ error: 'repoUrl and provider required' })
+
+      let parsed: URL
+      try {
+        parsed = new URL(repoUrl)
+      } catch {
+        return reply.code(400).send({ error: 'repoUrl must be a valid URL' })
+      }
+      if (parsed.protocol !== 'https:') {
+        return reply.code(400).send({ error: 'only https:// repo URLs are supported (credentials are injected as an HTTPS auth header)' })
+      }
+
+      const credRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ token_enc: string }>>`
+          SELECT token_enc FROM user_git_credentials
+          WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND provider = ${provider} LIMIT 1
+        `
+      ).catch(() => [])
+      if (credRows.length === 0) return reply.code(400).send({ error: `no stored git credentials for provider ${provider}` })
+      const token = decryptJson<string>(credRows[0]!.token_enc)
+
+      // Deterministic, collision-resistant local dir name from host+path — no
+      // user-controlled path traversal (URL.pathname is used, not raw input).
+      const safeName = `${parsed.hostname}${parsed.pathname}`.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '')
+      const localPath = path.join(CLONE_ROOT, safeName)
+
+      if (existsSync(localPath)) {
+        return reply.code(409).send({ error: 'already cloned', path: localPath })
+      }
+      await import('node:fs/promises').then(m => m.mkdir(CLONE_ROOT, { recursive: true }))
+
+      const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
+      const cloneArgs = ['-c', `http.extraHeader=${authHeader}`, 'clone', '--depth', '1', ...(branch ? ['--branch', branch] : []), repoUrl, localPath]
+      const result = await gitExec(cloneArgs, CLONE_ROOT)
+
+      if (result.code !== 0) {
+        return reply.code(500).send({ error: 'git clone failed', detail: result.stderr.slice(0, 2000) })
+      }
+
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'editor.repo_cloned',
+        resource: repoUrl,
+        outcome: 'action_executed',
+        metadata: { localPath, branch: branch ?? null },
+      }).catch(() => {})
+
+      return reply.code(201).send({ ok: true, path: localPath })
+    },
+  )
+
+  // POST /api/editor/build — real `docker build` (+ push if DOCKER_REGISTRY
+  // is configured) for an arbitrary edited service, streamed as SSE.
+  // Previously did not exist: pipeline.ts's own build stage is hardcoded to
+  // this platform's own two images (apps/gateway, apps/web) — confirmed
+  // live via product verification it isn't reusable for a user's own
+  // service. Ungated (matches the established precedent in pipeline.ts:
+  // build itself has no external effect beyond the tenant's own registry;
+  // only the deploy step that follows is gated).
+  app.post<{ Body: { servicePath: string; imageName: string; tag?: string } }>(
+    '/api/editor/build',
+    { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { servicePath, imageName, tag } = request.body
+
+      if (!servicePath || !imageName) {
+        return reply.code(400).send({ error: 'servicePath and imageName required' })
+      }
+      if (!isAllowedPath(servicePath) || !existsSync(servicePath)) {
+        return reply.code(403).send({ error: 'servicePath not allowed or not found' })
+      }
+      const dockerfilePath = path.join(servicePath, 'Dockerfile')
+      if (!existsSync(dockerfilePath)) {
+        return reply.code(400).send({ error: `no Dockerfile found at ${dockerfilePath}` })
+      }
+
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      const sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
+
+      const registry = process.env['DOCKER_REGISTRY']
+      const resolvedTag = tag ?? Date.now().toString(36)
+      const image = registry ? `${registry}/${imageName}:${resolvedTag}` : `${imageName}:${resolvedTag}`
+
+      const runStep = (label: string, args: string[], cwd: string, timeoutMs: number): Promise<void> =>
+        new Promise((resolve, reject) => {
+          sse({ type: 'log', line: `→ ${label} ${args.join(' ')}` })
+          const child = spawn(label, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+          child.stdout.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+          child.stderr.on('data', (d: Buffer) => sse({ type: 'log', line: d.toString().trim() }))
+          const timer = setTimeout(() => { child.kill(); reject(new Error(`${label} timed out`)) }, timeoutMs)
+          child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`${label} exited ${code}`)) })
+          child.on('error', (err) => { clearTimeout(timer); reject(err) })
+        })
+
+      try {
+        sse({ type: 'status', message: `Building ${image}…` })
+        await runStep('docker', ['build', servicePath, '-t', image], servicePath, 30 * 60_000)
+
+        let pushed = false
+        if (registry) {
+          sse({ type: 'status', message: `Pushing ${image}…` })
+          await runStep('docker', ['push', image], servicePath, 5 * 60_000)
+          pushed = true
+        } else {
+          sse({ type: 'log', line: 'DOCKER_REGISTRY not configured — built locally, not pushed. Deploy will only work if the k8s nodes can pull this image from the local docker daemon.' })
+        }
+
+        await appendAuditEvent({
+          tenantId, userId, action: 'editor.build', resource: image,
+          outcome: 'action_executed', metadata: { servicePath, pushed },
+        }).catch(() => {})
+
+        sse({ type: 'done', image, pushed })
+      } catch (err) {
+        await appendAuditEvent({
+          tenantId, userId, action: 'editor.build', resource: image,
+          outcome: 'action_failed', metadata: { servicePath, error: String(err) },
+        }).catch(() => {})
+        sse({ type: 'error', message: String(err) })
+        sse({ type: 'done', image, pushed: false })
+      }
+
+      reply.raw.end()
+    },
+  )
+
+  // POST /api/editor/commit — real git add+commit+push using the user's
+  // stored git credentials. Previously did not exist at all despite the
+  // editor collecting git tokens for exactly this purpose — confirmed live
+  // via product verification that nothing anywhere in the gateway ever read
+  // user_git_credentials except the routes that store/list/delete it.
+  //
+  // Gated the same way as terraform.ts's real apply route (atomic
+  // gate_events consume with separation-of-duties: the approver cannot be
+  // the same person requesting the push) — a real push to a real remote is
+  // exactly the class of write action CLAUDE.md's V1 Trust Principle
+  // requires gated, and this codebase's established pattern for that is the
+  // gate_events atomic-consume flow, not a bespoke one-off.
+  app.post<{ Body: { path: string; message: string; provider: string; gateId: string } }>(
+    '/api/editor/commit',
+    {
+      preHandler: [app.authenticate, requireRole('admin', 'dev')],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['path', 'message', 'provider', 'gateId'],
+          properties: {
+            path: { type: 'string' },
+            message: { type: 'string', minLength: 1, maxLength: 500 },
+            provider: { type: 'string' },
+            gateId: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { path: filePath, message, provider, gateId } = request.body
+
+      if (!isAllowedPath(filePath) || !existsSync(filePath)) {
+        return reply.code(403).send({ error: 'path not allowed or not found' })
+      }
+
+      const sentinel = '00000000-0000-0000-0000-000000000000'
+      const consumed = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE gate_events
+          SET status = 'consumed', decided_at = COALESCE(decided_at, NOW())
+          WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
+            AND status = 'approved'
+            AND created_at > NOW() - INTERVAL '24 hours'
+            AND tool_args->>'target' = ${filePath}
+            AND decided_by IS NOT NULL
+            AND decided_by <> ${sentinel}::uuid
+            AND decided_by <> ${userId}::uuid
+        `
+      ).catch(() => 0)
+      if (Number(consumed) === 0) {
+        return reply.code(403).send({ error: 'gate approval required before commit' })
+      }
+
+      const repoRoot = findGitRoot(filePath)
+      if (!repoRoot) return reply.code(400).send({ error: 'path is not inside a git repository' })
+
+      const credRows = await withTenant(prisma, tenantId, (tx) =>
+        tx.$queryRaw<Array<{ token_enc: string; username: string | null; email: string | null }>>`
+          SELECT token_enc, username, email FROM user_git_credentials
+          WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid AND provider = ${provider} LIMIT 1
+        `
+      ).catch(() => [])
+      if (credRows.length === 0) return reply.code(400).send({ error: `no stored git credentials for provider ${provider}` })
+      const token = decryptJson<string>(credRows[0]!.token_enc)
+      const gitUsername = credRows[0]!.username ?? 'anway-editor'
+      const gitEmail = credRows[0]!.email ?? 'editor@anway.local'
+
+      const relPath = path.relative(repoRoot, filePath)
+
+      const addResult = await gitExec(['add', relPath], repoRoot)
+      if (addResult.code !== 0) {
+        return reply.code(500).send({ error: 'git add failed', detail: addResult.stderr.slice(0, 2000) })
+      }
+
+      const commitResult = await gitExec(
+        ['-c', `user.name=${gitUsername}`, '-c', `user.email=${gitEmail}`, 'commit', '-m', message],
+        repoRoot,
+      )
+      if (commitResult.code !== 0) {
+        await appendAuditEvent({
+          tenantId, userId, action: 'editor.commit', resource: relPath, outcome: 'action_failed',
+          metadata: { message, error: commitResult.stderr.slice(0, 1000) },
+        }).catch(() => {})
+        return reply.code(500).send({ error: 'git commit failed', detail: commitResult.stderr.slice(0, 2000) })
+      }
+
+      const shaResult = await gitExec(['rev-parse', 'HEAD'], repoRoot)
+      const sha = shaResult.stdout.trim()
+
+      const branchResult = await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot)
+      const branch = branchResult.stdout.trim() || 'HEAD'
+
+      // http.extraHeader is scoped to this single invocation via -c — never
+      // written to the repo's on-disk config, never appears in `git remote
+      // -v`, never embedded in the remote URL.
+      const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
+      const pushResult = await gitExec(['-c', `http.extraHeader=${authHeader}`, 'push', 'origin', branch], repoRoot)
+
+      await appendAuditEvent({
+        tenantId, userId,
+        action: 'editor.commit',
+        resource: relPath,
+        outcome: pushResult.code === 0 ? 'action_executed' : 'action_failed',
+        metadata: {
+          sha, branch, message, pushed: pushResult.code === 0,
+          ...(pushResult.code === 0 ? {} : { pushError: pushResult.stderr.slice(0, 1000) }),
+        },
+      }).catch(() => {})
+
+      if (pushResult.code !== 0) {
+        return reply.code(500).send({ ok: false, sha, committed: true, pushed: false, error: 'git push failed', detail: pushResult.stderr.slice(0, 2000) })
+      }
+
+      return reply.send({ ok: true, sha, branch, committed: true, pushed: true })
+    },
+  )
+
   // POST /api/editor/analyze — LLM analysis, returns SSE stream of findings + test plan
   app.post<{ Body: { content: string; filename: string; language?: string } }>(
     '/api/editor/analyze',
     { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const { content, filename, language } = request.body
+      const { tenantId } = request.user as { tenantId: string }
 
       if (!content || !filename) {
         return reply.code(400).send({ error: 'content and filename required' })
@@ -188,9 +520,9 @@ export async function editorRoutes(app: FastifyInstance) {
 
       sse({ type: 'status', message: 'Reading file structure…' })
 
-      const llm = buildLlmClient()
+      const model = await resolveEditorModel(tenantId)
 
-      if (!llm) {
+      if (!model) {
         // No LLM configured — return structural findings from static analysis only
         sse({ type: 'status', message: 'No LLM configured — running static analysis…' })
         const findings = await staticAnalyze(content, filename)
@@ -230,9 +562,11 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
       try {
         sse({ type: 'status', message: 'Checking security issues…' })
 
-        const response = await llm([
-          { role: 'user', content: `Review this ${language ?? ''} file "${filename}":\n\n\`\`\`\n${content}\n\`\`\`` },
-        ])
+        const response = await callEditorLlm(
+          model,
+          `Review this ${language ?? ''} file "${filename}":\n\n\`\`\`\n${content}\n\`\`\``,
+          systemPrompt,
+        )
 
         sse({ type: 'status', message: 'Generating test cases…' })
 
@@ -346,6 +680,7 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
     { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const { content, filename, findings, testPlan } = request.body
+      const { tenantId } = request.user as { tenantId: string }
 
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -358,9 +693,9 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
 
       sse({ type: 'status', message: 'Generating test code…' })
 
-      const llm = buildLlmClient()
+      const model = await resolveEditorModel(tenantId)
 
-      if (!llm) {
+      if (!model) {
         sse({ type: 'error', message: 'No LLM configured — cannot generate tests' })
         sse({ type: 'done' })
         reply.raw.end()
@@ -373,9 +708,9 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
         const findingsSummary = JSON.stringify(findings.slice(0, 10), null, 2)
         const planSummary = JSON.stringify(testPlan.slice(0, 10), null, 2)
 
-        const response = await llm([{
-          role: 'user',
-          content: `Generate a self-contained Node.js test script (no external dependencies except built-in 'assert' and 'node:test' if available) to test this code.
+        const response = await callEditorLlm(
+          model,
+          `Generate a self-contained Node.js test script (no external dependencies except built-in 'assert' and 'node:test' if available) to test this code.
 
 The script MUST:
 1. Use only Node.js built-in modules (assert, node:test, or manual assertions)
@@ -397,7 +732,7 @@ ${content.slice(0, 3000)}
 \`\`\`
 
 Return ONLY the Node.js test script, no explanation, no markdown.`,
-        }])
+        )
 
         // Strip markdown code fences if present
         testCode = response.replace(/^```(?:javascript|js|node)?\n?/, '').replace(/\n?```$/, '').trim()
@@ -405,9 +740,17 @@ Return ONLY the Node.js test script, no explanation, no markdown.`,
         sse({ type: 'status', message: 'Running tests…' })
         sse({ type: 'testCode', code: testCode })
 
-        // Write test to temp file and execute
+        // Write test to temp file and execute. Confirmed live via product
+        // verification: the prompt above asks for "built-in 'assert' and
+        // 'node:test'", which real models overwhelmingly answer with
+        // classic `require(...)` CommonJS, not `import` — but this wrote
+        // the file as `.mjs` (forces ES module scope), so a real generated
+        // response failed immediately with "require is not defined in ES
+        // module scope" before a single test could run. `.cjs` forces
+        // CommonJS regardless of what the model outputs, matching the
+        // actual real-world output shape for this prompt.
         const tmpDir = await import('node:os').then(m => m.tmpdir())
-        const tmpFile = path.join(tmpDir, `anway-test-${Date.now()}.mjs`)
+        const tmpFile = path.join(tmpDir, `anway-test-${Date.now()}.cjs`)
         await writeFile(tmpFile, testCode, 'utf-8')
 
         await new Promise<void>((resolve) => {

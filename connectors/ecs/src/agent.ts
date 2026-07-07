@@ -1,4 +1,7 @@
 import { spawnSync } from 'node:child_process'
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import type { ConnectorCreds } from '@anway/types'
 import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
@@ -85,6 +88,67 @@ const TOOLS: ConnectorTool[] = [
       return { services: (data.services ?? []).map(s => ({ name: s.serviceName, desired: s.desiredCount, running: s.runningCount, status: s.status })) }
     },
     write: false,
+  },
+  {
+    definition: {
+      name: 'deploy_service',
+      description: 'Register a new task definition revision with the given image and update the service to it (force new deployment)',
+      parameters: {
+        type: 'object',
+        properties: {
+          cluster: { type: 'string' },
+          service: { type: 'string' },
+          image: { type: 'string' },
+        },
+        required: ['cluster', 'service', 'image'],
+      },
+    },
+    // Matches apps/gateway/src/routes/ecs.ts's real POST .../deploy route
+    // (same describe→register→update-service flow, gate-consume, audit
+    // pattern) — reachable directly only through that route in V1, same as
+    // K8sAgent's write tools.
+    execute: async (params, creds) => {
+      const c = creds as ConnectorCreds as Record<string, unknown>
+      const cluster = String(params.cluster)
+      const service = String(params.service)
+      const image = String(params.image)
+
+      const desc = awsCli(['ecs', 'describe-services', '--cluster', cluster, '--services', service, '--output', 'json'], c)
+      if (desc.status !== 0) throw new Error(`ECS deploy_service failed: describe-services exited ${desc.status}`)
+      const svcData = JSON.parse(desc.stdout) as { services?: Array<{ taskDefinition?: string }> }
+      const currentTaskDefArn = svcData.services?.[0]?.taskDefinition
+      if (!currentTaskDefArn) throw new Error(`ECS deploy_service failed: service ${service} not found in cluster ${cluster}`)
+
+      const td = awsCli(['ecs', 'describe-task-definition', '--task-definition', currentTaskDefArn, '--output', 'json'], c)
+      if (td.status !== 0) throw new Error(`ECS deploy_service failed: describe-task-definition exited ${td.status}`)
+      const taskDef = (JSON.parse(td.stdout) as { taskDefinition: Record<string, unknown> }).taskDefinition
+      const containerDefinitions = (taskDef.containerDefinitions as Array<Record<string, unknown>>).map(cd => ({ ...cd, image }))
+      const registerPayload: Record<string, unknown> = {
+        family: taskDef.family,
+        containerDefinitions,
+        ...(taskDef.taskRoleArn ? { taskRoleArn: taskDef.taskRoleArn } : {}),
+        ...(taskDef.executionRoleArn ? { executionRoleArn: taskDef.executionRoleArn } : {}),
+        ...(taskDef.networkMode ? { networkMode: taskDef.networkMode } : {}),
+        ...(taskDef.volumes ? { volumes: taskDef.volumes } : {}),
+        ...(taskDef.cpu ? { cpu: taskDef.cpu } : {}),
+        ...(taskDef.memory ? { memory: taskDef.memory } : {}),
+      }
+
+      const tmpFile = path.join(tmpdir(), `anway-ecs-taskdef-${Date.now()}.json`)
+      writeFileSync(tmpFile, JSON.stringify(registerPayload))
+      let register: ReturnType<typeof awsCli>
+      try {
+        register = awsCli(['ecs', 'register-task-definition', '--cli-input-json', `file://${tmpFile}`, '--output', 'json'], c)
+      } finally {
+        try { unlinkSync(tmpFile) } catch { /* ignore */ }
+      }
+      if (register.status !== 0) throw new Error(`ECS deploy_service failed: register-task-definition exited ${register.status}`)
+      const newTaskDefArn = (JSON.parse(register.stdout) as { taskDefinition: { taskDefinitionArn: string } }).taskDefinition.taskDefinitionArn
+
+      const update = awsCli(['ecs', 'update-service', '--cluster', cluster, '--service', service, '--task-definition', newTaskDefArn, '--force-new-deployment', '--output', 'json'], c)
+      return { ok: update.status === 0, taskDefinition: newTaskDefArn, output: update.status !== 0 ? 'aws ecs update-service failed' : '' }
+    },
+    write: true,
   },
 ]
 

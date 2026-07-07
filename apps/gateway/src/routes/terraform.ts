@@ -130,6 +130,15 @@ export async function terraformRoutes(app: FastifyInstance) {
         const { sub: applier } = request.user as { sub: string }
         const sentinel = '00000000-0000-0000-0000-000000000000'
         // SoD: sentinel-approved (Slack/auto) and self-approved gates are not valid for terraform apply
+        //
+        // Confirmed live via product verification: this checked
+        // `tool_args->>'env'`, but the only real gate-creation route
+        // (POST /api/gate in gate-decide-route.ts) writes `target`/
+        // `requestedBy` into tool_args — it never writes an `env` key.
+        // A gate created for `action:'terraform.apply', target: env` via
+        // that real route could therefore never be consumed here (this
+        // check would always read null and never match), no matter who
+        // approved it. Fixed to read the field the writer actually sets.
         const consumed = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
@@ -137,7 +146,7 @@ export async function terraformRoutes(app: FastifyInstance) {
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
               AND status = 'approved'
               AND created_at > NOW() - INTERVAL '24 hours'
-              AND tool_args->>'env' = ${env}
+              AND tool_args->>'target' = ${env}
               AND decided_by IS NOT NULL
               AND decided_by <> ${sentinel}::uuid
               AND decided_by <> ${applier}::uuid

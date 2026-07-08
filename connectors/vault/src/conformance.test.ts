@@ -60,7 +60,15 @@ describe('vault conformance', () => {
       const result = await bootstrapPromise
 
       expect(result.entitiesUpserted).toBe(0)
-      expect(result.episodeHints).toEqual(['Vault bootstrap: connection failed'])
+      // Confirmed live via independent review: this scenario is an empty
+      // payload (no token) getting a resolved-but-not-ok response every
+      // retry — not a connection failure at all (nothing here rejects).
+      // Distinguishing "no token configured" (legitimate, this case) from
+      // "a real token was provided and Vault still rejected it" (a real
+      // auth/permission failure that must throw, not report a silent
+      // empty success) required a more accurate message than the old
+      // generic "connection failed", which the fix now uses.
+      expect(result.episodeHints).toEqual(['Vault bootstrap: no token configured'])
       expect(fetch).toHaveBeenCalledTimes(5)
     })
   })

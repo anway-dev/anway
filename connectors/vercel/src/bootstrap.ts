@@ -7,27 +7,34 @@ export class VercelBootstrap implements IConnectorBootstrap {
 
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
     const token = (payload['token'] as string | undefined) ?? (payload['apiKey'] as string | undefined) ?? ''
+    if (!token) {
+      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Vercel bootstrap: no API token configured'] }
+    }
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
-    try {
-      const res = await fetch(`${payload['baseUrl'] ?? 'https://api.vercel.com'}/v9/projects`, { headers })
-      if (!res.ok) return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Vercel bootstrap: API call failed'] }
-      const data = await res.json() as { projects?: Array<{ id: string; name: string }> }
-      const projects = data.projects ?? []
-      let entitiesUpserted = 0
-      for (const p of projects) {
-        await this.kg.upsertEntity({
-          type: 'Service', name: p.name,
-          metadata: {
-            source: 'vercel', projectId: p.id,
-            connectorCoordinates: { vercel: { connectorType: 'vercel', resourceIds: { projectId: p.id, projectName: p.name }, resolvedAt: new Date().toISOString(), confidence: 1.0 } },
-          },
-        }, tenantId)
-        entitiesUpserted++
-      }
-      return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`Vercel: ${entitiesUpserted} projects indexed`] }
-    } catch {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Vercel bootstrap: connection failed'] }
+    // Confirmed live via independent review: `!res.ok` and the outer catch
+    // both swallowed every failure (invalid token, network outage,
+    // malformed JSON) as a plausible "API/connection failed" success with
+    // 0 entities. Hits Vercel's real cloud API (not a local default), so a
+    // network failure is a real outage worth surfacing — only "no token
+    // configured" (above) is legitimately empty.
+    const res = await fetch(`${payload['baseUrl'] ?? 'https://api.vercel.com'}/v9/projects`, { headers })
+    if (!res.ok) {
+      throw new Error(`Vercel bootstrap: /v9/projects failed with HTTP ${res.status}`)
     }
+    const data = await res.json() as { projects?: Array<{ id: string; name: string }> }
+    const projects = data.projects ?? []
+    let entitiesUpserted = 0
+    for (const p of projects) {
+      await this.kg.upsertEntity({
+        type: 'Service', name: p.name,
+        metadata: {
+          source: 'vercel', projectId: p.id,
+          connectorCoordinates: { vercel: { connectorType: 'vercel', resourceIds: { projectId: p.id, projectName: p.name }, resolvedAt: new Date().toISOString(), confidence: 1.0 } },
+        },
+      }, tenantId)
+      entitiesUpserted++
+    }
+    return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`Vercel: ${entitiesUpserted} projects indexed`] }
   }
 }

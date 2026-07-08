@@ -236,6 +236,15 @@ export function EditorView() {
   // ── Load file content ───────────────────────────────────────────────────────
 
   const loadFile = useCallback(async (filePath: string) => {
+    // Confirmed live via independent review: switching files while an
+    // analyze/run-tests SSE stream was still in flight left that stream
+    // running — its callbacks kept firing after the switch and wrote the
+    // PREVIOUS file's findings/testPlan/state onto whatever file the user
+    // had switched to in the meantime. abortRef.current is the same
+    // AbortController runAnalysis/runTests already use to cancel a prior
+    // stream when a NEW one starts; aborting it here too (a file switch
+    // is exactly as invalidating as starting a new run) closes the gap.
+    abortRef.current?.abort();
     setState("loading");
     setFindings([]);
     setTestPlan([]);
@@ -300,6 +309,10 @@ export function EditorView() {
   // ── Project source switch ───────────────────────────────────────────────────
 
   async function applySource() {
+    // Same in-flight-stream cancellation as loadFile above — some
+    // branches below (service/github entry-point loading) set file state
+    // directly instead of going through loadFile.
+    abortRef.current?.abort();
     setShowSourcePicker(false);
     setFindings([]);
     setTestPlan([]);
@@ -470,7 +483,12 @@ export function EditorView() {
           setState("gate");
         }
       },
-    ).catch(() => {
+    ).catch((err) => {
+      // A deliberate abort (file/source switch cancelling this exact
+      // stream — see loadFile/applySource) must not clobber whatever
+      // state the switch already moved to. Only a genuine stream error
+      // falls back to "writing".
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setState("writing");
     });
   }
@@ -522,7 +540,9 @@ export function EditorView() {
           setState("done");
         }
       },
-    ).catch(() => {
+    ).catch((err) => {
+      // Same abort-vs-real-error distinction as runAnalysis above.
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setState("gate");
     });
   }

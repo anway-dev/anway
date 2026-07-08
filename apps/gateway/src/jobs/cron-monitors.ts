@@ -79,7 +79,22 @@ export class SloBurnCheck {
       `
     ).catch(() => [] as Array<{ name: string; metadata: Record<string, unknown> }>)
 
-    const burning = services
+    // Confirmed live via independent review: no connector or job anywhere
+    // in this codebase ever writes errorBudget/burnRate1h/burnRate6h onto
+    // a Service entity's metadata — computing real SLO burn rate requires
+    // a per-service SLO target plus a live Datadog/Prometheus query, which
+    // doesn't exist yet. Previously this defaulted every missing field to
+    // 0/1.0 and reported 'ok', indistinguishable from "checked every
+    // service and none are burning" — a false-clean signal. Distinguish
+    // "real SLO data exists and nothing is burning" from "no service here
+    // has ever had real SLO data computed" so this doesn't look like a
+    // working monitor when it's actually never been fed real numbers.
+    const withData = services.filter(s => {
+      const meta = s.metadata ?? {}
+      return typeof meta.burnRate1h === 'number' || typeof meta.burnRate6h === 'number' || typeof meta.errorBudget === 'number'
+    })
+
+    const burning = withData
       .map(s => {
         const meta = s.metadata ?? {}
         const errorBudget = typeof meta.errorBudget === 'number' ? meta.errorBudget : 1.0
@@ -90,7 +105,7 @@ export class SloBurnCheck {
       .filter(s => s.burnRate1h > 1.0 || s.burnRate6h > 1.0) // >1x = burning faster than replenishment
 
     return {
-      status: burning.length > 0 ? 'burning' : 'ok',
+      status: withData.length === 0 ? 'no_data' : burning.length > 0 ? 'burning' : 'ok',
       services: services.length,
       burningServices: burning.map(b => ({ name: b.name, burnRate1h: b.burnRate1h, burnRate6h: b.burnRate6h })),
     }
@@ -200,7 +215,25 @@ export class CloudSecurityScan {
     const configured = await hasCloudConnector(tenantId)
     if (!configured) return { status: 'unconfigured', findings: 0, details: [] }
 
-    // Query findings from entities populated by cloud connector bootstraps
+    // Confirmed live via independent review: no cloud connector in this
+    // codebase (aws-cloudwatch, aws-health, azure-monitor, gcp-monitoring)
+    // ever writes a 'Finding' entity — none of them wraps a real security
+    // findings API (AWS Security Hub, GCP Security Command Center, Azure
+    // Defender). This query has always returned zero rows for every
+    // tenant. Previously that silently reported 'ok' — indistinguishable
+    // from "scanned and found nothing" when the truth is "no security
+    // findings source has ever been wired up". Report 'no_data' instead so
+    // this doesn't look like a working scan.
+    const totalFindingRows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*) as count FROM entities
+        WHERE tenant_id = ${tenantId}::uuid AND type = 'Finding'
+      `
+    ).catch(() => [{ count: 0n }] as Array<{ count: bigint }>)
+    if (Number(totalFindingRows[0]?.count ?? 0n) === 0) {
+      return { status: 'no_data', findings: 0, details: [] }
+    }
+
     const findingRows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ name: string; metadata: Record<string, unknown> }>>`
         SELECT name, metadata FROM entities
@@ -231,7 +264,14 @@ export class CostAnomalyDetection {
     const configured = await hasCloudConnector(tenantId)
     if (!configured) return { status: 'unconfigured', anomalies: 0, dailySpend: 0, baseline7dMean: 0 }
 
-    // Query cost entities populated by cloud connector bootstraps
+    // Confirmed live via independent review: no cloud connector in this
+    // codebase ever writes a 'Cost' entity — none wraps a real billing API
+    // (AWS Cost Explorer, GCP Billing, Azure Cost Management). This query
+    // has always returned zero rows for every tenant. Previously the empty
+    // case reported 'ok' — indistinguishable from "checked spend, no
+    // anomaly" when the truth is "no cost data source has ever been wired
+    // up". Report 'no_data' instead so this doesn't look like a working
+    // cost monitor.
     const costRows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ name: string; metadata: Record<string, unknown> }>>`
         SELECT name, metadata FROM entities
@@ -241,7 +281,7 @@ export class CostAnomalyDetection {
       `
     ).catch(() => [] as Array<{ name: string; metadata: Record<string, unknown> }>)
 
-    if (costRows.length === 0) return { status: 'ok', anomalies: 0, dailySpend: 0, baseline7dMean: 0 }
+    if (costRows.length === 0) return { status: 'no_data', anomalies: 0, dailySpend: 0, baseline7dMean: 0 }
 
     // Compute daily spend and 7-day baseline
     const spends = costRows.map(r => {

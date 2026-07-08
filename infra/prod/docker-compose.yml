@@ -1,6 +1,12 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # Confirmed live via independent review: plain postgres:16-alpine has
+    # no pgvector extension — CLAUDE.md's locked KB architecture requires
+    # pgvector for semantic search (HNSW index on kb_entries.embedding).
+    # Dev compose already uses pgvector/pgvector:pg16 (see
+    # infra/docker-compose.dev.yml); this is the same base Postgres 16 with
+    # the extension available, not a different distro.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: anway
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -102,7 +108,13 @@ services:
       - "8500:3000"
     environment:
       NODE_ENV: production
-      GATEWAY_URL: http://gateway:8510
+      # Confirmed live via independent review: this pointed at 8510, the
+      # HOST port mapping (`"8510:4000"` above) — meaningless for
+      # container-to-container traffic on the compose network, where the
+      # gateway is only reachable on the port it actually listens on
+      # (PORT: 4000 above). Every web -> gateway proxy call
+      # (app/api/*/route.ts) was broken in this prod compose stack.
+      GATEWAY_URL: http://gateway:4000
     depends_on:
       - gateway
     restart: unless-stopped

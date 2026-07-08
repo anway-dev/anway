@@ -12,7 +12,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8510/health/live"]
+      # Runs inside the gateway container itself, against the port it
+      # actually listens on (4000, per PORT/HOST above and the port
+      # mapping's container side) — 8510 was the host-side mapping and was
+      # never reachable from inside this container (confirmed live via
+      # independent review, same class of bug as GATEWAY_URL below).
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -22,7 +27,7 @@ services:
     ports:
       - "8500:3000"
     environment:
-      - GATEWAY_URL=http://gateway:8510
+      - GATEWAY_URL=http://gateway:4000
     depends_on:
       - gateway
     restart: unless-stopped

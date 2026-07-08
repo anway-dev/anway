@@ -179,11 +179,17 @@ services:
       # container's). Local-dev-only; a real deploy would point at a real
       # registry (ECR/GCR/ghcr.io) instead.
       DOCKER_REGISTRY: localhost:5000
-      # Real DeepSeek key (Anthropic-compatible) — used for live-testing
+      # DeepSeek key (Anthropic-compatible) — used for live-testing
       # LLM-backed agent flows (auto-triage, PRD/TechSpec chain) instead of
-      # a mocked provider, per standing session direction to use this
-      # instead of Ollama for real model calls.
-      DEEPSEEK_API_KEY: ***REMOVED-KEY***
+      # a mocked provider. Read from the host shell env, never committed —
+      # a real live key was hardcoded here previously (confirmed live via
+      # independent review), which meant every clone of this repo shipped a
+      # working third-party credential in git history. Export
+      # DEEPSEEK_API_KEY in your shell before `docker compose up` (or
+      # prefix the command: `DEEPSEEK_API_KEY=sk-... docker compose ...`);
+      # empty is a safe default — provider simply won't resolve, same as
+      # any other unset provider key.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     ports:
       - "8510:8510"
     volumes:

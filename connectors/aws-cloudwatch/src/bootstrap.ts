@@ -26,12 +26,34 @@ function awsEnv(creds: AwsCredentials): NodeJS.ProcessEnv {
 // was already fixed to this exact pattern for the same reason: an
 // AWS-API-returned value containing shell metacharacters would execute
 // arbitrary commands on the gateway host.
+//
+// Confirmed live via independent review (separate finding from the shell
+// injection above): the try/catch here swallowed EVERY failure as null —
+// bad credentials, network outage, throttling, malformed JSON — and every
+// call site below treats a null result as "nothing to report", so a
+// completely broken AWS connector (expired/invalid credentials) bootstrapped
+// as a plausible-looking "0 resources/alarms discovered" success, identical
+// to a legitimately quiet AWS account. agent.ts's runAws in this same
+// connector was already fixed (this session, prior work) to let real
+// failures throw — bootstrap.ts had a separate, unfixed copy.
+//
+// Distinguishing AccessDenied/UnauthorizedOperation (a real, common case:
+// an IAM policy scoped to only SOME of ec2/ecs/cloudwatch, not "AWS is
+// broken") from every other failure, since bootstrap.ts fetches three
+// independent resource types in one call — an org missing ec2:Describe*
+// permissions but correctly configured for cloudwatch:DescribeAlarms
+// should still get its alarms, not have the whole bootstrap abort.
 function runAws(args: string[], env: NodeJS.ProcessEnv): unknown {
   try {
     const out = execFileSync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
     return JSON.parse(out.toString())
-  } catch {
-    return null
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer | string })?.stderr?.toString() ?? ''
+    if (/AccessDenied|UnauthorizedOperation|is not authorized to perform/i.test(stderr)) {
+      return null // legitimate: this specific API is outside the credential's IAM scope
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`AWS CloudWatch bootstrap: 'aws ${args[0]} ${args[1] ?? ''}' failed: ${msg}`)
   }
 }
 

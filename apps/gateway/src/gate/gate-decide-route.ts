@@ -97,11 +97,22 @@ export async function gateDecideRoutes(app: FastifyInstance) {
     },
   )
 
-  // Create a gate (admin/sre only — prevents unprivileged auto-approval forgery)
+  // Create a gate — admin/sre/dev. Confirmed live via independent review:
+  // this was admin/sre only, but editor.commit (the only execution route a
+  // dev-role user can ever reach) also requires an approved gate — meaning
+  // a dev user editing code had no way to even REQUEST the approval their
+  // own commit needed, a structural dead end (403 before an admin/sre ever
+  // saw it). Adding 'dev' here doesn't weaken anything: approval remains
+  // admin/sre-only (POST /api/gate/:gateId/decide) with SoD enforced
+  // (decideGate rejects self-approval), and every execution route
+  // independently re-checks its own role requirement regardless of gate
+  // status — a dev-created gate for an action only admin/sre can execute
+  // (k8s/ecs/terraform) is simply never consumable by that dev, not a
+  // privilege escalation.
   app.post<{ Body: { action: string; target: string; requestedBy?: string; scope?: string; confidence?: number } }>(
     '/api/gate',
     {
-      preHandler: [app.authenticate, requireRole('admin', 'sre')],
+      preHandler: [app.authenticate, requireRole('admin', 'sre', 'dev')],
       schema: {
         body: {
           type: 'object',

@@ -128,6 +128,69 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  e2e:
+    # Confirmed live via independent review: apps/web/e2e/ (dozens of
+    # Playwright specs — auth, RBAC, security, terraform-ops, gate
+    # approvals, ...) had a real `test:e2e` script but was never wired
+    # into this workflow at all — only unit/connector tests (`check` job)
+    # ran in CI. A real regression anywhere in the web UI or its
+    # gateway-backed flows could merge without a single e2e assertion
+    # running.
+    #
+    # playwright.config.ts hardcodes baseURL http://localhost:8500 and
+    # apps/web/e2e/fixtures.ts's demo-login flow requires DEMO_MODE=true
+    # on the gateway — both already true of infra/docker-compose.dev.yml
+    # (the project's own documented self-contained dev stack, per
+    # CLAUDE.md's two-compose-stack architecture), so this job boots that
+    # stack directly rather than inventing a separate CI-only compose file.
+    #
+    # This is a first draft: unlike everything else fixed this session
+    # (each verified against a real running instance before being called
+    # done), this job's actual behavior on a real GitHub Actions runner
+    # has not been observed — there is no way to trigger/watch a real
+    # Actions run from this environment. Treat first-run failures as
+    # expected iteration, not a sign the approach is wrong.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Boot the self-contained dev stack
+        run: docker compose -f infra/docker-compose.dev.yml up -d --wait --wait-timeout 600
+      - name: Apply migrations
+        env:
+          DATABASE_URL: postgresql://anway:anway_dev_secret@localhost:5432/anway_dev
+        run: pnpm --filter anway-gateway exec prisma migrate deploy --schema apps/gateway/prisma/schema.prisma
+      - name: Seed demo fixtures (users, connectors, entities e2e specs expect)
+        env:
+          DATABASE_URL: postgresql://anway:anway_dev_secret@localhost:5432/anway_dev
+          SEED_DEMO: 'true'
+        run: pnpm --filter anway-gateway run db:seed
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Run e2e suite
+        run: pnpm --filter anway-web run test:e2e
+      - name: Upload Playwright traces/screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: apps/web/test-results/
+          retention-days: 7
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.dev.yml logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose -f infra/docker-compose.dev.yml down -v
+
   build-and-push:
     # Only runs for the pipeline's workflow_dispatch trigger (apps/gateway/src/routes/pipeline.ts's
     # "Strategy A" build path — dispatches this workflow with { inputs: { sha } } and expects real

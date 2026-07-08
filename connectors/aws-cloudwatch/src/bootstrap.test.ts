@@ -33,7 +33,7 @@ describe('AwsCloudwatchBootstrap', () => {
       throw err
     })
     const bootstrap = new AwsCloudwatchBootstrap(fakeKg())
-    await expect(bootstrap.bootstrap('t-1', 'conn-1', { accessKeyId: 'bad', secretAccessKey: 'bad' }))
+    await expect(bootstrap.bootstrap('t-1' as any, 'conn-1', { accessKeyId: 'bad', secretAccessKey: 'bad' }))
       .rejects.toThrow(/AWS CloudWatch bootstrap/)
   })
 
@@ -51,7 +51,7 @@ describe('AwsCloudwatchBootstrap', () => {
       return Buffer.from('[]')
     })
     const bootstrap = new AwsCloudwatchBootstrap(fakeKg())
-    const result = await bootstrap.bootstrap('t-1', 'conn-1', { accessKeyId: 'ok', secretAccessKey: 'ok' })
+    const result = await bootstrap.bootstrap('t-1' as any, 'conn-1', { accessKeyId: 'ok', secretAccessKey: 'ok' })
     expect(result.entitiesUpserted).toBe(1) // the one alarm, EC2 skipped due to scoped permissions
   })
 
@@ -63,7 +63,7 @@ describe('AwsCloudwatchBootstrap', () => {
       return Buffer.from('[]')
     })
     const bootstrap = new AwsCloudwatchBootstrap(fakeKg())
-    const result = await bootstrap.bootstrap('t-1', 'conn-1', { accessKeyId: 'ok', secretAccessKey: 'ok' })
+    const result = await bootstrap.bootstrap('t-1' as any, 'conn-1', { accessKeyId: 'ok', secretAccessKey: 'ok' })
     expect(result.entitiesUpserted).toBe(1)
   })
 })

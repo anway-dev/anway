@@ -25,13 +25,17 @@ function azEnv(creds: AzureCredentials): NodeJS.ProcessEnv {
   return env
 }
 
+// Confirmed live via independent review: this swallowed EVERY failure as
+// null — invalid/expired service-principal credentials, network outage,
+// malformed JSON — indistinguishable from the one case this file already
+// documents as legitimately empty ("az CLI may not be authenticated").
+// Throws now; callers below decide whether a failure is expected (no
+// credentials were ever provided — nothing to authenticate with) or real
+// (credentials were provided and the call still failed, which must
+// surface, not silently report 0 entities).
 async function runAz(args: string[], env: NodeJS.ProcessEnv): Promise<unknown> {
-  try {
-    const { stdout } = await execFileAsync('az', [...args, '--output', 'json'], { env, timeout: 30000 })
-    return JSON.parse(stdout)
-  } catch {
-    return null
-  }
+  const { stdout } = await execFileAsync('az', [...args, '--output', 'json'], { env, timeout: 30000 })
+  return JSON.parse(stdout)
 }
 
 export class AzureMonitorBootstrap implements IConnectorBootstrap {
@@ -45,11 +49,12 @@ export class AzureMonitorBootstrap implements IConnectorBootstrap {
       subscriptionId: (payload['subscriptionId'] ?? payload['subscription_id']) as string | undefined,
     }
     const env = azEnv(creds)
+    const hasCreds = Boolean(creds.clientId && creds.clientSecret && creds.tenantId)
     let entitiesUpserted = 0
     const hints: string[] = []
 
     // -- Metric alert rules (real az CLI call, no placeholder) ----------------
-    const alertsData = await runAz(['monitor', 'metrics', 'alert', 'list'], env) as Array<{
+    let alertsData: Array<{
       id?: string
       name?: string
       enabled?: boolean
@@ -57,6 +62,16 @@ export class AzureMonitorBootstrap implements IConnectorBootstrap {
       description?: string
       condition?: { allOf?: Array<{ metricName?: string; operator?: string; threshold?: number }> }
     }> | null
+    try {
+      alertsData = await runAz(['monitor', 'metrics', 'alert', 'list'], env) as typeof alertsData
+    } catch (err) {
+      if (!hasCreds) {
+        alertsData = null // no service-principal credentials were ever provided — nothing to authenticate with
+      } else {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new Error(`Azure Monitor bootstrap: 'az monitor metrics alert list' failed: ${msg}`)
+      }
+    }
 
     if (Array.isArray(alertsData)) {
       for (const a of alertsData) {
@@ -104,7 +119,7 @@ export class AzureMonitorBootstrap implements IConnectorBootstrap {
         `?api-version=2022-10-01` +
         `&$filter=eventSource eq 'ServiceHealth'`
 
-      const healthData = await runAz(['rest', '--method', 'GET', '--url', url], env) as {
+      let healthData: {
         value?: Array<{
           properties?: {
             title?: string
@@ -115,6 +130,16 @@ export class AzureMonitorBootstrap implements IConnectorBootstrap {
           }
         }>
       } | null
+      try {
+        healthData = await runAz(['rest', '--method', 'GET', '--url', url], env) as typeof healthData
+      } catch (err) {
+        if (!hasCreds) {
+          healthData = null
+        } else {
+          const msg = err instanceof Error ? err.message : String(err)
+          throw new Error(`Azure Monitor bootstrap: ResourceHealth events call failed: ${msg}`)
+        }
+      }
 
       if (Array.isArray(healthData?.value)) {
         for (const e of healthData!.value!) {

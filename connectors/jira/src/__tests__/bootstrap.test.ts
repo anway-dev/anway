@@ -54,7 +54,7 @@ describe('JiraBootstrap', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const bootstrap = new JiraBootstrap(kg)
-    const result = await bootstrap.bootstrap('t-1', 'conn-1', {
+    const result = await bootstrap.bootstrap('t-1' as any, 'conn-1', {
       baseUrl: 'https://jira.example.com', email: 'a@b.com', apiToken: 'tok',
     })
 

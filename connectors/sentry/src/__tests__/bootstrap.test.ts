@@ -38,7 +38,7 @@ describe('SentryBootstrap', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const bootstrap = new SentryBootstrap(kg)
-    const result = await bootstrap.bootstrap('t-1', 'conn-1', {
+    const result = await bootstrap.bootstrap('t-1' as any, 'conn-1', {
       token: 'tok', org: 'acme',
     })
 

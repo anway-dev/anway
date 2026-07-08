@@ -40,7 +40,7 @@ describe('JenkinsBootstrap', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const bootstrap = new JenkinsBootstrap(kg)
-    const result = await bootstrap.bootstrap('t-1', 'conn-1', {
+    const result = await bootstrap.bootstrap('t-1' as any, 'conn-1', {
       baseUrl: 'https://jenkins.example.com', user: 'ci', apiToken: 'tok',
     })
 

@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import type { IConnectorBootstrap, ConnectorBootstrapResult, IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
@@ -18,12 +18,27 @@ function awsEnv(creds: AwsCredentials): NodeJS.ProcessEnv {
   return env
 }
 
-function runAws(args: string, env: NodeJS.ProcessEnv): unknown {
+// Confirmed live via independent review, same two findings already fixed in
+// aws-cloudwatch's bootstrap.ts this session:
+//  1. execSync with a template-string command is a shell-injection risk —
+//     execFileSync with an argv array never invokes a shell to interpolate.
+//  2. The try/catch swallowed EVERY failure as null — invalid credentials,
+//     network outage, malformed JSON — indistinguishable from the ONE
+//     legitimate empty case this file already documents (AWS Health's
+//     describe-events requires a Business/Enterprise support plan;
+//     SubscriptionRequiredException is expected and handled below). Every
+//     other failure now throws instead of silently reporting 0 entities.
+function runAws(args: string[], env: NodeJS.ProcessEnv): unknown {
   try {
-    const out = execSync(`aws ${args} --output json`, { env, timeout: 30000 })
+    const out = execFileSync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
     return JSON.parse(out.toString())
-  } catch {
-    return null
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer | string })?.stderr?.toString() ?? ''
+    if (/SubscriptionRequiredException|AccessDenied|UnauthorizedOperation|is not authorized to perform/i.test(stderr)) {
+      return null // legitimate: no Business/Enterprise support plan, or this specific API outside the credential's IAM scope
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`AWS Health bootstrap: 'aws ${args.join(' ')}' failed: ${msg}`)
   }
 }
 
@@ -47,7 +62,7 @@ export class AwsHealthBootstrap implements IConnectorBootstrap {
     // describe-events requires Business/Enterprise support plan.
     // Handle entitlement failure gracefully — return zero entities rather
     // than falling back to fake placeholders.
-    const healthData = runAws('health describe-events', env) as {
+    const healthData = runAws(['health', 'describe-events'], env) as {
       events?: Array<{
         arn?: string
         service?: string
@@ -107,7 +122,7 @@ export class AwsHealthBootstrap implements IConnectorBootstrap {
     }
 
     // -- CloudWatch alarms (health-relevant vital signs) ---------------------
-    const alarmsData = runAws('cloudwatch describe-alarms --query "MetricAlarms[*]" --state-value ALARM', env) as Array<{
+    const alarmsData = runAws(['cloudwatch', 'describe-alarms', '--query', 'MetricAlarms[*]', '--state-value', 'ALARM'], env) as Array<{
       AlarmName: string; StateValue: string; MetricName: string; Namespace: string; AlarmDescription?: string
     }> | null
     if (Array.isArray(alarmsData)) {

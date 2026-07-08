@@ -1,8 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { EventEmitter } from 'node:events'
 
-// vi.mock hoists to top — factory must not reference outer variables
+// kubectl() is now async (real spawn, not spawnSync — blocking the whole
+// gateway event loop for up to 30s per call was a real production risk on
+// a multi-tenant process). Fake ChildProcess mirrors editor.test.ts's
+// established pattern: stdout/stderr are EventEmitters, 'close' fires on
+// the next tick with the exit code the test configures via
+// nextSpawnResult.
+let nextSpawnResult: { stdout: string; status: number | null } = { stdout: 'ok', status: 0 }
+const spawnCalls: Array<{ cmd: string; args: string[] }> = []
 vi.mock('node:child_process', () => ({
-  spawnSync: vi.fn().mockReturnValue({ stdout: 'ok', status: 0 }),
+  spawn: vi.fn((cmd: string, args: string[]) => {
+    spawnCalls.push({ cmd, args })
+    const child = new EventEmitter() as any
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = vi.fn()
+    const { stdout, status } = nextSpawnResult
+    process.nextTick(() => {
+      if (stdout) child.stdout.emit('data', Buffer.from(stdout))
+      child.emit('close', status)
+    })
+    return child
+  }),
 }))
 
 vi.mock('../db/prisma.js', () => {
@@ -23,9 +43,6 @@ vi.mock('../utils/crypto.js', () => ({
 
 import Fastify from 'fastify'
 import { k8sRoutes } from './k8s.js'
-import { spawnSync } from 'node:child_process'
-
-const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
 
 function buildTestApp() {
   const app = Fastify({ logger: false })
@@ -42,6 +59,8 @@ function buildTestApp() {
 describe('k8s write endpoints', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    spawnCalls.length = 0
+    nextSpawnResult = { stdout: 'ok', status: 0 }
   })
 
   describe('POST /api/k8s/pods/:namespace/:name/restart', () => {
@@ -92,7 +111,7 @@ describe('k8s write endpoints', () => {
           $executeRaw: vi.fn().mockResolvedValue(1), // gate consumed
         })
       })
-      mockSpawnSync.mockReturnValue({ stdout: 'deployment restarted', status: 0 })
+      nextSpawnResult = { stdout: 'deployment restarted', status: 0 }
 
       const app = buildTestApp()
       await app.register(k8sRoutes)
@@ -170,7 +189,7 @@ describe('k8s write endpoints', () => {
           $executeRaw: vi.fn().mockResolvedValue(1),
         })
       })
-      mockSpawnSync.mockReturnValue({ stdout: 'deployment.apps/myapp image updated', status: 0 })
+      nextSpawnResult = { stdout: 'deployment.apps/myapp image updated', status: 0 }
 
       const app = buildTestApp()
       await app.register(k8sRoutes)
@@ -187,10 +206,12 @@ describe('k8s write endpoints', () => {
       expect(body.action).toBe('deploy')
       expect(body.image).toBe('myapp:v2')
       // Real kubectl invocation — `*=image` sets every container by default.
-      expect(mockSpawnSync).toHaveBeenCalledWith(
-        'kubectl',
+      // arrayContaining (not exact equality) since the real kubeconfig
+      // credential path prepends `--kubeconfig <path>` before these args.
+      const kubectlCall = spawnCalls.find((c) => c.cmd === 'kubectl')
+      expect(kubectlCall).toBeDefined()
+      expect(kubectlCall!.args).toEqual(
         expect.arrayContaining(['set', 'image', 'deployment/myapp', '*=myapp:v2', '-n', 'default']),
-        expect.anything(),
       )
     })
   })

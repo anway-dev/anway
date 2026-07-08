@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
@@ -15,13 +15,27 @@ interface EntityRow {
 }
 
 // ---------------------------------------------------------------------------
-// kubectl helper — mirrors K8sAgent's kubectl() function
+// kubectl helper — same real kubectl invocation K8sAgent (connectors/k8s)
+// uses, but async. Confirmed live via independent review: this used
+// spawnSync with a 30s timeout — on a single-threaded Node gateway process,
+// that blocks the ENTIRE event loop (every tenant's every in-flight
+// request) for up to 30 real seconds per call, on every restart/scale/
+// deploy/cordon. terraform.ts's equivalent CLI call already uses async
+// spawn; this now matches that pattern instead of the older sync one.
 // ---------------------------------------------------------------------------
-function kubectl(args: string[], creds: Record<string, unknown>): { stdout: string; status: number | null } {
+function kubectl(args: string[], creds: Record<string, unknown>): Promise<{ stdout: string; status: number | null }> {
   const kubeconfig = typeof creds.kubeconfig === 'string' ? creds.kubeconfig : undefined
   const fullArgs = kubeconfig ? ['--kubeconfig', kubeconfig, ...args] : args
-  const result = spawnSync('kubectl', fullArgs, { encoding: 'utf-8', timeout: 30_000 })
-  return { stdout: result.stdout ?? '', status: result.status }
+  return new Promise((resolve) => {
+    const proc = spawn('kubectl', fullArgs)
+    let stdout = ''
+    let stderr = ''
+    const timer = setTimeout(() => proc.kill(), 30_000)
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.on('close', (code) => { clearTimeout(timer); resolve({ stdout: stdout + stderr, status: code }) })
+    proc.on('error', () => { clearTimeout(timer); resolve({ stdout: stderr, status: null }) })
+  })
 }
 
 async function loadK8sCredentials(tenantId: string): Promise<Record<string, unknown>> {
@@ -317,7 +331,7 @@ export async function k8sRoutes(app: FastifyInstance) {
 
       // Execute kubectl restart
       const creds = await loadK8sCredentials(user.tenantId)
-      const result = kubectl(['rollout', 'restart', 'deployment', name, '-n', namespace], creds)
+      const result = await kubectl(['rollout', 'restart', 'deployment', name, '-n', namespace], creds)
       const ok = result.status === 0
 
       await auditK8sAction(user.tenantId, user.sub, 'k8s.restart', ok ? 'success' : 'failure', `${namespace}/${name}`)
@@ -384,7 +398,7 @@ export async function k8sRoutes(app: FastifyInstance) {
       // exact container name for the common single-container-per-pod case.
       const containerTarget = container?.trim() || '*'
       const creds = await loadK8sCredentials(user.tenantId)
-      const result = kubectl(['set', 'image', `deployment/${name}`, `${containerTarget}=${image}`, '-n', namespace], creds)
+      const result = await kubectl(['set', 'image', `deployment/${name}`, `${containerTarget}=${image}`, '-n', namespace], creds)
       const ok = result.status === 0
 
       await auditK8sAction(user.tenantId, user.sub, 'k8s.deploy', ok ? 'success' : 'failure', `${namespace}/${name} -> ${image}`)
@@ -442,7 +456,7 @@ export async function k8sRoutes(app: FastifyInstance) {
 
       // Execute kubectl scale
       const creds = await loadK8sCredentials(user.tenantId)
-      const result = kubectl(['scale', '--replicas', String(replicas), `deployment/${name}`, '-n', namespace], creds)
+      const result = await kubectl(['scale', '--replicas', String(replicas), `deployment/${name}`, '-n', namespace], creds)
       const ok = result.status === 0
 
       await auditK8sAction(user.tenantId, user.sub, 'k8s.scale', ok ? 'success' : 'failure', `${namespace}/${name}→${replicas}`)
@@ -501,7 +515,7 @@ export async function k8sRoutes(app: FastifyInstance) {
 
       // Execute kubectl cordon
       const creds = await loadK8sCredentials(user.tenantId)
-      const result = kubectl(['cordon', name], creds)
+      const result = await kubectl(['cordon', name], creds)
       const ok = result.status === 0
 
       await auditK8sAction(user.tenantId, user.sub, 'k8s.cordon', ok ? 'success' : 'failure', name)

@@ -1,7 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { EventEmitter } from 'node:events'
 
+// awsCli() is now async (real spawn, not spawnSync — blocking the whole
+// gateway event loop for up to 30s per AWS CLI call, up to 4 sequentially
+// in this one route, was a real production risk on a multi-tenant
+// process). Fake ChildProcess mirrors editor.test.ts's/k8s.test.ts's
+// established pattern; spawnImpl branches on args exactly like the old
+// mockImplementation did, since real callers here dispatch on subcommand.
+type SpawnResult = { stdout: string; stderr: string; status: number }
+let spawnImpl: (args: string[]) => SpawnResult = () => ({ stdout: '', stderr: '', status: 0 })
+const spawnCalls: Array<{ cmd: string; args: string[] }> = []
 vi.mock('node:child_process', () => ({
-  spawnSync: vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 }),
+  spawn: vi.fn((cmd: string, args: string[]) => {
+    spawnCalls.push({ cmd, args })
+    const child = new EventEmitter() as any
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = vi.fn()
+    const { stdout, stderr, status } = spawnImpl(args)
+    process.nextTick(() => {
+      if (stdout) child.stdout.emit('data', Buffer.from(stdout))
+      if (stderr) child.stderr.emit('data', Buffer.from(stderr))
+      child.emit('close', status)
+    })
+    return child
+  }),
 }))
 
 vi.mock('../db/prisma.js', () => {
@@ -22,9 +45,6 @@ vi.mock('../utils/crypto.js', () => ({
 
 import Fastify from 'fastify'
 import { ecsRoutes } from './ecs.js'
-import { spawnSync } from 'node:child_process'
-
-const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
 
 function buildTestApp() {
   const app = Fastify({ logger: false })
@@ -42,6 +62,8 @@ function buildTestApp() {
 describe('ecs write endpoints', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    spawnCalls.length = 0
+    spawnImpl = () => ({ stdout: '', stderr: '', status: 0 })
   })
 
   describe('POST /api/ecs/services/:cluster/:service/deploy', () => {
@@ -99,7 +121,7 @@ describe('ecs write endpoints', () => {
         fn({ $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(1) })
       )
 
-      mockSpawnSync.mockImplementation((_cmd: string, args: string[]) => {
+      spawnImpl = (args: string[]) => {
         if (args.includes('describe-services')) {
           return { stdout: JSON.stringify({ services: [{ taskDefinition: 'arn:aws:ecs:task-def/my-family:1' }] }), stderr: '', status: 0 }
         }
@@ -121,7 +143,7 @@ describe('ecs write endpoints', () => {
           return { stdout: JSON.stringify({ service: { serviceName: 'my-service' } }), stderr: '', status: 0 }
         }
         return { stdout: '', stderr: 'unexpected call', status: 1 }
-      })
+      }
 
       const app = buildTestApp()
       await app.register(ecsRoutes)
@@ -140,7 +162,7 @@ describe('ecs write endpoints', () => {
 
       // register-task-definition must have been called with the new image
       // baked into the cloned container definitions, not the old one.
-      const registerCall = mockSpawnSync.mock.calls.find((c) => (c[1] as string[]).includes('register-task-definition'))
+      const registerCall = spawnCalls.find((c) => c.args.includes('register-task-definition'))
       expect(registerCall).toBeDefined()
     })
 
@@ -150,13 +172,13 @@ describe('ecs write endpoints', () => {
       mockWT.mockImplementation(async (_p: unknown, _t: string, fn: (tx: unknown) => unknown) =>
         fn({ $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(1) })
       )
-      mockSpawnSync.mockImplementation((_cmd: string, args: string[]) => {
+      spawnImpl = (args: string[]) => {
         if (args.includes('describe-services')) return { stdout: JSON.stringify({ services: [{ taskDefinition: 'arn:x:1' }] }), stderr: '', status: 0 }
         if (args.includes('describe-task-definition')) return { stdout: JSON.stringify({ taskDefinition: { family: 'f', containerDefinitions: [{ name: 'app', image: 'old' }] } }), stderr: '', status: 0 }
         if (args.includes('register-task-definition')) return { stdout: JSON.stringify({ taskDefinition: { taskDefinitionArn: 'arn:x:2' } }), stderr: '', status: 0 }
         if (args.includes('update-service')) return { stdout: '', stderr: 'service my-service is not active', status: 254 }
         return { stdout: '', stderr: '', status: 1 }
-      })
+      }
 
       const app = buildTestApp()
       await app.register(ecsRoutes)
@@ -171,6 +193,98 @@ describe('ecs write endpoints', () => {
       const body = JSON.parse(res.body) as { ok: boolean; error: string }
       expect(body.ok).toBe(false)
       expect(body.error).toContain('update-service')
+    })
+
+    // Regression test: this used to overwrite EVERY container's image
+    // unconditionally — fine for single-container tasks, but silently
+    // wrong for multi-container tasks (app + sidecar), where the sidecar's
+    // image would be clobbered with whatever tag was meant for the app.
+    it('requires an explicit container name for a multi-container task definition', async () => {
+      const { withTenant } = await import('../db/prisma.js')
+      const mockWT = withTenant as ReturnType<typeof vi.fn>
+      mockWT.mockImplementation(async (_p: unknown, _t: string, fn: (tx: unknown) => unknown) =>
+        fn({ $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(1) })
+      )
+      spawnImpl = (args: string[]) => {
+        if (args.includes('describe-services')) return { stdout: JSON.stringify({ services: [{ taskDefinition: 'arn:x:1' }] }), stderr: '', status: 0 }
+        if (args.includes('describe-task-definition')) {
+          return {
+            stdout: JSON.stringify({
+              taskDefinition: {
+                family: 'f',
+                containerDefinitions: [{ name: 'app', image: 'old-app' }, { name: 'sidecar', image: 'old-sidecar' }],
+              },
+            }),
+            stderr: '', status: 0,
+          }
+        }
+        return { stdout: '', stderr: 'should not reach register/update without a container name', status: 1 }
+      }
+
+      const app = buildTestApp()
+      await app.register(ecsRoutes)
+      await app.ready()
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/ecs/services/my-cluster/my-service/deploy',
+        payload: { image: 'myapp:v2', gateId: '00000000-0000-0000-0000-000000000001' },
+      })
+      expect(res.statusCode).toBe(400)
+      const body = JSON.parse(res.body) as { error: string; containers: string[] }
+      expect(body.error).toContain('container name is required')
+      expect(body.containers).toEqual(['app', 'sidecar'])
+      expect(spawnCalls.some((c) => c.args.includes('register-task-definition'))).toBe(false)
+    })
+
+    it('updates only the named container, leaving the sidecar image untouched', async () => {
+      const { withTenant } = await import('../db/prisma.js')
+      const mockWT = withTenant as ReturnType<typeof vi.fn>
+      mockWT.mockImplementation(async (_p: unknown, _t: string, fn: (tx: unknown) => unknown) =>
+        fn({ $queryRaw: vi.fn().mockResolvedValue([]), $executeRaw: vi.fn().mockResolvedValue(1) })
+      )
+      // The route deletes its tmp cli-input-json file in a `finally` right
+      // after the register-task-definition call returns — read it inside
+      // spawnImpl (synchronously, before that cleanup runs), not after the
+      // request completes.
+      let capturedRegisterPayload: { containerDefinitions: Array<{ name: string; image: string }> } | null = null
+      const fsSync = await import('node:fs')
+      spawnImpl = (args: string[]) => {
+        if (args.includes('describe-services')) return { stdout: JSON.stringify({ services: [{ taskDefinition: 'arn:x:1' }] }), stderr: '', status: 0 }
+        if (args.includes('describe-task-definition')) {
+          return {
+            stdout: JSON.stringify({
+              taskDefinition: {
+                family: 'f',
+                containerDefinitions: [{ name: 'app', image: 'old-app' }, { name: 'sidecar', image: 'old-sidecar' }],
+              },
+            }),
+            stderr: '', status: 0,
+          }
+        }
+        if (args.includes('register-task-definition')) {
+          const cliInputArg = args.find((a) => a.startsWith('file://'))!.replace('file://', '')
+          capturedRegisterPayload = JSON.parse(fsSync.readFileSync(cliInputArg, 'utf-8'))
+          return { stdout: JSON.stringify({ taskDefinition: { taskDefinitionArn: 'arn:x:2' } }), stderr: '', status: 0 }
+        }
+        if (args.includes('update-service')) return { stdout: '', stderr: '', status: 0 }
+        return { stdout: '', stderr: 'unexpected call', status: 1 }
+      }
+
+      const app = buildTestApp()
+      await app.register(ecsRoutes)
+      await app.ready()
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/ecs/services/my-cluster/my-service/deploy',
+        payload: { image: 'myapp:v2', container: 'app', gateId: '00000000-0000-0000-0000-000000000001' },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(capturedRegisterPayload).not.toBeNull()
+      const containers = capturedRegisterPayload!.containerDefinitions
+      expect(containers.find((c) => c.name === 'app')!.image).toBe('myapp:v2')
+      expect(containers.find((c) => c.name === 'sidecar')!.image).toBe('old-sidecar')
     })
   })
 })

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -19,7 +19,15 @@ import { appendAuditEvent } from './audit.js'
 
 const ECS_CONNECTOR_TYPE = 'ecs'
 
-function awsCli(args: string[], creds: Record<string, unknown>): { stdout: string; stderr: string; status: number | null } {
+// Confirmed live via independent review: this used spawnSync with a 30s
+// timeout — on a single-threaded Node gateway process, that blocks the
+// ENTIRE event loop (every tenant's every in-flight request) for up to 30
+// real seconds per AWS CLI call, and this route makes up to 4 of them
+// sequentially (describe-services, describe-task-definition,
+// register-task-definition, update-service) — a worst case of two real
+// minutes with the whole gateway unresponsive to every tenant. Matches
+// k8s.ts's kubectl()/terraform.ts's existing async spawn pattern instead.
+function awsCli(args: string[], creds: Record<string, unknown>): Promise<{ stdout: string; stderr: string; status: number | null }> {
   const env: Record<string, string> = {}
   if (creds['accessKeyId']) env['AWS_ACCESS_KEY_ID'] = String(creds['accessKeyId'])
   if (creds['secretAccessKey']) env['AWS_SECRET_ACCESS_KEY'] = String(creds['secretAccessKey'])
@@ -27,8 +35,16 @@ function awsCli(args: string[], creds: Record<string, unknown>): { stdout: strin
   // LocalStack / AWS-API-compatible emulator override — same convention as
   // the other aws-* connectors in this codebase.
   if (creds['endpointUrl']) env['AWS_ENDPOINT_URL'] = String(creds['endpointUrl'])
-  const result = spawnSync('aws', args, { encoding: 'utf-8', timeout: 30_000, env: { ...process.env, ...env } })
-  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status }
+  return new Promise((resolve) => {
+    const proc = spawn('aws', args, { env: { ...process.env, ...env } })
+    let stdout = ''
+    let stderr = ''
+    const timer = setTimeout(() => proc.kill(), 30_000)
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.on('close', (code) => { clearTimeout(timer); resolve({ stdout, stderr, status: code }) })
+    proc.on('error', () => { clearTimeout(timer); resolve({ stdout, stderr, status: null }) })
+  })
 }
 
 async function loadEcsCredentials(tenantId: string): Promise<Record<string, unknown>> {
@@ -117,13 +133,13 @@ export async function ecsRoutes(app: FastifyInstance): Promise<void> {
   // revision, swapping each container's image) and updates the service to
   // it with --force-new-deployment. Real AWS ECS deploy semantics — no
   // fabricated success on any step.
-  app.post<{ Params: { cluster: string; service: string }; Body: { image: string; gateId?: string } }>(
+  app.post<{ Params: { cluster: string; service: string }; Body: { image: string; container?: string; gateId?: string } }>(
     '/api/ecs/services/:cluster/:service/deploy',
     { preHandler: [app.authenticate, requireRole('sre', 'admin')] },
     async (request, reply) => {
       const user = request.user as { tenantId: string; sub: string; role?: string }
       const { cluster, service } = request.params
-      const { image, gateId } = request.body ?? {}
+      const { image, container, gateId } = request.body ?? {}
 
       if (!image || typeof image !== 'string') {
         return reply.code(400).send({ error: 'image is required' })
@@ -162,7 +178,7 @@ export async function ecsRoutes(app: FastifyInstance): Promise<void> {
       const creds = await loadEcsCredentials(user.tenantId)
 
       // 1. Find the service's current task definition.
-      const descResult = awsCli(['ecs', 'describe-services', '--cluster', cluster, '--services', service, '--output', 'json'], creds)
+      const descResult = await awsCli(['ecs', 'describe-services', '--cluster', cluster, '--services', service, '--output', 'json'], creds)
       if (descResult.status !== 0) {
         await auditEcsAction(user.tenantId, user.sub, 'ecs.deploy', 'failure: describe-services', `${cluster}/${service}`)
         return reply.code(500).send({ ok: false, error: 'aws ecs describe-services failed', detail: descResult.stderr.slice(0, 2000) })
@@ -179,7 +195,7 @@ export async function ecsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // 2. Describe the current task definition to clone it with a new image.
-      const tdResult = awsCli(['ecs', 'describe-task-definition', '--task-definition', currentTaskDefArn, '--output', 'json'], creds)
+      const tdResult = await awsCli(['ecs', 'describe-task-definition', '--task-definition', currentTaskDefArn, '--output', 'json'], creds)
       if (tdResult.status !== 0) {
         await auditEcsAction(user.tenantId, user.sub, 'ecs.deploy', 'failure: describe-task-definition', `${cluster}/${service}`)
         return reply.code(500).send({ ok: false, error: 'aws ecs describe-task-definition failed', detail: tdResult.stderr.slice(0, 2000) })
@@ -191,18 +207,45 @@ export async function ecsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(500).send({ ok: false, error: 'could not parse describe-task-definition response' })
       }
 
-      // 3. Register a new revision — every container gets the new image
-      // (single-container-per-task convention, same default as k8s deploy's
-      // `*=image`). register-task-definition only accepts a specific subset
-      // of fields; passing the full describe-task-definition response back
-      // verbatim is rejected (read-only fields like taskDefinitionArn,
-      // revision, status, requiresAttributes, compatibilities).
+      // 3. Register a new revision. Confirmed live via independent review:
+      // this used to overwrite EVERY container's image unconditionally —
+      // fine for a genuine single-container task, but ECS multi-container
+      // tasks (app + sidecar/log-shipper/envoy) are common, and this would
+      // silently replace a sidecar's image with the app's new one, using
+      // whatever tag happens to apply to both (usually breaking the
+      // sidecar outright). k8s.ts's equivalent deploy route already has an
+      // explicit-container escape hatch (defaults to kubectl's `*` all-
+      // containers wildcard only because that's real, intentional kubectl
+      // syntax) — ECS has no such wildcard convention, so the safe
+      // equivalent is: single-container tasks may omit `container` (there
+      // is only one legitimate target), multi-container tasks must name
+      // which one to update. register-task-definition only accepts a
+      // specific subset of fields; passing the full describe-task-
+      // definition response back verbatim is rejected (read-only fields
+      // like taskDefinitionArn, revision, status, requiresAttributes,
+      // compatibilities).
+      if (taskDef.containerDefinitions.length > 1 && !container) {
+        return reply.code(400).send({
+          ok: false,
+          error: `task definition has ${taskDef.containerDefinitions.length} containers — container name is required`,
+          containers: taskDef.containerDefinitions.map((c) => c.name),
+        })
+      }
+      if (container && !taskDef.containerDefinitions.some((c) => c.name === container)) {
+        return reply.code(400).send({
+          ok: false,
+          error: `container "${container}" not found in task definition`,
+          containers: taskDef.containerDefinitions.map((c) => c.name),
+        })
+      }
       const registerPayload = {
         family: taskDef.family,
         ...(taskDef.taskRoleArn ? { taskRoleArn: taskDef.taskRoleArn } : {}),
         ...(taskDef.executionRoleArn ? { executionRoleArn: taskDef.executionRoleArn } : {}),
         ...(taskDef.networkMode ? { networkMode: taskDef.networkMode } : {}),
-        containerDefinitions: taskDef.containerDefinitions.map((c) => ({ ...c, image })),
+        containerDefinitions: taskDef.containerDefinitions.map((c) =>
+          !container || c.name === container ? { ...c, image } : c
+        ),
         ...(taskDef.volumes ? { volumes: taskDef.volumes } : {}),
         ...(taskDef.placementConstraints ? { placementConstraints: taskDef.placementConstraints } : {}),
         ...(taskDef.requiresCompatibilities ? { requiresCompatibilities: taskDef.requiresCompatibilities } : {}),
@@ -212,9 +255,9 @@ export async function ecsRoutes(app: FastifyInstance): Promise<void> {
 
       const tmpFile = path.join(tmpdir(), `anway-ecs-taskdef-${Date.now()}.json`)
       await writeFile(tmpFile, JSON.stringify(registerPayload), 'utf-8')
-      let registerResult: ReturnType<typeof awsCli>
+      let registerResult: Awaited<ReturnType<typeof awsCli>>
       try {
-        registerResult = awsCli(['ecs', 'register-task-definition', '--cli-input-json', `file://${tmpFile}`, '--output', 'json'], creds)
+        registerResult = await awsCli(['ecs', 'register-task-definition', '--cli-input-json', `file://${tmpFile}`, '--output', 'json'], creds)
       } finally {
         await rm(tmpFile, { force: true })
       }
@@ -230,7 +273,7 @@ export async function ecsRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // 4. Point the service at the new revision.
-      const updateResult = awsCli(
+      const updateResult = await awsCli(
         ['ecs', 'update-service', '--cluster', cluster, '--service', service, '--task-definition', newTaskDefArn, '--force-new-deployment', '--output', 'json'],
         creds,
       )

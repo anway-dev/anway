@@ -213,30 +213,38 @@ async function blockDeployGate(
   tenantId: string,
   params: Record<string, unknown>,
 ): Promise<ActionResult> {
-  const pipelineName = typeof params.pipeline === 'string' ? params.pipeline : null
+  // Confirmed live via independent review: pipeline_stage_runs (see
+  // 0032_pipelines/migration.sql) has no `pipeline_name`/`stage_name`
+  // columns at all — real columns are `pipeline_id` (UUID) and `stage_id`
+  // (text, e.g. "gate.prod" per pipeline.ts:214). This UPDATE always threw
+  // "column does not exist", silently caught below, so block_deploy_gate
+  // never blocked a single real deploy. It also checked `status = 'pending'`
+  // — pipeline.ts's real awaiting-approval state for a gate stage is
+  // 'waiting' (see pipeline.ts:1078,1103,1244); 'pending' is only ever the
+  // table's DEFAULT for a not-yet-started stage, never the gate-wait state.
+  const pipelineId = typeof params.pipelineId === 'string' ? params.pipelineId : null
   const env = typeof params.env === 'string' ? params.env : null
+  const stageId = typeof params.stageId === 'string' ? params.stageId : (env ? `gate.${env}` : null)
 
-  if (!pipelineName) {
-    return { ok: false, action: 'block_deploy_gate', error: 'pipeline name is required' }
+  if (!pipelineId || !stageId) {
+    return { ok: false, action: 'block_deploy_gate', error: 'pipelineId and (stageId or env) are required' }
   }
 
   try {
-    // Set the pending gate.<env> stage run for the named pipeline to rejected
-    const stageName = env ? `gate.${env}` : 'gate'
     const affected = await withTenant(prisma, tenantId, (tx) =>
       tx.$executeRaw`
         UPDATE pipeline_stage_runs
         SET status = 'rejected', finished_at = NOW()
         WHERE tenant_id = ${tenantId}::uuid
-          AND pipeline_name = ${pipelineName}
-          AND stage_name = ${stageName}
-          AND status = 'pending'
+          AND pipeline_id = ${pipelineId}::uuid
+          AND stage_id = ${stageId}
+          AND status = 'waiting'
       `
     )
-    log.info({ tenantId, pipelineName, env, stageName, affected }, 'block_deploy_gate executed')
-    return { ok: true, action: 'block_deploy_gate', detail: JSON.stringify({ pipelineName, env, affected }) }
+    log.info({ tenantId, pipelineId, env, stageId, affected }, 'block_deploy_gate executed')
+    return { ok: true, action: 'block_deploy_gate', detail: JSON.stringify({ pipelineId, env, stageId, affected: Number(affected) }) }
   } catch (err) {
-    log.error({ err, tenantId, pipelineName }, 'block_deploy_gate failed')
+    log.error({ err, tenantId, pipelineId, stageId }, 'block_deploy_gate failed')
     return { ok: false, action: 'block_deploy_gate', error: String(err) }
   }
 }

@@ -44,8 +44,13 @@ export class JenkinsBootstrap implements IConnectorBootstrap {
     const jobs = resp.jobs ?? []
 
     for (const job of jobs) {
-      // Job → Pipeline entity
-      await this.kg.upsertEntity({
+      // Job → Pipeline entity. Confirmed live via independent review:
+      // upsertRelationship casts fromEntityId/toEntityId to ::uuid, but
+      // this previously passed fabricated `Deploy:${name}` /
+      // `Pipeline:${name}` strings, which threw on the very first real
+      // build. upsertEntity's return value is the real entity UUID and
+      // must be captured instead.
+      const pipelineId = await this.kg.upsertEntity({
         type: 'Pipeline',
         name: job.name,
         metadata: {
@@ -61,7 +66,7 @@ export class JenkinsBootstrap implements IConnectorBootstrap {
       // Last build → Deploy entity + DEPLOYED_TO relationship
       if (job.lastBuild) {
         const deployName = `${job.name}#${job.lastBuild.number}`
-        await this.kg.upsertEntity({
+        const deployId = await this.kg.upsertEntity({
           type: 'Deploy',
           name: deployName,
           metadata: {
@@ -73,9 +78,9 @@ export class JenkinsBootstrap implements IConnectorBootstrap {
         entitiesUpserted++
 
         await this.kg.upsertRelationship({
-          fromEntityId: `Deploy:${deployName}`,
+          fromEntityId: deployId,
           relType: 'DEPLOYED_TO',
-          toEntityId: `Pipeline:${job.name}`,
+          toEntityId: pipelineId,
         }, tenantId)
         relationshipsUpserted++
 

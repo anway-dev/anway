@@ -48,8 +48,15 @@ export class JiraBootstrap implements IConnectorBootstrap {
     // 1. Projects → ownership containers
     const projectsResp = await jiraGet(conn, '/rest/api/3/project/search?maxResults=50') as { values?: JiraProject[] }
     const projects = projectsResp.values ?? []
+    // Keyed by Jira project key — used below to resolve each issue's
+    // OWNED_BY target. Confirmed live via independent review:
+    // upsertRelationship casts fromEntityId/toEntityId to ::uuid, but this
+    // previously passed fabricated `Project:${name}` / `Ticket:${key}`
+    // strings, which threw on the very first real ticket. upsertEntity's
+    // return value is the real entity UUID and must be captured instead.
+    const projectIdByKey = new Map<string, string>()
     for (const p of projects) {
-      await this.kg.upsertEntity({
+      const projectId = await this.kg.upsertEntity({
         type: 'Project',
         name: p.name,
         metadata: {
@@ -60,6 +67,7 @@ export class JiraBootstrap implements IConnectorBootstrap {
         },
       }, tenantId)
       entitiesUpserted++
+      projectIdByKey.set(p.key, projectId)
       hints.push(`Jira project ${p.key} — ${p.name}`)
     }
 
@@ -70,7 +78,7 @@ export class JiraBootstrap implements IConnectorBootstrap {
     ) as { issues?: JiraIssue[] }
     const issues = issuesResp.issues ?? []
     for (const issue of issues) {
-      await this.kg.upsertEntity({
+      const ticketId = await this.kg.upsertEntity({
         type: 'Ticket',
         name: issue.key,
         metadata: {
@@ -85,11 +93,13 @@ export class JiraBootstrap implements IConnectorBootstrap {
       entitiesUpserted++
 
       // Ticket OWNED_BY its Project container (RELATES_TO Service resolved later, G2)
-      if (issue.fields?.project?.key) {
+      const projectKey = issue.fields?.project?.key
+      const projectId = projectKey ? projectIdByKey.get(projectKey) : undefined
+      if (projectId) {
         await this.kg.upsertRelationship({
-          fromEntityId: `Ticket:${issue.key}`,
+          fromEntityId: ticketId,
           relType: 'OWNED_BY',
-          toEntityId: `Project:${issue.fields.project.name ?? issue.fields.project.key}`,
+          toEntityId: projectId,
         }, tenantId)
         relationshipsUpserted++
       }

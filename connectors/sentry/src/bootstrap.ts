@@ -39,8 +39,14 @@ export class SentryBootstrap implements IConnectorBootstrap {
 
     // 1. Projects → Service entities
     const projects = await sentryGet(conn, `/api/0/organizations/${conn.org}/projects/`) as SentryProject[]
+    // Confirmed live via independent review: upsertRelationship casts
+    // fromEntityId/toEntityId to ::uuid, but this previously passed
+    // fabricated `Alert:${title}` / `Service:${slug}` strings, which threw
+    // on the very first real issue. upsertEntity's return value is the
+    // real entity UUID and must be captured instead.
+    let firstProjectId: string | undefined
     for (const p of projects) {
-      await this.kg.upsertEntity({
+      const projectEntityId = await this.kg.upsertEntity({
         type: 'Service',
         name: p.slug,
         metadata: {
@@ -51,18 +57,19 @@ export class SentryBootstrap implements IConnectorBootstrap {
         },
       }, tenantId)
       entitiesUpserted++
+      if (p === projects[0]) firstProjectId = projectEntityId
       hints.push(`Sentry project ${p.slug} — ${p.name}`)
     }
 
     // 2. Recent issues for the first project → Alert entities
     const firstProject = projects[0]
-    if (firstProject) {
+    if (firstProject && firstProjectId) {
       const issues = await sentryGet(
         conn,
         `/api/0/projects/${conn.org}/${firstProject.slug}/issues/?statsPeriod=24h`,
       ) as SentryIssue[]
       for (const issue of issues) {
-        await this.kg.upsertEntity({
+        const alertId = await this.kg.upsertEntity({
           type: 'Alert',
           name: issue.title,
           metadata: {
@@ -75,9 +82,9 @@ export class SentryBootstrap implements IConnectorBootstrap {
         entitiesUpserted++
 
         await this.kg.upsertRelationship({
-          fromEntityId: `Alert:${issue.title}`,
+          fromEntityId: alertId,
           relType: 'MONITORED_BY',
-          toEntityId: `Service:${firstProject.slug}`,
+          toEntityId: firstProjectId,
         }, tenantId)
         relationshipsUpserted++
       }

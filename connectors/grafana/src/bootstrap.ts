@@ -22,19 +22,42 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
     const headers: Record<string, string> = { Authorization: authHeader, 'Content-Type': 'application/json' }
 
     let entitiesUpserted = 0
+
+    // Confirmed live via independent review: each of the 3 fetches below
+    // treated ANY non-ok response as "0 results for this type", and the
+    // outer catch swallowed connection errors too — a completely invalid
+    // token would 401 on all three and report a plausible "0 dashboards, 0
+    // alert rules, 0 datasources indexed" success, indistinguishable from a
+    // genuinely empty Grafana instance.
+    //
+    // baseUrl always has a value (defaults to localhost:3000, a real
+    // unauthenticated local dev setup), so a connection-level failure
+    // (fetch() itself throwing — DNS/refused/timeout) stays legitimately
+    // empty, same reasoning as elastic's bootstrap this session. But once
+    // a specific endpoint responds, only 401/403 (permission/auth scoping
+    // for that one endpoint — Grafana API tokens can be scoped per-feature)
+    // stays a legitimate per-endpoint gap; anything else (5xx) throws.
+    async function fetchList<T>(path: string, label: string): Promise<T[]> {
+      const resp = await fetch(`${baseUrl}${path}`, { headers })
+      if (resp.ok) return await resp.json() as T[]
+      if (resp.status === 401 || resp.status === 403) return []
+      throw new Error(`Grafana bootstrap: ${label} failed with HTTP ${resp.status}`)
+    }
+
+    let dashboards: Array<{ uid: string; title: string }>
+    let alertRules: Array<{ uid: string; title: string; labels?: Record<string, string> }>
+    let datasources: Array<{ uid: string; name: string; type: string }>
     try {
-    // Fetch dashboards
-    const dashResp = await fetch(`${baseUrl}/api/search?type=dash-db&limit=100`, { headers })
-    const dashboards = dashResp.ok ? await dashResp.json() as Array<{ uid: string; title: string }> : []
-
-    // Fetch alert rules
-    const alertResp = await fetch(`${baseUrl}/api/v1/provisioning/alert-rules`, { headers })
-    const alertRules = alertResp.ok ? await alertResp.json() as Array<{ uid: string; title: string; labels?: Record<string, string> }> : []
-
-    // Fetch datasources — each datasource becomes a Service entity so agents can
-    // resolve "which Grafana datasource backs this service"
-    const dsResp = await fetch(`${baseUrl}/api/datasources`, { headers })
-    const datasources = dsResp.ok ? await dsResp.json() as Array<{ uid: string; name: string; type: string }> : []
+      dashboards = await fetchList(`/api/search?type=dash-db&limit=100`, 'dashboard search')
+      alertRules = await fetchList(`/api/v1/provisioning/alert-rules`, 'alert rules')
+      datasources = await fetchList(`/api/datasources`, 'datasources')
+    } catch (err) {
+      if (err instanceof TypeError) {
+        // fetch() itself threw (connection-level failure) — genuinely unreachable.
+        return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Grafana bootstrap: instance unreachable'] }
+      }
+      throw err
+    }
 
     for (const ds of datasources) {
       await this.kg.upsertEntity({
@@ -77,9 +100,6 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
       entitiesUpserted,
       relationshipsUpserted: 0,
       episodeHints: [`Grafana: ${dashboards.length} dashboards, ${alertRules.length} alert rules, ${datasources.length} datasources indexed`],
-    }
-    } catch {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Grafana bootstrap: connection failed'] }
     }
   }
 }

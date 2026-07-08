@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify'
-import { Prisma } from '@prisma/client'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { UUID_RE } from '../utils/validators.js'
@@ -178,7 +177,7 @@ export async function accessRoutes(app: FastifyInstance) {
       const rows = await withTenant(prisma, user.tenantId, (tx) =>
         tx.$queryRaw<Array<{ id: string; email: string; role: string }>>`
           INSERT INTO users (id, tenant_id, email, role)
-          VALUES (${newId}::uuid, ${user.tenantId}::uuid, ${email}, ${Prisma.raw(`'${role}'`)}::\"AgentRole\")
+          VALUES (${newId}::uuid, ${user.tenantId}::uuid, ${email}, ${role}::"AgentRole")
           ON CONFLICT (tenant_id, email) DO UPDATE SET role = EXCLUDED.role
           RETURNING id, email, role
         `
@@ -211,7 +210,7 @@ export async function accessRoutes(app: FastifyInstance) {
       const { role } = request.body
       const affected = await withTenant(prisma, user.tenantId, (tx) =>
         tx.$executeRaw`
-          UPDATE users SET role = ${Prisma.raw(`'${role}'`)}::\"AgentRole\" WHERE id = ${userId}::uuid AND tenant_id = ${user.tenantId}::uuid
+          UPDATE users SET role = ${role}::"AgentRole" WHERE id = ${userId}::uuid AND tenant_id = ${user.tenantId}::uuid
         `
       ).catch(() => 0)
       if (Number(affected) === 0) return reply.code(404).send({ error: 'user not found' })

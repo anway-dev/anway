@@ -1,7 +1,7 @@
 import type { IGateSink, GateEvent } from './gate.js'
 
 export class InMemoryGateSink implements IGateSink {
-  private readonly store = new Map<string, 'approved' | 'rejected' | 'pending'>()
+  private readonly store = new Map<string, 'approved' | 'rejected' | 'pending' | 'consumed'>()
 
   async push(event: GateEvent): Promise<string> {
     this.store.set(event.id, 'pending')
@@ -25,6 +25,12 @@ export class InMemoryGateSink implements IGateSink {
     // the guard belongs here too, not only in one caller.
     if (!this.store.has(gateId)) return
     this.store.set(gateId, decision)
+  }
+
+  async consume(gateId: string): Promise<boolean> {
+    if (this.store.get(gateId) !== 'approved') return false
+    this.store.set(gateId, 'consumed')
+    return true
   }
 
   /** Clear all gates — for test cleanup */

@@ -60,6 +60,9 @@ async function consumeGate(
   target: string,
 ): Promise<boolean> {
   const sentinel = '00000000-0000-0000-0000-000000000000'
+  // Bound on tool_name too (not just target) — confirmed live via
+  // independent review that a target-only bind lets any approved gate
+  // whose target string matches authorize a completely different action.
   const consumed = await withTenant(prisma, tenantId, (tx) =>
     tx.$executeRaw`
       UPDATE gate_events
@@ -67,6 +70,7 @@ async function consumeGate(
       WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
         AND status = 'approved'
         AND created_at > NOW() - INTERVAL '24 hours'
+        AND tool_name = 'ecs.deploy'
         AND tool_args->>'target' = ${target}
         AND decided_by IS NOT NULL
         AND decided_by <> ${sentinel}::uuid

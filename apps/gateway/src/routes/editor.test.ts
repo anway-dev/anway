@@ -22,13 +22,13 @@ const scratchRoot = vi.hoisted(() => {
 // controls via the `nextSpawnExit` queue (git add/commit/push and docker
 // build/push are each a separate spawn() call in the real code).
 let nextSpawnExit: number[] = []
-const spawnCalls: Array<{ cmd: string; args: string[] }> = []
+const spawnCalls: Array<{ cmd: string; args: string[]; env?: Record<string, string> }> = []
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return {
     ...actual,
-    spawn: vi.fn((cmd: string, args: string[]) => {
-      spawnCalls.push({ cmd, args })
+    spawn: vi.fn((cmd: string, args: string[], opts?: { env?: Record<string, string> }) => {
+      spawnCalls.push({ cmd, args, env: opts?.env })
       const child = new EventEmitter() as any
       child.stdout = new EventEmitter()
       child.stderr = new EventEmitter()
@@ -156,7 +156,7 @@ describe('editor write endpoints', () => {
       expect(spawnCalls.length).toBe(0)
     })
 
-    it('runs the real git add/commit/push sequence on a valid gate, with the token injected via a scoped http.extraHeader (never in the remote URL)', async () => {
+    it('runs the real git add/commit/push sequence on a valid gate, with the token injected via GIT_CONFIG_* env vars (never in argv or the remote URL)', async () => {
       mkdirSync(path.join(scratchRoot, 'repo2', '.git'), { recursive: true })
       writeFileSync(path.join(scratchRoot, 'repo2', 'file.txt'), 'content')
 
@@ -189,7 +189,12 @@ describe('editor write endpoints', () => {
 
       const pushCall = spawnCalls.find((c) => c.args.includes('push'))
       expect(pushCall).toBeDefined()
-      expect(pushCall!.args.some((a) => a.startsWith('http.extraHeader=Authorization: Basic'))).toBe(true)
+      // Token travels via GIT_CONFIG_* env vars, never argv — not visible to
+      // `ps` for the process lifetime the way `-c http.extraHeader=...` was.
+      expect(pushCall!.args.some((a) => a.includes('http.extraHeader') || a.includes('http.extraheader'))).toBe(false)
+      expect(pushCall!.env?.['GIT_CONFIG_COUNT']).toBe('1')
+      expect(pushCall!.env?.['GIT_CONFIG_KEY_0']).toBe('http.extraheader')
+      expect(pushCall!.env?.['GIT_CONFIG_VALUE_0']).toContain('Authorization: Basic')
       // The token must never appear as part of the remote URL/argv verbatim.
       expect(pushCall!.args.join(' ')).not.toContain('fake-git-token')
       const addCall = spawnCalls.find((c) => c.args[0] === 'add')

@@ -44,6 +44,7 @@ describe('pollGate', () => {
       push: vi.fn(),
       poll: vi.fn().mockResolvedValue('approved'),
       record: vi.fn(),
+      consume: vi.fn().mockResolvedValue(true),
     }
     const decision = await pollGate(sink, 'g1', 5000, 100)
     expect(decision._tag).toBe('approved')
@@ -54,6 +55,7 @@ describe('pollGate', () => {
       push: vi.fn(),
       poll: vi.fn().mockResolvedValue('rejected'),
       record: vi.fn(),
+      consume: vi.fn().mockResolvedValue(true),
     }
     const decision = await pollGate(sink, 'g1', 5000, 100)
     expect(decision._tag).toBe('rejected')
@@ -64,6 +66,7 @@ describe('pollGate', () => {
       push: vi.fn(),
       poll: vi.fn().mockResolvedValue(null), // never decided
       record: vi.fn(),
+      consume: vi.fn().mockResolvedValue(true),
     }
     const decision = await pollGate(sink, 'g1', 300, 100)
     expect(decision._tag).toBe('timeout')

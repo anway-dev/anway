@@ -18,6 +18,16 @@ export interface IGateSink {
   poll(gateId: string): Promise<'approved' | 'rejected' | null>
   /** Called after decision recorded — for audit. */
   record(gateId: string, decision: 'approved' | 'rejected', decidedBy: string): Promise<void>
+  /**
+   * Atomically transitions status 'approved' -> 'consumed'. Single-use —
+   * the caller that actually executes the write action must call this
+   * before running it. Returns true only if this call performed the
+   * transition (race-safe: two racing executors can't both consume the
+   * same approval). Without this, an approved gate stays reusable for its
+   * full validity window — a chat-approved write could be replayed
+   * against a direct write route (or vice versa) using the same gateId.
+   */
+  consume(gateId: string): Promise<boolean>
 }
 
 export type GateDecision = { _tag: 'approved' } | { _tag: 'rejected'; reason: string } | { _tag: 'timeout' }

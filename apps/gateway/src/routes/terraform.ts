@@ -139,6 +139,14 @@ export async function terraformRoutes(app: FastifyInstance) {
         // that real route could therefore never be consumed here (this
         // check would always read null and never match), no matter who
         // approved it. Fixed to read the field the writer actually sets.
+        //
+        // Confirmed live via TWO independent review passes (second one):
+        // this also never checked tool_name — an approved gate for a
+        // completely different action (e.g. "notify_channel — demo")
+        // whose target string happened to equal this env name could be
+        // replayed here to authorize a real terraform apply. Canonical
+        // action string per resolve-connector-id.test.ts and this file's
+        // own gate-creation calls below: 'terraform.apply'.
         const consumed = await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`
             UPDATE gate_events
@@ -146,6 +154,7 @@ export async function terraformRoutes(app: FastifyInstance) {
             WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
               AND status = 'approved'
               AND created_at > NOW() - INTERVAL '24 hours'
+              AND tool_name = 'terraform.apply'
               AND tool_args->>'target' = ${env}
               AND decided_by IS NOT NULL
               AND decided_by <> ${sentinel}::uuid

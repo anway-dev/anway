@@ -490,6 +490,28 @@ export class ConnectorAgent {
             resultMessages.push(this.model.formatToolResult(call.id, resultStr))
             continue
           }
+
+          // Single-use consume — closes the gap where an approved gate
+          // stayed replayable (status='approved', within its validity
+          // window) after chat already executed it, letting the same
+          // gateId re-run the identical write via a direct write route.
+          const consumed = await this.gateSink.consume(gateId)
+          if (!consumed) {
+            await this.auditSink.append({
+              id: crypto.randomUUID(),
+              tenantId: this.perimeterCtx.tenantId,
+              userId: this.perimeterCtx.userId,
+              sessionId: this.perimeterCtx.sessionId,
+              eventType: 'tool_call_blocked',
+              payload: { gateId, toolName: call.name, reason: 'gate_already_consumed' },
+              createdAt: new Date(),
+            })
+            const blockMsg = `Write action "${call.name}" blocked: gate approval already consumed`
+            result = { error: blockMsg }
+            const resultStr = JSON.stringify(result)
+            resultMessages.push(this.model.formatToolResult(call.id, resultStr))
+            continue
+          }
         }
 
         // --- Execute tool ---

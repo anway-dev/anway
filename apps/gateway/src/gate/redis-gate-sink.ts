@@ -84,4 +84,22 @@ export class RedisGateSink implements IGateSink {
     const pub = await this.getPub()
     await pub.setEx(`${GATE_KEY_PREFIX}${gateId}:decision`, GATE_TTL_SECONDS, decision)
   }
+
+  // Single-use atomic flip approved -> consumed. WHERE status='approved'
+  // guarantees only one caller ever sees affected=1, same idempotency
+  // guarantee as the direct write routes' consumeGate. Without this, a
+  // chat-approved write action was never marked used — the row stayed
+  // status='approved' within its 24h validity window and the same gateId
+  // could be replayed on a direct write route to re-run the action again.
+  async consume(gateId: string): Promise<boolean> {
+    if (!this.tenantId) return false
+    const affected = await withTenant(prisma, this.tenantId, (tx) =>
+      tx.$executeRaw`
+        UPDATE gate_events
+        SET status = 'consumed'
+        WHERE id = ${gateId}::uuid AND tenant_id = ${this.tenantId!}::uuid AND status = 'approved'
+      `
+    ).catch(() => 0)
+    return Number(affected) > 0
+  }
 }

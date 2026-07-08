@@ -41,23 +41,29 @@ async function loadK8sCredentials(tenantId: string): Promise<Record<string, unkn
 // ---------------------------------------------------------------------------
 // Gate atomic-consume — copies terraform.ts:124-150 reference pattern
 // ---------------------------------------------------------------------------
-// Binding on namespace alone (the original check) meant one approved gate
-// for "restart deployment X in prod" could also be consumed to authorize
-// restarting deployment Y, or scaling a different deployment entirely, in
-// that same namespace — confirmed live via independent review. Real gate
-// rows (see prisma/seed.ts's k8s_restart_deployment/scale_deployment
-// entries) carry a `deployment` or `node` key in tool_args alongside
-// namespace; bind on that too so an approval only ever authorizes the exact
-// resource it was requested for.
+// Binding on namespace+resource alone (the original check) meant an
+// approved gate for "restart deployment X in prod" — chat-created via
+// ConnectorAgent, real tool_name k8s__restart_deployment per
+// connector-tools-adapter.ts's `${connectorType}__${toolName}` naming —
+// could ALSO be consumed to authorize *scaling* the same deployment (a
+// completely different, differently-reviewed action), since nothing here
+// ever checked tool_name. Confirmed live via TWO independent review passes
+// (this session). Now binds on the real tool_name for each of the 3 call
+// sites below, and — for scale specifically — the real `replicas` value
+// that was actually approved, so "approved: scale to 2" can't be consumed
+// as "scale to 0".
 async function consumeGate(
   gateId: string,
   tenantId: string,
   applierId: string,
+  toolName: string,
   namespace: string,
   resourceKey: 'deployment' | 'node',
   resourceName: string,
+  replicas?: number,
 ): Promise<boolean> {
   const sentinel = '00000000-0000-0000-0000-000000000000'
+  const noReplicasCheck = replicas === undefined
   const consumed = await withTenant(prisma, tenantId, (tx) =>
     tx.$executeRaw`
       UPDATE gate_events
@@ -65,8 +71,10 @@ async function consumeGate(
       WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
         AND status = 'approved'
         AND created_at > NOW() - INTERVAL '24 hours'
+        AND tool_name = ${toolName}
         AND (${namespace} = '' OR tool_args->>'namespace' = ${namespace})
         AND tool_args->>${resourceKey} = ${resourceName}
+        AND (${noReplicasCheck} OR (tool_args->>'replicas')::int = ${replicas ?? 0})
         AND decided_by IS NOT NULL
         AND decided_by <> ${sentinel}::uuid
         AND decided_by <> ${applierId}::uuid
@@ -90,9 +98,15 @@ async function consumeGateByTarget(
   gateId: string,
   tenantId: string,
   applierId: string,
+  toolName: string,
   target: string,
 ): Promise<boolean> {
   const sentinel = '00000000-0000-0000-0000-000000000000'
+  // Confirmed live via independent review: binding on `target` alone let
+  // any approved gate whose target string happened to match authorize a
+  // DIFFERENT action — e.g. a gate approved for "editor.commit" against a
+  // path string that collided with a "prod/api" namespace/deployment
+  // target could be replayed here. tool_name closes that.
   const consumed = await withTenant(prisma, tenantId, (tx) =>
     tx.$executeRaw`
       UPDATE gate_events
@@ -100,6 +114,7 @@ async function consumeGateByTarget(
       WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
         AND status = 'approved'
         AND created_at > NOW() - INTERVAL '24 hours'
+        AND tool_name = ${toolName}
         AND tool_args->>'target' = ${target}
         AND decided_by IS NOT NULL
         AND decided_by <> ${sentinel}::uuid
@@ -295,7 +310,7 @@ export async function k8sRoutes(app: FastifyInstance) {
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before restart' })
       }
-      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace, 'deployment', name)
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, 'k8s__restart_deployment', namespace, 'deployment', name)
       if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before restart' })
       }
@@ -359,7 +374,7 @@ export async function k8sRoutes(app: FastifyInstance) {
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before deploy' })
       }
-      const gateOk = await consumeGateByTarget(gateId, user.tenantId, user.sub, `${namespace}/${name}`)
+      const gateOk = await consumeGateByTarget(gateId, user.tenantId, user.sub, 'k8s.deploy', `${namespace}/${name}`)
       if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before deploy' })
       }
@@ -420,7 +435,7 @@ export async function k8sRoutes(app: FastifyInstance) {
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before scale' })
       }
-      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, namespace, 'deployment', name)
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, 'k8s__scale_deployment', namespace, 'deployment', name, replicas)
       if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before scale' })
       }
@@ -479,7 +494,7 @@ export async function k8sRoutes(app: FastifyInstance) {
       if (!gateId) {
         return reply.code(403).send({ error: 'gate approval required before cordon' })
       }
-      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, '', 'node', name)
+      const gateOk = await consumeGate(gateId, user.tenantId, user.sub, 'k8s__cordon_node', '', 'node', name)
       if (!gateOk) {
         return reply.code(403).send({ error: 'gate approval required before cordon' })
       }

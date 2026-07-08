@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole } from '../plugins/rbac.js'
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, statSync, realpathSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
@@ -19,22 +19,98 @@ const ALLOWED_ROOTS: string[] = [
   process.env['EDITOR_ROOT'] ?? path.resolve(process.cwd(), '../..'),
   '/tmp/anway-editor',
 ]
+const CLONE_ROOT_BASE = '/tmp/anway-editor'
+
+// Root directories can themselves sit behind a symlink (e.g. macOS's
+// /tmp -> /private/tmp, or os.tmpdir()'s /var/folders/... ->
+// /private/var/folders/...). resolveSafePath below always realpath's the
+// TARGET before this containment check, so the roots must be realpath'd
+// too — comparing a canonicalized target against a non-canonicalized root
+// silently fails containment for every legitimate path (confirmed live:
+// this rejected every request under a symlinked EDITOR_ROOT with 403).
+// Falls back to plain path.resolve for a root that doesn't exist yet.
+function realRoot(root: string): string {
+  const resolved = path.resolve(root)
+  try {
+    return realpathSync(resolved)
+  } catch {
+    return resolved
+  }
+}
 
 function isAllowedPath(target: string): boolean {
   const resolved = path.resolve(target)
   return ALLOWED_ROOTS.some((root) => {
-    const r = path.resolve(root)
+    const r = realRoot(root)
     return resolved === r || resolved.startsWith(r + path.sep)
   })
 }
 
+// Confirmed live via independent review: CLONE_ROOT_BASE (/tmp/anway-editor)
+// was a single shared directory for every tenant, with no ownership check
+// anywhere — tenant A clones a private repo with their own token, and any
+// user of any OTHER tenant could then read (and, via commit, write/push
+// against) it, since isAllowedPath only checked "is this under an allowed
+// root", not "does this belong to the calling tenant". Every path under
+// CLONE_ROOT_BASE must additionally be under the CALLING tenant's own
+// subdirectory. Paths under the other ALLOWED_ROOTS entry (EDITOR_ROOT) are
+// unaffected — that's shared, non-tenant-specific infrastructure by design.
+function isAllowedPathForTenant(target: string, tenantId: string): boolean {
+  if (!isAllowedPath(target)) return false
+  const cloneRoot = realRoot(CLONE_ROOT_BASE)
+  const underCloneRoot = target === cloneRoot || target.startsWith(cloneRoot + path.sep)
+  if (!underCloneRoot) return true
+  // tenantRoot is a subdirectory of cloneRoot which may not exist yet
+  // (created lazily by the clone route) — build it from the already
+  // canonicalized cloneRoot rather than realpath-ing a path that doesn't
+  // exist, which would just fall back to the non-canonical form anyway.
+  const tenantRoot = path.join(cloneRoot, tenantId)
+  return target === tenantRoot || target.startsWith(tenantRoot + path.sep)
+}
+
+// Confirmed live via independent review: isAllowedPath used path.resolve
+// only, which never follows symlinks — a path INSIDE an allowed root that
+// is (or passes through) a symlink pointing OUTSIDE it (e.g. a cloned
+// repo containing a symlink to /Users/raj/.ssh, which `git clone` checks
+// out by default) passed the prefix check while `readFile`/`writeFile`
+// followed the link for real, giving arbitrary read/write outside the
+// sandbox entirely. Resolves to the deepest EXISTING ancestor, realpath's
+// it (canonicalizing every symlink in the chain, not just the leaf), then
+// re-checks THAT real location against the tenant-scoped allowlist before
+// ever touching the filesystem for real. Returns the real path with any
+// not-yet-existing tail re-appended (needed for save's "create a new
+// file" case), or null if disallowed.
+function resolveSafePath(target: string, tenantId: string): string | null {
+  const resolved = path.resolve(target)
+  let dir = resolved
+  const tail: string[] = []
+  for (let i = 0; i < 100; i++) {
+    if (existsSync(dir)) break
+    const parent = path.dirname(dir)
+    if (parent === dir) return null // hit filesystem root without finding anything real
+    tail.unshift(path.basename(dir))
+    dir = parent
+  }
+  let real: string
+  try {
+    real = realpathSync(dir)
+  } catch {
+    return null
+  }
+  if (!isAllowedPathForTenant(real, tenantId)) return null
+  return tail.length ? path.join(real, ...tail) : real
+}
+
 // Walks up from a file path looking for a `.git` directory, never leaving
 // the editor's own allowed roots (so a crafted path can't walk out to some
-// unrelated repo on the host).
-function findGitRoot(startPath: string): string | null {
+// unrelated repo on the host). Takes an already-symlink-resolved starting
+// path (from resolveSafePath) — path.dirname on a canonical path never
+// re-introduces a symlink, so no further realpath calls are needed here,
+// only the tenant-scoped containment re-check on every step up.
+function findGitRoot(startPath: string, tenantId: string): string | null {
   let dir = existsSync(startPath) && statSync(startPath).isDirectory() ? startPath : path.dirname(startPath)
   for (let i = 0; i < 50; i++) {
-    if (!isAllowedPath(dir)) return null
+    if (!isAllowedPathForTenant(dir, tenantId)) return null
     if (existsSync(path.join(dir, '.git'))) return dir
     const parent = path.dirname(dir)
     if (parent === dir) return null
@@ -43,9 +119,9 @@ function findGitRoot(startPath: string): string | null {
   return null
 }
 
-function gitExec(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+function gitExec(args: string[], cwd: string, extraEnv?: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('git', args, { cwd, env: { ...process.env } })
+    const proc = spawn('git', args, { cwd, env: { ...process.env, ...extraEnv } })
     let stdout = ''
     let stderr = ''
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
@@ -53,6 +129,21 @@ function gitExec(args: string[], cwd: string): Promise<{ code: number; stdout: s
     proc.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }))
     proc.on('error', reject)
   })
+}
+
+// Confirmed live via independent review: `git -c http.extraHeader=...`
+// puts the bearer token in this process's own argv, readable by any other
+// local process via `ps` for the duration of the clone/push (clones can
+// run minutes). git's env-var config mechanism achieves the exact same
+// per-invocation scoping (never written to the repo's on-disk config,
+// never touches the remote URL) without ever appearing in argv.
+function gitAuthEnv(token: string): Record<string, string> {
+  const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
+  return {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.extraheader',
+    GIT_CONFIG_VALUE_0: authHeader,
+  }
 }
 
 function detectLanguage(filename: string): string {
@@ -131,22 +222,24 @@ export async function editorRoutes(app: FastifyInstance) {
     '/api/editor/files',
     { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
       const reqPath = request.query.path
 
       if (!reqPath) {
         return reply.code(400).send({ error: 'path required' })
       }
 
-      if (!isAllowedPath(reqPath) || !existsSync(reqPath)) {
+      const safePath = resolveSafePath(reqPath, tenantId)
+      if (!safePath || !existsSync(safePath)) {
         return reply.code(403).send({ error: 'path not allowed or not found' })
       }
 
-      const s = await stat(reqPath)
+      const s = await stat(safePath)
       if (!s.isDirectory()) {
         return reply.code(400).send({ error: 'path must be a directory' })
       }
 
-      const tree = await buildFileTree(reqPath)
+      const tree = await buildFileTree(safePath)
       return reply.send(tree)
     },
   )
@@ -156,28 +249,30 @@ export async function editorRoutes(app: FastifyInstance) {
     '/api/editor/file',
     { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
+      const { tenantId } = request.user as { tenantId: string }
       const reqPath = request.query.path
 
       if (!reqPath) {
         return reply.code(400).send({ error: 'path required' })
       }
 
-      if (!isAllowedPath(reqPath) || !existsSync(reqPath)) {
+      const safePath = resolveSafePath(reqPath, tenantId)
+      if (!safePath || !existsSync(safePath)) {
         return reply.code(403).send({ error: 'path not allowed or not found' })
       }
 
-      const s = await stat(reqPath)
+      const s = await stat(safePath)
       if (!s.isFile()) {
         return reply.code(400).send({ error: 'path must be a file' })
       }
 
-      const content = await readFile(reqPath, 'utf-8')
-      const filename = path.basename(reqPath)
+      const content = await readFile(safePath, 'utf-8')
+      const filename = path.basename(safePath)
 
       return reply.send({
         content,
         filename,
-        path: reqPath,
+        path: safePath,
         language: detectLanguage(filename),
         size: s.size,
       })
@@ -205,41 +300,42 @@ export async function editorRoutes(app: FastifyInstance) {
       if (Buffer.byteLength(content, 'utf-8') > MAX_SAVE_BYTES) {
         return reply.code(413).send({ error: `content exceeds ${MAX_SAVE_BYTES} byte limit` })
       }
-      if (!isAllowedPath(reqPath)) {
+      const safePath = resolveSafePath(reqPath, tenantId)
+      if (!safePath) {
         return reply.code(403).send({ error: 'path not allowed' })
       }
       // Existing target must be a real file (never silently create through a
       // directory path or overwrite something that isn't a plain file).
-      if (existsSync(reqPath)) {
-        const s = await stat(reqPath)
+      // resolveSafePath already confirmed the parent directory exists (and
+      // is a real, allowed, tenant-owned location) when the target itself
+      // doesn't yet exist — no separate existsSync(dirname) check needed.
+      if (existsSync(safePath)) {
+        const s = await stat(safePath)
         if (!s.isFile()) return reply.code(400).send({ error: 'path must be a file' })
-      } else if (!existsSync(path.dirname(reqPath))) {
-        return reply.code(400).send({ error: 'parent directory does not exist' })
       }
 
-      await writeFile(reqPath, content, 'utf-8')
+      await writeFile(safePath, content, 'utf-8')
 
       await appendAuditEvent({
         tenantId,
         userId,
         action: 'editor.file_saved',
-        resource: reqPath,
+        resource: safePath,
         outcome: 'action_executed',
         metadata: { bytes: Buffer.byteLength(content, 'utf-8') },
       }).catch(() => {})
 
-      return reply.send({ ok: true, path: reqPath, bytes: Buffer.byteLength(content, 'utf-8') })
+      return reply.send({ ok: true, path: safePath, bytes: Buffer.byteLength(content, 'utf-8') })
     },
   )
 
   // POST /api/editor/clone — clone a real git repo (using the user's stored
   // credentials) into a scratch workspace so the editor can point at a repo
   // that isn't already checked out on disk, not just the fixed ALLOWED_ROOTS
-  // default. Clones under /tmp/anway-editor/<sanitized>, which is itself one
-  // of the two ALLOWED_ROOTS, so every subsequent read/save/commit call
-  // against the cloned path passes the same containment check as everything
-  // else in this file.
-  const CLONE_ROOT = '/tmp/anway-editor'
+  // default. Clones under /tmp/anway-editor/<tenantId>/<sanitized> — tenant-
+  // scoped (see isAllowedPathForTenant's doc comment: this used to be one
+  // shared directory for every tenant with zero ownership check, a real
+  // cross-tenant repo disclosure found live via independent review).
   app.post<{ Body: { repoUrl: string; provider: string; branch?: string } }>(
     '/api/editor/clone',
     { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
@@ -270,16 +366,16 @@ export async function editorRoutes(app: FastifyInstance) {
       // Deterministic, collision-resistant local dir name from host+path — no
       // user-controlled path traversal (URL.pathname is used, not raw input).
       const safeName = `${parsed.hostname}${parsed.pathname}`.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '')
-      const localPath = path.join(CLONE_ROOT, safeName)
+      const tenantCloneRoot = path.join(CLONE_ROOT_BASE, tenantId)
+      const localPath = path.join(tenantCloneRoot, safeName)
 
       if (existsSync(localPath)) {
         return reply.code(409).send({ error: 'already cloned', path: localPath })
       }
-      await import('node:fs/promises').then(m => m.mkdir(CLONE_ROOT, { recursive: true }))
+      await import('node:fs/promises').then(m => m.mkdir(tenantCloneRoot, { recursive: true }))
 
-      const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
-      const cloneArgs = ['-c', `http.extraHeader=${authHeader}`, 'clone', '--depth', '1', ...(branch ? ['--branch', branch] : []), repoUrl, localPath]
-      const result = await gitExec(cloneArgs, CLONE_ROOT)
+      const cloneArgs = ['clone', '--depth', '1', ...(branch ? ['--branch', branch] : []), repoUrl, localPath]
+      const result = await gitExec(cloneArgs, tenantCloneRoot, gitAuthEnv(token))
 
       if (result.code !== 0) {
         return reply.code(500).send({ error: 'git clone failed', detail: result.stderr.slice(0, 2000) })
@@ -305,17 +401,18 @@ export async function editorRoutes(app: FastifyInstance) {
   // service. Ungated (matches the established precedent in pipeline.ts:
   // build itself has no external effect beyond the tenant's own registry;
   // only the deploy step that follows is gated).
-  app.post<{ Body: { servicePath: string; imageName: string; tag?: string } }>(
+  app.post<{ Body: { servicePath: string; imageName: string } }>(
     '/api/editor/build',
     { preHandler: [app.authenticate, requireRole('admin', 'dev')] },
     async (request, reply) => {
       const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
-      const { servicePath, imageName, tag } = request.body
+      const { servicePath: reqServicePath, imageName } = request.body
 
-      if (!servicePath || !imageName) {
+      if (!reqServicePath || !imageName) {
         return reply.code(400).send({ error: 'servicePath and imageName required' })
       }
-      if (!isAllowedPath(servicePath) || !existsSync(servicePath)) {
+      const servicePath = resolveSafePath(reqServicePath, tenantId)
+      if (!servicePath || !existsSync(servicePath)) {
         return reply.code(403).send({ error: 'servicePath not allowed or not found' })
       }
       const dockerfilePath = path.join(servicePath, 'Dockerfile')
@@ -332,7 +429,13 @@ export async function editorRoutes(app: FastifyInstance) {
       const sse = (data: object) => reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
 
       const registry = process.env['DOCKER_REGISTRY']
-      const resolvedTag = tag ?? Date.now().toString(36)
+      // Confirmed live via independent review: a caller-supplied `tag` on
+      // this ungated route could deliberately collide with an existing,
+      // meaningful tag in the tenant's registry (e.g. `latest`, or a tag a
+      // separate real deploy pipeline pulls by reference), overwriting it
+      // without any gate. Always server-generate — a fresh unique tag can
+      // never collide with something that already matters.
+      const resolvedTag = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
       const image = registry ? `${registry}/${imageName}:${resolvedTag}` : `${imageName}:${resolvedTag}`
 
       const runStep = (label: string, args: string[], cwd: string, timeoutMs: number): Promise<void> =>
@@ -371,7 +474,15 @@ export async function editorRoutes(app: FastifyInstance) {
           outcome: 'action_failed', metadata: { servicePath, error: String(err) },
         }).catch(() => {})
         sse({ type: 'error', message: String(err) })
-        sse({ type: 'done', image, pushed: false })
+        // Confirmed live via independent review: this used to send `image`
+        // in the failure-path `done` event too. The frontend's guard
+        // (`if (!builtImage) return`) checks `e.image` truthiness on ANY
+        // `done` event, not specifically a successful one — so a failed
+        // build still populated `builtImage` and the caller proceeded to
+        // request a deploy gate and (once approved) deploy a reference
+        // that was never actually built or pushed. Omit `image` entirely
+        // on failure so that guard works as intended.
+        sse({ type: 'done', pushed: false })
       }
 
       reply.raw.end()
@@ -409,12 +520,18 @@ export async function editorRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
-      const { path: filePath, message, provider, gateId } = request.body
+      const { path: reqPath, message, provider, gateId } = request.body
 
-      if (!isAllowedPath(filePath) || !existsSync(filePath)) {
+      const filePath = resolveSafePath(reqPath, tenantId)
+      if (!filePath || !existsSync(filePath)) {
         return reply.code(403).send({ error: 'path not allowed or not found' })
       }
 
+      // Confirmed live via independent review: the consume check bound only
+      // on `target`, never `tool_name` — a gate approved for a DIFFERENT
+      // action (e.g. "k8s.deploy — prod/api") whose target string happened
+      // to match this file's path would also satisfy this UPDATE...WHERE.
+      // Binding on tool_name too closes that cross-action replay.
       const sentinel = '00000000-0000-0000-0000-000000000000'
       const consumed = await withTenant(prisma, tenantId, (tx) =>
         tx.$executeRaw`
@@ -423,6 +540,7 @@ export async function editorRoutes(app: FastifyInstance) {
           WHERE id = ${gateId}::uuid AND tenant_id = ${tenantId}::uuid
             AND status = 'approved'
             AND created_at > NOW() - INTERVAL '24 hours'
+            AND tool_name = 'editor.commit'
             AND tool_args->>'target' = ${filePath}
             AND decided_by IS NOT NULL
             AND decided_by <> ${sentinel}::uuid
@@ -433,7 +551,7 @@ export async function editorRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: 'gate approval required before commit' })
       }
 
-      const repoRoot = findGitRoot(filePath)
+      const repoRoot = findGitRoot(filePath, tenantId)
       if (!repoRoot) return reply.code(400).send({ error: 'path is not inside a git repository' })
 
       const credRows = await withTenant(prisma, tenantId, (tx) =>
@@ -472,11 +590,11 @@ export async function editorRoutes(app: FastifyInstance) {
       const branchResult = await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot)
       const branch = branchResult.stdout.trim() || 'HEAD'
 
-      // http.extraHeader is scoped to this single invocation via -c — never
-      // written to the repo's on-disk config, never appears in `git remote
-      // -v`, never embedded in the remote URL.
-      const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
-      const pushResult = await gitExec(['-c', `http.extraHeader=${authHeader}`, 'push', 'origin', branch], repoRoot)
+      // Auth injected via GIT_CONFIG_* env vars (gitAuthEnv) — never written
+      // to the repo's on-disk config, never in `git remote -v`, never in
+      // the remote URL, and — unlike the `git -c http.extraHeader=...` form
+      // this used before — never visible in this process's own argv either.
+      const pushResult = await gitExec(['push', 'origin', branch], repoRoot, gitAuthEnv(token))
 
       await appendAuditEvent({
         tenantId, userId,

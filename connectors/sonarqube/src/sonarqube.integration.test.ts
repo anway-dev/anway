@@ -105,6 +105,13 @@ const emptyMetricsFixture = {
   },
 }
 
+const projectsFixture = {
+  components: [
+    { key: 'com.example:payments-api', name: 'payments-api', qualifier: 'TRK' },
+    { key: 'com.example:checkout-api', name: 'checkout-api', qualifier: 'TRK' },
+  ],
+}
+
 const fixtureRoutes: FixtureRoute[] = [
   {
     method: 'GET',
@@ -117,6 +124,12 @@ const fixtureRoutes: FixtureRoute[] = [
     path: '/api/measures/component',
     status: 200,
     body: metricsFixture,
+  },
+  {
+    method: 'GET',
+    path: '/api/projects/search',
+    status: 200,
+    body: projectsFixture,
   },
 ]
 
@@ -132,16 +145,21 @@ describe('sonarqube — fixture HTTP server', () => {
 
   it('bootstrap extracts entities from fixture', async () => {
     const kg = new FakeKG()
-    // bootstrap calls /api/projects/search which won't match the fixture routes (404)
-    // but that's expected — bootstrap handles non-ok gracefully
     const result = await new SonarQubeBootstrap(kg).bootstrap(
       tenantId, 'test-connector',
       { baseUrl: fixture.baseUrl, token: 'test-token' },
     )
-    // Bootstrap won't match routes — /api/projects/search is not in our fixture
-    // but the call should not throw
-    expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
-    expect(result.episodeHints).toBeDefined()
+    // Confirmed live via independent review: this test previously relied
+    // on /api/projects/search 404ing against the fixture (a route the
+    // fixture never implemented) and asserted only "didn't throw" — a real
+    // SonarQube instance always has this endpoint, so a 404 there means
+    // something is genuinely broken (wrong baseUrl, version mismatch), not
+    // an acceptable case. Added the route to the fixture so this test
+    // exercises the real success path instead of an artifact of test
+    // incompleteness.
+    expect(result.entitiesUpserted).toBe(2)
+    expect(kg.entities.some((e) => e.name === 'payments-api')).toBe(true)
+    expect(kg.entities.some((e) => e.name === 'checkout-api')).toBe(true)
   })
 
   describe('get_issues', () => {

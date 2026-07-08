@@ -28,7 +28,7 @@ function awsEnv(creds: AwsCredentials): NodeJS.ProcessEnv {
 //     describe-events requires a Business/Enterprise support plan;
 //     SubscriptionRequiredException is expected and handled below). Every
 //     other failure now throws instead of silently reporting 0 entities.
-function runAws(args: string[], env: NodeJS.ProcessEnv): unknown {
+function runAws(args: string[], env: NodeJS.ProcessEnv, hasCreds: boolean): unknown {
   try {
     const out = execFileSync('aws', [...args, '--output', 'json'], { env, timeout: 30000 })
     return JSON.parse(out.toString())
@@ -37,6 +37,10 @@ function runAws(args: string[], env: NodeJS.ProcessEnv): unknown {
     if (/SubscriptionRequiredException|AccessDenied|UnauthorizedOperation|is not authorized to perform/i.test(stderr)) {
       return null // legitimate: no Business/Enterprise support plan, or this specific API outside the credential's IAM scope
     }
+    // No credentials were ever provided — nothing to authenticate with, so
+    // any CLI failure (missing binary, generic auth error with no
+    // recognizable AWS error code) is expected, not a real problem.
+    if (!hasCreds) return null
     const msg = err instanceof Error ? err.message : String(err)
     throw new Error(`AWS Health bootstrap: 'aws ${args.join(' ')}' failed: ${msg}`)
   }
@@ -55,6 +59,7 @@ export class AwsHealthBootstrap implements IConnectorBootstrap {
 
     const env = awsEnv(creds)
     const region = env['AWS_DEFAULT_REGION'] ?? 'us-east-1'
+    const hasCreds = Boolean(creds.accessKeyId && creds.secretAccessKey)
     let entitiesUpserted = 0
     const hints: string[] = []
 
@@ -62,7 +67,7 @@ export class AwsHealthBootstrap implements IConnectorBootstrap {
     // describe-events requires Business/Enterprise support plan.
     // Handle entitlement failure gracefully — return zero entities rather
     // than falling back to fake placeholders.
-    const healthData = runAws(['health', 'describe-events'], env) as {
+    const healthData = runAws(['health', 'describe-events'], env, hasCreds) as {
       events?: Array<{
         arn?: string
         service?: string
@@ -122,7 +127,7 @@ export class AwsHealthBootstrap implements IConnectorBootstrap {
     }
 
     // -- CloudWatch alarms (health-relevant vital signs) ---------------------
-    const alarmsData = runAws(['cloudwatch', 'describe-alarms', '--query', 'MetricAlarms[*]', '--state-value', 'ALARM'], env) as Array<{
+    const alarmsData = runAws(['cloudwatch', 'describe-alarms', '--query', 'MetricAlarms[*]', '--state-value', 'ALARM'], env, hasCreds) as Array<{
       AlarmName: string; StateValue: string; MetricName: string; Namespace: string; AlarmDescription?: string
     }> | null
     if (Array.isArray(alarmsData)) {

@@ -695,18 +695,22 @@ describe('AzureMonitorBootstrap — bootstrap tests (mocked execFile)', () => {
     expect(result.episodeHints[1]).toContain(`${HEALTH_EVENTS_OUTPUT.value.length} service health events discovered`)
   })
 
-  it('returns zero entities gracefully when metrics alert list fails', async () => {
+  // Confirmed live via independent review: this used to assert the OLD
+  // behavior — a real CLI failure with real credentials provided was
+  // silently swallowed into "no data" hint text, indistinguishable from
+  // "az CLI genuinely not authenticated". Real credentials being provided
+  // means a failure here is a real problem (expired/invalid secret,
+  // network outage) that must surface, not report a false-clean result.
+  it('throws when metrics alert list fails with real credentials provided', async () => {
     mockErrorOnce('az: command not found')
     mockStdoutOnce(HEALTH_EMPTY_OUTPUT)
 
     const kg = new FakeKnowledgeGraph()
-    const result = await new AzureMonitorBootstrap(kg).bootstrap(
+    await expect(new AzureMonitorBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any,
       'test-conn',
       creds(),
-    )
-
-    expect(result.episodeHints[0]).toContain('no data')
+    )).rejects.toThrow(/Azure Monitor bootstrap/)
   })
 
   it('skips service health events when no subscriptionId provided', async () => {
@@ -739,17 +743,17 @@ describe('AzureMonitorBootstrap — bootstrap tests (mocked execFile)', () => {
     expect(disabled?.metadata?.['severity']).toBe('low')
   })
 
-  it('handles both alert list and service health failing', async () => {
+  // Same fix as above — real credentials provided, every call fails, must
+  // throw rather than report a false-clean "0 entities" success.
+  it('throws when both alert list and service health fail with real credentials provided', async () => {
     mockError('command not found')
 
     const kg = new FakeKnowledgeGraph()
-    const result = await new AzureMonitorBootstrap(kg).bootstrap(
+    await expect(new AzureMonitorBootstrap(kg).bootstrap(
       '00000000-0000-0000-0000-000000000001' as any,
       'test-conn',
       creds(),
-    )
-
-    expect(result.entitiesUpserted).toBe(0)
+    )).rejects.toThrow(/Azure Monitor bootstrap/)
   })
 
   it('accepts snake_case cred keys', async () => {

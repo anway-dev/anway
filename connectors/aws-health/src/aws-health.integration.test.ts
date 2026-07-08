@@ -94,11 +94,13 @@ function creds(overrides?: Record<string, unknown>): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 // agent.ts uses execFile (argv array — safe against shell injection from
-// LLM-reachable tool-call params); bootstrap.ts still uses execSync (safe
-// there since it only ever runs two hardcoded command strings with no
-// interpolated params). Mock both from the same child_process factory.
-const { execSync, execFile } = vi.hoisted(() => ({ execSync: vi.fn(), execFile: vi.fn() }))
-vi.mock('child_process', () => ({ execSync, execFile }))
+// LLM-reachable tool-call params); bootstrap.ts now also uses
+// execFileSync (argv array, converted from execSync's shell-string form
+// this session — same shell-injection-safety fix already applied to
+// aws-cloudwatch's bootstrap.ts). Mock all three from the same
+// child_process factory.
+const { execFileSync, execFile } = vi.hoisted(() => ({ execFileSync: vi.fn(), execFile: vi.fn() }))
+vi.mock('child_process', () => ({ execFileSync, execFile }))
 
 type ExecFileCallback = (error: Error | null, result: { stdout: string; stderr: string }) => void
 
@@ -396,13 +398,13 @@ describe('AwsHealthAgent — tool tests (mocked execFile, argv array)', () => {
 })
 
 // -- Bootstrap tests --------------------------------------------------------
-describe('AwsHealthBootstrap — bootstrap tests (mocked execSync)', () => {
-  beforeEach(() => { execSync.mockReset() })
+describe('AwsHealthBootstrap — bootstrap tests (mocked execFileSync)', () => {
+  beforeEach(() => { execFileSync.mockReset() })
 
   it('upserts Alert entities from real health describe-events + CloudWatch alarms', async () => {
     // First call: health describe-events → 2 events
     // Second call: cloudwatch describe-alarms → 1 alarm
-    execSync
+    execFileSync
       .mockReturnValueOnce(Buffer.from(JSON.stringify(HEALTH_EVENTS_OUTPUT)))
       .mockReturnValueOnce(Buffer.from(JSON.stringify(CLOUDWATCH_ALARMS_FOR_BOOTSTRAP)))
 
@@ -420,8 +422,10 @@ describe('AwsHealthBootstrap — bootstrap tests (mocked execSync)', () => {
   })
 
   it('returns zero entities gracefully when health describe-events fails (no support plan)', async () => {
-    execSync
-      .mockImplementationOnce(() => { throw new Error('SubscriptionRequiredException') })
+    execFileSync
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('command failed'), { stderr: Buffer.from('An error occurred (SubscriptionRequiredException) when calling the DescribeEvents operation') })
+      })
       .mockReturnValueOnce(Buffer.from(JSON.stringify([])))
 
     const kg = new FakeKnowledgeGraph()
@@ -437,7 +441,7 @@ describe('AwsHealthBootstrap — bootstrap tests (mocked execSync)', () => {
   })
 
   it('accepts snake_case cred keys (access_key_id, secret_access_key, session_token)', async () => {
-    execSync
+    execFileSync
       .mockReturnValueOnce(Buffer.from(JSON.stringify(HEALTH_EVENTS_OUTPUT)))
       .mockReturnValueOnce(Buffer.from(JSON.stringify([])))
 
@@ -449,16 +453,24 @@ describe('AwsHealthBootstrap — bootstrap tests (mocked execSync)', () => {
     )
 
     expect(result.entitiesUpserted).toBe(2)
-    // Verify env got the snake_case creds
-    const callEnv = execSync.mock.calls[0]![1] as { env?: Record<string, string> }
+    // Verify env got the snake_case creds — execFileSync(file, args, options),
+    // so options is the 3rd positional arg (index 2), not the 2nd (index 1)
+    // like execSync(command, options) used to be.
+    const callEnv = execFileSync.mock.calls[0]![2] as { env?: Record<string, string> }
     expect(callEnv.env!['AWS_ACCESS_KEY_ID']).toBe('AKIA_SNAKE')
     expect(callEnv.env!['AWS_SECRET_ACCESS_KEY']).toBe('snake-secret')
     expect(callEnv.env!['AWS_SESSION_TOKEN']).toBe('snake-token')
     expect(callEnv.env!['AWS_DEFAULT_REGION']).toBe('eu-west-1')
   })
 
-  it('handles both describe-events and describe-alarms failing', async () => {
-    execSync.mockImplementation(() => { throw new Error('command not found') })
+  // Confirmed live via independent review: this used to assert the OLD
+  // behavior — a real CLI failure (generic "command not found", no
+  // recognizable AWS error code) with NO credentials configured at all is
+  // legitimately empty (nothing to authenticate with), same reasoning
+  // applied to argocd/azure-monitor/gcp-monitoring/vault's bootstraps this
+  // session.
+  it('gracefully reports zero entities when both calls fail and no credentials are configured', async () => {
+    execFileSync.mockImplementation(() => { throw new Error('command not found') })
 
     const kg = new FakeKnowledgeGraph()
     const result = await new AwsHealthBootstrap(kg).bootstrap(
@@ -471,8 +483,21 @@ describe('AwsHealthBootstrap — bootstrap tests (mocked execSync)', () => {
     expect(result.episodeHints[0]).toContain('no data')
   })
 
+  // New coverage: the same generic failure WITH real credentials provided
+  // must throw instead of reporting a false-clean empty success.
+  it('throws when both calls fail with real credentials provided', async () => {
+    execFileSync.mockImplementation(() => { throw new Error('command not found') })
+
+    const kg = new FakeKnowledgeGraph()
+    await expect(new AwsHealthBootstrap(kg).bootstrap(
+      '00000000-0000-0000-0000-000000000001' as any,
+      'test-conn',
+      { accessKeyId: 'AKIA_TEST', secretAccessKey: 'test-secret' },
+    )).rejects.toThrow(/AWS Health bootstrap/)
+  })
+
   it('skips health events without arn field', async () => {
-    execSync
+    execFileSync
       .mockReturnValueOnce(Buffer.from(JSON.stringify({
         events: [
           { service: 'EC2', region: 'us-east-1', statusCode: 'open' }, // no arn → skip

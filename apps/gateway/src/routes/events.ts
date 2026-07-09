@@ -6,6 +6,7 @@ import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
 import { decryptJson } from '../utils/crypto.js'
 import { IncidentService } from '../services/incident.js'
+import { publishDurable } from '../events/durable-events.js'
 
 const log = pino({ name: 'event-routes' })
 
@@ -117,13 +118,19 @@ async function getEventPub(): Promise<import('redis').RedisClientType | null> {
   return _pub
 }
 
+// Durable publish (outbox) — replaces the old fire-and-forget Redis-only
+// publish; see events/durable-events.ts for the loss/dedupe rationale.
+// Every payload on these routes already carries tenantId; the outbox row
+// is written under that tenant's RLS scope.
 async function tryPublish(pub: import('redis').RedisClientType | null, channel: string, payload: Record<string, unknown>): Promise<void> {
-  if (!pub) return
-  try {
-    await pub.publish(channel, JSON.stringify(payload))
-  } catch (err) {
-    log.error({ err, channel }, 'Redis publish failed')
+  const tenantId = typeof payload['tenantId'] === 'string' ? payload['tenantId'] : null
+  if (!tenantId) {
+    // No tenant — can't write an outbox row; degrade to ephemeral publish.
+    if (!pub) return
+    try { await pub.publish(channel, JSON.stringify(payload)) } catch (err) { log.error({ err, channel }, 'Redis publish failed') }
+    return
   }
+  await publishDurable(pub, tenantId, channel, payload)
 }
 
 // Map alertmanager severity to IncidentSeverity enum

@@ -7,6 +7,7 @@ import { ProviderFactory } from '@anway/agent'
 import type { ProviderConfig } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { claimEvent, publishDurable } from '../events/durable-events.js'
 import { runTenantMappingPhase } from './mapper.js'
 import { startGraphWorker } from './queue.js'
 // Tier 1 — fully operational
@@ -259,6 +260,14 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
         return
       }
       const tid = event.tenantId
+
+      // Cross-replica dedupe (durable-events.ts): with >1 gateway replica,
+      // every replica receives every pub/sub message — exactly one claims
+      // it. Bootstrap events additionally keep their own Redis lock below
+      // (protects against non-outbox publishers like boot-scan too).
+      const eventLogId = (event as { __eventLogId?: string }).__eventLogId
+      if (!(await claimEvent(eventLogId, tid, 'graph-builder'))) return
+
       // Extract connectorType once; only set for connector lifecycle events
       const eventConnectorType = (event as { connectorType?: string }).connectorType
 
@@ -505,14 +514,18 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
           WHERE connector_type = ${source} AND enabled = true
         `.catch(() => [] as Array<{ id: string; tenant_id: string; credentials_enc: string | null; credentials: Record<string, unknown> }>)
         for (const row of rows) {
-          await graphPub.publish('connector_reconnected', JSON.stringify({
+          // Payload deliberately omitted (previously carried decrypted
+          // credentials): this publish is durable now — the outbox persists
+          // the payload to event_log and plaintext credentials must never
+          // land there. The empty-payload branch below loads stored
+          // credentials from connector_config by connectorId.
+          await publishDurable(graphPub as never, row.tenant_id, 'connector_reconnected', {
             type: 'connector_reconnected',
             tenantId: row.tenant_id,
             connectorType: source,
             connectorId: row.id,
-            payload: effectiveCredentials(row),
             at: new Date().toISOString(),
-          })).catch(() => {})
+          }).catch(() => {})
         }
       }
     } catch { /* ignore parse errors */ }

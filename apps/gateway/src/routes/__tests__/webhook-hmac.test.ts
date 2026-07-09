@@ -46,7 +46,12 @@ describe('webhook HMAC authentication', () => {
     })
     expect(r.statusCode).toBe(200)
     expect(r.json()).toEqual({ ok: true })
-  })
+    // The deploy route now also writes a durable event_log outbox row (a
+    // real Postgres roundtrip) before publishing — under `pnpm test`'s
+    // full-parallel load that roundtrip pushed this past vitest's default
+    // 5000ms (passes in 410ms in isolation). Same 15s allowance as the
+    // other real-DB route tests (gate-policies, settings).
+  }, 15_000)
 
   it('rejects a request with an invalid HMAC signature', async () => {
     const r = await app.inject({

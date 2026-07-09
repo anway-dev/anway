@@ -10,6 +10,7 @@ import { effectiveApiKey } from '../utils/credentials.js'
 import { UUID_RE } from '../utils/validators.js'
 import type { TenantId } from '@anway/types'
 import pino from 'pino'
+import { claimEvent } from './durable-events.js'
 
 const log = pino({ name: 'incident-subscriber' })
 
@@ -61,7 +62,7 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
   await sub.subscribe('incident_created', (message) => {
     // Non-blocking: fire-and-forget with error logging
     void (async () => {
-      let payload: { incidentId?: string; tenantId?: string; title?: string; description?: string; severity?: string }
+      let payload: { incidentId?: string; tenantId?: string; title?: string; description?: string; severity?: string; __eventLogId?: string }
       try {
         payload = JSON.parse(message)
       } catch {
@@ -78,6 +79,10 @@ export async function startIncidentSubscriber(redisUrl: string): Promise<void> {
         log.warn({ payload }, 'incident-subscriber: invalid payload — skipping')
         return
       }
+
+      // Cross-replica dedupe — exactly one replica runs the (expensive,
+      // LLM-backed) SRE analysis per incident (durable-events.ts).
+      if (!(await claimEvent(payload.__eventLogId, tenantId, 'incident-subscriber'))) return
 
       // Resolve provider per-tenant from DB (with env fallback)
       const providerConfig = await resolveProviderConfig(tenantId)

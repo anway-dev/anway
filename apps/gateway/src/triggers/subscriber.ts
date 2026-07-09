@@ -5,6 +5,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { UUID_RE } from '../utils/validators.js'
 import pino from 'pino'
+import { claimEvent, publishDurable } from '../events/durable-events.js'
 
 const log = pino({ name: 'trigger-subscriber' })
 
@@ -31,6 +32,9 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
         log.warn({ channel, tenantId: payload.tenantId }, 'subscriber: invalid tenantId — skipping')
         return
       }
+      // Cross-replica dedupe — exactly one replica evaluates trigger rules
+      // for a given event (durable-events.ts).
+      if (!(await claimEvent(payload['__eventLogId'] as string | undefined, payload.tenantId, 'trigger-engine'))) return
       const { tenantId, ...rest } = payload
       const rules = await withTenant(prisma, tenantId, (tx) =>
         tx.$queryRaw<TriggerRule[]>`
@@ -45,7 +49,7 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
       const { actions, perimeters } = await engine.evaluate(channel, rest)
 
       if (actions.length > 0) {
-        await pub.publish('trigger_matched', JSON.stringify({ tenantId, channel, actions, perimeters }))
+        await publishDurable(pub as never, tenantId, 'trigger_matched', { tenantId, channel, actions, perimeters })
         // Write audit event so CERT V can verify trigger actually fired
         await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`

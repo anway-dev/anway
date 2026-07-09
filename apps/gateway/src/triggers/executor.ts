@@ -4,6 +4,7 @@ import { executeTriggerAction } from './actions.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import pino from 'pino'
+import { claimEvent } from '../events/durable-events.js'
 
 const log = pino({ name: 'trigger-executor' })
 
@@ -38,8 +39,13 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
       eventType?: string
       actions: TriggerAction[]
       perimeters?: TriggerPerimeter[]
+      __eventLogId?: string
     }
     try { payload = JSON.parse(message) } catch { return }
+
+    // Cross-replica dedupe — exactly one replica inserts gate rows /
+    // executes read actions for a matched trigger (durable-events.ts).
+    if (!(await claimEvent(payload.__eventLogId, payload.tenantId, 'trigger-executor'))) return
 
     const perimeters = payload.perimeters ?? []
     const systemSentinel = '00000000-0000-0000-0000-000000000000'

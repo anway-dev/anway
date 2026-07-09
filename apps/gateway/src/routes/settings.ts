@@ -6,8 +6,8 @@ import { withTenant } from '../db/prisma.js'
 import type { PrismaClient } from '@prisma/client'
 import { providerRegistry } from '@anway/agent'
 import { encryptJson, decryptJson } from '../utils/crypto.js'
-import { effectiveCredentials } from '../utils/credentials.js'
 import { requireRole, auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
+import { publishDurable } from '../events/durable-events.js'
 import { isSafeURL } from '../utils/safe-url.js'
 import { CONNECTOR_CATALOG } from './connectors.js'
 
@@ -237,12 +237,11 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       const pub = await getSettingsPub().catch(() => null)
       if (pub) {
         const row = await withTenant(prisma, tenantId, (tx) =>
-          tx.$queryRaw<Array<{ id: string; credentials_enc: string | null }>>`
-            SELECT id, credentials_enc FROM connector_config
+          tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM connector_config
             WHERE connector_type = ${type} AND instance_name = ${instanceName} AND tenant_id = ${tenantId}::uuid LIMIT 1
           `
         ).catch(() => [])
-        const credPayload = effectiveCredentials(row[0])
         // connectorId is the connector_config row's own UUID — not the bare
         // type string — so multiple instances of the same type are properly
         // distinguished downstream (bootstrap registry, graph entities,
@@ -252,13 +251,20 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         // First registration → full bootstrap; credential update → reconnect (re-bootstrap with updated creds)
         const eventType = isNew ? 'connector_registered' : 'connector_reconnected'
         await pub.del(`graph:bootstrap:lock:${tenantId}:${connectorId}`).catch(() => {})
-        await pub.publish(eventType, JSON.stringify({
+        // Payload deliberately OMITTED (previously carried decrypted
+        // credentials through Redis): this publish is now durable — the
+        // outbox writes the payload to event_log, and plaintext credentials
+        // must never land in a Postgres table. The graph-builder subscriber
+        // already has an explicit empty-payload path that loads the stored
+        // encrypted credentials from connector_config by connectorId
+        // (subscriber.ts's "carry no payload — load stored credentials"
+        // branch), so dropping them here changes transport, not behavior.
+        await publishDurable(pub, tenantId, eventType, {
           type: eventType,
           tenantId,
           connectorType: type,
           connectorId,
-          payload: { ...credPayload, name: instanceName },
-        }))
+        })
       }
 
       return { ok: true }

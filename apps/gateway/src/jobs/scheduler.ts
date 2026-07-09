@@ -5,6 +5,8 @@ import { withTenant } from '../db/prisma.js'
 import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrief, CloudSecurityScan, CostAnomalyDetection, IncidentRetrospective, DataRetentionJob } from './cron-monitors.js'
 import { SchedulerFactory } from '../scheduler/factory.js'
 import { runFreshnessDecay } from '../kb/freshness-daemon.js'
+import { replayUnconsumedEvents, purgeOldEvents } from '../events/durable-events.js'
+import { createClient } from 'redis'
 import { bootstrapUnindexedConnectors } from '../graph-builder/boot-scan.js'
 import { runMappingPhaseAllTenants } from '../graph-builder/mapper.js'
 import type { IScheduler } from '@anway/agent'
@@ -141,6 +143,35 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
     schedule: '*/5 * * * *',
     async run() {
       return runFreshnessDecay(redisUrl)
+    },
+  })
+
+  // Event replay — re-publishes durable event_log rows any expected consumer
+  // missed (crash between outbox INSERT and publish, or a subscriber that
+  // was down). Bounded by replay_count; claims dedupe consumers that
+  // already processed. See events/durable-events.ts.
+  await scheduler.register({
+    id: 'event-replay',
+    name: 'event_replay',
+    schedule: '*/2 * * * *',
+    async run() {
+      const pub = createClient({ url: redisUrl })
+      await pub.connect()
+      try {
+        return await replayUnconsumedEvents(pub as never)
+      } finally {
+        await pub.quit().catch(() => {})
+      }
+    },
+  })
+
+  // Event log retention — 7 days.
+  await scheduler.register({
+    id: 'event-log-purge',
+    name: 'event_log_purge',
+    schedule: '0 3 * * *',
+    async run() {
+      return purgeOldEvents()
     },
   })
 

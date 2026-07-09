@@ -10,6 +10,7 @@ import { withTenant } from '../db/prisma.js'
 import { requireRole } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
 import { UUID_RE } from '../utils/validators.js'
+import { publishDurable } from '../events/durable-events.js'
 
 let _pub: RedisClientType | null = null
 let _pubConnecting: Promise<RedisClientType | null> | null = null
@@ -85,14 +86,14 @@ export async function incidentRoutes(app: FastifyInstance) {
     try {
       const pub = await getPub()
       if (pub) {
-        await pub.publish('incident_created', JSON.stringify({
+        await publishDurable(pub, user.tenantId, 'incident_created', {
           type: 'incident_created',
           tenantId: user.tenantId,
           incidentId: incident.id,
           title: incident.title,
           severity: incident.severity,
           description: incident.description ?? undefined,
-        }))
+        })
       }
     } catch (err) {
       request.log.warn({ err }, 'incident_created Redis publish failed')

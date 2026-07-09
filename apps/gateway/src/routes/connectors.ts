@@ -10,6 +10,7 @@ import { decryptJson } from '../utils/crypto.js'
 import { isSafeURL } from '../utils/safe-url.js'
 import { testK8sConnectivity } from '@anway/connector-k8s'
 import { createKnowledgeGraph } from '../kb/index.js'
+import { publishDurable } from '../events/durable-events.js'
 
 export interface ConfigField { label: string; key: string; type: string; placeholder?: string }
 export interface CatalogEntry { id: string; name: string; category: string; description: string; color: string; icon: string; capabilities: string[]; configFields: ConfigField[] }
@@ -221,12 +222,12 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
     const pub = await getBootstrapPub()
     if (pub) {
       await pub.del(`graph:bootstrap:lock:${tenantId}:${connectorId}`).catch(() => {})
-      await pub.publish('connector_registered', JSON.stringify({
+      await publishDurable(pub, tenantId, 'connector_registered', {
         type: 'connector_registered',
         tenantId,
         connectorType: type,
         connectorId,
-      }))
+      })
     }
     return { ok: true, message: `Bootstrap triggered for ${type} (${instanceName})` }
   })
@@ -269,12 +270,12 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
       }).catch(() => {})
       const pub = await getBootstrapPub()
       if (pub) {
-        await pub.publish('connector_removed', JSON.stringify({
+        await publishDurable(pub, tenantId, 'connector_removed', {
           type: 'connector_removed',
           tenantId,
           connectorId: id,
           connectorType: rows[0]!.connector_type,
-        }))
+        })
       }
       return reply.code(204).send()
     },
@@ -514,12 +515,12 @@ const KNOWN_CONNECTORS = new Set(CONNECTOR_CATALOG.map(c => c.id))
     const pub = await getBootstrapPub()
     if (pub) {
       await pub.del(`graph:bootstrap:lock:${tenantId}:${connectorId}`).catch(() => {})
-      await pub.publish('connector_reconnected', JSON.stringify({
+      await publishDurable(pub, tenantId, 'connector_reconnected', {
         type: 'connector_reconnected',
         tenantId,
         connectorType: type,
         connectorId,
-      }))
+      })
     }
     return { ok: true, message: `Reconnect triggered for ${type} (${instanceName})` }
   })

@@ -123,7 +123,7 @@ function rewriteKubeconfigForContainer(kubeconfig: string): string {
  * Returns `{ path, cleanup }` — caller MUST call cleanup() when done.
  * Falls back to KUBECONFIG env var if no connector configured.
  */
-async function resolveKubeconfigPath(tenantId: string): Promise<{ path: string; cleanup: () => void }> {
+export async function resolveKubeconfigPath(tenantId: string): Promise<{ path: string; cleanup: () => void }> {
   const noop = () => {}
   try {
     const rows = await prisma.$queryRaw<Array<{ credentials_enc: string | null }>>`

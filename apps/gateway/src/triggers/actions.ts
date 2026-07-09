@@ -67,7 +67,7 @@ async function createIncident(
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ id: string }>>`
         INSERT INTO incidents (tenant_id, title, severity, status, description, created_at)
-        VALUES (${tenantId}::uuid, ${title}, ${severity}::incident_severity, 'active'::incident_status,
+        VALUES (${tenantId}::uuid, ${title}, ${severity}::"IncidentSeverity", 'active'::"IncidentStatus",
                 ${description}, NOW())
         RETURNING id
       `
@@ -338,7 +338,7 @@ async function openWarRoom(
     const rows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ id: string }>>`
         INSERT INTO incidents (tenant_id, title, severity, status, description, created_at)
-        VALUES (${tenantId}::uuid, ${title}, ${severity}::incident_severity, 'active'::incident_status,
+        VALUES (${tenantId}::uuid, ${title}, ${severity}::"IncidentSeverity", 'active'::"IncidentStatus",
                 ${description}, NOW())
         RETURNING id
       `

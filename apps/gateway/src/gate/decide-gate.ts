@@ -4,6 +4,7 @@ import { RedisGateSink } from './redis-gate-sink.js'
 import { getMemoryGateSink } from './memory-gate-fallback.js'
 import { gateDecisionsTotal } from '../metrics.js'
 import { executeTriggerAction } from '../triggers/actions.js'
+import { executePipelineRollback } from '../pipeline/rollback.js'
 
 const TRIGGER_ACTION_TYPES = new Set([
   'notify_oncall', 'create_incident', 'run_runbook', 'notify_channel',
@@ -154,9 +155,25 @@ export async function decideGate(
   ).catch((err) => { log?.warn({ err, gateId }, 'gate.decision audit write failed') })
 
   if (decision === 'approved' && gateRows[0]!.tool_name === 'pipeline_rollback') {
+    // Real execution — helm's native rollback to the previous release
+    // revision (pipeline/rollback.ts). Fired async: `helm rollback --wait`
+    // can take minutes and this function's result is returned synchronously
+    // to the approving HTTP request / chat tool. Outcome lands on the
+    // pipeline's own rollback stage run + audit log either way.
+    const toolArgs = (gateRows[0]!.tool_args ?? {}) as Record<string, unknown>
+    const pipelineId = toolArgs['pipelineId'] as string | undefined
+    if (pipelineId) {
+      void executePipelineRollback(tenantId, pipelineId, userId)
+        .then((r) => log?.info({ gateId, pipelineId, ok: r.ok }, 'pipeline rollback finished'))
+        .catch((err) => log?.error({ err, gateId, pipelineId }, 'pipeline rollback dispatch error'))
+      return {
+        ok: true, code: 200, gateId, decision, executed: true,
+        note: 'Rollback execution started (helm rollback to previous revision) — outcome will appear on the pipeline rollback stage and audit log.',
+      }
+    }
     return {
       ok: true, code: 200, gateId, decision, executed: false,
-      note: 'Rollback approval recorded, but automatic execution is not implemented — re-deploy the previous known-good version manually.',
+      note: 'Rollback approved but the gate carries no pipelineId — cannot resolve which release to roll back.',
     }
   }
 

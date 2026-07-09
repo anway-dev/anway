@@ -35,6 +35,7 @@ import { pipelineRoutes } from './routes/pipeline.js'
 import { environmentRoutes } from './routes/environments.js'
 import { slackCommandRoutes } from './routes/slack-commands.js'
 import { httpRequestDuration, httpRequestsTotal } from './metrics.js'
+import { signalsRoutes } from './routes/signals.js'
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -128,6 +129,7 @@ export async function buildApp() {
   await app.register(pipelineRoutes)
   await app.register(environmentRoutes)
   await app.register(slackCommandRoutes)
+  await app.register(signalsRoutes)
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (process.env['SENTRY_DSN']) {

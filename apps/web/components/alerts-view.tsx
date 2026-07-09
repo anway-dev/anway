@@ -267,6 +267,10 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
+  // Proactive signals inbox (morning briefs, surfaced contexts) — real
+  // signal_inbox rows via /api/signals. Previously write-only: the cron
+  // morning brief and surface_context wrote rows nothing displayed.
+  const [inbox, setInbox] = useState<Array<{ id: string; eventType: string; summary: string; source: string; createdAt: string }>>([]);
 
   useEffect(() => {
     fetch("/api/alerts")
@@ -275,6 +279,18 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
       .catch(() => setAlerts([]))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetch("/api/signals?unreadOnly=true")
+      .then(r => r.json() as Promise<Array<{ id: string; eventType: string; summary: string; source: string; createdAt: string }>>)
+      .then(rows => setInbox(Array.isArray(rows) ? rows : []))
+      .catch(() => setInbox([]))
+  }, [])
+
+  const dismissSignal = async (id: string) => {
+    setInbox(prev => prev.filter(s => s.id !== id))
+    await fetch(`/api/signals/${id}/read`, { method: "POST" }).catch(() => {})
+  }
 
   useEffect(() => {
     fetch("/api/connectors/catalog")
@@ -307,7 +323,10 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
     )
   }
 
-  if (alerts.length === 0) {
+  if (alerts.length === 0 && inbox.length === 0) {
+    // Only fully empty when BOTH live alerts and the proactive inbox are
+    // empty — a quiet morning with a fresh brief is exactly when the
+    // inbox matters most.
     return (
       <div style={{ height: "100%", background: "#080808" }}>
         <EmptyState
@@ -326,6 +345,31 @@ export function AlertsView({ onTriggerOrchestrator, onGoToConnectors }: Props) {
       <style>{`
         @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
       `}</style>
+
+      {/* Proactive signals inbox — morning briefs + surfaced contexts */}
+      {inbox.length > 0 && (
+        <div style={{ padding: "10px 20px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0 }}>
+          <div style={{ fontSize: "10px", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>
+            Proactive Signals ({inbox.length})
+          </div>
+          {inbox.slice(0, 5).map(s => (
+            <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: "8px", padding: "5px 0", borderBottom: "1px solid #111" }}>
+              <span style={{ fontSize: "9px", color: "#8b5cf6", background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: "3px", padding: "1px 6px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>
+                {s.eventType.replace(/_/g, " ")}
+              </span>
+              <span style={{ fontSize: "11px", color: "#aaa", flex: 1, lineHeight: 1.5 }}>{s.summary}</span>
+              <span style={{ fontSize: "9px", color: "#444", flexShrink: 0 }}>{new Date(s.createdAt).toLocaleString()}</span>
+              <button
+                onClick={() => dismissSignal(s.id)}
+                style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer", fontSize: "11px", padding: "0 2px", flexShrink: 0 }}
+                title="Mark read"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ padding: "16px 20px 0", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>

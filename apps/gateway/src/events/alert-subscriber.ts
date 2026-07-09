@@ -89,6 +89,9 @@ export async function startAlertSubscriber(redisUrl: string): Promise<void> {
           incidentId: incident.id,
           title,
           description: desc || undefined,
+          // Explicit service label from the alert — feeds the CAUSED_BY
+          // deploy correlation without title-matching heuristics.
+          ...(service ? { serviceHint: service } : {}),
         }).catch((err) => log.error({ err }, 'alert-subscriber: incident_created publish failed'))
       } catch (err) {
         log.error({ err, tenantId, title }, 'alert-subscriber: failed to create incident')

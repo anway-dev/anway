@@ -158,13 +158,19 @@ export async function replayUnconsumedEvents(
           WHERE e.tenant_id = ${tenantId}::uuid
             AND c.event_id IS NULL
             AND e.replay_count < ${MAX_REPLAYS}
-            AND e.created_at < NOW() - make_interval(secs => ${REPLAY_GRACE_SECONDS})
-            AND e.created_at > NOW() - make_interval(hours => ${REPLAY_MAX_AGE_HOURS})
+            AND e.created_at < NOW() - (${REPLAY_GRACE_SECONDS}::int * INTERVAL '1 second')
+            AND e.created_at > NOW() - (${REPLAY_MAX_AGE_HOURS}::int * INTERVAL '1 hour')
           LIMIT 50
         )
         RETURNING el.id, el.channel, el.payload
       `
-    ).catch(() => [] as Array<{ id: string; channel: string; payload: Record<string, unknown> }>)
+    ).catch((err: Error) => {
+      // Same lesson as incident-correlation.ts: a silent catch here hid a
+      // real SQL error (make_interval + Prisma bigint binding) — the
+      // replayer was a no-op while looking healthy. Log loudly.
+      log.error({ err, tenantId }, 'event replay candidate query failed')
+      return [] as Array<{ id: string; channel: string; payload: Record<string, unknown> }>
+    })
 
     for (const row of rows) {
       try {

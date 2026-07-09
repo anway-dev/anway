@@ -16,8 +16,8 @@ vi.mock('../utils/crypto.js', () => ({
 }))
 const publishDurableMock = vi.fn(async () => {})
 const stampMock = vi.fn(async () => {})
-vi.mock('./durable-events.js', () => ({ publishDurable: (...a: unknown[]) => publishDurableMock(...a) }))
-vi.mock('./webhook-registrar.js', () => ({ stampEventReceived: (...a: unknown[]) => stampMock(...a) }))
+vi.mock('./durable-events.js', () => ({ publishDurable: (...a: unknown[]) => (publishDurableMock as (...args: unknown[]) => unknown)(...a) }))
+vi.mock('./webhook-registrar.js', () => ({ stampEventReceived: (...a: unknown[]) => (stampMock as (...args: unknown[]) => unknown)(...a) }))
 
 import { pollConnectorsOnce } from './connector-poller.js'
 

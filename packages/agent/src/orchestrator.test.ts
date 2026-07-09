@@ -242,6 +242,65 @@ describe('runSession', () => {
     }
   })
 
+  it('applies inferred role for response shaping (effective_role = inferred ?? auth) and audits it', async () => {
+    // Regression test: the intent classifier always produced inferredRole
+    // in its JSON but it was parsed nowhere — effectiveRole was the raw
+    // JWT role forever, so role-aware answering never actually varied.
+    const capturedSystemPrompts: string[] = []
+    const provider: IModelProvider = {
+      modelId: 'mock-model',
+      cheapModelId: 'mock-model-cheap',
+      async chat(_messages, _tools, _opts): Promise<ChatResponse> {
+        return { content: '{"intent":"general","inferredRole":"pm"}', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
+      },
+      async *stream(messages, _tools, _opts) {
+        const sys = messages.find(m => m.role === 'system')
+        if (sys) capturedSystemPrompts.push(sys.content)
+        yield { type: 'text_delta', content: 'ok' }
+        yield { type: 'done', inputTokens: 20, outputTokens: 10 }
+      },
+      formatToolCall(): Message { return { role: 'assistant', content: '' } },
+      formatToolResult(): Message { return { role: 'user', content: '' } },
+    }
+    const auditSink = new InMemoryAuditSink()
+    const orch = createOrchestrator({
+      model: provider, tools: [], perimeter: makePermissivePerimeter(), auditSink,
+      sessionMemory: new InMemorySessionMemory(), knowledgeGraph: makeMockKG(),
+    })
+    await collectEvents(runSession(orch, 'What is the status of Feature X for the Q3 launch?', makeCtx()))
+
+    const roleEvent = auditSink.events.find(e => e.eventType === 'role_inferred')
+    expect(roleEvent).toBeDefined()
+    expect(roleEvent!.payload).toMatchObject({ authRole: 'dev', inferredRole: 'pm' })
+    // Synthesis prompt carries the inferred role's guidance, not the auth role's
+    const synthPrompt = capturedSystemPrompts.join('\n')
+    expect(synthPrompt).toContain('Effective role: pm')
+    expect(synthPrompt).toContain('product manager')
+  })
+
+  it('ignores an invalid inferredRole (never trusts arbitrary classifier output)', async () => {
+    const provider: IModelProvider = {
+      modelId: 'mock-model',
+      cheapModelId: 'mock-model-cheap',
+      async chat(): Promise<ChatResponse> {
+        return { content: '{"intent":"general","inferredRole":"superadmin"}', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
+      },
+      async *stream(_messages, _tools, _opts) {
+        yield { type: 'text_delta', content: 'ok' }
+        yield { type: 'done', inputTokens: 20, outputTokens: 10 }
+      },
+      formatToolCall(): Message { return { role: 'assistant', content: '' } },
+      formatToolResult(): Message { return { role: 'user', content: '' } },
+    }
+    const auditSink = new InMemoryAuditSink()
+    const orch = createOrchestrator({
+      model: provider, tools: [], perimeter: makePermissivePerimeter(), auditSink,
+      sessionMemory: new InMemorySessionMemory(), knowledgeGraph: makeMockKG(),
+    })
+    await collectEvents(runSession(orch, 'hello', makeCtx()))
+    expect(auditSink.events.find(e => e.eventType === 'role_inferred')).toBeUndefined()
+  })
+
   it('logs query_received and agent_spawned audit events', async () => {
     const auditSink = new InMemoryAuditSink()
     const orch = createOrchestrator({

@@ -191,8 +191,27 @@ export async function* runSession(
     reconcileTokenUsage(budget, intentEstimatedTokens, (intentResp?.usage?.inputTokens ?? 0) + (intentResp?.usage?.outputTokens ?? 0))
     totalInputTokens += intentResp?.usage?.inputTokens ?? 0
     totalOutputTokens += intentResp?.usage?.outputTokens ?? 0
-    const parsed = extractJson<{ intent?: unknown }>(intentResp.content)
+    const parsed = extractJson<{ intent?: unknown; inferredRole?: unknown }>(intentResp.content)
     if (typeof parsed.intent === 'string') classifiedIntent = parsed.intent
+    // CLAUDE.md role model: effective_role = inferred_role ?? auth_role.
+    // Confirmed via independent review: the classifier already produced
+    // inferredRole in its JSON, but it was parsed nowhere — effectiveRole
+    // was always the raw JWT role, so a PM asking "status of Feature X"
+    // and an SRE triaging an outage got identical response framing.
+    // Response-shaping ONLY: the access perimeter is resolved separately
+    // from user_perimeters and is NOT touched by inference — a role can
+    // never infer its way into broader tool access.
+    const VALID_ROLES = new Set(['admin', 'sre', 'dev', 'pm', 'ba'])
+    if (typeof parsed.inferredRole === 'string' && VALID_ROLES.has(parsed.inferredRole) && parsed.inferredRole !== ctx.effectiveRole) {
+      const authRole = ctx.effectiveRole
+      ctx = { ...ctx, effectiveRole: parsed.inferredRole as typeof ctx.effectiveRole }
+      auditSink.append({
+        id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
+        sessionId: ctx.sessionId, eventType: 'role_inferred',
+        payload: { authRole, inferredRole: parsed.inferredRole, note: 'response-shaping only — perimeter unchanged' },
+        createdAt: new Date(),
+      }).catch(() => {})
+    }
   } catch (err) {
     auditSink.append({
       id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
@@ -668,8 +687,17 @@ function buildSynthesisMessages(
 
   const noData = findings.every(f => f.toolsUsed.length === 0)
 
+  const ROLE_GUIDANCE: Record<string, string> = {
+    sre: 'Answer as for an on-call SRE: lead with current impact and most likely cause, then evidence (metrics/deploys/logs with timestamps), then concrete next actions. Terse, operational.',
+    dev: 'Answer as for the owning developer: lead with the specific code/deploy-level cause, reference repos/PRs/commits where known, and suggest the concrete fix or test.',
+    pm: 'Answer as for a product manager: lead with user/feature impact and status in plain language, avoid raw infrastructure detail unless it changes the decision, include timeline and who owns the next step.',
+    ba: 'Answer as for a business analyst: lead with measurable outcomes and trends, quantify wherever data allows, avoid implementation detail.',
+    admin: 'Answer as for a platform admin: include configuration, access, and cross-tenant/system-health framing where relevant.',
+  }
+  const roleGuidance = ROLE_GUIDANCE[effectiveRole] ?? ''
   const systemContent =
-    `You are Anway — the orchestrator synthesiser. Your specialist agents have queried all connected data sources in parallel. Effective role: ${effectiveRole}.\n\n` +
+    `You are Anway — the orchestrator synthesiser. Your specialist agents have queried all connected data sources in parallel. Effective role: ${effectiveRole}.\n` +
+    (roleGuidance ? `${roleGuidance}\n\n` : '\n') +
     `${graphContext}\n${connectorContext}\n\n` +
     (sreContext ? `${sreContext}\n\n` : '') +
     `## SPECIALIST AGENT FINDINGS\n` +

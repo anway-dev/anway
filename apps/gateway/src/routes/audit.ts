@@ -4,6 +4,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { redactSecrets } from '../utils/redact.js'
 import { UUID_RE } from '../utils/validators.js'
+import { auditAndDenyIfNotAdmin } from '../plugins/rbac.js'
 
 interface AuditEvent {
   id: string
@@ -123,6 +124,88 @@ export async function auditRoutes(app: FastifyInstance) {
       } as AuditEvent
     }),
       nextCursor: hasMore && last ? `${last.created_at.toISOString()},${last.id}` : null,
+    }
+  })
+
+  // Audit intelligence — CLAUDE.md: "Audit feeds intelligence — org-level
+  // query patterns, bottleneck detection, usage analytics". Confirmed via
+  // independent review: audit_events was written everywhere and read only
+  // by the raw audit-log UI — zero aggregation, no learning loop. One
+  // admin-gated endpoint aggregating the 7-day window:
+  //   - intents: what the org actually asks (top classified intents)
+  //   - activityByDay: query volume trend
+  //   - toolCalls: allowed vs hard-blocked + the top blocked tools
+  //     (bottleneck signal — repeated blocks = perimeter friction or a
+  //     misconfigured connector scope)
+  //   - gates: approval vs rejection counts (trust signal)
+  //   - graphMisses: entities users asked about that the graph doesn't
+  //     know (KB coverage gaps — each one is a bootstrap-worth candidate)
+  //   - roleInferences: how often users work outside their provisioned role
+  app.get('/api/audit/insights', {
+    preHandler: [app.authenticate],
+  }, async (request, reply) => {
+    const user = request.user as { tenantId: string; role?: string }
+    if (await auditAndDenyIfNotAdmin(request, reply)) return
+    const { tenantId } = user
+
+    const [intents, activityByDay, toolCallCounts, topBlockedTools, gates, graphMisses, roleInferences] = await Promise.all([
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ intent: string; count: bigint }>>`
+        SELECT payload->>'intent' AS intent, COUNT(*) AS count FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type = 'agent_spawned'
+          AND created_at > NOW() - INTERVAL '7 days' AND payload->>'intent' IS NOT NULL
+        GROUP BY 1 ORDER BY count DESC LIMIT 10
+      `).catch(() => []),
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ day: string; count: bigint }>>`
+        SELECT to_char(created_at, 'YYYY-MM-DD') AS day, COUNT(*) AS count FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type = 'query_received'
+          AND created_at > NOW() - INTERVAL '7 days'
+        GROUP BY 1 ORDER BY 1
+      `).catch(() => []),
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ event_type: string; count: bigint }>>`
+        SELECT event_type, COUNT(*) AS count FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type IN ('tool_call_allowed', 'tool_call_blocked')
+          AND created_at > NOW() - INTERVAL '7 days'
+        GROUP BY 1
+      `).catch(() => []),
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ tool: string; count: bigint }>>`
+        SELECT payload->>'toolName' AS tool, COUNT(*) AS count FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type = 'tool_call_blocked'
+          AND created_at > NOW() - INTERVAL '7 days' AND payload->>'toolName' IS NOT NULL
+        GROUP BY 1 ORDER BY count DESC LIMIT 10
+      `).catch(() => []),
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ decision: string; count: bigint }>>`
+        SELECT payload->>'decision' AS decision, COUNT(*) AS count FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type = 'gate_decision'
+          AND created_at > NOW() - INTERVAL '7 days' AND payload->>'decision' IS NOT NULL
+        GROUP BY 1
+      `).catch(() => []),
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ entity: string; count: bigint }>>`
+        SELECT payload->>'entityName' AS entity, COUNT(*) AS count FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type = 'graph_miss'
+          AND created_at > NOW() - INTERVAL '7 days' AND payload->>'entityName' IS NOT NULL
+        GROUP BY 1 ORDER BY count DESC LIMIT 10
+      `).catch(() => []),
+      withTenant(prisma, tenantId, (tx) => tx.$queryRaw<Array<{ auth_role: string; inferred_role: string; count: bigint }>>`
+        SELECT payload->>'authRole' AS auth_role, payload->>'inferredRole' AS inferred_role, COUNT(*) AS count
+        FROM audit_events
+        WHERE tenant_id = ${tenantId}::uuid AND event_type = 'role_inferred'
+          AND created_at > NOW() - INTERVAL '7 days'
+        GROUP BY 1, 2 ORDER BY count DESC LIMIT 10
+      `).catch(() => []),
+    ])
+
+    const allowed = Number((toolCallCounts as Array<{ event_type: string; count: bigint }>).find(t => t.event_type === 'tool_call_allowed')?.count ?? 0n)
+    const blocked = Number((toolCallCounts as Array<{ event_type: string; count: bigint }>).find(t => t.event_type === 'tool_call_blocked')?.count ?? 0n)
+
+    return {
+      windowDays: 7,
+      intents: (intents as Array<{ intent: string; count: bigint }>).map(r => ({ intent: r.intent, count: Number(r.count) })),
+      activityByDay: (activityByDay as Array<{ day: string; count: bigint }>).map(r => ({ day: r.day, count: Number(r.count) })),
+      toolCalls: { allowed, blocked, blockRate: allowed + blocked > 0 ? blocked / (allowed + blocked) : 0 },
+      topBlockedTools: (topBlockedTools as Array<{ tool: string; count: bigint }>).map(r => ({ tool: r.tool, count: Number(r.count) })),
+      gates: (gates as Array<{ decision: string; count: bigint }>).map(r => ({ decision: r.decision, count: Number(r.count) })),
+      graphMisses: (graphMisses as Array<{ entity: string; count: bigint }>).map(r => ({ entity: r.entity, count: Number(r.count) })),
+      roleInferences: (roleInferences as Array<{ auth_role: string; inferred_role: string; count: bigint }>).map(r => ({ authRole: r.auth_role, inferredRole: r.inferred_role, count: Number(r.count) })),
     }
   })
 

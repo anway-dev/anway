@@ -15,6 +15,58 @@ describe('StructuralGraph', () => {
       expect(id1).toBe('uuid-1')
       expect(id2).toBe('uuid-1')
     })
+
+    // Regression test: the merge upsert previously never bumped
+    // updated_at, so it stayed frozen at INSERT time forever and
+    // entity-level freshness had no signal to decay from.
+    it('bumps updated_at on every upsert so entity freshness has a real signal', async () => {
+      const query = makeMockQuery([{ id: 'uuid-1' }])
+      const kg = new StructuralGraph(query as any)
+      await kg.upsertEntity({ type: 'Service', name: 'test-svc' }, 'tenant-1' as any)
+      expect(query.mock.calls[0]?.[0]).toContain('updated_at = NOW()')
+    })
+  })
+
+  describe('resolveContext freshness', () => {
+    // Regression test: freshness previously came only from a content-ILIKE
+    // heuristic against kb_entries — an entity with no string-matching
+    // kb_entry served as freshness 1.0 regardless of its own age. Entity
+    // updated_at staleness is now the primary signal; the overall value is
+    // min(entityFreshness, kbFreshness).
+    it('bounds freshness by the entity\'s own updated_at staleness, not just kb_entries', async () => {
+      const query = vi.fn(async (sql: string) => {
+        if (sql.includes('FROM entities WHERE id') && sql.includes('SELECT id')) {
+          return [{ id: 'e-1', tenantId: 'tenant-1', type: 'Service', name: 'payments-api', metadata: {} }]
+        }
+        if (sql.includes('entity_graph')) return []
+        if (sql.includes('FROM relationships')) return []
+        if (sql.includes('AS ef')) return [{ ef: 0.3 }]   // stale entity (decayed)
+        if (sql.includes('kb_entries')) return []          // no kb_entries match at all
+        if (sql.includes('kb_episodes')) return []
+        return []
+      })
+      const kg = new StructuralGraph(query as any)
+      const ctx = await kg.resolveContext('e-1', 'tenant-1' as any, 1)
+      // Old behavior: no kb_entries match → 1.0. New: entity staleness wins.
+      expect(ctx.freshness).toBe(0.3)
+    })
+
+    it('takes the lower of entity staleness and kb_entries score', async () => {
+      const query = vi.fn(async (sql: string) => {
+        if (sql.includes('FROM entities WHERE id') && sql.includes('SELECT id')) {
+          return [{ id: 'e-1', tenantId: 'tenant-1', type: 'Service', name: 'payments-api', metadata: {} }]
+        }
+        if (sql.includes('entity_graph')) return []
+        if (sql.includes('FROM relationships')) return []
+        if (sql.includes('AS ef')) return [{ ef: 0.9 }]     // fresh entity
+        if (sql.includes('kb_entries')) return [{ fs: 0.4 }] // stale kb entry
+        if (sql.includes('kb_episodes')) return []
+        return []
+      })
+      const kg = new StructuralGraph(query as any)
+      const ctx = await kg.resolveContext('e-1', 'tenant-1' as any, 1)
+      expect(ctx.freshness).toBe(0.4)
+    })
   })
 
   describe('getEntity', () => {

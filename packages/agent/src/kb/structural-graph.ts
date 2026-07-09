@@ -211,12 +211,34 @@ export class StructuralGraph implements IKnowledgeGraph {
       }
     }
 
-    // Compute real freshness from kb_entries
+    // Freshness = min(entity-level staleness, kb_entries signal).
+    //
+    // Confirmed via independent review: freshness previously came ONLY
+    // from a content-ILIKE heuristic against kb_entries — an entity with
+    // no string-matching kb_entry served as freshness 1.0 regardless of
+    // age. Entities themselves are the structural graph's source of truth,
+    // so their own updated_at (bumped on every real upsert — see
+    // upsertEntity) is the primary signal: linear decay to 0 over
+    // ENTITY_FULL_DECAY_SECONDS (7 days — structural topology is
+    // slow-moving; 3.5 days without any connector event re-confirming the
+    // entity crosses the <0.5 "agent must re-fetch" threshold CLAUDE.md
+    // defines, and the orchestrator's existing [STALE — verify] prompt
+    // flag fires from this same number).
+    const ENTITY_FULL_DECAY_SECONDS = 7 * 24 * 3600
+    const entityFreshRows = await this.query<{ ef: number }>(
+      `SELECT GREATEST(0.0, 1.0 - (EXTRACT(EPOCH FROM (NOW() - updated_at)) / $3)) AS ef
+       FROM entities WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      [entityId, tenantId, ENTITY_FULL_DECAY_SECONDS],
+    ).catch(() => [])
+    const entityFreshness = entityFreshRows.length > 0 ? Number(entityFreshRows[0]!.ef) : 1.0
+
     const freshRows = await this.query<{ fs: number }>(
       `SELECT freshness_score AS fs FROM kb_entries WHERE tenant_id = $1::uuid AND content ILIKE $2 ORDER BY freshness_score ASC LIMIT 1`,
       [tenantId, `%${entity.name}%`],
     ).catch(() => [])
-    const freshness = freshRows.length > 0 ? freshRows[0]!.fs : 1.0
+    const kbFreshness = freshRows.length > 0 ? Number(freshRows[0]!.fs) : 1.0
+
+    const freshness = Math.min(entityFreshness, kbFreshness)
 
     return {
       primaryEntity: entity,
@@ -263,11 +285,18 @@ export class StructuralGraph implements IKnowledgeGraph {
     // (imageUri, triggeredBy, workflowRun, commitMessage) on the same Deploy
     // entity, instead of the two events' facts accumulating on one record
     // as GraphBuilder's event-driven upsert model requires.
+    // updated_at bumped on every upsert — confirmed via independent review
+    // that without it, updated_at stayed frozen at INSERT time forever
+    // (the merge only touched metadata), so entity-level freshness (below,
+    // resolveContext) had no real signal to decay from: a 3-week-old
+    // entity and one re-confirmed by a bootstrap 5 minutes ago were
+    // indistinguishable.
     const rows = await this.query<{ id: string }>(
       `INSERT INTO entities (tenant_id, type, name, metadata)
        VALUES ($1::uuid, $2, $3, $4::jsonb)
        ON CONFLICT (tenant_id, type, name) DO UPDATE
-         SET metadata = entities.metadata || EXCLUDED.metadata
+         SET metadata = entities.metadata || EXCLUDED.metadata,
+             updated_at = NOW()
        RETURNING id`,
       [tenantId, entity.type, entity.name, JSON.stringify(entity.metadata ?? {})],
     )

@@ -113,8 +113,9 @@ export async function connectorsRoutes(app: FastifyInstance) {
     if (!KNOWN_CONNECTORS.has(type)) return reply.code(400).send({ error: `unknown connector type: ${type}` })
     const instanceName = request.query.instanceName?.trim() || type
     const row = await withTenant(prisma, tenantId, (tx) =>
-      tx.$queryRaw<{ bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null }[]>`
-        SELECT bootstrapped_at AS bootstrapped_at, last_bootstrap_summary AS last_bootstrap_summary
+      tx.$queryRaw<{ bootstrapped_at: Date | null; last_bootstrap_summary: Record<string, unknown> | null; last_event_received_at: Date | null; sync_state: Record<string, unknown> }[]>`
+        SELECT bootstrapped_at AS bootstrapped_at, last_bootstrap_summary AS last_bootstrap_summary,
+               last_event_received_at, sync_state
         FROM connector_config WHERE tenant_id = ${tenantId}::uuid AND connector_type = ${type} AND instance_name = ${instanceName}
       `
     ).catch(() => [])
@@ -126,6 +127,12 @@ export async function connectorsRoutes(app: FastifyInstance) {
       summary: sanitizeBootstrapSummary(summary),
       namespaces: Array.isArray(summary?.['namespaces']) ? summary['namespaces'] as string[] : [],
       namespaceFilter: Array.isArray(summary?.['namespace_filter']) ? summary['namespace_filter'] as string[] : null,
+      // Ongoing-sync liveness: when the last real vendor event arrived
+      // (webhook or poll), and whether a vendor webhook is registered —
+      // silence is visible instead of a stale graph looking identical to a
+      // quiet org.
+      lastEventReceivedAt: row[0]!.last_event_received_at,
+      webhookRegistered: Boolean(row[0]!.sync_state?.['webhookRegisteredAt']),
     }
   })
 

@@ -7,6 +7,8 @@ import { prisma } from '../db/client.js'
 import { decryptJson } from '../utils/crypto.js'
 import { IncidentService } from '../services/incident.js'
 import { publishDurable } from '../events/durable-events.js'
+import { registerGithubWebhookRoute } from './github-webhook.js'
+import { stampEventReceivedByType } from '../events/webhook-registrar.js'
 
 const log = pino({ name: 'event-routes' })
 
@@ -149,6 +151,10 @@ export async function eventRoutes(app: FastifyInstance) {
     }
   })
 
+  // Native GitHub webhook receiver — needs this plugin scope's raw-body
+  // capture for HMAC verification. See github-webhook.ts.
+  registerGithubWebhookRoute(app, getEventPub)
+
   // Authenticate: static webhook token first, then HMAC, then JWT
   const authenticateEvent = async (request: FastifyRequest, reply: FastifyReply) => {
     // Static webhook token / per-tenant alertmanager token — no HMAC required on top.
@@ -192,6 +198,10 @@ export async function eventRoutes(app: FastifyInstance) {
     const { tenantId } = user
     const pub = await getEventPub()
     const service = new IncidentService(prisma)
+
+    // Event-silence visibility: stamp the alertmanager connector as having
+    // delivered a real event (webhook-registrar.ts).
+    await stampEventReceivedByType(tenantId, 'alertmanager')
 
     for (const alert of body.alerts) {
       // Only skip explicitly resolved alerts (status='resolved') — default to firing

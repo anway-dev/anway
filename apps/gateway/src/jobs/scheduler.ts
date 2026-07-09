@@ -6,6 +6,7 @@ import { ServiceHealthSweep, SloBurnCheck, DeployHealthReport, OncallMorningBrie
 import { SchedulerFactory } from '../scheduler/factory.js'
 import { runFreshnessDecay } from '../kb/freshness-daemon.js'
 import { replayUnconsumedEvents, purgeOldEvents } from '../events/durable-events.js'
+import { pollConnectorsOnce } from '../events/connector-poller.js'
 import { createClient } from 'redis'
 import { bootstrapUnindexedConnectors } from '../graph-builder/boot-scan.js'
 import { runMappingPhaseAllTenants } from '../graph-builder/mapper.js'
@@ -159,6 +160,23 @@ export async function createCronJobs(redisUrl: string): Promise<IScheduler> {
       await pub.connect()
       try {
         return await replayUnconsumedEvents(pub as never)
+      } finally {
+        await pub.quit().catch(() => {})
+      }
+    },
+  })
+
+  // Connector polling fallback — ongoing sync for connectors without an
+  // active vendor webhook (see events/connector-poller.ts).
+  await scheduler.register({
+    id: 'connector-poll',
+    name: 'connector_poll',
+    schedule: '*/5 * * * *',
+    async run() {
+      const pub = createClient({ url: redisUrl })
+      await pub.connect()
+      try {
+        return await pollConnectorsOnce(pub as never)
       } finally {
         await pub.quit().catch(() => {})
       }

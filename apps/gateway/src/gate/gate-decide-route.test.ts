@@ -58,7 +58,9 @@ describe('POST /api/gate', () => {
       payload: { action: 'editor.commit', target: '/tmp/x' },
     })
     expect(res.statusCode).not.toBe(403)
-  })
+    // Real DB roundtrip (gate insert attempt) — same full-parallel-load
+    // allowance as this file's other DB-touching tests.
+  }, 15_000)
 
   it('still lets sre and admin past the role check', async () => {
     for (const role of ['sre', 'admin']) {
@@ -69,7 +71,7 @@ describe('POST /api/gate', () => {
       })
       expect(res.statusCode).not.toBe(403)
     }
-  })
+  }, 15_000)
 })
 
 describe('POST /api/gate/:gateId/decide', () => {

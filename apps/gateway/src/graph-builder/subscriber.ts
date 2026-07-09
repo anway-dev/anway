@@ -8,6 +8,7 @@ import type { ProviderConfig } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 import { createKnowledgeGraph } from '../kb/index.js'
 import { claimEvent, publishDurable } from '../events/durable-events.js'
+import { ensureGithubWebhook } from '../events/webhook-registrar.js'
 import { runTenantMappingPhase } from './mapper.js'
 import { startGraphWorker } from './queue.js'
 // Tier 1 — fully operational
@@ -445,6 +446,17 @@ export async function startGraphBuilderSubscriber(redisUrl: string, log: Subscri
               tenantId: tid, action: 'connector.bootstrap_completed', resource: connectorType, outcome: 'success',
               metadata: { connectorType, message: nsCount !== undefined ? `Bootstrap complete — ${nsCount} namespace${nsCount !== 1 ? 's' : ''} discovered` : 'Bootstrap complete' },
             }).catch(() => {})
+
+            // Ongoing sync: register the vendor webhook after a successful
+            // bootstrap (CLAUDE.md: "After bootstrap, connector registers
+            // event subscriptions"). Best-effort + idempotent — failure or
+            // a missing ANWAY_PUBLIC_URL falls back to connector-poller.ts,
+            // audit-logged either way inside the registrar.
+            if (connectorType === 'github' && eventConnectorId && UUID_RE.test(eventConnectorId)) {
+              const bootstrapCreds = (event as { payload?: Record<string, unknown> }).payload ?? {}
+              void ensureGithubWebhook(tid, eventConnectorId, bootstrapCreds)
+                .catch((err: Error) => log.warn({ err, tenantId: tid }, 'github webhook registration errored'))
+            }
 
             // Mapping phase — runs after every bootstrap to resolve cross-entity relationships
             appendAuditEvent({ tenantId: tid, action: 'connector.mapping_started', resource: connectorType, outcome: 'success', metadata: { connectorType, message: 'Resolving entity relationships…' } }).catch(() => {})

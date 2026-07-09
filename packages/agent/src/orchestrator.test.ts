@@ -255,7 +255,7 @@ describe('runSession', () => {
       },
       async *stream(messages, _tools, _opts) {
         const sys = messages.find(m => m.role === 'system')
-        if (sys) capturedSystemPrompts.push(sys.content)
+        if (sys && typeof sys.content === 'string') capturedSystemPrompts.push(sys.content)
         yield { type: 'text_delta', content: 'ok' }
         yield { type: 'done', inputTokens: 20, outputTokens: 10 }
       },

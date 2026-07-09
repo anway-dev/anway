@@ -35,44 +35,70 @@ export class ConfluenceBootstrap implements IConnectorBootstrap {
     // per-space permissions is a legitimate partial case, same reasoning
     // as the AWS per-API AccessDenied handling elsewhere this session) but
     // now distinguishes that from a fully broken connector too.
-    const spaceResp = await fetch(`${baseUrl}/wiki/rest/api/space?limit=50`, { headers })
-    if (!spaceResp.ok) {
-      throw new Error(`confluence: GET /wiki/rest/api/space failed with HTTP ${spaceResp.status}`)
+    // Paginate to completion with a hard budget — confirmed via independent
+    // review: previously one page of spaces (limit=50) and one page of
+    // content per space (limit=20), no pagination — a real wiki got a
+    // silently partial graph. Truncation by the budget is REPORTED below.
+    const MAX_SPACES = 500
+    const MAX_PAGES_PER_SPACE = 200
+    const SPACE_PAGE = 50
+    const CONTENT_PAGE = 50
+    let truncated = false
+
+    const spaces: Array<{ key: string; name: string }> = []
+    for (let start = 0; ; start += SPACE_PAGE) {
+      const spaceResp = await fetch(`${baseUrl}/wiki/rest/api/space?limit=${SPACE_PAGE}&start=${start}`, { headers })
+      if (!spaceResp.ok) {
+        throw new Error(`confluence: GET /wiki/rest/api/space failed with HTTP ${spaceResp.status}`)
+      }
+      const batch = (await spaceResp.json() as { results?: Array<{ key: string; name: string }> }).results ?? []
+      spaces.push(...batch)
+      if (batch.length < SPACE_PAGE) break
+      if (spaces.length >= MAX_SPACES) { truncated = true; break }
     }
-    const spaces = (await spaceResp.json() as { results?: Array<{ key: string; name: string }> }).results ?? []
+
     for (const space of spaces) {
-      let pageResp: Response
-      try {
-        pageResp = await fetch(`${baseUrl}/wiki/rest/api/space/${space.key}/content?limit=20`, { headers })
-      } catch {
-        continue // genuine per-space network error — try the other spaces
-      }
-      if (!pageResp.ok) {
-        // 403/404 for one specific space is a legitimate per-space
-        // permission gap; anything else (5xx, auth entirely broken) is a
-        // real failure that must not look identical to "empty space".
-        if (pageResp.status === 403 || pageResp.status === 404) continue
-        throw new Error(`confluence: GET pages for space ${space.key} failed with HTTP ${pageResp.status}`)
-      }
-      const pages = (await pageResp.json() as { results?: Array<{ id: string; title: string; _links?: { webui?: string } }> }).results ?? []
-      for (const page of pages) {
-        await this.kg.upsertEntity({
-          type: 'Doc', name: page.title,
-          metadata: {
-            externalId: page.id,
-            space: space.key,
-            url: `${baseUrl}${page._links?.webui ?? `/wiki/spaces/${space.key}/pages/${page.id}`}`,
-            connectorCoordinates: { confluence: { resourceIds: { spaceKey: space.key, pageId: page.id, pageTitle: page.title } } },
-          },
-        }, tenantId)
-        entitiesUpserted++
+      let spacePages = 0
+      for (let start = 0; ; start += CONTENT_PAGE) {
+        let pageResp: Response
+        try {
+          pageResp = await fetch(`${baseUrl}/wiki/rest/api/space/${space.key}/content?limit=${CONTENT_PAGE}&start=${start}`, { headers })
+        } catch {
+          break // genuine per-space network error — try the other spaces
+        }
+        if (!pageResp.ok) {
+          // 403/404 for one specific space is a legitimate per-space
+          // permission gap; anything else (5xx, auth entirely broken) is a
+          // real failure that must not look identical to "empty space".
+          if (pageResp.status === 403 || pageResp.status === 404) break
+          throw new Error(`confluence: GET pages for space ${space.key} failed with HTTP ${pageResp.status}`)
+        }
+        const pages = (await pageResp.json() as { results?: Array<{ id: string; title: string; _links?: { webui?: string } }> }).results ?? []
+        for (const page of pages) {
+          await this.kg.upsertEntity({
+            type: 'Doc', name: page.title,
+            metadata: {
+              externalId: page.id,
+              space: space.key,
+              url: `${baseUrl}${page._links?.webui ?? `/wiki/spaces/${space.key}/pages/${page.id}`}`,
+              connectorCoordinates: { confluence: { resourceIds: { spaceKey: space.key, pageId: page.id, pageTitle: page.title } } },
+            },
+          }, tenantId)
+          entitiesUpserted++
+          spacePages++
+        }
+        if (pages.length < CONTENT_PAGE) break
+        if (spacePages >= MAX_PAGES_PER_SPACE) { truncated = true; break }
       }
     }
 
     return {
       entitiesUpserted,
       relationshipsUpserted: 0,
-      episodeHints: entitiesUpserted > 0 ? [`confluence: bootstrapped ${entitiesUpserted} docs`] : ['confluence: no entities found'],
+      episodeHints: [
+        ...(entitiesUpserted > 0 ? [`confluence: bootstrapped ${entitiesUpserted} docs`] : ['confluence: no entities found']),
+        ...(truncated ? ['confluence: TRUNCATED by budget — graph is partial'] : []),
+      ],
     }
   }
 }

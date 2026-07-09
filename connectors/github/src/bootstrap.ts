@@ -27,12 +27,17 @@ export class GitHubBootstrap implements IConnectorBootstrap {
 
     try {
       let repos: GitHubRepo[] = []
-      // List repos for the org
-      for (let page = 1; page <= 5; page++) {
+      let reposTruncated = false
+      // List repos for the org — paginate with a hard budget (10 pages =
+      // 1000 repos); when the budget truncates, report it in episodeHints
+      // below instead of silently serving a partial graph.
+      const MAX_REPO_PAGES = 10
+      for (let page = 1; ; page++) {
         const pageRepos = await this.fetchJson<GitHubRepo[]>(baseUrl, `/orgs/${org}/repos?type=source&per_page=100&page=${page}`, token)
         if (!Array.isArray(pageRepos) || pageRepos.length === 0) break
         repos = repos.concat(pageRepos)
         if (pageRepos.length < 100) break
+        if (page >= MAX_REPO_PAGES) { reposTruncated = true; break }
       }
 
       let entitiesUpserted = 0
@@ -138,9 +143,16 @@ export class GitHubBootstrap implements IConnectorBootstrap {
       }
 
       const hints = [`GitHub bootstrap: ${repos.length} repos indexed`]
+      if (reposTruncated) hints.push(`GitHub bootstrap: TRUNCATED at ${MAX_REPO_PAGES * 100} repos — graph is partial`)
       return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
-    } catch {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['GitHub bootstrap: API call failed'] }
+    } catch (err) {
+      // Same swallow-everything bug fixed across 17 other connectors this
+      // session, still present here in the single most important one: an
+      // invalid/expired token reported a plausible "API call failed" empty
+      // SUCCESS, indistinguishable from an org with no repos. Real
+      // failures must throw so graph-builder records bootstrap_failed.
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`GitHub bootstrap failed: ${msg}`)
     }
   }
 }

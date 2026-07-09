@@ -35,6 +35,22 @@ async function pdGet(conn: PdConn, path: string): Promise<unknown> {
   return res.json()
 }
 
+// Offset pagination to completion with a hard budget — confirmed via
+// independent review: users/teams/oncalls each fetched one page
+// (limit=100) with no pagination, silently truncating any org with >100
+// of each. PagerDuty's REST API paginates via offset/limit + `more`.
+async function pdGetAll<T>(conn: PdConn, pathBase: string, key: string, cap: number): Promise<{ items: T[]; capped: boolean }> {
+  const items: T[] = []
+  for (let offset = 0; ; offset += 100) {
+    const sep = pathBase.includes('?') ? '&' : '?'
+    const resp = await pdGet(conn, `${pathBase}${sep}limit=100&offset=${offset}`) as Record<string, unknown> & { more?: boolean }
+    const page = (resp[key] as T[] | undefined) ?? []
+    items.push(...page)
+    if (resp.more !== true) return { items, capped: false }
+    if (items.length >= cap) return { items, capped: true }
+  }
+}
+
 export class PagerdutyBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
 
@@ -58,8 +74,10 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
     // only because FakeKnowledgeGraph's test double happens to return
     // exactly `${type}:${name}` as its id.
     const engineerIdByPdUserId = new Map<string, string>()
-    const usersResp = await pdGet(conn, '/users?limit=100') as { users?: PdUser[] }
-    const users = usersResp.users ?? []
+    let truncated = false
+    const usersRes = await pdGetAll<PdUser>(conn, '/users', 'users', 2000)
+    if (usersRes.capped) truncated = true
+    const users = usersRes.items
     for (const user of users) {
       const engineerId = await this.kg.upsertEntity({
         type: 'Engineer',
@@ -78,8 +96,9 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
 
     // 2. Teams → Team entities. Same real-id capture as above.
     const teamIdByPdTeamId = new Map<string, string>()
-    const teamsResp = await pdGet(conn, '/teams?limit=100') as { teams?: PdTeam[] }
-    const teams = teamsResp.teams ?? []
+    const teamsRes = await pdGetAll<PdTeam>(conn, '/teams', 'teams', 1000)
+    if (teamsRes.capped) truncated = true
+    const teams = teamsRes.items
     for (const team of teams) {
       const teamId = await this.kg.upsertEntity({
         type: 'Team',
@@ -105,8 +124,9 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
     // team, though one commonly maps to one or more). Resolved properly
     // here, with each distinct escalation policy fetched at most once.
     const teamsByEscalationPolicyId = new Map<string, PdEscalationPolicy['teams']>()
-    const oncallsResp = await pdGet(conn, '/oncalls?limit=100') as { oncalls?: PdOncall[] }
-    const oncalls = oncallsResp.oncalls ?? []
+    const oncallsRes = await pdGetAll<PdOncall>(conn, '/oncalls', 'oncalls', 2000)
+    if (oncallsRes.capped) truncated = true
+    const oncalls = oncallsRes.items
     for (const oncall of oncalls) {
       const pdUserId = oncall.user?.id
       const epId = oncall.escalation_policy?.id
@@ -141,6 +161,7 @@ export class PagerdutyBootstrap implements IConnectorBootstrap {
     }
 
     hints.push(`PagerDuty bootstrap: ${users.length} users, ${teams.length} teams, ${oncalls.length} oncalls`)
+    if (truncated) hints.push('PagerDuty bootstrap: TRUNCATED by budget — graph is partial')
     return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
   }
 }

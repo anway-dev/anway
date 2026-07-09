@@ -18,12 +18,27 @@ export class VercelBootstrap implements IConnectorBootstrap {
     // 0 entities. Hits Vercel's real cloud API (not a local default), so a
     // network failure is a real outage worth surfacing — only "no token
     // configured" (above) is legitimately empty.
-    const res = await fetch(`${payload['baseUrl'] ?? 'https://api.vercel.com'}/v9/projects`, { headers })
-    if (!res.ok) {
-      throw new Error(`Vercel bootstrap: /v9/projects failed with HTTP ${res.status}`)
+    // Paginate to completion with a hard budget (Vercel: pagination.next
+    // timestamp cursor via ?until=) — confirmed via independent review this
+    // fetched one page (default 20!), silently truncating any account with
+    // >20 projects.
+    const MAX_PROJECTS = 1000
+    const base = (payload['baseUrl'] as string | undefined) ?? 'https://api.vercel.com'
+    const projects: Array<{ id: string; name: string }> = []
+    let truncated = false
+    let until: number | null = null
+    for (;;) {
+      const untilParam = until != null ? `&until=${until}` : ''
+      const res = await fetch(`${base}/v9/projects?limit=100${untilParam}`, { headers })
+      if (!res.ok) {
+        throw new Error(`Vercel bootstrap: /v9/projects failed with HTTP ${res.status}`)
+      }
+      const data = await res.json() as { projects?: Array<{ id: string; name: string }>; pagination?: { next?: number | null } }
+      projects.push(...(data.projects ?? []))
+      if (data.pagination?.next == null) break
+      if (projects.length >= MAX_PROJECTS) { truncated = true; break }
+      until = data.pagination.next
     }
-    const data = await res.json() as { projects?: Array<{ id: string; name: string }> }
-    const projects = data.projects ?? []
     let entitiesUpserted = 0
     for (const p of projects) {
       await this.kg.upsertEntity({
@@ -35,6 +50,12 @@ export class VercelBootstrap implements IConnectorBootstrap {
       }, tenantId)
       entitiesUpserted++
     }
-    return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`Vercel: ${entitiesUpserted} projects indexed`] }
+    return {
+      entitiesUpserted, relationshipsUpserted: 0,
+      episodeHints: [
+        `Vercel: ${entitiesUpserted} projects indexed`,
+        ...(truncated ? [`Vercel bootstrap: TRUNCATED at ${MAX_PROJECTS} projects — graph is partial`] : []),
+      ],
+    }
   }
 }

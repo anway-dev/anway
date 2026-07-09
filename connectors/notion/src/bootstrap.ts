@@ -22,15 +22,27 @@ export class NotionBootstrap implements IConnectorBootstrap {
     // 0 entities. This hits Notion's real cloud API (not a local default),
     // so a network failure is a real outage worth surfacing, not
     // swallowing — only "no token configured" (above) is legitimately empty.
-    const res = await fetch(`${payload['baseUrl'] ?? 'https://api.notion.com'}/v1/search`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ filter: { value: 'database', property: 'object' } }),
-    })
-    if (!res.ok) {
-      throw new Error(`Notion bootstrap: /v1/search failed with HTTP ${res.status}`)
+    // Cursor-paginate to completion with a hard budget (Notion:
+    // start_cursor/has_more) — confirmed via independent review this
+    // fetched one page (default 100), silently truncating larger workspaces.
+    const MAX_DATABASES = 1000
+    const results: Array<{ id: string; title?: Array<{ plain_text: string }> }> = []
+    let truncated = false
+    let startCursor: string | undefined
+    for (;;) {
+      const res = await fetch(`${payload['baseUrl'] ?? 'https://api.notion.com'}/v1/search`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ filter: { value: 'database', property: 'object' }, ...(startCursor ? { start_cursor: startCursor } : {}) }),
+      })
+      if (!res.ok) {
+        throw new Error(`Notion bootstrap: /v1/search failed with HTTP ${res.status}`)
+      }
+      const data = await res.json() as { results?: Array<{ id: string; title?: Array<{ plain_text: string }> }>; has_more?: boolean; next_cursor?: string | null }
+      results.push(...(data.results ?? []))
+      if (!data.has_more || !data.next_cursor) break
+      if (results.length >= MAX_DATABASES) { truncated = true; break }
+      startCursor = data.next_cursor
     }
-    const data = await res.json() as { results?: Array<{ id: string; title?: Array<{ plain_text: string }> }> }
-    const results = data.results ?? []
     let entitiesUpserted = 0
     for (const db of results) {
       const title = db.title?.[0]?.plain_text ?? db.id
@@ -43,6 +55,12 @@ export class NotionBootstrap implements IConnectorBootstrap {
       }, tenantId)
       entitiesUpserted++
     }
-    return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`Notion: ${entitiesUpserted} databases indexed`] }
+    return {
+      entitiesUpserted, relationshipsUpserted: 0,
+      episodeHints: [
+        `Notion: ${entitiesUpserted} databases indexed`,
+        ...(truncated ? [`Notion bootstrap: TRUNCATED at ${MAX_DATABASES} databases — graph is partial`] : []),
+      ],
+    }
   }
 }

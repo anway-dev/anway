@@ -48,7 +48,16 @@ export class GrafanaBootstrap implements IConnectorBootstrap {
     let alertRules: Array<{ uid: string; title: string; labels?: Record<string, string> }>
     let datasources: Array<{ uid: string; name: string; type: string }>
     try {
-      dashboards = await fetchList(`/api/search?type=dash-db&limit=100`, 'dashboard search')
+      // Dashboards paginate (page param, 100/page); alert rules and
+      // datasources are returned as full lists by Grafana's API. Confirmed
+      // via independent review: one page (limit=100) silently truncated
+      // any instance with >100 dashboards. Hard budget 2000.
+      dashboards = []
+      for (let page = 1; page <= 20; page++) {
+        const batch = await fetchList<{ uid: string; title: string }>(`/api/search?type=dash-db&limit=100&page=${page}`, 'dashboard search')
+        dashboards.push(...batch)
+        if (batch.length < 100) break
+      }
       alertRules = await fetchList(`/api/v1/provisioning/alert-rules`, 'alert rules')
       datasources = await fetchList(`/api/datasources`, 'datasources')
     } catch (err) {

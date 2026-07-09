@@ -33,9 +33,26 @@ export class SlackBootstrap implements IConnectorBootstrap {
     let entitiesUpserted = 0
     const hints: string[] = []
 
-    // Public channels → Team entities (Slack channel ≈ team comms surface)
-    const resp = await slackGet(conn, '/api/conversations.list?types=public_channel&limit=200') as { channels?: SlackChannel[] }
-    const channels = resp.channels ?? []
+    // Public channels → Team entities (Slack channel ≈ team comms surface).
+    // Paginate via Slack's real cursor convention
+    // (response_metadata.next_cursor) with a hard budget — confirmed via
+    // independent review this fetched one page (limit=200) with no cursor
+    // loop, silently truncating any workspace with >200 public channels.
+    const MAX_CHANNELS = 2000
+    const channels: SlackChannel[] = []
+    let truncated = false
+    let cursor = ''
+    for (;;) {
+      const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+      const resp = await slackGet(conn, `/api/conversations.list?types=public_channel&limit=200${cursorParam}`) as {
+        channels?: SlackChannel[]
+        response_metadata?: { next_cursor?: string }
+      }
+      channels.push(...(resp.channels ?? []))
+      cursor = resp.response_metadata?.next_cursor ?? ''
+      if (!cursor) break
+      if (channels.length >= MAX_CHANNELS) { truncated = true; break }
+    }
     for (const channel of channels) {
       await this.kg.upsertEntity({
         type: 'Team',
@@ -51,6 +68,7 @@ export class SlackBootstrap implements IConnectorBootstrap {
     }
 
     hints.push(`Slack bootstrap: ${channels.length} public channels`)
+    if (truncated) hints.push(`Slack bootstrap: TRUNCATED at ${MAX_CHANNELS} channels — graph is partial`)
     return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: hints }
   }
 }

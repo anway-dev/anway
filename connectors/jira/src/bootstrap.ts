@@ -45,9 +45,26 @@ export class JiraBootstrap implements IConnectorBootstrap {
     let relationshipsUpserted = 0
     const hints: string[] = []
 
-    // 1. Projects → ownership containers
-    const projectsResp = await jiraGet(conn, '/rest/api/3/project/search?maxResults=50') as { values?: JiraProject[] }
-    const projects = projectsResp.values ?? []
+    // Paginate to completion with a hard budget — confirmed via independent
+    // review: this fetched exactly one page (maxResults=50) with no
+    // pagination at all, so any org with >50 projects or >50 recent issues
+    // got a silently partial graph, and agents answered confidently from an
+    // incomplete world model. When the budget itself truncates, that is
+    // REPORTED in episodeHints below, never silent.
+    const MAX_PROJECTS = 1000
+    const MAX_ISSUES = 1000
+    const PAGE = 50
+
+    // 1. Projects → ownership containers (Jira: startAt/maxResults + isLast)
+    const projects: JiraProject[] = []
+    let projectsTruncated = false
+    for (let startAt = 0; ; startAt += PAGE) {
+      const resp = await jiraGet(conn, `/rest/api/3/project/search?maxResults=${PAGE}&startAt=${startAt}`) as { values?: JiraProject[]; isLast?: boolean }
+      const page = resp.values ?? []
+      projects.push(...page)
+      if (resp.isLast === true || page.length < PAGE) break
+      if (projects.length >= MAX_PROJECTS) { projectsTruncated = true; break }
+    }
     // Keyed by Jira project key — used below to resolve each issue's
     // OWNED_BY target. Confirmed live via independent review:
     // upsertRelationship casts fromEntityId/toEntityId to ::uuid, but this
@@ -71,12 +88,19 @@ export class JiraBootstrap implements IConnectorBootstrap {
       hints.push(`Jira project ${p.key} — ${p.name}`)
     }
 
-    // 2. Recent issues → Ticket entities
-    const issuesResp = await jiraGet(
-      conn,
-      '/rest/api/3/search?jql=' + encodeURIComponent('ORDER BY updated DESC') + '&maxResults=50&fields=summary,project,assignee',
-    ) as { issues?: JiraIssue[] }
-    const issues = issuesResp.issues ?? []
+    // 2. Recent issues → Ticket entities (same startAt pagination)
+    const issues: JiraIssue[] = []
+    let issuesTruncated = false
+    for (let startAt = 0; ; startAt += PAGE) {
+      const resp = await jiraGet(
+        conn,
+        '/rest/api/3/search?jql=' + encodeURIComponent('ORDER BY updated DESC') + `&maxResults=${PAGE}&startAt=${startAt}&fields=summary,project,assignee`,
+      ) as { issues?: JiraIssue[]; total?: number }
+      const page = resp.issues ?? []
+      issues.push(...page)
+      if (page.length < PAGE || (typeof resp.total === 'number' && issues.length >= resp.total)) break
+      if (issues.length >= MAX_ISSUES) { issuesTruncated = true; break }
+    }
     for (const issue of issues) {
       const ticketId = await this.kg.upsertEntity({
         type: 'Ticket',
@@ -106,6 +130,8 @@ export class JiraBootstrap implements IConnectorBootstrap {
     }
 
     hints.push(`Jira bootstrap: ${projects.length} projects, ${issues.length} issues`)
+    if (projectsTruncated) hints.push(`Jira bootstrap: TRUNCATED at ${MAX_PROJECTS} projects — graph is partial`)
+    if (issuesTruncated) hints.push(`Jira bootstrap: TRUNCATED at ${MAX_ISSUES} issues — graph is partial`)
     return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
   }
 }

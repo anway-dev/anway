@@ -86,8 +86,24 @@ export class LinearBootstrap implements IConnectorBootstrap {
 
     // 3. Fetch recent issues (last 30 days). `team { id }` is a real field
     // on Linear's Issue type — every issue belongs to exactly one team.
-    const issuesData = await graphqlQuery(apiKey, baseUrl, `{ issues(filter: { createdAt: { gte: "${new Date(Date.now() - 30 * 86400000).toISOString()}" } }, first: 100) { nodes { id identifier title description team { id } } } }`) as { data?: { issues?: { nodes: IssueNode[] } } }
-    const issues = issuesData?.data?.issues?.nodes ?? []
+    // Cursor-paginate to completion with a hard budget (Relay-style
+    // pageInfo { hasNextPage endCursor }) — confirmed via independent
+    // review this fetched exactly first:100 with no cursor loop, silently
+    // truncating any org with >100 recent tickets.
+    const MAX_ISSUES = 1000
+    const since = new Date(Date.now() - 30 * 86400000).toISOString()
+    const issues: IssueNode[] = []
+    let issuesTruncated = false
+    let after = ''
+    for (;;) {
+      const afterArg = after ? `, after: "${after}"` : ''
+      const issuesData = await graphqlQuery(apiKey, baseUrl, `{ issues(filter: { createdAt: { gte: "${since}" } }, first: 100${afterArg}) { pageInfo { hasNextPage endCursor } nodes { id identifier title description team { id } } } }`) as { data?: { issues?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string }; nodes: IssueNode[] } } }
+      const page = issuesData?.data?.issues
+      issues.push(...(page?.nodes ?? []))
+      if (!page?.pageInfo?.hasNextPage || !page.pageInfo.endCursor) break
+      if (issues.length >= MAX_ISSUES) { issuesTruncated = true; break }
+      after = page.pageInfo.endCursor
+    }
 
     for (const issue of issues) {
       const issueName = `${issue.identifier}: ${issue.title}`
@@ -135,6 +151,7 @@ export class LinearBootstrap implements IConnectorBootstrap {
     }
 
     const hints = [`Linear bootstrap: ${teams.length} teams, ${projects.length} projects, ${issues.length} recent tickets`]
+    if (issuesTruncated) hints.push(`Linear bootstrap: TRUNCATED at ${MAX_ISSUES} tickets — graph is partial`)
     return { entitiesUpserted, relationshipsUpserted, episodeHints: hints }
   }
 }

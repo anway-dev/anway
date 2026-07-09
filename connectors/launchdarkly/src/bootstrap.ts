@@ -19,12 +19,24 @@ export class LaunchDarklyBootstrap implements IConnectorBootstrap {
     // "unreachable is legitimate" case here (unlike elastic/grafana) —
     // this hits LaunchDarkly's real cloud API, not a local default, so a
     // network failure is a real outage worth surfacing, not swallowing.
-    const res = await fetch(`${payload['baseUrl'] ?? 'https://app.launchdarkly.com'}/api/v2/projects`, { headers })
-    if (!res.ok) {
-      throw new Error(`LaunchDarkly bootstrap: /api/v2/projects failed with HTTP ${res.status}`)
+    // Paginate to completion with a hard budget (LaunchDarkly v2:
+    // limit/offset + totalCount; default page size is only 20) — confirmed
+    // via independent review this fetched one unpaginated page.
+    const MAX_PROJECTS = 1000
+    const base = (payload['baseUrl'] as string | undefined) ?? 'https://app.launchdarkly.com'
+    const projects: Array<{ key: string; name: string }> = []
+    let truncated = false
+    for (let offset = 0; ; offset += 100) {
+      const res = await fetch(`${base}/api/v2/projects?limit=100&offset=${offset}`, { headers })
+      if (!res.ok) {
+        throw new Error(`LaunchDarkly bootstrap: /api/v2/projects failed with HTTP ${res.status}`)
+      }
+      const data = await res.json() as { items?: Array<{ key: string; name: string }>; totalCount?: number }
+      const page = data.items ?? []
+      projects.push(...page)
+      if (page.length < 100 || (typeof data.totalCount === 'number' && projects.length >= data.totalCount)) break
+      if (projects.length >= MAX_PROJECTS) { truncated = true; break }
     }
-    const data = await res.json() as { items?: Array<{ key: string; name: string }> }
-    const projects = data.items ?? []
     let entitiesUpserted = 0
     for (const p of projects) {
       await this.kg.upsertEntity({
@@ -36,6 +48,12 @@ export class LaunchDarklyBootstrap implements IConnectorBootstrap {
       }, tenantId)
       entitiesUpserted++
     }
-    return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`LaunchDarkly: ${entitiesUpserted} projects indexed`] }
+    return {
+      entitiesUpserted, relationshipsUpserted: 0,
+      episodeHints: [
+        `LaunchDarkly: ${entitiesUpserted} projects indexed`,
+        ...(truncated ? [`LaunchDarkly bootstrap: TRUNCATED at ${MAX_PROJECTS} projects — graph is partial`] : []),
+      ],
+    }
   }
 }

@@ -18,12 +18,28 @@ export class DynatraceBootstrap implements IConnectorBootstrap {
     // malformed JSON) as a plausible "API call failed" success with 0
     // entities — identical to a genuinely empty Dynatrace tenant. Real
     // failures now throw; missing host/token above stays legitimately empty.
-    const res = await fetch(`${baseUrl}/api/v2/entities?entitySelector=type(SERVICE)`, { headers })
-    if (!res.ok) {
-      throw new Error(`Dynatrace bootstrap: entities call failed with HTTP ${res.status}`)
+    // Paginate to completion with a hard budget (Dynatrace v2:
+    // nextPageKey; subsequent pages take ONLY nextPageKey as param) —
+    // confirmed via independent review this fetched one page (default 50),
+    // silently truncating any environment with >50 services.
+    const MAX_ENTITIES = 2000
+    const entities: Array<{ entityId: string; displayName: string }> = []
+    let truncated = false
+    let nextPageKey: string | undefined
+    for (;;) {
+      const url = nextPageKey
+        ? `${baseUrl}/api/v2/entities?nextPageKey=${encodeURIComponent(nextPageKey)}`
+        : `${baseUrl}/api/v2/entities?entitySelector=type(SERVICE)&pageSize=500`
+      const res = await fetch(url, { headers })
+      if (!res.ok) {
+        throw new Error(`Dynatrace bootstrap: entities call failed with HTTP ${res.status}`)
+      }
+      const data = await res.json() as { entities?: Array<{ entityId: string; displayName: string }>; nextPageKey?: string | null }
+      entities.push(...(data.entities ?? []))
+      if (!data.nextPageKey) break
+      if (entities.length >= MAX_ENTITIES) { truncated = true; break }
+      nextPageKey = data.nextPageKey
     }
-    const data = await res.json() as { entities?: Array<{ entityId: string; displayName: string }> }
-    const entities = data.entities ?? []
     let entitiesUpserted = 0
     for (const e of entities) {
       await this.kg.upsertEntity({
@@ -35,6 +51,12 @@ export class DynatraceBootstrap implements IConnectorBootstrap {
       }, tenantId)
       entitiesUpserted++
     }
-    return { entitiesUpserted, relationshipsUpserted: 0, episodeHints: [`Dynatrace: ${entitiesUpserted} services indexed`] }
+    return {
+      entitiesUpserted, relationshipsUpserted: 0,
+      episodeHints: [
+        `Dynatrace: ${entitiesUpserted} services indexed`,
+        ...(truncated ? [`Dynatrace bootstrap: TRUNCATED at ${MAX_ENTITIES} services — graph is partial`] : []),
+      ],
+    }
   }
 }

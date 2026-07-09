@@ -9,6 +9,9 @@ import { createKnowledgeGraph } from '../kb/index.js'
 import { decryptJson } from '../utils/crypto.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { requireRole } from '../plugins/rbac.js'
+import { UUID_RE } from '../utils/validators.js'
+import { appendAuditEvent } from './audit.js'
 
 // CONNECTOR_API_KEYS format: <key>:<tenantId>,<key>:<tenantId>,...
 // Each key is bound to exactly one tenant — cross-tenant writes are rejected.
@@ -91,9 +94,11 @@ interface GraphEntityRow {
 }
 
 interface GraphRelRow {
+  id: string
   fromEntityId: string
   relType: string
   toEntityId: string
+  metadata: Record<string, unknown> | null
 }
 
 interface TriageEntityRow {
@@ -131,7 +136,7 @@ export async function graphEventRoutes(app: FastifyInstance) {
       const hasMore = entities.length > limit
       const entityData = hasMore ? entities.slice(0, limit) : entities
       const relationships = await tx.$queryRaw<GraphRelRow[]>`
-        SELECT from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId"
+        SELECT id, from_entity_id AS "fromEntityId", rel_type AS "relType", to_entity_id AS "toEntityId", metadata
         FROM relationships WHERE tenant_id = ${tenantId}::uuid LIMIT 2000
       `
       return { data: entityData, relationships, nextCursor: hasMore ? entityData[entityData.length - 1]!.id : null }
@@ -206,6 +211,84 @@ export async function graphEventRoutes(app: FastifyInstance) {
 
   // Guard: warn at startup if no keys configured
   warnIfNoKeys(app)
+
+  // Unconfirmed-relationship review — confirmed via independent review:
+  // the graph builder stores `unconfirmed: confidence < 0.7` on
+  // fuzzy-matched relationships (builder.ts) and CLAUDE.md says these are
+  // "surfaced in KB view for human confirmation", but no route and no UI
+  // ever read the flag — the human-in-the-loop graph-correction flywheel
+  // didn't exist. Confirm promotes to confidence 1.0; reject deletes the
+  // edge. Both admin/sre-gated and audited.
+  app.get('/api/graph/relationships/unconfirmed', { preHandler: [app.authenticate] }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const rows = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ id: string; rel_type: string; metadata: Record<string, unknown>; from_name: string; from_type: string; to_name: string; to_type: string }>>`
+        SELECT r.id, r.rel_type, r.metadata,
+               ef.name AS from_name, ef.type AS from_type,
+               et.name AS to_name, et.type AS to_type
+        FROM relationships r
+        JOIN entities ef ON ef.id = r.from_entity_id
+        JOIN entities et ON et.id = r.to_entity_id
+        WHERE r.tenant_id = ${tenantId}::uuid AND r.metadata->>'unconfirmed' = 'true'
+        ORDER BY r.created_at DESC LIMIT 100
+      `
+    ).catch(() => [])
+    return rows.map(r => ({
+      id: r.id,
+      relType: r.rel_type,
+      confidence: Number(r.metadata?.['confidence'] ?? 0),
+      source: r.metadata?.['source'] ?? null,
+      from: { name: r.from_name, type: r.from_type },
+      to: { name: r.to_name, type: r.to_type },
+    }))
+  })
+
+  app.post<{ Params: { id: string } }>(
+    '/api/graph/relationships/:id/confirm',
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { id } = request.params
+      if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
+      const affected = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          UPDATE relationships
+          SET metadata = metadata || ${JSON.stringify({ unconfirmed: false, confidence: 1.0, confirmedBy: userId, confirmedAt: new Date().toISOString() })}::jsonb
+          WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid AND metadata->>'unconfirmed' = 'true'
+        `
+      ).catch(() => 0)
+      if (Number(affected) === 0) return reply.code(404).send({ error: 'not found or already confirmed' })
+      await appendAuditEvent({
+        tenantId, userId, action: 'graph.relationship_confirmed', resource: id,
+        outcome: 'action_executed', metadata: {},
+      }).catch(() => {})
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/graph/relationships/:id',
+    { preHandler: [app.authenticate, requireRole('admin', 'sre')] },
+    async (request, reply) => {
+      const { tenantId, sub: userId } = request.user as { tenantId: string; sub: string }
+      const { id } = request.params
+      if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
+      // Reject only ever deletes an UNCONFIRMED edge — confirmed structural
+      // facts are not deletable through this review flow.
+      const affected = await withTenant(prisma, tenantId, (tx) =>
+        tx.$executeRaw`
+          DELETE FROM relationships
+          WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid AND metadata->>'unconfirmed' = 'true'
+        `
+      ).catch(() => 0)
+      if (Number(affected) === 0) return reply.code(404).send({ error: 'not found or not unconfirmed' })
+      await appendAuditEvent({
+        tenantId, userId, action: 'graph.relationship_rejected', resource: id,
+        outcome: 'action_executed', metadata: {},
+      }).catch(() => {})
+      return reply.code(204).send()
+    },
+  )
 
   app.post<{ Body: GraphEvent }>('/api/graph/events', {
     preHandler: async (request, reply) => {

@@ -145,6 +145,62 @@ services:
     networks:
       - anway-dev
 
+  # Episodic knowledge layer — Graphiti (agent-service) + Neo4j. Confirmed
+  # via independent review: these only existed in the PROD compose file, so
+  # the dev stack (where all live verification happens) silently degraded
+  # HybridKnowledgeGraph to structural-only and the temporal-reasoning
+  # story ("what changed in the last hour before the alert?") had never
+  # actually run where the product runs. AGENT_SERVICE_URL on the gateway
+  # below activates the hybrid path (apps/gateway/src/kb/index.ts).
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/anway-dev-password
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    networks:
+      - anway-dev
+
+  agent-service:
+    build:
+      context: ..
+      dockerfile: apps/agent-service/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: anway-dev-password
+      # Graphiti's episode extraction uses an LLM — same host-env passthrough
+      # convention as the gateway's DEEPSEEK_API_KEY below. Any
+      # OpenAI-COMPATIBLE endpoint works (e.g. DeepSeek:
+      # OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_BASE_URL=https://api.deepseek.com
+      # LLM_MODEL=deepseek-chat).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${DEEPSEEK_API_KEY:-}}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 45s
+    networks:
+      - anway-dev
+
   gateway:
     image: node:22
     working_dir: /app
@@ -170,6 +226,10 @@ services:
       # Docker → host Ollama. Overrides the localhost-only .env default which
       # resolves to the container's own loopback when running in Docker.
       OLLAMA_ENDPOINT: http://host.docker.internal:11434/v1
+      # Episodic layer (Graphiti via agent-service) — activates
+      # HybridKnowledgeGraph in kb/index.ts. Gateway degrades gracefully to
+      # structural-only if agent-service is down.
+      AGENT_SERVICE_URL: http://agent-service:8000
       # Dev-only demo login (POST /api/auth/demo) — required by apps/web/e2e/fixtures.ts
       DEMO_MODE: "true"
       # Deploy Agent build stage — real registry to enable actual `docker build`
@@ -266,6 +326,7 @@ services:
       - anway-dev
 
 volumes:
+  neo4j_data:
   postgres_data:
   redis_data:
   prometheus_data:

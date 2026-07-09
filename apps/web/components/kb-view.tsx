@@ -425,6 +425,11 @@ export function KbView() {
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(['Service', 'Team']));
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
 
+  // Unconfirmed relationships (confidence < 0.7, stored by the graph
+  // builder) awaiting human confirm/reject — CLAUDE.md's KB confidence
+  // policy. Previously stored but never surfaced anywhere.
+  const [unconfirmed, setUnconfirmed] = useState<Array<{ id: string; relType: string; confidence: number; source: string | null; from: { name: string; type: string }; to: { name: string; type: string } }>>([]);
+
   useEffect(() => {
     fetch("/api/graph/entities")
       .then(r => r.json())
@@ -434,7 +439,20 @@ export function KbView() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+    fetch("/api/graph/relationships/unconfirmed")
+      .then(r => r.json())
+      .then((rows) => setUnconfirmed(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
   }, []);
+
+  const reviewRelationship = async (id: string, action: "confirm" | "reject") => {
+    setUnconfirmed(prev => prev.filter(u => u.id !== id));
+    if (action === "confirm") {
+      await fetch(`/api/graph/relationships/${id}/confirm`, { method: "POST" }).catch(() => {});
+    } else {
+      await fetch(`/api/graph/relationships/${id}`, { method: "DELETE" }).catch(() => {});
+    }
+  };
 
   const entityById = useMemo(() => new Map(entities.map(e => [e.id, e])), [entities]);
 
@@ -498,6 +516,38 @@ export function KbView() {
           </div>
         </div>
       </div>
+
+      {/* Unconfirmed relationships awaiting human review — the KB
+          confidence policy's human-in-the-loop confirmation flywheel */}
+      {unconfirmed.length > 0 && (
+        <div style={{ padding: "10px 24px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0 }}>
+          <div style={{ fontSize: "10px", color: "#f59e0b", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>
+            Unconfirmed relationships ({unconfirmed.length}) — needs review
+          </div>
+          {unconfirmed.slice(0, 5).map(u => (
+            <div key={u.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "4px 0", borderBottom: "1px solid #111", fontSize: "11px" }}>
+              <span style={{ color: "#e5e5e5" }}>{u.from.name}</span>
+              <span style={{ color: "#8b5cf6", fontSize: "10px" }}>—{u.relType}→</span>
+              <span style={{ color: "#e5e5e5" }}>{u.to.name}</span>
+              <span style={{ color: "#555", fontSize: "10px" }}>conf {u.confidence.toFixed(2)}{u.source ? ` · ${u.source}` : ""}</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+                <button
+                  onClick={() => reviewRelationship(u.id, "confirm")}
+                  style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.4)", color: "#10b981", borderRadius: "3px", padding: "2px 10px", fontSize: "10px", cursor: "pointer" }}
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => reviewRelationship(u.id, "reject")}
+                  style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", borderRadius: "3px", padding: "2px 10px", fontSize: "10px", cursor: "pointer" }}
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Type filter + search — list mode only */}
       {viewMode === "list" && (

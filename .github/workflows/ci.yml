@@ -74,7 +74,7 @@ jobs:
       # schema.prisma uses). `pnpm --filter anway-gateway exec` resolves
       # the workspace's own pinned 6.19.3 binary instead. Verified locally:
       # `pnpm --filter anway-gateway exec prisma --version` reports 6.19.3.
-      - run: pnpm --filter anway-gateway exec prisma migrate deploy --schema apps/gateway/prisma/schema.prisma
+      - run: pnpm --filter anway-gateway exec prisma migrate deploy --schema prisma/schema.prisma
       # Confirmed live via independent review: this job previously never
       # ran any test suite at all — only typechecks and docker builds. A
       # real regression in any package's logic could merge without a
@@ -178,7 +178,7 @@ jobs:
       - name: Apply migrations
         env:
           DATABASE_URL: postgresql://anway:anway_dev_secret@localhost:5432/anway_dev
-        run: pnpm --filter anway-gateway exec prisma migrate deploy --schema apps/gateway/prisma/schema.prisma
+        run: pnpm --filter anway-gateway exec prisma migrate deploy --schema prisma/schema.prisma
       - name: Seed demo fixtures (users, connectors, entities e2e specs expect)
         env:
           DATABASE_URL: postgresql://anway:anway_dev_secret@localhost:5432/anway_dev

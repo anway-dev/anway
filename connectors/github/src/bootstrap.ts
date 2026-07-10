@@ -33,7 +33,9 @@ export class GitHubBootstrap implements IConnectorBootstrap {
       // below instead of silently serving a partial graph.
       const MAX_REPO_PAGES = 10
       for (let page = 1; ; page++) {
-        const pageRepos = await this.fetchJson<GitHubRepo[]>(baseUrl, `/orgs/${org}/repos?type=source&per_page=100&page=${page}`, token)
+        // 'sources' (plural) per the official API spec — the Prism contract
+        // test (real Actions run 29090846170) rejected 'source' with 422.
+        const pageRepos = await this.fetchJson<GitHubRepo[]>(baseUrl, `/orgs/${org}/repos?type=sources&per_page=100&page=${page}`, token)
         if (!Array.isArray(pageRepos) || pageRepos.length === 0) break
         repos = repos.concat(pageRepos)
         if (pageRepos.length < 100) break

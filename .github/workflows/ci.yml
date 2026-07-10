@@ -159,6 +159,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # dist/ is gitignored; the compose containers import @anway/* via each
+      # package's dist over the repo bind-mount. A fresh checkout has none,
+      # so the gateway crashed at boot with ERR_MODULE_NOT_FOUND on
+      # @anway/agent/dist/index.js — confirmed on real run 29090846170.
+      # Building on the runner puts dist/ into the mounted tree.
+      - run: pnpm turbo run build --filter='./packages/*' --filter='./connectors/*'
       - name: Boot the self-contained dev stack
         # `up --wait` hard-fails on any service without a healthcheck
         # (otel-collector) — confirmed on real run 29079070468. Boot detached

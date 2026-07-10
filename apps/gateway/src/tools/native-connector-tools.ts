@@ -346,6 +346,23 @@ export async function getNativeConnectorTools(
 
   const tools: ExecutableTool[] = []
   for (const row of rows) {
+    // Per-connector fault isolation: a single misconfigured connector row
+    // (e.g. grafana registered without creds — makeGrafanaTools throws by
+    // design) must not take down tool assembly for the whole tenant. On the
+    // first real CI e2e run (29095118343) one cred-less seeded grafana row
+    // 500'd EVERY /api/chat request org-wide.
+    try {
+      buildToolsForRow(row, tools)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`native-connector-tools: skipping ${row.connector_type} (${row.instance_name}): ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  return tools
+}
+
+function buildToolsForRow(row: ConnectorConfigRow, tools: ExecutableTool[]): void {
+  {
     const creds = effectiveCredentials(row as Parameters<typeof effectiveCredentials>[0])
     switch (row.connector_type) {
       case 'prometheus':    tools.push(...makePrometheusTools(creds)); break
@@ -385,5 +402,4 @@ export async function getNativeConnectorTools(
       case 'vercel':          tools.push(...adaptConnectorAgent(new VercelAgent(), creds as ConnectorCreds)); break
     }
   }
-  return tools
 }

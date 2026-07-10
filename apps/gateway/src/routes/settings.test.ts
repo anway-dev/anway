@@ -20,6 +20,19 @@ function tokenFor(role: string): string {
 beforeAll(async () => {
   initMetrics()
   app = await buildApp()
+  // The audit-row assertion below depends on the tenant + user rows existing
+  // (audit_events.user_id is a real FK; a missing user makes appendAuditEvent
+  // fail silently and the test flake with "0 rows" whenever the local test DB
+  // was recreated without seed data). Seed idempotently, best-effort.
+  await prisma.$executeRaw`
+    INSERT INTO tenants (id, name, slug) VALUES ('00000000-0000-0000-0000-000000000001'::uuid, 'Test Tenant', 'test-tenant')
+    ON CONFLICT (id) DO NOTHING
+  `.catch(() => {})
+  await prisma.$executeRaw`
+    INSERT INTO users (id, tenant_id, email, role)
+    VALUES ('00000000-0000-0000-0000-000000000002'::uuid, '00000000-0000-0000-0000-000000000001'::uuid, 'u@example.com', 'dev')
+    ON CONFLICT (id) DO NOTHING
+  `.catch(() => {})
 })
 
 afterAll(async () => {

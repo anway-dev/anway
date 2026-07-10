@@ -201,6 +201,13 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
       - name: Run e2e suite
+        env:
+          # CERT D registers the prometheus connector with this URL and the
+          # GATEWAY CONTAINER then fetches it — 127.0.0.1 (the spec default)
+          # is the gateway's own loopback inside compose, so bootstrap failed
+          # with "prometheus unreachable" on real run 29095118343. Use the
+          # compose-network service name.
+          DEMO_PROMETHEUS_URL: http://prometheus:9090
         run: pnpm --filter anway-web run test:e2e
       - name: Upload Playwright traces/screenshots on failure
         if: failure()

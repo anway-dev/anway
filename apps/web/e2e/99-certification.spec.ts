@@ -129,6 +129,7 @@ test.describe('CERT D: Connector lifecycle', () => {
   })
 
   test('D.3 bootstrap completes and writes bootstrapped_at', async ({ request }) => {
+    test.setTimeout(120_000) // must outlive the 90s bootstrap poll below
     const trigger = await request.post(`${GATEWAY}/api/connectors/prometheus/bootstrap`, { headers })
     expect(trigger.status(), 'bootstrap trigger must succeed').toBe(200)
 
@@ -139,12 +140,16 @@ test.describe('CERT D: Connector lifecycle', () => {
         return await s.json() as { bootstrapped?: boolean; bootstrappedAt?: string }
       },
       (s) => s.bootstrapped === true,
-      { intervalMs: 1000, timeoutMs: 30000 },
+      // 90s: on a loaded CI runner the async pipeline (Redis → subscriber →
+      // crawl → per-entity kb writes, each of which may burn a full
+      // embeddings-API failure roundtrip when no valid key is configured)
+      // legitimately exceeds 30s — confirmed on real Actions run 29093482137.
+      { intervalMs: 2000, timeoutMs: 90000 },
     ).catch(() => null)
 
     expect(
       status?.bootstrapped,
-      'CERT FAIL: bootstrap did not complete within 30s. ' +
+      'CERT FAIL: bootstrap did not complete within 90s. ' +
       'GraphBuilderSubscriber not running, no LLM provider, or connector unreachable.'
     ).toBe(true)
     expect(status!.bootstrappedAt, 'bootstrapped_at must be written back').toBeTruthy()

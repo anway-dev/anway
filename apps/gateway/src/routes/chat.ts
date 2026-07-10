@@ -21,7 +21,7 @@ import type {
   ConversationTurn,
   SessionContext,
 } from '@anway/agent'
-import type { ProviderConfig } from '@anway/agent'
+import type { ProviderConfig, IModelProvider } from '@anway/agent'
 import { TenantId, UserId, SessionId } from '@anway/types'
 import type { AgentRole } from '@anway/types'
 import type { PrismaClient } from '@prisma/client'
@@ -361,7 +361,18 @@ export async function chatRoutes(app: FastifyInstance) {
     if (!providerConfig) {
       return reply.code(503).send({ error: 'No LLM provider configured', code: 'NO_PROVIDER' })
     }
-    const provider = ProviderFactory.create(providerConfig)
+    // A providerConfig row can exist while its key is absent/invalid (e.g. a
+    // seeded config whose env var isn't set in this deployment) —
+    // ProviderFactory.create then throws, which surfaced as an unhandled 500
+    // on the first real CI e2e run (29093482137). Same contract as the
+    // missing-config case above: 503 NO_PROVIDER, not 500.
+    let provider: IModelProvider
+    try {
+      provider = ProviderFactory.create(providerConfig)
+    } catch (err) {
+      request.log.warn({ err, providerType: providerConfig.type }, 'provider construction failed — treating as no provider')
+      return reply.code(503).send({ error: 'No LLM provider configured', code: 'NO_PROVIDER' })
+    }
 
     // Session memory MUST be resolved before the ownership check and
     // initSession below. Confirmed live: this used to be created only AFTER

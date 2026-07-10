@@ -41,7 +41,7 @@ test.describe('Orchestrator Chat — UI', () => {
   test('P0: default view is chat — input visible', async ({ page }) => {
     await setAuthCookie(page.context())
     await page.goto('/')
-    const input = page.locator('input[placeholder*="nvay"]').or(page.locator('textarea[placeholder*="nvay"]')).first()
+    const input = page.getByPlaceholder(/ask .*nway anything/i).first()
     await expect(input).toBeVisible({ timeout: 5000 })
   })
 
@@ -49,13 +49,16 @@ test.describe('Orchestrator Chat — UI', () => {
     await setAuthCookie(page.context())
     await page.goto('/')
     const chips = page.locator('button').filter({ hasText: /alert|deploy|why|incident/i })
+    // count() has no auto-wait — evaluated before hydration it returns 0
+    // (real CI run 29093482137). Anchor on visibility first.
+    await expect(chips.first()).toBeVisible({ timeout: 10_000 })
     expect(await chips.count()).toBeGreaterThanOrEqual(2)
   })
 
   test('P1: type in chat input and submit', async ({ page }) => {
     await setAuthCookie(page.context())
     await page.goto('/')
-    const input = page.locator('input[placeholder*="nvay"]').or(page.locator('textarea[placeholder*="nvay"]')).first()
+    const input = page.getByPlaceholder(/ask .*nway anything/i).first()
     await expect(input).toBeVisible({ timeout: 5000 })
     const query = 'test query ' + uniqueId('')
     await input.fill(query)

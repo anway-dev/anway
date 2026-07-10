@@ -11,7 +11,7 @@ export class GitHubBootstrap implements IConnectorBootstrap {
 
   private async fetchJson<T>(baseUrl: string, path: string, token: string): Promise<T> {
     const res = await fetch(`${baseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' }
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
     })
     if (!res.ok) throw new Error(`GitHub API ${res.status}: ${path}`)
     return res.json() as Promise<T>

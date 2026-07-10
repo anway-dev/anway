@@ -94,8 +94,15 @@ jobs:
           sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/share/dotnet /opt/ghc || true
           docker system prune -f || true
           df -h / | tail -1
-      - run: docker build -f apps/gateway/Dockerfile . -t anway-gateway:ci
-      - run: docker build -f apps/web/Dockerfile . -t anway-web:ci
+      # Validate the production Dockerfiles end-to-end WITHOUT exporting the
+      # image: on runs 29102024644 and 29104210443 the hosted runner received
+      # a shutdown signal ~12-23 min into "exporting layers" (the monorepo
+      # images are too large for the hosted-runner disk even after toolchain
+      # reclaim). type=cacheonly executes every stage — any Dockerfile or
+      # build error still fails — and skips only the fatal export. Real image
+      # export/push happens in build-and-push on dispatch, unchanged.
+      - run: docker buildx build -f apps/gateway/Dockerfile . --output type=cacheonly
+      - run: docker buildx build -f apps/web/Dockerfile . --output type=cacheonly
   evals:
     # Agent output-quality evals (packages/agent/src/evals) — real,
     # non-mocked model calls scored by an LLM-as-judge against specific

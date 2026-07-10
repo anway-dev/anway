@@ -711,7 +711,15 @@ Focus on: security vulnerabilities, race conditions, missing validation, error h
         sse({ type: 'summary', summary: parsed.summary ?? '' })
         sse({ type: 'done' })
       } catch (err) {
-        sse({ type: 'error', message: String(err) })
+        // A provider can be CONFIGURED but dead (config row present, key
+        // absent/invalid in this deployment) — real CI e2e run 29104210443
+        // (CERT BH.1) hit exactly that and the stream ended with only an
+        // error frame. Degrade to the same static analysis the no-provider
+        // path uses instead of returning nothing.
+        sse({ type: 'status', message: `LLM analysis failed (${String(err).slice(0, 120)}) — falling back to static analysis` })
+        const findings = await staticAnalyze(content, filename)
+        sse({ type: 'findings', findings })
+        sse({ type: 'testPlan', testPlan: generateStaticTestPlan(findings) })
         sse({ type: 'done' })
       }
 

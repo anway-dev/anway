@@ -53,6 +53,10 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Fresh CI checkout has no built workspace dists — the apps resolve
+      # @anway/* types via each package's dist/, so typechecking the apps
+      # fails with TS2307 without this (confirmed on real run 29079070468).
+      - run: pnpm turbo run build --filter='./packages/*' --filter='./connectors/*'
       - run: npx tsc --noEmit -p apps/gateway/tsconfig.json
       - run: npx tsc --noEmit -p apps/web/tsconfig.json
       # Non-interactive equivalent of `pnpm --filter anway-gateway run
@@ -156,7 +160,21 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Boot the self-contained dev stack
-        run: docker compose -f infra/docker-compose.dev.yml up -d --wait --wait-timeout 600
+        # `up --wait` hard-fails on any service without a healthcheck
+        # (otel-collector) — confirmed on real run 29079070468. Boot detached
+        # and wait on the two endpoints the e2e suite actually talks to.
+        run: |
+          docker compose -f infra/docker-compose.dev.yml up -d
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8510/health >/dev/null 2>&1 && curl -sf http://localhost:8500 >/dev/null 2>&1; then
+              echo "gateway + web healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "stack did not become healthy in 600s"
+          docker compose -f infra/docker-compose.dev.yml ps
+          docker compose -f infra/docker-compose.dev.yml logs --no-color gateway web | tail -100
+          exit 1
       - name: Apply migrations
         env:
           DATABASE_URL: postgresql://anway:anway_dev_secret@localhost:5432/anway_dev

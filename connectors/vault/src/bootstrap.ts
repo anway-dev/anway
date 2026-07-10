@@ -43,9 +43,19 @@ export class VaultBootstrap implements IConnectorBootstrap {
       }
       throw new Error(`Vault bootstrap: /v1/sys/mounts failed with HTTP ${res?.status ?? 'no response'}`)
     }
-    const mounts = await res.json() as Record<string, { type: string; description?: string }>
+    // Confirmed against a REAL Vault instance (dev-mode container): the
+    // /v1/sys/mounts response is a standard Vault envelope — request_id,
+    // lease_id, wrap_info: null, auth: null, ... with the actual mount map
+    // under `data` (top-level mount keys are also present for backwards
+    // compat, ALONGSIDE the null envelope fields). Iterating the raw body
+    // hit `wrap_info: null` and crashed on `info.type`. The fixture test
+    // authored an envelope-free response, so only the live run caught it.
+    const body = await res.json() as { data?: Record<string, unknown> } & Record<string, unknown>
+    const mounts = (body['data'] && typeof body['data'] === 'object' ? body['data'] : body) as Record<string, unknown>
     let entitiesUpserted = 0
-    for (const [path, info] of Object.entries(mounts)) {
+    for (const [path, rawInfo] of Object.entries(mounts)) {
+      if (!rawInfo || typeof rawInfo !== 'object' || typeof (rawInfo as { type?: unknown }).type !== 'string') continue
+      const info = rawInfo as { type: string; description?: string }
       // Each mount is a secret engine namespace
       await this.kg.upsertEntity({
         type: 'Service', name: path.replace(/\/$/, ''),

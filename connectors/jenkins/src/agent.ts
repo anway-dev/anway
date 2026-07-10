@@ -2,23 +2,36 @@ import type { ConnectorCreds } from '@anway/types'
 import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
 
 
-interface JenkinsConn { baseUrl: string; user: string; apiToken: string }
+interface JenkinsConn { baseUrl: string; user?: string; apiToken?: string }
 
+// user/apiToken are an optional PAIR: real Jenkins instances commonly allow
+// anonymous read (ci.jenkins.io does — verified live against it), and
+// requiring a token made every such instance unusable. baseUrl alone is
+// valid; a user without a token (or vice versa) is still a config error.
 function connFromCreds(creds: Record<string, unknown>): JenkinsConn {
   const baseUrl = creds['baseUrl']
   const user = creds['user']
   const apiToken = creds['apiToken']
-  if (typeof baseUrl !== 'string' || typeof user !== 'string' || typeof apiToken !== 'string') {
-    throw new Error('Jenkins credentials not configured (baseUrl/user/apiToken)')
+  if (typeof baseUrl !== 'string' || baseUrl.length === 0) {
+    throw new Error('Jenkins credentials not configured (baseUrl required)')
   }
-  return { baseUrl: baseUrl.replace(/\/$/, ''), user, apiToken }
+  const hasUser = typeof user === 'string' && user.length > 0
+  const hasToken = typeof apiToken === 'string' && apiToken.length > 0
+  if (hasUser !== hasToken) {
+    throw new Error('Jenkins credentials misconfigured: user and apiToken must be provided together')
+  }
+  return {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    ...(hasUser ? { user: user as string, apiToken: apiToken as string } : {}),
+  }
 }
 
 async function jenkinsGet(conn: JenkinsConn, path: string): Promise<unknown> {
-  const auth = Buffer.from(`${conn.user}:${conn.apiToken}`).toString('base64')
-  const res = await fetch(`${conn.baseUrl}${path}`, {
-    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-  })
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (conn.user && conn.apiToken) {
+    headers['Authorization'] = `Basic ${Buffer.from(`${conn.user}:${conn.apiToken}`).toString('base64')}`
+  }
+  const res = await fetch(`${conn.baseUrl}${path}`, { headers })
   if (!res.ok) throw new Error(`Jenkins API failed: HTTP ${res.status} (${path})`)
   return await res.json() as unknown
 }

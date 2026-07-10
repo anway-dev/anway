@@ -21,19 +21,27 @@ import { CoralogixAgent } from './agent.js'
 
 
 // ── Shared routes (bootstrap + alerts) ──────────────────────────────────────
+// Shapes below follow the DOCS-VERIFIED Coralogix API surface:
+// - bootstrap: POST /api/v1/dataprime/query (Direct Query HTTP API) — the
+//   previous /api/v1/logs/get-applications route was fixture-authored
+//   fiction that mirrored an endpoint that never existed.
+// - alerts: GET /mgmt/openapi/3/alerts/alerts-general/v3/alert-defs
+//   (Alert Definitions v3 REST service; camelCase gRPC-gateway JSON,
+//   P1..P5 priorities).
 const sharedRoutes: FixtureRoute[] = [
-  { method: 'POST', path: '/api/v1/logs/get-applications', status: 200,
-    body: { applications: [{ name: 'payments-api' }, { name: 'auth-service' }] } },
-  { method: 'GET', path: '/api/v1/logs/statistics/applications', status: 200,
-    body: { data: [{ application: 'payments-api' }, { application: 'auth-service' }] } },
+  { method: 'POST', path: '/api/v1/dataprime/query', status: 200,
+    body: { result: { results: [
+      { userData: JSON.stringify({ applicationname: 'payments-api', cnt: 120 }) },
+      { userData: JSON.stringify({ applicationname: 'auth-service', cnt: 40 }) },
+    ] } } },
   {
-    method: 'GET', path: '/api/v1/alert-definitions', status: 200, body: {
-      alert_definitions: [
-        { id: 'ad-001', name: 'High error rate — payments-api', severity: 'critical', enabled: true, last_triggered_at: '2026-07-04T09:30:00Z', description: 'Error rate exceeds 5% threshold' },
-        { id: 'ad-002', name: 'Latency spike — payments-api', severity: 'high', enabled: true, last_triggered_at: '2026-07-04T09:15:00Z', description: 'P99 latency exceeds 500ms' },
-        { id: 'ad-003', name: 'Disk space low — auth-service', severity: 'medium', enabled: true, description: 'Disk usage exceeds 80%' },
-        { id: 'ad-004', name: 'Dead letter queue — payments-api', severity: 'low', enabled: false, updated_at: '2026-07-01T00:00:00Z' },
-        { id: 'ad-005', name: 'No severity field', enabled: true },
+    method: 'GET', path: '/mgmt/openapi/3/alerts/alerts-general/v3/alert-defs', status: 200, body: {
+      alertDefs: [
+        { id: 'ad-001', alertDefProperties: { name: 'High error rate — payments-api', priority: 'ALERT_DEF_PRIORITY_P1', enabled: true }, lastTriggeredTime: '2026-07-04T09:30:00Z' },
+        { id: 'ad-002', alertDefProperties: { name: 'Latency spike — payments-api', priority: 'ALERT_DEF_PRIORITY_P2', enabled: true }, lastTriggeredTime: '2026-07-04T09:15:00Z' },
+        { id: 'ad-003', alertDefProperties: { name: 'Disk space low — auth-service', priority: 'ALERT_DEF_PRIORITY_P3', enabled: true } },
+        { id: 'ad-004', alertDefProperties: { name: 'Dead letter queue — payments-api', priority: 'ALERT_DEF_PRIORITY_P4', enabled: false }, updatedTime: '2026-07-01T00:00:00Z' },
+        { id: 'ad-005', alertDefProperties: { name: 'No priority field', enabled: true } },
       ],
     },
   },
@@ -72,7 +80,7 @@ const logsDataPrimeRoute: FixtureRoute = {
 const errorBase = 'http-500'
 const errorRoutes: FixtureRoute[] = [
   { method: 'POST', path: '/api/v1/dataprime/query', status: 500, body: {} },
-  { method: 'GET', path: '/api/v1/alert-definitions', status: 500, body: {} },
+  { method: 'GET', path: '/mgmt/openapi/3/alerts/alerts-general/v3/alert-defs', status: 500, body: {} },
 ]
 
 
@@ -197,7 +205,7 @@ describe('coralogix — fixture HTTP server', () => {
       id: 'ad-001', title: 'High error rate — payments-api', severity: 'critical', status: 'firing',
     })
     expect(result.alerts[0]!.firedAt).toBe('2026-07-04T09:30:00Z')
-    expect(result.alerts[2]!.severity).toBe('medium')
+    expect(result.alerts[2]!.severity).toBe('warning')
     expect(result.alerts[2]!.status).toBe('firing')
     expect(result.alerts[3]!.status).toBe('disabled')
     expect(result.alerts[4]!.severity).toBe('info')

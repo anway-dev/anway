@@ -9,6 +9,15 @@ const LINEAR_API = 'https://api.linear.app/graphql'
 // unconditionally on all 3 tools below, so no fixture-server test or
 // self-hosted GraphQL-compatible endpoint could ever reach these calls.
 
+// Linear auth (docs-verified at linear.app/developers/graphql): personal
+// API keys (lin_api_*) are passed RAW in Authorization — the Bearer prefix
+// is ONLY for OAuth2 access tokens. This sent Bearer unconditionally, which
+// 401s for every personal API key (the credential type users actually
+// configure).
+function linearAuthHeader(token: string): string {
+  return token.startsWith('lin_api_') ? token : `Bearer ${token}`
+}
+
 const TOOLS: ConnectorTool[] = [
   {
     definition: { name: 'get_issues', description: 'List issues for a team', parameters: { type: 'object', properties: { team: { type: 'string' }, limit: { type: 'number', optional: true } }, required: ['team'] } },
@@ -18,7 +27,7 @@ const TOOLS: ConnectorTool[] = [
       const query = `query { issues(filter: { team: { key: { eq: "${params.team}" } } }, first: ${params.limit ?? 25}) { nodes { id title state { name } priority assignee { name } } } }`
       const res = await fetch((creds as ConnectorCreds).baseUrl || LINEAR_API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: linearAuthHeader(token) },
         body: JSON.stringify({ query }),
       })
       if (!res.ok) throw new Error(`Linear get_issues failed: HTTP ${res.status}`)
@@ -37,7 +46,7 @@ const TOOLS: ConnectorTool[] = [
       const query = `query { projects(first: ${params.first ?? 10}, filter: { teams: { key: { eq: "${params.team}" } } }) { nodes { id name description state { name } } } }`
       const res = await fetch((creds as ConnectorCreds).baseUrl || LINEAR_API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: linearAuthHeader(token) },
         body: JSON.stringify({ query }),
       })
       if (!res.ok) throw new Error(`Linear get_projects failed: HTTP ${res.status}`)
@@ -55,7 +64,7 @@ const TOOLS: ConnectorTool[] = [
       const mutation = `mutation CreateIssue($title: String!, $teamId: String!) { issueCreate(input: { title: $title, teamId: $teamId }) { success issue { id identifier title url } } }`
       const res = await fetch((creds as ConnectorCreds).baseUrl || LINEAR_API, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: linearAuthHeader(token) },
         body: JSON.stringify({ query: mutation, variables: { title: String(params.title), teamId: String(params.teamId) } }),
       })
       if (!res.ok) throw new Error(`Linear create_issue failed: HTTP ${res.status}`)

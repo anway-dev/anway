@@ -24,5 +24,7 @@ describe('gcp-monitoring conformance', () => {
       '00000000-0000-0000-0000-000000000001' as any, 'test-conn', {}
     )
     expect(result.entitiesUpserted).toBeGreaterThanOrEqual(0)
-  })
+    // 30s: gcloud is preinstalled on GitHub Actions runners and takes >5s to
+    // fail auth (same class as azure-monitor's az timeout on run 29080975927).
+  }, 30_000)
 })

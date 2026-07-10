@@ -50,10 +50,23 @@ fail_banner() {
 cd "$PROJECT_ROOT"
 
 # ── 1. Infra (postgres, redis, neo4j, agent-service) ──
+# Both compose files use the same project/container names — blindly running
+# infra/docker-compose.yml on a machine where the DEV stack
+# (infra/docker-compose.dev.yml: containerized gateway on 8510 + web on 8500)
+# is up RECREATES those containers with the other file's config and kills the
+# running gateway/web (confirmed live: a cert run took down a healthy dev
+# stack, then failed itself because its native-gateway fallback missed the
+# 45s window). Detect which stack owns the containers and reuse it.
 log "Ensuring core infra is up (postgres/redis/neo4j/agent-service)..."
-docker compose -f infra/docker-compose.yml up -d postgres redis neo4j agent-service 2>/dev/null \
-  || docker compose -f infra/docker-compose.yml up -d 2>/dev/null \
-  || warn "infra compose start failed — assuming services already running"
+if docker ps --format '{{.Names}}' | grep -q '^infra-gateway-1$'; then
+  log "Dev compose stack detected — reusing infra/docker-compose.dev.yml"
+  docker compose -f infra/docker-compose.dev.yml up -d 2>/dev/null \
+    || warn "dev compose start failed — assuming services already running"
+else
+  docker compose -f infra/docker-compose.yml up -d postgres redis neo4j agent-service 2>/dev/null \
+    || docker compose -f infra/docker-compose.yml up -d 2>/dev/null \
+    || warn "infra compose start failed — assuming services already running"
+fi
 
 log "Waiting for agent-service (episodic layer) at http://localhost:8000 ..."
 if wait_for "http://localhost:8000/docs" 120; then

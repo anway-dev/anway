@@ -36,7 +36,9 @@ describe('CoralogixBootstrap', () => {
 
   it('bootstraps real applications into entities on success', async () => {
     const { CoralogixBootstrap } = await import('../bootstrap.js')
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ applications: [{ name: 'payments-api' }] }) })))
+    // DataPrime Direct Query HTTP API response shape (docs-verified) —
+    // NDJSON-ish envelope with userData rows as JSON strings.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, text: async () => JSON.stringify({ result: { results: [{ userData: JSON.stringify({ applicationname: 'payments-api' }) }] } }) })))
     const kg = new FakeKG()
     const result = await new CoralogixBootstrap(kg).bootstrap(tenantId, 'conn-1', { apiKey: 'real-key' })
     expect(result.entitiesUpserted).toBe(1)

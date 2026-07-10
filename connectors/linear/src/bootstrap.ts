@@ -2,10 +2,19 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
+// Linear auth (docs-verified at linear.app/developers/graphql): personal
+// API keys (lin_api_*) are passed RAW in Authorization — the Bearer prefix
+// is ONLY for OAuth2 access tokens. This sent Bearer unconditionally, which
+// 401s for every personal API key (the credential type users actually
+// configure).
+function linearAuthHeader(token: string): string {
+  return token.startsWith('lin_api_') ? token : `Bearer ${token}`
+}
+
 async function graphqlQuery(token: string, baseUrl: string, query: string): Promise<Record<string, unknown>> {
   const res = await fetch(baseUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', Authorization: linearAuthHeader(token) },
     body: JSON.stringify({ query }),
   })
   if (!res.ok) throw new Error(`Linear API ${res.status}`)

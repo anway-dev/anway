@@ -6,13 +6,17 @@ interface CoralogixCreds { baseUrl: string; apiKey: string; region: string }
  * Extract credentials matching bootstrap.ts auth model:
  * - apiKey from payload['apiKey'] ?? payload['token']
  * - region from payload['region'] (default 'us1')
- * - baseUrl defaults to region-scoped 'https://ng-api-http.{region}.coralogix.com'
+ * - baseUrl defaults to the docs-verified unified regional scheme
+ *   'https://api.{region}.coralogix.com' (us1/us2/eu1/eu2/ap1/ap2/ap3).
+ *   The previous default (ng-api-http.{region}.coralogix.com) mixed the
+ *   legacy host prefix with the new region-domain scheme — a hostname that
+ *   exists in neither generation.
  */
 function extractCreds(creds: Record<string, unknown>): CoralogixCreds | null {
   const apiKey = (creds['apiKey'] as string | undefined) ?? (creds['token'] as string | undefined)
   if (!apiKey) return null
   const region = (creds['region'] as string | undefined) ?? 'us1'
-  const baseUrl = (creds['baseUrl'] as string | undefined) ?? `https://ng-api-http.${region}.coralogix.com`
+  const baseUrl = (creds['baseUrl'] as string | undefined) ?? `https://api.${region}.coralogix.com`
   return { baseUrl: baseUrl.replace(/\/$/, ''), apiKey, region }
 }
 
@@ -212,7 +216,12 @@ const TOOLS: ConnectorTool[] = [
         ? (params.severity as string).toLowerCase()
         : null
 
-      const res = await fetch(`${c.baseUrl}/api/v1/alert-definitions`, {
+      // Docs-verified path (docs.coralogix.com/api-reference/v3): the Alert
+      // Definitions v3 REST service lives under /mgmt/openapi/3 with list
+      // endpoint /alerts/alerts-general/v3/alert-defs. The previous
+      // /api/v1/alert-definitions path was fixture-authored fiction — no
+      // such endpoint exists in the Coralogix API surface.
+      const res = await fetch(`${c.baseUrl}/mgmt/openapi/3/alerts/alerts-general/v3/alert-defs`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${c.apiKey}`,
@@ -221,31 +230,39 @@ const TOOLS: ConnectorTool[] = [
       })
       if (!res.ok) throw new Error(`Coralogix get_alerts failed: HTTP ${res.status}`)
 
-      const data = (await res.json()) as {
-        alert_definitions?: Array<{
-          id: string
-          name: string
-          severity?: string
-          enabled?: boolean
-          description?: string
-          labels?: Record<string, string>
-          last_triggered_at?: string
-          updated_at?: string
-          created_at?: string
-        }>
+      interface AlertDefProps {
+        name?: string
+        description?: string
+        priority?: string
+        enabled?: boolean
+        entityLabels?: Record<string, string>
       }
-
-      const defs = data.alert_definitions ?? []
+      interface AlertDef {
+        id?: string
+        alertDefProperties?: AlertDefProps
+        createdTime?: string
+        updatedTime?: string
+        lastTriggeredTime?: string
+      }
+      // gRPC-gateway JSON uses camelCase (alertDefs); tolerate snake_case too.
+      const data = (await res.json()) as { alertDefs?: AlertDef[]; alert_defs?: AlertDef[] }
+      const defs = data.alertDefs ?? data.alert_defs ?? []
 
       const alerts = defs
         .map(d => {
-          const title = d.name ?? d.id
-          const severity = (d.severity ?? 'info').toLowerCase()
-          const enabled = d.enabled !== false
+          const props = d.alertDefProperties ?? {}
+          const title = props.name ?? d.id ?? 'unnamed-alert'
+          // v3 uses priority P1..P5 — map to conventional severities.
+          const priority = (props.priority ?? '').toUpperCase()
+          const severity = priority.includes('P1') ? 'critical'
+            : priority.includes('P2') ? 'error'
+            : priority.includes('P3') ? 'warning'
+            : 'info'
+          const enabled = props.enabled !== false
           const status = enabled ? 'firing' : 'disabled'
-          const firedAt = d.last_triggered_at ?? d.updated_at ?? d.created_at ?? new Date().toISOString()
+          const firedAt = d.lastTriggeredTime ?? d.updatedTime ?? d.createdTime ?? new Date().toISOString()
 
-          return { id: d.id, title, severity, status, firedAt }
+          return { id: d.id ?? title, title, severity, status, firedAt }
         })
         .filter(a => {
           if (serviceFilter) {

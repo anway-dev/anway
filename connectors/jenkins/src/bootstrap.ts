@@ -2,24 +2,33 @@ import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
 
-interface JenkinsConn { baseUrl: string; user: string; apiToken: string }
+interface JenkinsConn { baseUrl: string; user?: string; apiToken?: string }
 
 interface JenkinsBuild { number: number; result?: string; timestamp?: number }
 interface JenkinsJob { name: string; url: string; lastBuild?: JenkinsBuild }
 
+// user/apiToken optional PAIR — anonymous-read Jenkins instances are real
+// (verified live against ci.jenkins.io). Same contract as agent.ts.
 function connFromPayload(payload: Record<string, unknown>): JenkinsConn | null {
   const baseUrl = payload['baseUrl']
   const user = payload['user']
   const apiToken = payload['apiToken']
-  if (typeof baseUrl !== 'string' || typeof user !== 'string' || typeof apiToken !== 'string') return null
-  return { baseUrl: baseUrl.replace(/\/$/, ''), user, apiToken }
+  if (typeof baseUrl !== 'string' || baseUrl.length === 0) return null
+  const hasUser = typeof user === 'string' && user.length > 0
+  const hasToken = typeof apiToken === 'string' && apiToken.length > 0
+  if (hasUser !== hasToken) return null
+  return {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    ...(hasUser ? { user: user as string, apiToken: apiToken as string } : {}),
+  }
 }
 
 async function jenkinsGet(conn: JenkinsConn, path: string): Promise<unknown> {
-  const auth = Buffer.from(`${conn.user}:${conn.apiToken}`).toString('base64')
-  const res = await fetch(`${conn.baseUrl}${path}`, {
-    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-  })
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (conn.user && conn.apiToken) {
+    headers['Authorization'] = `Basic ${Buffer.from(`${conn.user}:${conn.apiToken}`).toString('base64')}`
+  }
+  const res = await fetch(`${conn.baseUrl}${path}`, { headers })
   if (!res.ok) throw new Error(`Jenkins API ${res.status} for ${path}`)
   return res.json()
 }
@@ -30,7 +39,7 @@ export class JenkinsBootstrap implements IConnectorBootstrap {
   async bootstrap(tenantId: TenantId, _connectorId: string, payload: Record<string, unknown>): Promise<ConnectorBootstrapResult> {
     const conn = connFromPayload(payload)
     if (!conn) {
-      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Jenkins bootstrap: missing baseUrl/user/apiToken'] }
+      return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Jenkins bootstrap: missing baseUrl (or user without apiToken)'] }
     }
 
     let entitiesUpserted = 0

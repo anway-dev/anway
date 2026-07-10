@@ -50,7 +50,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Fresh CI checkout has no built workspace dists — the apps resolve
@@ -107,7 +107,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Check for a configured model provider key
@@ -156,7 +156,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Boot the self-contained dev stack
@@ -165,13 +165,13 @@ jobs:
         # and wait on the two endpoints the e2e suite actually talks to.
         run: |
           docker compose -f infra/docker-compose.dev.yml up -d
-          for i in $(seq 1 120); do
+          for i in $(seq 1 240); do
             if curl -sf http://localhost:8510/health >/dev/null 2>&1 && curl -sf http://localhost:8500 >/dev/null 2>&1; then
               echo "gateway + web healthy"; exit 0
             fi
             sleep 5
           done
-          echo "stack did not become healthy in 600s"
+          echo "stack did not become healthy in 1200s"
           docker compose -f infra/docker-compose.dev.yml ps
           docker compose -f infra/docker-compose.dev.yml logs --no-color gateway web | tail -100
           exit 1

@@ -45,7 +45,7 @@ fixture/unit suites on top.
 | sentry | docs-verified | `/api/0/*` + Bearer auth match docs |
 | elastic | fixture-only¹ | Real-container run attempted; ES boot flaky under load — rerun pending |
 | sonarqube | fixture-only¹ | Real-container run attempted; container OOM'd under load — rerun pending |
-| aws-cloudwatch | fixture-only¹ | LocalStack run pending |
+| aws-cloudwatch | fixture-only¹ | LocalStack run attempted 3× on 2026-07-10 — the container never reached healthy on this machine's degraded docker daemon (environment-blocked, not code-blocked). The connector shells out to the aws CLI and honors `endpointUrl` (`AWS_ENDPOINT_URL`), so the LocalStack path is wired; rerun `scripts/live-connector-verify.ts aws-cloudwatch '{"region":"us-east-1","endpointUrl":"http://localhost:14566","accessKeyId":"test","secretAccessKey":"test"}'` on a healthy docker host |
 | aws-health | fixture-only | No LocalStack support for the Health API; needs real AWS account |
 | ecs / eks / gke | fixture-only | Conformance + fixture suites; need real cloud accounts (EKS/GKE not in LocalStack community) |
 | azure-monitor | fixture-only | az-CLI based; needs real Azure login (CI conformance covers no-auth path) |

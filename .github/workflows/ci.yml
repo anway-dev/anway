@@ -85,6 +85,15 @@ jobs:
       # real regression in any package's logic could merge without a
       # single vitest/pytest assertion running in CI.
       - run: pnpm test
+      # Run 29102024644: the runner got a shutdown signal mid "exporting
+      # layers" — hosted-runner disk exhausted (pnpm store + turbo outputs +
+      # two full monorepo images). Reclaim the big preinstalled toolchains
+      # first; standard hosted-runner practice.
+      - name: Free runner disk for image builds
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/share/dotnet /opt/ghc || true
+          docker system prune -f || true
+          df -h / | tail -1
       - run: docker build -f apps/gateway/Dockerfile . -t anway-gateway:ci
       - run: docker build -f apps/web/Dockerfile . -t anway-web:ci
   evals:

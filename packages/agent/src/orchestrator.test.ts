@@ -3,7 +3,7 @@ import { SessionId, TenantId, UserId, Message } from '@anway/types'
 import type { StreamEvent } from '@anway/types'
 import type { IAuditSink, AuditEvent } from './interfaces/audit.js'
 import type { IModelProvider, ChatResponse } from './interfaces/provider.js'
-import type { ISessionMemory, SessionContext, ConversationTurn } from './interfaces/memory.js'
+import type { ISessionMemory, SessionContext, SessionEntityRef, ConversationTurn } from './interfaces/memory.js'
 import { AgentPerimeter } from './perimeter/engine.js'
 import type { UserPerimeter, ConnectorManifest } from './perimeter/engine.js'
 import type { TokenBudget } from './middleware/token-meter.js'
@@ -24,16 +24,23 @@ class InMemoryAuditSink implements IAuditSink {
 
 class InMemorySessionMemory implements ISessionMemory {
   private readonly store = new Map<string, ConversationTurn[]>()
+  readonly contextEntitiesBySession = new Map<string, SessionEntityRef[]>()
 
   async get(sessionId: SessionId): Promise<SessionContext | null> {
     const turns = this.store.get(sessionId as string) ?? []
+    const contextEntities = this.contextEntitiesBySession.get(sessionId as string)
     return {
       sessionId,
       userId: UserId('test-user'),
       tenantId: TenantId('test-tenant'),
       effectiveRole: 'dev',
       turns,
+      ...(contextEntities ? { contextEntities } : {}),
     }
+  }
+
+  async updateContextEntities(sessionId: SessionId, entities: SessionEntityRef[]): Promise<void> {
+    this.contextEntitiesBySession.set(sessionId as string, entities)
   }
 
   async append(sessionId: SessionId, turn: ConversationTurn): Promise<void> {
@@ -299,6 +306,129 @@ describe('runSession', () => {
     })
     await collectEvents(runSession(orch, 'hello', makeCtx()))
     expect(auditSink.events.find(e => e.eventType === 'role_inferred')).toBeUndefined()
+  })
+
+  // -------------------------------------------------------------------------
+  // Multi-repo sessions (CLAUDE.md capability #8) — N entities per query,
+  // per-entity coordinates, and session carryover for follow-up turns.
+  // -------------------------------------------------------------------------
+
+  function makeMultiEntityKG() {
+    const known: Record<string, { id: string; coords: Record<string, Record<string, string>> }> = {
+      'checkout-api': { id: 'e-checkout', coords: { github: { repo: 'org/checkout' } } },
+      'payments-api': { id: 'e-payments', coords: { github: { repo: 'org/payments' } } },
+    }
+    const toContext = (name: string, e: { id: string; coords: Record<string, Record<string, string>> }) => ({
+      primaryEntity: { id: e.id, tenantId: 'test-tenant', type: 'Service', name, metadata: {} },
+      relatedEntities: [], relationships: [], recentEpisodes: [],
+      connectorCoordinates: Object.fromEntries(Object.entries(e.coords).map(([ct, ids]) =>
+        [ct, { connectorType: ct, resourceIds: ids, resolvedAt: new Date(), confidence: 1.0 }])),
+      groundingSources: [], freshness: 1.0,
+    })
+    return {
+      ...makeMockKG(),
+      resolveContextByName: async (name: string) => {
+        const e = known[name]
+        return e ? toContext(name, e) : null
+      },
+      resolveContext: async (id: string) => {
+        const entry = Object.entries(known).find(([, e]) => e.id === id)
+        if (!entry) throw new Error(`Entity ${id} not found`)
+        return toContext(entry[0], entry[1])
+      },
+    }
+  }
+
+  function makeMultiEntityProvider(capturedSystemPrompts: string[], entityAnswer: (query: string) => string): IModelProvider {
+    return {
+      modelId: 'mock-model',
+      cheapModelId: 'mock-model-cheap',
+      async chat(messages, _tools, _opts): Promise<ChatResponse> {
+        const sys = messages.find(m => m.role === 'system')
+        const sysText = typeof sys?.content === 'string' ? sys.content : ''
+        if (sysText.startsWith('Extract ALL')) {
+          const user = messages.find(m => m.role === 'user')
+          const q = typeof user?.content === 'string' ? user.content : ''
+          return { content: entityAnswer(q), toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
+        }
+        return { content: '{"intent":"general"}', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 } }
+      },
+      async *stream(messages, _tools, _opts) {
+        const sys = messages.find(m => m.role === 'system')
+        if (sys && typeof sys.content === 'string') capturedSystemPrompts.push(sys.content)
+        yield { type: 'text_delta', content: 'ok' }
+        yield { type: 'done', inputTokens: 20, outputTokens: 10 }
+      },
+      formatToolCall(): Message { return { role: 'assistant', content: '' } },
+      formatToolResult(): Message { return { role: 'user', content: '' } },
+    }
+  }
+
+  it('resolves multiple entities in one query — per-entity graph context and coordinates, set pinned to session', async () => {
+    // Regression: extraction asked for ONE name only, so a dev query spanning
+    // two services got graph coordinates for a single repo — the other was
+    // invisible to every specialist agent.
+    const capturedSystemPrompts: string[] = []
+    const provider = makeMultiEntityProvider(capturedSystemPrompts, () => 'checkout-api, payments-api')
+    const auditSink = new InMemoryAuditSink()
+    const sessionMemory = new InMemorySessionMemory()
+    const orch = createOrchestrator({
+      model: provider, tools: [], perimeter: makePermissivePerimeter(), auditSink,
+      sessionMemory, knowledgeGraph: makeMultiEntityKG(),
+    })
+    await collectEvents(runSession(orch, 'Why is checkout-api failing after the payments-api deploy?', makeCtx('multi-session')))
+
+    // Both entities' coordinates land in the synthesis prompt — secondary as its own block
+    const synthPrompt = capturedSystemPrompts.join('\n')
+    expect(synthPrompt).toContain('entity resolved: "checkout-api"')
+    expect(synthPrompt).toContain('ADDITIONAL ENTITY IN SCOPE — "payments-api"')
+    expect(synthPrompt).toContain('org/checkout')
+    expect(synthPrompt).toContain('org/payments')
+
+    // Resolution audited
+    const resolvedEvent = auditSink.events.find(e => e.eventType === 'context_entities_resolved')
+    expect(resolvedEvent).toBeDefined()
+    expect(resolvedEvent!.payload).toMatchObject({ entities: ['checkout-api', 'payments-api'], carriedOver: false })
+
+    // Entity set pinned to the session for follow-up turns
+    expect(sessionMemory.contextEntitiesBySession.get('multi-session')).toEqual([
+      { id: 'e-checkout', name: 'checkout-api' },
+      { id: 'e-payments', name: 'payments-api' },
+    ])
+  })
+
+  it('carries the session entity set into follow-up turns that name no entity (context maintained)', async () => {
+    // Regression: a follow-up like "why is it still broken?" extracted no
+    // entity and dead-ended on "ask the user which service" even though the
+    // services were named one turn earlier in the same session.
+    const capturedSystemPrompts: string[] = []
+    const provider = makeMultiEntityProvider(
+      capturedSystemPrompts,
+      (q) => q.includes('checkout-api') ? 'checkout-api, payments-api' : '',
+    )
+    const auditSink = new InMemoryAuditSink()
+    const sessionMemory = new InMemorySessionMemory()
+    const orch = createOrchestrator({
+      model: provider, tools: [], perimeter: makePermissivePerimeter(), auditSink,
+      sessionMemory, knowledgeGraph: makeMultiEntityKG(),
+    })
+    const ctx = makeCtx('carryover-session')
+
+    await collectEvents(runSession(orch, 'Compare checkout-api with payments-api deploys', ctx))
+    capturedSystemPrompts.length = 0
+    await collectEvents(runSession(orch, 'why is it still broken?', ctx))
+
+    // Second turn re-resolved the pinned entities instead of asking the user
+    const synthPrompt = capturedSystemPrompts.join('\n')
+    expect(synthPrompt).toContain('entity resolved: "checkout-api"')
+    expect(synthPrompt).toContain('Carried over from earlier turns in this session')
+    expect(synthPrompt).toContain('ADDITIONAL ENTITY IN SCOPE — "payments-api"')
+    expect(synthPrompt).not.toContain('no specific entity identified')
+
+    const carryEvent = auditSink.events.find(e =>
+      e.eventType === 'context_entities_resolved' && (e.payload as { carriedOver?: boolean }).carriedOver === true)
+    expect(carryEvent).toBeDefined()
+    expect(carryEvent!.payload).toMatchObject({ entities: ['checkout-api', 'payments-api'], carriedOver: true })
   })
 
   it('logs query_received and agent_spawned audit events', async () => {

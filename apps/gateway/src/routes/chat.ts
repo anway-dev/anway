@@ -17,6 +17,7 @@ import type {
   TokenBudget,
   ISessionMemory,
   SessionMeta,
+  SessionEntityRef,
   ConversationTurn,
   SessionContext,
 } from '@anway/agent'
@@ -62,11 +63,29 @@ export class InMemorySessionMemory implements ISessionMemory {
       tenantId: meta?.tenantId ?? TenantId('unknown'),
       effectiveRole: meta?.effectiveRole ?? ('dev' as AgentRole),
       turns: stored,
+      ...(meta?.summary !== undefined ? { summary: meta.summary } : {}),
+      ...(meta?.contextEntityId !== undefined ? { contextEntityId: meta.contextEntityId } : {}),
+      ...(meta?.contextEntities !== undefined ? { contextEntities: meta.contextEntities } : {}),
     }
   }
 
+  // Called on EVERY request of a session — merge over existing meta so the
+  // multi-repo contextEntities set (and summary) written mid-session survive
+  // subsequent turns instead of being wiped by each request's re-init.
   async initSession(meta: SessionMeta): Promise<void> {
-    this.metas.set(meta.sessionId, meta)
+    const existing = this.metas.get(meta.sessionId)
+    this.metas.set(meta.sessionId, existing ? {
+      ...meta,
+      ...(meta.summary === undefined && existing.summary !== undefined ? { summary: existing.summary } : {}),
+      ...(meta.contextEntities === undefined && existing.contextEntities !== undefined ? { contextEntities: existing.contextEntities } : {}),
+      ...(meta.contextEntityId === undefined && existing.contextEntityId !== undefined ? { contextEntityId: existing.contextEntityId } : {}),
+    } : meta)
+  }
+
+  async updateContextEntities(sessionId: SessionId, entities: SessionEntityRef[]): Promise<void> {
+    const meta = this.metas.get(sessionId)
+    if (!meta) return
+    this.metas.set(sessionId, { ...meta, contextEntities: entities, contextEntityId: entities[0]?.id ?? meta.contextEntityId })
   }
 
   async append(sessionId: SessionId, turn: ConversationTurn): Promise<void> {
@@ -299,13 +318,7 @@ export async function chatRoutes(app: FastifyInstance) {
     throw new Error('Production requires REDIS_URL environment variable')
   }
 
-  // Build session memory — Redis if REDIS_URL configured, in-process fallback otherwise
-  let sessionMemory: ISessionMemory = inMemoryStore
-
   const redisUrl = process.env['REDIS_URL']
-  // Defer Redis memory creation until after provider is resolved so we can
-  // pass summariseProvider (cheap-tier model) for real session summarization.
-  let deferredRedisInit: (() => void) | null = null
 
   app.post<{ Body: ChatBody }>('/api/chat', {
     preHandler: [app.authenticate],
@@ -347,6 +360,25 @@ export async function chatRoutes(app: FastifyInstance) {
       : dbConfig ?? resolveProviderConfig()
     if (!providerConfig) {
       return reply.code(503).send({ error: 'No LLM provider configured', code: 'NO_PROVIDER' })
+    }
+    const provider = ProviderFactory.create(providerConfig)
+
+    // Session memory MUST be resolved before the ownership check and
+    // initSession below. Confirmed live: this used to be created only AFTER
+    // both had already run against the in-memory fallback, so on the first
+    // request after boot the session's meta landed in process memory while
+    // its turns went to Redis — RedisSessionMemory.get() returned null for
+    // that session forever, silently losing conversation history, the
+    // rolling summary, and the multi-repo entity carryover set.
+    // MemoryFactory reuses one shared Redis client per URL (per-request
+    // clients leaked a connection per chat call).
+    let sessionMemory: ISessionMemory = inMemoryStore
+    if (redisUrl) {
+      try {
+        sessionMemory = MemoryFactory.create({ type: 'redis', redisUrl, summariseProvider: provider })
+      } catch (err) {
+        request.log.warn({ err }, 'Redis session memory init failed, using in-memory fallback')
+      }
     }
 
     // Load connectors + tenant in parallel — both are best-effort
@@ -532,18 +564,6 @@ export async function chatRoutes(app: FastifyInstance) {
       tenantId: TenantId(tenantId),
       effectiveRole: (role as AgentRole) ?? 'dev',
       turns: [],
-    }
-
-    const provider = ProviderFactory.create(providerConfig)
-    // Initialize Redis session memory now that provider (summariseProvider) is available.
-    // Previously created without summariseProvider → long-session summaries degraded
-    // to the literal string '[Summary of N earlier turns]'.
-    if (redisUrl) {
-      try {
-        sessionMemory = MemoryFactory.create({ type: 'redis', redisUrl, summariseProvider: provider })
-      } catch (err) {
-        app.log.warn({ err }, 'Redis session memory init failed, using in-memory fallback')
-      }
     }
 
     const auditSink = new PostgresAuditSink(prisma, (err) => {

@@ -15,6 +15,7 @@ export type {
   ConversationTurn,
   SessionContext,
   SessionMeta,
+  SessionEntityRef,
   MemoryConfig,
 } from './interfaces/memory.js'
 

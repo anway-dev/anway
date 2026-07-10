@@ -309,3 +309,73 @@ describe('ISessionMemory contract', () => {
     expect(ctx!.turns[0]).toEqual(turn)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Multi-repo session entity carryover (CLAUDE.md capability #8)
+// ---------------------------------------------------------------------------
+
+describe('RedisSessionMemory.updateContextEntities', () => {
+  it('persists the entity set into session meta and get() returns it', async () => {
+    const redis = makeMockRedis()
+    const mem = new RedisSessionMemory(redis as never)
+    const meta = makeMeta()
+    await mem.initSession(meta)
+
+    const entities = [
+      { id: 'e-checkout', name: 'checkout-api' },
+      { id: 'e-payments', name: 'payments-api' },
+    ]
+    await mem.updateContextEntities(meta.sessionId, entities)
+
+    const ctx = await mem.get(meta.sessionId)
+    expect(ctx!.contextEntities).toEqual(entities)
+    expect(ctx!.contextEntityId).toBe('e-checkout')
+  })
+
+  it('is a no-op when session meta does not exist yet', async () => {
+    const redis = makeMockRedis()
+    const mem = new RedisSessionMemory(redis as never)
+    await mem.updateContextEntities(SessionId('missing'), [{ id: 'e1', name: 'svc' }])
+    expect(redis.store.size).toBe(0)
+  })
+})
+
+describe('RedisSessionMemory.initSession meta preservation', () => {
+  it('re-init on a later turn preserves contextEntities and summary written mid-session', async () => {
+    // Regression: the gateway calls initSession on EVERY request of a
+    // session — a plain overwrite wiped the pinned multi-repo entity set
+    // (and the rolling summary) each new turn.
+    const redis = makeMockRedis()
+    const mem = new RedisSessionMemory(redis as never)
+    const meta = makeMeta()
+    await mem.initSession(meta)
+
+    const entities = [{ id: 'e-checkout', name: 'checkout-api' }]
+    await mem.updateContextEntities(meta.sessionId, entities)
+    redis.store.set(`session:${meta.sessionId}:meta`, JSON.stringify({
+      ...JSON.parse(redis.store.get(`session:${meta.sessionId}:meta`)!),
+      summary: 'earlier turns summary',
+    }))
+
+    // next turn: gateway re-inits with the same identity fields only
+    await mem.initSession(meta)
+
+    const ctx = await mem.get(meta.sessionId)
+    expect(ctx!.contextEntities).toEqual(entities)
+    expect(ctx!.contextEntityId).toBe('e-checkout')
+    expect(ctx!.summary).toBe('earlier turns summary')
+  })
+
+  it('re-init with explicit fields still overrides preserved ones', async () => {
+    const redis = makeMockRedis()
+    const mem = new RedisSessionMemory(redis as never)
+    const meta = makeMeta()
+    await mem.initSession(meta)
+    await mem.updateContextEntities(meta.sessionId, [{ id: 'e1', name: 'old-svc' }])
+
+    await mem.initSession({ ...meta, contextEntities: [{ id: 'e2', name: 'new-svc' }] })
+
+    const ctx = await mem.get(meta.sessionId)
+    expect(ctx!.contextEntities).toEqual([{ id: 'e2', name: 'new-svc' }])
+  })
+})

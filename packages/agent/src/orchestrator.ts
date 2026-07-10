@@ -1,8 +1,8 @@
 import type { ErrorCode, GroundingSource, Message, StreamEvent } from '@anway/types'
 import type { IAuditSink } from './interfaces/audit.js'
-import type { ISessionMemory, SessionContext } from './interfaces/memory.js'
+import type { ISessionMemory, SessionContext, SessionEntityRef } from './interfaces/memory.js'
 import type { IModelProvider, ToolDefinition } from './interfaces/provider.js'
-import type { IKnowledgeGraph } from './interfaces/knowledge-graph.js'
+import type { AgentContext, IKnowledgeGraph } from './interfaces/knowledge-graph.js'
 import { extractJson } from './agents/extract-json.js'
 import { createTokenMeterMiddleware, reconcileTokenUsage } from './middleware/token-meter.js'
 import type { TokenBudget } from './middleware/token-meter.js'
@@ -270,6 +270,14 @@ export async function* runSession(
   // re-resolves a UUID by name-ILIKE (both failure modes: UUID never matches,
   // and empty string matches every row).
   let resolvedAgentContext: Awaited<ReturnType<typeof config.knowledgeGraph.resolveContextByName>> = null
+  // Multi-repo sessions (CLAUDE.md capability #8: "dev query spans N repos,
+  // context maintained"). Every entity resolved this turn, primary first —
+  // each secondary entity gets its own graph-context block and coordinate
+  // set, and the full set is persisted to session meta so follow-up turns
+  // that don't re-name the services keep every one of them in scope.
+  const resolvedEntities: Array<{ context: AgentContext }> = []
+  let entitiesCarriedOver = false
+  const MAX_SESSION_ENTITIES = 5
 
   const isAlertInvestigation = classifiedIntent === 'incident_triage' ||
     /alert|incident|firing|outage|error.?rate|latency|spike|investigate/i.test(input)
@@ -278,19 +286,31 @@ export async function* runSession(
     // For alert investigations: extract the service hint separately from the alert name.
     // "Investigate HighErrorRate on service payments-api" → service="payments-api"
     // "Investigate PrometheusMissingRuleEvaluations" → service="" (infra alert, no service)
+    // CRITICAL constraint on both prompts: only names appearing VERBATIM in
+    // the query. Confirmed live: without it, the cheap model echoed the
+    // example names back for entity-free follow-ups ("which of the two
+    // should I roll back?"), fabricating an extraction that happened to
+    // match real graph entities and silently bypassing session carryover.
     const entityExtractPrompt = isAlertInvestigation
-      ? 'Extract the SOFTWARE SERVICE name (not the alert name) from this query. ' +
-        'A service name looks like: payments-api, checkout-api, auth-service. ' +
+      ? 'Extract the SOFTWARE SERVICE name(s) (not the alert name) from this query — an investigation may span several services. ' +
+        'A service name looks like: orders-api, cart-service. ' +
         'An alert name looks like: HighErrorRate, PodCrashLooping, PrometheusMissingRuleEvaluations. ' +
-        'Respond with ONLY the service name, or empty string if query is about an infrastructure alert with no specific service.'
-      : 'Extract the primary service, team, or entity name from this query. Respond with ONLY the name, or empty string if none found.'
+        'Respond with ONLY the service names, comma-separated, most relevant first, at most 5 — or empty string if the query is about an infrastructure alert with no specific service. ' +
+        'Only output names that appear VERBATIM in the query text — never invent names and never copy names from these instructions.\n' +
+        'Example: "did anything in orders-api change before cart-service broke?" → "cart-service, orders-api"\n' +
+        'Example: "why is HighErrorRate firing?" → ""'
+      : 'Extract ALL software service, team, or entity names mentioned in this query — a dev query may span several services/repos, and every one of them matters. ' +
+        'Respond with ONLY the names, comma-separated, most relevant first, at most 5. Respond with empty string if none found. ' +
+        'Only output names that appear VERBATIM in the query text — never invent names and never copy names from these instructions.\n' +
+        'Example: "did anything in orders-api change before cart-service broke?" → "cart-service, orders-api"\n' +
+        'Example: "why is it still slow?" → ""'
 
     // Token check before entity extraction
     const entityExtractMsgs: Message[] = [
       { role: 'system', content: entityExtractPrompt },
       { role: 'user', content: input },
     ]
-    const entityEstimatedTokens = Math.ceil(JSON.stringify(entityExtractMsgs).length / 4) + 30
+    const entityEstimatedTokens = Math.ceil(JSON.stringify(entityExtractMsgs).length / 4) + 60
     const entityTokenCheck = await checkTokens({ estimatedTokens: entityEstimatedTokens, messages: entityExtractMsgs, model: cheapModel })
     if ('_tag' in entityTokenCheck && entityTokenCheck._tag === 'TokenHardBlock') {
       yield makeError('TOKEN_LIMIT_EXCEEDED', entityTokenCheck.reason)
@@ -299,7 +319,7 @@ export async function* runSession(
 
     let entityResp: Awaited<ReturnType<typeof model.chat>>
     try {
-      entityResp = await model.chat(entityExtractMsgs, [], { model: cheapModel, maxTokens: 30, temperature: 0, ...(signal ? { signal } : {}) })
+      entityResp = await model.chat(entityExtractMsgs, [], { model: cheapModel, maxTokens: 60, temperature: 0, ...(signal ? { signal } : {}) })
     } catch (chatErr) {
       // Same leaked-reservation class as intent classification above —
       // release the real reservation before this failure propagates to the
@@ -312,71 +332,168 @@ export async function* runSession(
     reconcileTokenUsage(budget, entityEstimatedTokens, (entityResp?.usage?.inputTokens ?? 0) + (entityResp?.usage?.outputTokens ?? 0))
     totalInputTokens += entityResp?.usage?.inputTokens ?? 0
     totalOutputTokens += entityResp?.usage?.outputTokens ?? 0
-    const entityName = entityResp.content.trim()
+    // Parse the comma-separated extraction into a deduped, bounded name list.
+    // Deterministic echo guard (belt to the prompt's braces): drop any name
+    // that does not actually occur in the query — normalized comparison so
+    // "Payments API" in the query still admits "payments-api" from the model.
+    const normalizedInput = input.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const seenNames = new Set<string>()
+    const entityNames = entityResp.content.trim()
+      ? entityResp.content.trim().split(',')
+          .map(s => s.trim())
+          .filter(s => {
+            if (!s || s.length > 100) return false
+            const key = s.toLowerCase()
+            if (seenNames.has(key)) return false
+            const normalized = key.replace(/[^a-z0-9]/g, '')
+            if (!normalized || !normalizedInput.includes(normalized)) return false
+            seenNames.add(key)
+            return true
+          })
+          .slice(0, MAX_SESSION_ENTITIES)
+      : []
+    const entityName = entityNames[0] ?? ''
 
-    if (entityName) {
-      resolvedAgentContext = await config.knowledgeGraph.resolveContextByName(entityName, ctx.tenantId, 1)
-const context = resolvedAgentContext
-      if (!context?.primaryEntity) {
+    for (const name of entityNames) {
+      const resolved = await config.knowledgeGraph.resolveContextByName(name, ctx.tenantId, 1)
+      if (resolved?.primaryEntity) {
+        // Dedupe by resolved entity id — two extracted names can fuzzy-match
+        // the same graph entity.
+        if (!resolvedEntities.some(re => re.context.primaryEntity.id === resolved.primaryEntity.id)) {
+          resolvedEntities.push({ context: resolved })
+        }
+      } else {
         await config.auditSink.append({
           id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
           sessionId: ctx.sessionId, eventType: 'graph_miss',
-          payload: { entityName }, createdAt: new Date(),
+          payload: { entityName: name }, createdAt: new Date(),
         }).catch(() => {})
       }
-      if (context?.primaryEntity) {
-        ctx = { ...ctx, contextEntityId: context.primaryEntity.id }
-        const coords = context.connectorCoordinates
-        const parts = [
-          `## GRAPH CONTEXT — entity resolved: "${context.primaryEntity.name}" (${context.primaryEntity.type})`,
-          `Use ONLY these coordinates in tool calls. Do not query other services.`,
-        ]
-        for (const rel of context.relationships.slice(0, 10)) {
-          const fromName = rel.fromEntityId === context.primaryEntity.id
-            ? context.primaryEntity.name
-            : context.relatedEntities.find(e => e.id === rel.fromEntityId)?.name ?? rel.fromEntityId
-          const toName = context.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
-          parts.push(`  ${rel.relType}: ${fromName} → ${toName}`)
+    }
+
+    // Session carryover — the "context maintained" half of multi-repo
+    // sessions. A follow-up like "why is it still broken?" names no entity;
+    // re-resolve the entities pinned to this session in earlier turns instead
+    // of dead-ending on "ask the user which service".
+    if (resolvedEntities.length === 0 && (session?.contextEntities?.length ?? 0) > 0) {
+      for (const ref of (session?.contextEntities ?? []).slice(0, MAX_SESSION_ENTITIES)) {
+        try {
+          const resolved = await config.knowledgeGraph.resolveContext(ref.id, ctx.tenantId, 1)
+          resolvedEntities.push({ context: resolved })
+        } catch {
+          // entity deleted from graph since it was pinned — drop it silently
         }
-        if (Object.keys(coords).length > 0) {
-          parts.push('## CONNECTOR COORDINATES (mandatory — use these exact values):')
-          for (const [connType, coord] of Object.entries(coords)) {
-            parts.push(`  ${connType}: ${JSON.stringify(coord.resourceIds)}`)
-          }
-          const promCoord = coords['prometheus']
-          if (promCoord?.resourceIds) {
-            const svc = promCoord.resourceIds['service'] ?? promCoord.resourceIds['job']
-            if (svc) parts.push(`  → PromQL scope: {service="${svc}"} or {job="${svc}"}`)
-          }
+      }
+      entitiesCarriedOver = resolvedEntities.length > 0
+    }
+
+    if (resolvedEntities.length > 0) {
+      const context = resolvedEntities[0]!.context
+      resolvedAgentContext = context
+      ctx = { ...ctx, contextEntityId: context.primaryEntity.id }
+
+      const relLines = (c: AgentContext, limit: number): string[] =>
+        c.relationships.slice(0, limit).map(rel => {
+          const fromName = rel.fromEntityId === c.primaryEntity.id
+            ? c.primaryEntity.name
+            : c.relatedEntities.find(e => e.id === rel.fromEntityId)?.name ?? rel.fromEntityId
+          const toName = rel.toEntityId === c.primaryEntity.id
+            ? c.primaryEntity.name
+            : c.relatedEntities.find(e => e.id === rel.toEntityId)?.name ?? rel.toEntityId
+          return `  ${rel.relType}: ${fromName} → ${toName}`
+        })
+
+      const coords = context.connectorCoordinates
+      const parts = [
+        `## GRAPH CONTEXT — entity resolved: "${context.primaryEntity.name}" (${context.primaryEntity.type})`,
+        `Use ONLY these coordinates in tool calls. Do not query other services.`,
+      ]
+      if (entitiesCarriedOver) {
+        parts.push('  [Carried over from earlier turns in this session — no entity named in this query]')
+      }
+      parts.push(...relLines(context, 10))
+      if (Object.keys(coords).length > 0) {
+        parts.push('## CONNECTOR COORDINATES (mandatory — use these exact values):')
+        for (const [connType, coord] of Object.entries(coords)) {
+          parts.push(`  ${connType}: ${JSON.stringify(coord.resourceIds)}`)
+        }
+        const promCoord = coords['prometheus']
+        if (promCoord?.resourceIds) {
+          const svc = promCoord.resourceIds['service'] ?? promCoord.resourceIds['job']
+          if (svc) parts.push(`  → PromQL scope: {service="${svc}"} or {job="${svc}"}`)
+        }
+      } else {
+        // Entity in graph but no connector coordinates yet.
+        // For alert investigations: fall through to alert protocol.
+        if (isAlertInvestigation) {
+          parts.push(`  [No connector coordinates yet — use alert investigation protocol below]`)
+          parts.push(ALERT_INVESTIGATION_PROTOCOL)
         } else {
-          // Entity in graph but no connector coordinates yet.
-          // For alert investigations: fall through to alert protocol.
-          if (isAlertInvestigation) {
-            parts.push(`  [No connector coordinates yet — use alert investigation protocol below]`)
-            parts.push(ALERT_INVESTIGATION_PROTOCOL)
-          } else {
-            parts.push('  [No connector coordinates — use entity name for targeted queries only.]')
+          parts.push('  [No connector coordinates — use entity name for targeted queries only.]')
+        }
+      }
+      if (context.freshness < 0.5) parts.push('  [STALE — verify critical facts from live connector]')
+
+      // Secondary entities — the rest of the multi-repo scope. Compact block
+      // each: identity, top relationships, own coordinate set.
+      for (const extra of resolvedEntities.slice(1)) {
+        const c = extra.context
+        parts.push(`## ADDITIONAL ENTITY IN SCOPE — "${c.primaryEntity.name}" (${c.primaryEntity.type})${entitiesCarriedOver ? ' [carried from earlier in this session]' : ''}`)
+        parts.push(...relLines(c, 5))
+        if (Object.keys(c.connectorCoordinates).length > 0) {
+          parts.push(`  Connector coordinates for "${c.primaryEntity.name}" (use for calls targeting this entity):`)
+          for (const [connType, coord] of Object.entries(c.connectorCoordinates)) {
+            parts.push(`    ${connType}: ${JSON.stringify(coord.resourceIds)}`)
           }
         }
-        if (context.freshness < 0.5) parts.push('  [STALE — verify critical facts from live connector]')
-        graphContext = parts.join('\n')
-        groundingSources = context.groundingSources.map(gs => ({
+        if (c.freshness < 0.5) parts.push('  [STALE — verify critical facts from live connector]')
+      }
+      graphContext = parts.join('\n')
+
+      groundingSources = resolvedEntities.flatMap(re =>
+        re.context.groundingSources.map(gs => ({
           source: gs.source,
           fetchedAt: gs.fetchedAt.toISOString(),
           confidence: gs.confidence,
-          freshness: context.freshness,
+          freshness: re.context.freshness,
+        })),
+      )
+
+      // Pin the session's entity set: this turn's resolutions first, then any
+      // previously pinned entities not re-mentioned, capped. Carryover turns
+      // resolved FROM the pinned set — nothing changed, skip the write.
+      if (!entitiesCarriedOver) {
+        const pinned: SessionEntityRef[] = resolvedEntities.map(re => ({
+          id: re.context.primaryEntity.id,
+          name: re.context.primaryEntity.name,
         }))
-      } else if (entityName && isAlertInvestigation) {
-        // Service mentioned but not yet in graph — still investigate using alert protocol.
-        // Alert labels from alertmanager will provide coordinates.
-        graphContext =
-          `## GRAPH CONTEXT — service "${entityName}" not yet in knowledge graph.\n` +
-          `Graph miss — use alert investigation protocol to derive coordinates from live alert labels.\n` +
-          ALERT_INVESTIGATION_PROTOCOL
-      } else if (entityName) {
-        // Non-alert: entity not in graph — block tools, ask user to confirm
-        graphContext = `## GRAPH CONTEXT — entity "${entityName}" not found in knowledge graph.\nDo NOT call connector tools. Ask the user to confirm the exact service name or register the relevant connector first.`
+        for (const prior of session?.contextEntities ?? []) {
+          if (!pinned.some(p => p.id === prior.id)) pinned.push(prior)
+        }
+        await sessionMemory.updateContextEntities?.(ctx.sessionId, pinned.slice(0, MAX_SESSION_ENTITIES)).catch(() => {})
       }
+
+      if (resolvedEntities.length > 1 || entitiesCarriedOver) {
+        await config.auditSink.append({
+          id: crypto.randomUUID(), tenantId: ctx.tenantId, userId: ctx.userId,
+          sessionId: ctx.sessionId, eventType: 'context_entities_resolved',
+          payload: {
+            entities: resolvedEntities.map(re => re.context.primaryEntity.name),
+            carriedOver: entitiesCarriedOver,
+          },
+          createdAt: new Date(),
+        }).catch(() => {})
+      }
+    } else if (entityName && isAlertInvestigation) {
+      // Service mentioned but not yet in graph — still investigate using alert protocol.
+      // Alert labels from alertmanager will provide coordinates.
+      graphContext =
+        `## GRAPH CONTEXT — service "${entityName}" not yet in knowledge graph.\n` +
+        `Graph miss — use alert investigation protocol to derive coordinates from live alert labels.\n` +
+        ALERT_INVESTIGATION_PROTOCOL
+    } else if (entityName) {
+      // Non-alert: entity not in graph — block tools, ask user to confirm
+      graphContext = `## GRAPH CONTEXT — entity "${entityName}" not found in knowledge graph.\nDo NOT call connector tools. Ask the user to confirm the exact service name or register the relevant connector first.`
     } else if (isAlertInvestigation) {
       // No specific service extracted but this is an alert investigation (e.g. infra alert).
       // Use alert investigation protocol — alertmanager is the coordinate source.
@@ -435,10 +552,26 @@ const context = resolvedAgentContext
     }
   }
 
+  // Multi-repo: flat `coordinates` above is the PRIMARY entity's only — two
+  // repos both flatten to a `repo` key, so merging N entities into one flat
+  // map silently overwrites all but the last. Secondary entities travel in a
+  // per-entity map keyed by entity name instead.
+  const entityCoordinates: Record<string, Record<string, string>> = {}
+  if (resolvedEntities.length > 1) {
+    for (const re of resolvedEntities) {
+      const flat: Record<string, string> = {}
+      for (const coords of Object.values(re.context.connectorCoordinates)) {
+        Object.assign(flat, coords.resourceIds)
+      }
+      if (Object.keys(flat).length > 0) entityCoordinates[re.context.primaryEntity.name] = flat
+    }
+  }
+
   const specialistCtx: SpecialistContext = {
     task: input,
     intent: classifiedIntent,
     coordinates,
+    ...(Object.keys(entityCoordinates).length > 1 ? { entityCoordinates } : {}),
     entityHint: ctx.contextEntityId ?? undefined,
     tenantId: ctx.tenantId,
     sessionId: ctx.sessionId,

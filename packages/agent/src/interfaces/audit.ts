@@ -16,6 +16,7 @@ export type AuditEventType =
   | 'intent_parse_failed'
   | 'graph_miss'
   | 'role_inferred'
+  | 'context_entities_resolved'
   | 'perimeter_changed'
   | 'perimeter_removed'
   | 'trigger_fired'

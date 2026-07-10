@@ -35,7 +35,14 @@ export interface AgentFinding {
 export interface SpecialistContext {
   task: string                        // what to investigate
   intent: string                      // classified intent
-  coordinates: Record<string, string> // graph-resolved labels: { service, job, namespace, … }
+  coordinates: Record<string, string> // graph-resolved labels for the PRIMARY entity: { service, job, namespace, … }
+  /**
+   * Multi-repo sessions: per-entity coordinate sets when the query spans
+   * several services/repos. Key = entity name. Present only when >1 entity
+   * resolved — flat `coordinates` would silently collide (both repos flatten
+   * to a `repo` key) so each entity keeps its own map.
+   */
+  entityCoordinates?: Record<string, Record<string, string>>
   alertContext?: string               // serialised alert labels from alertmanager (if pre-fetched)
   entityHint?: string | undefined                 // fallback when graph has no coordinates
   tenantId: string
@@ -302,6 +309,9 @@ export class ConnectorAgent {
     const coordPart = Object.keys(ctx.coordinates).length > 0
       ? `\nConnector coordinates (use these exact label values): ${JSON.stringify(ctx.coordinates)}`
       : ''
+    const multiEntityPart = ctx.entityCoordinates && Object.keys(ctx.entityCoordinates).length > 1
+      ? `\nThis query spans MULTIPLE services/repos. Per-entity connector coordinates — use the matching entity's exact values for each targeted call, never mix entities: ${JSON.stringify(ctx.entityCoordinates)}`
+      : ''
     const alertPart = ctx.alertContext
       ? `\nAlert context (labels from alertmanager — use service/job/namespace from here): ${ctx.alertContext}`
       : ''
@@ -309,7 +319,7 @@ export class ConnectorAgent {
 
     const userContent =
       `Task: ${ctx.task}\nIntent: ${ctx.intent}` +
-      coordPart + alertPart + entityPart
+      coordPart + multiEntityPart + alertPart + entityPart
 
     const toolDefs: ToolDefinition[] = this.tools.map(t => ({
       name: t.name,

@@ -1,5 +1,5 @@
 import type { SessionId } from '@anway/types'
-import type { ISessionMemory, ConversationTurn, SessionContext, SessionMeta } from '../interfaces/memory.js'
+import type { ISessionMemory, ConversationTurn, SessionContext, SessionEntityRef, SessionMeta } from '../interfaces/memory.js'
 import type { IModelProvider } from '../interfaces/provider.js'
 import type { Redis } from 'ioredis'
 
@@ -32,10 +32,39 @@ export class RedisSessionMemory implements ISessionMemory {
   /**
    * Initialise session metadata. Must be called once before the first append.
    * Idempotent — safe to call again with updated effectiveRole.
+   *
+   * The gateway calls this on EVERY request of a session, not just the first
+   * — a plain overwrite here wiped the rolling `summary` written by
+   * summarise() and the `contextEntities` set written by
+   * updateContextEntities() on each new turn, silently resetting long-session
+   * compression and multi-repo carryover. Fields the caller doesn't supply
+   * are preserved from the existing meta.
    */
   async initSession(meta: SessionMeta): Promise<void> {
     const key = metaKey(meta.sessionId)
-    await this.redis.set(key, JSON.stringify(meta), 'EX', SESSION_TTL_SECONDS)
+    const existingRaw = await this.redis.get(key)
+    let merged: SessionMeta = meta
+    if (existingRaw) {
+      const existing = JSON.parse(existingRaw) as SessionMeta
+      merged = {
+        ...meta,
+        ...(meta.summary === undefined && existing.summary !== undefined ? { summary: existing.summary } : {}),
+        ...(meta.contextEntities === undefined && existing.contextEntities !== undefined ? { contextEntities: existing.contextEntities } : {}),
+        ...(meta.contextEntityId === undefined && existing.contextEntityId !== undefined ? { contextEntityId: existing.contextEntityId } : {}),
+      }
+    }
+    await this.redis.set(key, JSON.stringify(merged), 'EX', SESSION_TTL_SECONDS)
+  }
+
+  /** Persist the session's resolved entity set (multi-repo carryover). */
+  async updateContextEntities(sessionId: SessionId, entities: SessionEntityRef[]): Promise<void> {
+    const key = metaKey(sessionId)
+    const metaRaw = await this.redis.get(key)
+    if (!metaRaw) return // no session meta yet — nothing to attach to
+    const meta = JSON.parse(metaRaw) as SessionMeta
+    const firstId = entities[0]?.id ?? meta.contextEntityId
+    const updated: SessionMeta = { ...meta, contextEntities: entities, ...(firstId !== undefined ? { contextEntityId: firstId } : {}) }
+    await this.redis.set(key, JSON.stringify(updated), 'EX', SESSION_TTL_SECONDS)
   }
 
   async get(sessionId: SessionId): Promise<SessionContext | null> {

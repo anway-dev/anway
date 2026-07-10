@@ -268,9 +268,25 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Same hosted-runner disk reclaim as the check job — this job never had
+      # it, and on run 29110502847 the runner died on the SECOND image after
+      # the gateway image's layers had filled the local store (gateway built
+      # AND pushed fine post-slimming). Prune between images for the same
+      # reason.
+      - name: Free runner disk for image builds
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/share/dotnet /opt/ghc || true
+          docker system prune -f || true
+          df -h / | tail -1
       - run: |
           docker build -f apps/gateway/Dockerfile . -t ghcr.io/${{ github.repository_owner }}/anway-gateway:${{ inputs.sha }}
           docker push ghcr.io/${{ github.repository_owner }}/anway-gateway:${{ inputs.sha }}
+      - name: Reclaim space from the gateway image before building web
+        run: |
+          docker image rm ghcr.io/${{ github.repository_owner }}/anway-gateway:${{ inputs.sha }} || true
+          docker builder prune -af || true
+          docker system prune -f || true
+          df -h / | tail -1
       - run: |
           docker build -f apps/web/Dockerfile . -t ghcr.io/${{ github.repository_owner }}/anway-web:${{ inputs.sha }}
           docker push ghcr.io/${{ github.repository_owner }}/anway-web:${{ inputs.sha }}

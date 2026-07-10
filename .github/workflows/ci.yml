@@ -163,7 +163,14 @@ jobs:
         # `up --wait` hard-fails on any service without a healthcheck
         # (otel-collector) — confirmed on real run 29079070468. Boot detached
         # and wait on the two endpoints the e2e suite actually talks to.
+        #
+        # apps/gateway/.env is gitignored, and the gateway container's dev
+        # command is `tsx watch --env-file=.env` which hard-exits with
+        # "node: .env: not found" when the file is absent — confirmed on
+        # real run 29089473803 (all real config comes from the compose
+        # environment block; the file just has to exist).
         run: |
+          cp -n apps/gateway/.env.example apps/gateway/.env
           docker compose -f infra/docker-compose.dev.yml up -d
           for i in $(seq 1 240); do
             if curl -sf http://localhost:8510/health >/dev/null 2>&1 && curl -sf http://localhost:8500 >/dev/null 2>&1; then

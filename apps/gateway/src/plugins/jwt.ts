@@ -35,6 +35,26 @@ export default fp(async function jwtPlugin(app: FastifyInstance) {
     throw new Error('JWT_SECRET or JWT_PRIVATE_KEY must be set')
   }
 
+  // Production hardening: refuse to boot with a weak or known-default HS256
+  // secret. These are the literal defaults shipped in this repo's own
+  // .env.example files — a prod deploy that never rotated them would mint
+  // trivially forgeable session tokens. Fail closed at boot, matching
+  // assertEncryptionKey()'s posture for ANWAY_ENCRYPTION_KEY.
+  if (process.env['NODE_ENV'] === 'production' && !privateKey && secret) {
+    const KNOWN_DEFAULTS = new Set([
+      'dev-secret-change-in-production',
+      'change-me-to-a-random-secret-at-least-32-chars',
+      'ci-test-secret-not-for-real-use-32chars',
+      'test-secret',
+    ])
+    if (KNOWN_DEFAULTS.has(secret)) {
+      throw new Error('JWT_SECRET is a known default value — set a unique random secret for production')
+    }
+    if (secret.length < 32) {
+      throw new Error(`JWT_SECRET must be at least 32 characters in production (got ${secret.length})`)
+    }
+  }
+
   await app.register(jwt, {
     secret:
       privateKey && publicKey

@@ -213,6 +213,10 @@ jobs:
           # with "prometheus unreachable" on real run 29095118343. Use the
           # compose-network service name.
           DEMO_PROMETHEUS_URL: http://prometheus:9090
+          # Real docker-build-inside-SSE is structurally slow on shared
+          # runners (see AF.1's comment in 99-certification.spec.ts); the
+          # image-build path is covered by the check job's docker builds.
+          CERT_SKIP_BUILD_STAGE: '1'
         run: pnpm --filter anway-web run test:e2e
       - name: Upload Playwright traces/screenshots on failure
         if: failure()

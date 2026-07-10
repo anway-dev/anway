@@ -7,6 +7,7 @@ interface AwsCredentials {
   secretAccessKey?: string
   sessionToken?: string
   region?: string
+  endpointUrl?: string
 }
 
 function awsEnv(creds: AwsCredentials): NodeJS.ProcessEnv {
@@ -15,6 +16,11 @@ function awsEnv(creds: AwsCredentials): NodeJS.ProcessEnv {
   if (creds.secretAccessKey) env['AWS_SECRET_ACCESS_KEY'] = creds.secretAccessKey
   if (creds.sessionToken) env['AWS_SESSION_TOKEN'] = creds.sessionToken
   env['AWS_DEFAULT_REGION'] = creds.region ?? process.env['AWS_DEFAULT_REGION'] ?? 'us-east-1'
+  // Endpoint override (LocalStack etc.) — agent.ts in this same connector
+  // already honored endpointUrl; bootstrap didn't, so a LocalStack-configured
+  // connector's tools worked while its bootstrap hit real AWS and failed
+  // (found by the first live LocalStack verification run).
+  if (creds.endpointUrl) env['AWS_ENDPOINT_URL'] = creds.endpointUrl
   return env
 }
 
@@ -66,6 +72,7 @@ export class AwsCloudwatchBootstrap implements IConnectorBootstrap {
       secretAccessKey: (payload['secretAccessKey'] ?? payload['secret_access_key']) as string | undefined,
       sessionToken:    (payload['sessionToken']    ?? payload['session_token'])     as string | undefined,
       region:          (payload['region'])                                           as string | undefined,
+      endpointUrl:     (payload['endpointUrl']     ?? payload['endpoint_url'])     as string | undefined,
     }
 
     const env = awsEnv(creds)

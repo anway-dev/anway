@@ -26,21 +26,27 @@ declare module '@fastify/jwt' {
   }
 }
 
-export default fp(async function jwtPlugin(app: FastifyInstance) {
-  const privateKey = process.env.JWT_PRIVATE_KEY
-  const publicKey = process.env.JWT_PUBLIC_KEY
-  const secret = process.env.JWT_SECRET
-
+// Production hardening: refuse to boot with a weak or known-default HS256
+// secret. These are the literal defaults shipped in this repo's own
+// .env.example files — a prod deploy that never rotated them would mint
+// trivially forgeable session tokens. Fail closed at boot, matching
+// assertEncryptionKey()'s posture for ANWAY_ENCRYPTION_KEY.
+//
+// Pure + exported so the unit tests exercise it directly with injected
+// values: the first version of those tests mutated process.env, which races
+// with other test FILES in the same vitest worker (confirmed on real
+// Actions run 29095118343 — oidc.test.ts's buildApp saw JWT_SECRET deleted
+// mid-flight by a concurrently running jwt.test.ts).
+export function validateJwtSecretConfig(cfg: {
+  privateKey?: string | undefined
+  secret?: string | undefined
+  nodeEnv?: string | undefined
+}): void {
+  const { privateKey, secret, nodeEnv } = cfg
   if (!privateKey && !secret) {
     throw new Error('JWT_SECRET or JWT_PRIVATE_KEY must be set')
   }
-
-  // Production hardening: refuse to boot with a weak or known-default HS256
-  // secret. These are the literal defaults shipped in this repo's own
-  // .env.example files — a prod deploy that never rotated them would mint
-  // trivially forgeable session tokens. Fail closed at boot, matching
-  // assertEncryptionKey()'s posture for ANWAY_ENCRYPTION_KEY.
-  if (process.env['NODE_ENV'] === 'production' && !privateKey && secret) {
+  if (nodeEnv === 'production' && !privateKey && secret) {
     const KNOWN_DEFAULTS = new Set([
       'dev-secret-change-in-production',
       'change-me-to-a-random-secret-at-least-32-chars',
@@ -54,6 +60,14 @@ export default fp(async function jwtPlugin(app: FastifyInstance) {
       throw new Error(`JWT_SECRET must be at least 32 characters in production (got ${secret.length})`)
     }
   }
+}
+
+export default fp(async function jwtPlugin(app: FastifyInstance) {
+  const privateKey = process.env.JWT_PRIVATE_KEY
+  const publicKey = process.env.JWT_PUBLIC_KEY
+  const secret = process.env.JWT_SECRET
+
+  validateJwtSecretConfig({ privateKey, secret, nodeEnv: process.env['NODE_ENV'] })
 
   await app.register(jwt, {
     secret:

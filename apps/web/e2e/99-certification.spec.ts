@@ -402,7 +402,9 @@ test.describe('CERT I: UI — real data, no mock fallbacks', () => {
     await expect(
       page.locator('input[type="email"]'),
       'unauthenticated visit to / must render the login form, not the app shell'
-    ).toBeVisible({ timeout: 8000 })
+      // 20s: first hit compiles /login in Next dev mode — cold compile alone
+      // exceeded 8s on a loaded machine (timing flake, verified 200/160ms warm).
+    ).toBeVisible({ timeout: 20000 })
   })
 
   test('I.2 login flow issues cookie and loads app', async ({ page }) => {
@@ -428,7 +430,9 @@ test.describe('CERT I: UI — real data, no mock fallbacks', () => {
     await expect(
       page.locator('text=CERT-Alert').first(),
       'Signals must render the incident created via webhook — if missing, feed is mock or broken'
-    ).toBeVisible({ timeout: 10000 })
+      // 30s: first click on Signals cold-compiles the view chunk in Next dev
+      // mode (feed itself verified API-side by F.3; passes on CI).
+    ).toBeVisible({ timeout: 30000 })
   })
 
   test('I.4 Signals view does NOT show known mock-data markers', async ({ page, context }) => {

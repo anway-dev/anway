@@ -1,64 +1,48 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import Fastify from 'fastify'
-import jwtPlugin from './jwt.js'
+import { describe, it, expect } from 'vitest'
+import { validateJwtSecretConfig } from './jwt.js'
 
 // Production boot hardening: a weak or repo-default JWT_SECRET must refuse
 // to boot in NODE_ENV=production (forgeable session tokens otherwise), and
 // must keep working untouched in development.
+//
+// Tests call the pure validator with injected values — the first version
+// mutated process.env, which races with other test FILES sharing the vitest
+// worker (real Actions run 29095118343: oidc.test.ts's buildApp saw
+// JWT_SECRET deleted mid-flight).
 
-const ENV_KEYS = ['NODE_ENV', 'JWT_SECRET', 'JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY'] as const
-let saved: Record<string, string | undefined>
-
-beforeEach(() => {
-  saved = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]))
-  delete process.env['JWT_PRIVATE_KEY']
-  delete process.env['JWT_PUBLIC_KEY']
-})
-
-afterEach(() => {
-  for (const k of ENV_KEYS) {
-    if (saved[k] === undefined) delete process.env[k]
-    else process.env[k] = saved[k]
-  }
-})
-
-async function boot(): Promise<void> {
-  const app = Fastify({ logger: false })
-  try {
-    await app.register(jwtPlugin)
-  } finally {
-    await app.close()
-  }
-}
-
-describe('jwt plugin production secret hardening', () => {
-  it('refuses a known repo-default secret in production', async () => {
-    process.env['NODE_ENV'] = 'production'
-    process.env['JWT_SECRET'] = 'dev-secret-change-in-production'
-    await expect(boot()).rejects.toThrow(/known default/)
+describe('jwt production secret hardening', () => {
+  it('refuses a known repo-default secret in production', () => {
+    expect(() => validateJwtSecretConfig({
+      secret: 'dev-secret-change-in-production', nodeEnv: 'production',
+    })).toThrow(/known default/)
   })
 
-  it('refuses a short secret in production', async () => {
-    process.env['NODE_ENV'] = 'production'
-    process.env['JWT_SECRET'] = 'short-but-not-default'
-    await expect(boot()).rejects.toThrow(/at least 32 characters/)
+  it('refuses a short secret in production', () => {
+    expect(() => validateJwtSecretConfig({
+      secret: 'short-but-not-default', nodeEnv: 'production',
+    })).toThrow(/at least 32 characters/)
   })
 
-  it('accepts a strong secret in production', async () => {
-    process.env['NODE_ENV'] = 'production'
-    process.env['JWT_SECRET'] = 'a'.repeat(24) + 'unique-suffix-xyz'
-    await expect(boot()).resolves.toBeUndefined()
+  it('accepts a strong secret in production', () => {
+    expect(() => validateJwtSecretConfig({
+      secret: 'a'.repeat(24) + 'unique-suffix-xyz', nodeEnv: 'production',
+    })).not.toThrow()
   })
 
-  it('allows the dev default outside production', async () => {
-    process.env['NODE_ENV'] = 'development'
-    process.env['JWT_SECRET'] = 'dev-secret-change-in-production'
-    await expect(boot()).resolves.toBeUndefined()
+  it('allows the dev default outside production', () => {
+    expect(() => validateJwtSecretConfig({
+      secret: 'dev-secret-change-in-production', nodeEnv: 'development',
+    })).not.toThrow()
   })
 
-  it('still requires some secret to be set at all', async () => {
-    process.env['NODE_ENV'] = 'development'
-    delete process.env['JWT_SECRET']
-    await expect(boot()).rejects.toThrow(/JWT_SECRET or JWT_PRIVATE_KEY/)
+  it('still requires some secret to be set at all', () => {
+    expect(() => validateJwtSecretConfig({ nodeEnv: 'development' }))
+      .toThrow(/JWT_SECRET or JWT_PRIVATE_KEY/)
+  })
+
+  it('an RS256 private key bypasses the HS256 secret checks', () => {
+    expect(() => validateJwtSecretConfig({
+      privateKey: '-----BEGIN PRIVATE KEY-----', nodeEnv: 'production',
+    })).not.toThrow()
   })
 })

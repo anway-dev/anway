@@ -1,4 +1,5 @@
 import type { IConnectorAgent, ConnectorTool } from '@anway/agent'
+import { snykRestList } from './rest.js'
 
 interface SnykCreds { token: string; baseUrl: string }
 
@@ -9,22 +10,24 @@ function extractCreds(creds: Record<string, unknown>): SnykCreds {
   return { token, baseUrl: baseUrl.replace(/\/$/, '') }
 }
 
-interface SnykOrg {
-  id: string
-  name: string
-}
+interface OrgAttrs { name: string }
+interface ProjectAttrs { name: string }
 
-interface SnykProject {
-  id: string
-  name: string
-}
-
-/** Raw vulnerability shape from Snyk v1 POST /org/{orgId}/project/{projectId}/issues */
-interface SnykVuln {
-  id: string
-  issueData: { severity: string; title: string }
-  pkgName: string
-  isFixable: boolean
+/**
+ * Snyk REST issue attributes (docs.snyk.io REST API reference, issues).
+ * Severity lives in effective_severity_level; the affected package in
+ * coordinates[].representations[].dependency.
+ */
+interface IssueAttrs {
+  title?: string
+  effective_severity_level?: string
+  coordinates?: Array<{
+    is_fixable_manually?: boolean
+    is_fixable_snyk?: boolean
+    is_upgradeable?: boolean
+    is_patchable?: boolean
+    representations?: Array<{ dependency?: { package_name?: string; package_version?: string } }>
+  }>
 }
 
 /** Normalised return shape matching existing tool contract */
@@ -45,26 +48,17 @@ async function resolveProject(
   // we cannot know whether the project exists at all, so it throws rather
   // than being indistinguishable from "traversed everything, found no
   // match" (which legitimately returns null below).
-  const orgsRes = await fetch(`${baseUrl}/v1/orgs`, {
-    headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
-  })
-  if (!orgsRes.ok) throw new Error(`Snyk list orgs failed: HTTP ${orgsRes.status}`)
-  const orgsData = (await orgsRes.json()) as { orgs?: SnykOrg[] }
-  const orgs = orgsData.orgs ?? []
+  const orgs = await snykRestList<OrgAttrs>(baseUrl, token, '/rest/orgs', 'list orgs')
 
   // 2. For each org, list projects and search for match
   for (const org of orgs) {
     try {
-      const projRes = await fetch(`${baseUrl}/v1/org/${org.id}/projects`, {
-        headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
-      })
-      if (!projRes.ok) continue
-      const projData = (await projRes.json()) as { projects?: SnykProject[] }
-      const projects = projData.projects ?? []
-
+      const projects = await snykRestList<ProjectAttrs>(
+        baseUrl, token, `/rest/orgs/${org.id}/projects`, `list projects (org ${org.id})`,
+      )
       // Exact project ID match first, then name match
       for (const p of projects) {
-        if (p.id === projectHint || p.name === projectHint) {
+        if (p.id === projectHint || p.attributes.name === projectHint) {
           return { orgId: org.id, projectId: p.id }
         }
       }
@@ -99,29 +93,25 @@ const TOOLS: ConnectorTool[] = [
       const resolved = await resolveProject(projectHint, c.baseUrl, c.token)
       if (!resolved) return { vulns: [] }
 
-      const issuesRes = await fetch(
-        `${c.baseUrl}/v1/org/${resolved.orgId}/project/${resolved.projectId}/issues`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `token ${c.token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({}),
-        },
+      // REST issues endpoint, scoped to the project via scan_item filters
+      // (docs-verified; replaces the deprecated v1 POST .../issues).
+      const issues = await snykRestList<IssueAttrs>(
+        c.baseUrl, c.token,
+        `/rest/orgs/${resolved.orgId}/issues?scan_item.id=${encodeURIComponent(resolved.projectId)}&scan_item.type=project`,
+        'get_vulnerabilities',
       )
-      if (!issuesRes.ok) throw new Error(`Snyk get_vulnerabilities failed: HTTP ${issuesRes.status}`)
-      const issuesData = (await issuesRes.json()) as {
-        issues?: { vulnerabilities?: SnykVuln[] }
-      }
-      const raw = issuesData.issues?.vulnerabilities ?? []
-      const vulns: VulnResult[] = raw.map(v => ({
-        id: v.id,
-        severity: v.issueData?.severity ?? 'unknown',
-        title: v.issueData?.title ?? '',
-        packageName: v.pkgName ?? '',
-        fixable: v.isFixable ?? false,
-      }))
+
+      const vulns: VulnResult[] = issues.map(issue => {
+        const coord = issue.attributes.coordinates?.[0]
+        const dep = coord?.representations?.find(r => r.dependency)?.dependency
+        return {
+          id: issue.id,
+          severity: issue.attributes.effective_severity_level ?? 'unknown',
+          title: issue.attributes.title ?? '',
+          packageName: dep?.package_name ?? '',
+          fixable: Boolean(coord?.is_fixable_snyk || coord?.is_fixable_manually || coord?.is_upgradeable || coord?.is_patchable),
+        }
+      })
       return { vulns }
     },
     write: false,

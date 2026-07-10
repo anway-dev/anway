@@ -19,90 +19,62 @@ import { SnykAgent } from './agent.js'
  * pattern this could be upgraded to).
  */
 
-// ── Realistic Snyk API fixtures — multi-org, multi-project ────────────
+// ── Realistic Snyk REST API fixtures — multi-org, multi-project ───────
+// Shapes follow the docs-verified Snyk REST API (JSON:API envelopes):
+// GET /rest/orgs, GET /rest/orgs/{id}/projects,
+// GET /rest/orgs/{id}/issues?scan_item.id=...&scan_item.type=project.
+// The fixture server matches method+path only (query stripped), so each
+// project whose issues we assert lives in its OWN org.
 
 const orgsFixture = {
-  orgs: [
-    { id: 'org-1', name: 'acme', slug: 'acme' },
-    { id: 'org-2', name: 'acme-labs', slug: 'acme-labs' },
+  data: [
+    { id: 'org-1', attributes: { name: 'acme' } },
+    { id: 'org-2', attributes: { name: 'acme-labs' } },
+    { id: 'org-3', attributes: { name: 'acme-clean' } },
   ],
 }
 
-const org1ProjectsFixture = {
-  projects: [
-    { id: 'proj-1', name: 'payments-api', type: 'npm' },
-    { id: 'proj-2', name: 'checkout-api', type: 'npm' },
-  ],
-}
+const org1ProjectsFixture = { data: [{ id: 'proj-1', attributes: { name: 'payments-api' } }] }
+const org2ProjectsFixture = { data: [{ id: 'proj-3', attributes: { name: 'auth-service' } }] }
+const org3ProjectsFixture = { data: [{ id: 'proj-2', attributes: { name: 'checkout-api' } }] }
 
-const org2ProjectsFixture = {
-  projects: [
-    { id: 'proj-3', name: 'auth-service', type: 'golang' },
-  ],
-}
-
-// Snyk v1 POST /org/{orgId}/project/{projectId}/issues response shape
-// Each vulnerability has: id, issueData: { severity, title }, pkgName, isFixable
-const proj1VulnsFixture = {
-  issues: {
-    vulnerabilities: [
-      {
-        id: 'SNYK-JS-EXPRESS-450006',
-        issueData: { severity: 'critical', title: 'Remote Code Execution' },
-        pkgName: 'express',
-        isFixable: true,
-      },
-      {
-        id: 'SNYK-JS-LODASH-567746',
-        issueData: { severity: 'high', title: 'Prototype Pollution' },
-        pkgName: 'lodash',
-        isFixable: true,
-      },
-      {
-        id: 'SNYK-JS-MINIMIST-559764',
-        issueData: { severity: 'medium', title: 'Regular Expression Denial of Service (ReDoS)' },
-        pkgName: 'minimist',
-        isFixable: true,
-      },
-    ],
+const restIssue = (id: string, severity: string, title: string, pkg: string, fixable: boolean) => ({
+  id,
+  attributes: {
+    title,
+    effective_severity_level: severity,
+    coordinates: [{
+      is_upgradeable: fixable,
+      representations: [{ dependency: { package_name: pkg } }],
+    }],
   },
+})
+
+const org1IssuesFixture = {
+  data: [
+    restIssue('SNYK-JS-EXPRESS-450006', 'critical', 'Remote Code Execution', 'express', true),
+    restIssue('SNYK-JS-LODASH-567746', 'high', 'Prototype Pollution', 'lodash', true),
+    restIssue('SNYK-JS-MINIMIST-559764', 'medium', 'Regular Expression Denial of Service (ReDoS)', 'minimist', true),
+  ],
 }
 
-const proj3VulnsFixture = {
-  issues: {
-    vulnerabilities: [
-      {
-        id: 'SNYK-GOLANG-GOLANGORGXNET-1083182',
-        issueData: { severity: 'low', title: 'Information Exposure' },
-        pkgName: 'golang.org/x/net',
-        isFixable: false,
-      },
-      {
-        id: 'SNYK-GOLANG-GITHUBCOMLIBPQ-1083183',
-        issueData: { severity: 'high', title: 'SQL Injection' },
-        pkgName: 'github.com/lib/pq',
-        isFixable: true,
-      },
-    ],
-  },
+const org2IssuesFixture = {
+  data: [
+    restIssue('SNYK-GOLANG-GOLANGORGXNET-1083182', 'low', 'Information Exposure', 'golang.org/x/net', false),
+    restIssue('SNYK-GOLANG-GITHUBCOMLIBPQ-1083183', 'high', 'SQL Injection', 'github.com/lib/pq', true),
+  ],
 }
 
-const emptyVulnsFixture = {
-  issues: { vulnerabilities: [] },
-}
+const emptyIssuesFixture = { data: [] }
 
 const fixtureRoutes: FixtureRoute[] = [
-  // Org listing
-  { method: 'GET', path: '/v1/orgs', status: 200, body: orgsFixture },
-  // Projects per org
-  { method: 'GET', path: '/v1/org/org-1/projects', status: 200, body: org1ProjectsFixture },
-  { method: 'GET', path: '/v1/org/org-2/projects', status: 200, body: org2ProjectsFixture },
-  // Issues per project (POST)
-  { method: 'POST', path: '/v1/org/org-1/project/proj-1/issues', status: 200, body: proj1VulnsFixture },
-  { method: 'POST', path: '/v1/org/org-1/project/proj-2/issues', status: 200, body: emptyVulnsFixture },
-  { method: 'POST', path: '/v1/org/org-2/project/proj-3/issues', status: 200, body: proj3VulnsFixture },
-  // Server error for a specific project
-  { method: 'POST', path: '/v1/org/org-1/project/proj-err/issues', status: 500, body: {} },
+  { method: 'GET', path: '/rest/orgs', status: 200, body: orgsFixture },
+  { method: 'GET', path: '/rest/orgs/org-1/projects', status: 200, body: org1ProjectsFixture },
+  { method: 'GET', path: '/rest/orgs/org-2/projects', status: 200, body: org2ProjectsFixture },
+  { method: 'GET', path: '/rest/orgs/org-3/projects', status: 200, body: org3ProjectsFixture },
+  { method: 'GET', path: '/rest/orgs/org-1/issues', status: 200, body: org1IssuesFixture },
+  { method: 'GET', path: '/rest/orgs/org-2/issues', status: 200, body: org2IssuesFixture },
+  { method: 'GET', path: '/rest/orgs/org-3/issues', status: 200, body: emptyIssuesFixture },
 ]
 
 describe('snyk — fixture HTTP server', () => {
@@ -317,21 +289,21 @@ describe('snyk — fixture HTTP server', () => {
   it('fixture server received org + project + issues requests', () => {
     const paths = fixture.receivedRequests.map(r => `${r.method} ${r.path.split('?')[0]!}`)
 
-    // Bootstrap: GET /v1/orgs + GET /v1/org/org-1/projects + GET /v1/org/org-2/projects
+    // Bootstrap: GET /rest/orgs + per-org project lists
     expect(
-      paths.filter(p => p === 'GET /v1/orgs').length,
-      'expected at least one GET /v1/orgs call',
+      paths.filter(p => p === 'GET /rest/orgs').length,
+      'expected at least one GET /rest/orgs call',
     ).toBeGreaterThan(0)
 
-    // Agent: POST issues calls
+    // Agent: REST issues calls, scoped per org
     expect(
-      paths.some(p => p === 'POST /v1/org/org-1/project/proj-1/issues'),
-      'expected POST /v1/org/org-1/project/proj-1/issues call',
+      paths.some(p => p === 'GET /rest/orgs/org-1/issues'),
+      'expected GET /rest/orgs/org-1/issues call',
     ).toBe(true)
 
     expect(
-      paths.some(p => p === 'POST /v1/org/org-2/project/proj-3/issues'),
-      'expected POST /v1/org/org-2/project/proj-3/issues call (project in non-first org)',
+      paths.some(p => p === 'GET /rest/orgs/org-2/issues'),
+      'expected GET /rest/orgs/org-2/issues call (project in non-first org)',
     ).toBe(true)
   })
 

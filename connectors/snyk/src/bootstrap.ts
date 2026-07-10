@@ -1,6 +1,7 @@
 import type { IConnectorBootstrap, ConnectorBootstrapResult } from '@anway/agent'
 import type { IKnowledgeGraph } from '@anway/agent'
 import type { TenantId } from '@anway/types'
+import { snykRestList } from './rest.js'
 
 export class SnykBootstrap implements IConnectorBootstrap {
   constructor(private readonly kg: IKnowledgeGraph) {}
@@ -10,38 +11,32 @@ export class SnykBootstrap implements IConnectorBootstrap {
     if (!token) {
       return { entitiesUpserted: 0, relationshipsUpserted: 0, episodeHints: ['Snyk bootstrap: no API token configured'] }
     }
-    const headers: Record<string, string> = { Authorization: `token ${token}`, 'Content-Type': 'application/json' }
+    const baseUrl = ((payload['baseUrl'] as string | undefined)?.trim() || undefined) ?? 'https://api.snyk.io'
 
-    // Confirmed live via independent review: both the top-level catch and
-    // the per-org catch swallowed every failure (invalid token, network
-    // outage, malformed JSON) as a plausible success — a completely
-    // invalid token would fail the orgs call and report "0 projects
-    // across 0 orgs indexed", identical to a genuinely empty Snyk account.
-    // This hits Snyk's real cloud API (not a local default), so a network
-    // failure is a real outage worth surfacing — only "no token
-    // configured" (above) is legitimately empty.
-    const orgsRes = await fetch(`${payload['baseUrl'] ?? 'https://api.snyk.io'}/v1/orgs`, { headers })
-    if (!orgsRes.ok) {
-      throw new Error(`Snyk bootstrap: /v1/orgs failed with HTTP ${orgsRes.status}`)
-    }
-    const orgsData = await orgsRes.json() as { orgs?: Array<{ id: string; name: string }> }
-    const orgs = orgsData.orgs ?? []
+    // Migrated to the Snyk REST API (docs-verified) — v1 (/v1/orgs,
+    // /v1/org/{id}/projects) is vendor-deprecated; all development is on
+    // REST and deprecated v1 endpoints get Sunset headers.
+    //
+    // Failure semantics preserved from the earlier fix: a failure of the
+    // orgs call (invalid token, network outage) throws — it must never look
+    // identical to a genuinely empty Snyk account. Per-org 403/404 is a
+    // legitimate permission gap and skips just that org.
+    const orgs = await snykRestList<{ name: string }>(baseUrl, token, '/rest/orgs', 'bootstrap list orgs')
     let entitiesUpserted = 0
     for (const org of orgs) {
-      const projRes = await fetch(`${payload['baseUrl'] ?? 'https://api.snyk.io'}/v1/org/${org.id}/projects`, { headers })
-      if (!projRes.ok) {
-        // 403/404 for one specific org is a legitimate per-org permission
-        // gap (the token may not have access to every org); anything
-        // else is a real failure that must not look identical to "empty org".
-        if (projRes.status === 403 || projRes.status === 404) continue
-        throw new Error(`Snyk bootstrap: projects for org ${org.id} failed with HTTP ${projRes.status}`)
+      let projects: Array<{ id: string; attributes: { name: string } }>
+      try {
+        projects = await snykRestList<{ name: string }>(baseUrl, token, `/rest/orgs/${org.id}/projects`, `bootstrap projects (org ${org.id})`)
+      } catch (err) {
+        const msg = String(err)
+        if (msg.includes('HTTP 403') || msg.includes('HTTP 404')) continue
+        throw err
       }
-      const projData = await projRes.json() as { projects?: Array<{ id: string; name: string }> }
-      for (const p of projData.projects ?? []) {
+      for (const p of projects) {
         await this.kg.upsertEntity({
-          type: 'Repo', name: p.name,
+          type: 'Repo', name: p.attributes.name,
           metadata: {
-            source: 'snyk', orgId: org.id, orgName: org.name,
+            source: 'snyk', orgId: org.id, orgName: org.attributes.name,
             connectorCoordinates: { snyk: { connectorType: 'snyk', resourceIds: { orgId: org.id, projectId: p.id }, resolvedAt: new Date().toISOString(), confidence: 1.0 } },
           },
         }, tenantId)

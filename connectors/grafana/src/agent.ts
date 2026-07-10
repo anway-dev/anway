@@ -21,13 +21,33 @@ const TOOLS: ConnectorTool[] = [
     write: false,
   },
   {
-    definition: { name: 'get_alerts', description: 'List Grafana alerts', parameters: { type: 'object', properties: {} } },
+    definition: { name: 'get_alerts', description: 'List active Grafana alerts (unified alerting)', parameters: { type: 'object', properties: {} } },
     execute: async (params, creds) => {
       const base = (creds as ConnectorCreds).baseUrl ?? 'http://localhost:3001'
       const auth = btoa(`admin:${(creds as ConnectorCreds).password ?? 'admin'}`)
-      const res = await fetch(`${base}/api/alerts`, { headers: { Authorization: `Basic ${auth}` } })
+      // /api/alerts is the LEGACY alerting API, removed with legacy alerting
+      // in Grafana 11 — confirmed live against a real Grafana 13 instance
+      // (play.grafana.org): 404. Unified alerting exposes active alerts via
+      // the built-in Alertmanager compatibility API — confirmed 200 with
+      // real alert payloads on the same instance.
+      const res = await fetch(`${base}/api/alertmanager/grafana/api/v2/alerts`, { headers: { Authorization: `Basic ${auth}` } })
       if (!res.ok) throw new Error(`Grafana get_alerts failed: HTTP ${res.status}`)
-      return { alerts: await res.json() }
+      const raw = await res.json() as Array<{
+        labels?: Record<string, string>
+        annotations?: Record<string, string>
+        status?: { state?: string }
+        startsAt?: string
+      }>
+      return {
+        alerts: raw.map(a => ({
+          title: a.labels?.['alertname'] ?? 'unknown-alert',
+          state: a.status?.state ?? 'unknown',
+          severity: a.labels?.['severity'] ?? 'info',
+          startsAt: a.startsAt ?? null,
+          labels: a.labels ?? {},
+          summary: a.annotations?.['summary'] ?? a.annotations?.['description'] ?? '',
+        })),
+      }
     },
     write: false,
   },

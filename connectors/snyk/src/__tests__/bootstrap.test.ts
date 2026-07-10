@@ -38,9 +38,9 @@ describe('SnykBootstrap', () => {
   it('treats a 403 on one specific org as a legitimate per-org permission gap, continuing with others', async () => {
     const { SnykBootstrap } = await import('../bootstrap.js')
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/v1/orgs')) return { ok: true, json: async () => ({ orgs: [{ id: 'org-a', name: 'A' }, { id: 'org-b', name: 'B' }] }) }
-      if (url.includes('/org/org-a/')) return { ok: false, status: 403, json: async () => ({}) }
-      if (url.includes('/org/org-b/')) return { ok: true, json: async () => ({ projects: [{ id: 'p1', name: 'payments-api' }] }) }
+      if (url.includes('/rest/orgs/org-a/')) return { ok: false, status: 403, json: async () => ({}) }
+      if (url.includes('/rest/orgs/org-b/')) return { ok: true, json: async () => ({ data: [{ id: 'p1', attributes: { name: 'payments-api' } }] }) }
+      if (url.includes('/rest/orgs')) return { ok: true, json: async () => ({ data: [{ id: 'org-a', attributes: { name: 'A' } }, { id: 'org-b', attributes: { name: 'B' } }] }) }
       return { ok: false, status: 404, json: async () => ({}) }
     }))
     const kg = new FakeKG()
@@ -52,7 +52,8 @@ describe('SnykBootstrap', () => {
   it('throws when a per-org projects call fails with a real (non-403/404) error', async () => {
     const { SnykBootstrap } = await import('../bootstrap.js')
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/v1/orgs')) return { ok: true, json: async () => ({ orgs: [{ id: 'org-a', name: 'A' }] }) }
+      if (url.includes('/rest/orgs/org-a/')) return { ok: false, status: 500, json: async () => ({}) }
+      if (url.includes('/rest/orgs')) return { ok: true, json: async () => ({ data: [{ id: 'org-a', attributes: { name: 'A' } }] }) }
       return { ok: false, status: 500, json: async () => ({}) }
     }))
     await expect(new SnykBootstrap(new FakeKG()).bootstrap(tenantId, 'conn-1', { token: 'real' }))

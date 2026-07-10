@@ -39,13 +39,32 @@ export function validateEnv(): Env {
   return result.data
 }
 
-export function assertSecureJwtSecret(): void {
-  if (process.env['NODE_ENV'] !== 'production') return
-  const hasRs256 = process.env['JWT_PRIVATE_KEY'] && process.env['JWT_PUBLIC_KEY']
+// Known default secrets shipped in this repo's own .env.example / CI files —
+// a prod deploy that never rotated them would mint forgeable session tokens.
+const KNOWN_DEFAULT_JWT_SECRETS = new Set([
+  'dev-secret-change-in-production',
+  'change-me-to-a-random-secret-at-least-32-chars',
+  'ci-test-secret-not-for-real-use-32chars',
+  'test-secret',
+])
+
+// Parameterized (defaults to process.env) so tests inject values instead of
+// mutating global env — the env-mutating version of its test raced other
+// test FILES sharing the vitest worker (real Actions runs 29095118343 and
+// 29097544519: oidc.test.ts's buildApp saw JWT_SECRET missing/weak
+// mid-flight and failed with "JWT_SECRET or JWT_PRIVATE_KEY must be set").
+export function assertSecureJwtSecret(env: {
+  NODE_ENV?: string | undefined
+  JWT_SECRET?: string | undefined
+  JWT_PRIVATE_KEY?: string | undefined
+  JWT_PUBLIC_KEY?: string | undefined
+} = process.env): void {
+  if (env.NODE_ENV !== 'production') return
+  const hasRs256 = env.JWT_PRIVATE_KEY && env.JWT_PUBLIC_KEY
   if (!hasRs256) {
-    const secret = process.env['JWT_SECRET']
-    if (!secret || secret === 'dev-secret-change-in-production' || secret.length < 32) {
-      throw new Error('Production requires either JWT_PRIVATE_KEY+JWT_PUBLIC_KEY (RS256) or JWT_SECRET >=32 chars')
+    const secret = env.JWT_SECRET
+    if (!secret || KNOWN_DEFAULT_JWT_SECRETS.has(secret) || secret.length < 32) {
+      throw new Error('Production requires either JWT_PRIVATE_KEY+JWT_PUBLIC_KEY (RS256) or a unique JWT_SECRET >=32 chars (not a repo default)')
     }
   }
 }

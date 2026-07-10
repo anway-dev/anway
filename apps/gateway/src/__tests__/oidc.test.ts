@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// Same convention as every sibling suite that calls buildApp: supply the JWT
+// secret this file needs instead of relying on ambient env (this was the
+// only buildApp suite without it — failed on CI runners where no .env or
+// job-level secret reached the vitest fork: runs 29095118343..29100451297).
+process.env['JWT_SECRET'] = 'test-secret'
+
 import { buildApp } from '../app.js'
 
 describe('OIDC routes', () => {

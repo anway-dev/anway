@@ -53,6 +53,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # apps/gateway/.env is gitignored; vitest resolves gateway env through
+      # it (oidc.test.ts relies on ambient JWT config rather than setting its
+      # own — confirmed failing on runs 29095118343/29097544519/29100451297
+      # only where the file is absent). Same cp as the e2e job.
+      - run: cp -n apps/gateway/.env.example apps/gateway/.env
       # Fresh CI checkout has no built workspace dists — the apps resolve
       # @anway/* types via each package's dist/, so typechecking the apps
       # fails with TS2307 without this (confirmed on real run 29079070468).

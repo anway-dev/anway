@@ -78,13 +78,19 @@ export async function healthRoutes(app: FastifyInstance) {
         OR (table_name='provider_config' AND column_name IN ('api_key')))
     `
     const plaintextColumns = cols.map(c => c.column_name)
-    // Check an enc column has v1: prefix — scoped to caller's tenant only
+    // Check an enc column has v1: prefix — scoped to caller's tenant only.
+    // Sample only rows that actually STORE credentials: connectors seeded
+    // with credentials_enc = NULL (e.g. in-network prometheus needing no
+    // auth) are legitimate and made an unordered LIMIT 1 sample report a
+    // false "unencrypted" (real CI run 29100451297, CERT J.1). No non-NULL
+    // rows at all = vacuously encrypted-at-rest.
     const samples = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<{ credentials_enc: string | null }[]>`
-        SELECT credentials_enc FROM connector_config LIMIT 1
+        SELECT credentials_enc FROM connector_config
+        WHERE credentials_enc IS NOT NULL LIMIT 1
       `
     ).catch(() => [] as { credentials_enc: string | null }[])
-    const sampleEncPrefix = samples[0]?.credentials_enc?.startsWith('v1:') ?? false
+    const sampleEncPrefix = samples.length === 0 || (samples[0]?.credentials_enc?.startsWith('v1:') ?? false)
     return { plaintextColumns, sampleEncPrefix }
   } catch (err) {
     return reply.code(500).send({ error: err instanceof Error ? err.message : 'unknown' })

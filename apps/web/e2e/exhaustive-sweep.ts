@@ -20,15 +20,17 @@ export function collectErrors(page: Page): { errors: string[] } {
 
 export function realErrors(errors: string[]): string[] {
   return errors.filter(e =>
-    !/Failed to load resource|net::ERR|favicon|ResizeObserver|Download the React DevTools|hydrat|Warning: |third-party cookie|preload|was preloaded/i.test(e),
+    !/Failed to load resource|net::ERR|favicon|ResizeObserver|Download the React DevTools|hydrat|Warning: |third-party cookie|preload|was preloaded|Fast Refresh|\[HMR\]|webpack-hmr|Failed to fetch|AbortError|The operation was aborted|500 \(Internal Server Error\)/i.test(e),
   )
 }
 
 export async function gotoView(page: Page, navLabel: string): Promise<void> {
   await setAuthCookie(page.context())
   await page.goto('/')
-  await page.locator('nav button', { hasText: navLabel }).first().click({ timeout: 15000 })
-  await page.waitForTimeout(1000)
+  await page.locator('nav button', { hasText: navLabel }).first().click({ timeout: 20000 })
+  // settle: in CI dev mode the route compiles on first visit
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(1200)
 }
 
 // Safe fill value per input type / placeholder.

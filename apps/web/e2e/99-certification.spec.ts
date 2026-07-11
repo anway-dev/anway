@@ -67,12 +67,25 @@ test.describe('CERT B: Auth', () => {
   // a boolean flag — rejected per security review. The real /api/auth/demo
   // endpoint achieves the same practical purpose (a valid JWT for the fixed
   // demo tenant) safely, since it's pinned to one tenant/email, not parametrized.
-  test('B.1 POST /api/auth/demo issues JWT for the demo tenant', async ({ request }) => {
-    const r = await request.post(`${GATEWAY}/api/auth/demo`)
-    expect(r.status()).toBe(200)
-    const body = await r.json() as { token?: string }
-    expect(body.token, 'token must be issued').toBeTruthy()
-    expect(body.token!.split('.').length, 'token must be a JWT').toBe(3)
+  test('B.1 auth issues a JWT — demo mint when DEMO_MODE=true, else admin password login', async ({ request }) => {
+    // Demo is a configurable feature (DEMO_MODE). When on, /api/auth/demo
+    // mints a JWT; when off it 404s and admin authenticates by password.
+    // Assert whichever mode this deployment runs yields a valid JWT.
+    const demo = await request.post(`${GATEWAY}/api/auth/demo`)
+    let token: string | undefined
+    if (demo.status() === 200) {
+      token = (await demo.json() as { token?: string }).token
+    } else {
+      expect(demo.status()).toBe(404)
+      const login = await request.post(`${GATEWAY}/api/auth/login`, {
+        data: { email: 'admin@demo.anway.dev', password: 'E2ETestPassword2026!' },
+        headers: { 'Content-Type': 'application/json' },
+      })
+      expect(login.status()).toBe(200)
+      token = (await login.json() as { token?: string }).token
+    }
+    expect(token, 'token must be issued').toBeTruthy()
+    expect(token!.split('.').length, 'token must be a JWT').toBe(3)
   })
 
   test('B.2 protected endpoint without token returns 401', async ({ request }) => {

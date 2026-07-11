@@ -34,10 +34,16 @@ async function seedDemo() {
     ON CONFLICT (tenant_id, name) DO NOTHING
   `
 
+  // bcrypt('E2ETestPassword2026!', 10) — same test credential as the dev/sre
+  // seed users below. Admin now carries a real password_hash so it can log in
+  // WITHOUT demo mode (DEMO_MODE=false): the one-click "Try Demo" admin mint
+  // is a demo-only convenience; with it off, admin must authenticate normally
+  // like any user.
+  const E2E_TEST_PASSWORD_HASH = '$2b$10$WDGislF0oEQO7YtIOrLw0ubZsEWs0h3bxAkkJ7.ZyWLZlAKEr9Mla'
   const user = await prisma.user.upsert({
     where: { tenant_id_email: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anway.dev' } },
-    update: {},
-    create: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anway.dev', role: 'admin' },
+    update: { password_hash: E2E_TEST_PASSWORD_HASH },
+    create: { tenant_id: DEMO_TENANT_ID, email: 'admin@demo.anway.dev', role: 'admin', password_hash: E2E_TEST_PASSWORD_HASH },
   })
   log(`User: ${user.email}`)
 
@@ -61,9 +67,7 @@ async function seedDemo() {
   // 401 instead of the intended 200/403 — confirmed live: this was the actual
   // root cause behind a large cluster of e2e failures (gate SoD, RBAC checks,
   // access-api 403-for-non-admin), not real app bugs.
-  // Password hash is bcrypt('E2ETestPassword2026!', 10) — test-only credential,
-  // matches e2e/fixtures.ts's default fallback.
-  const E2E_TEST_PASSWORD_HASH = '$2b$10$WDGislF0oEQO7YtIOrLw0ubZsEWs0h3bxAkkJ7.ZyWLZlAKEr9Mla'
+  // Password hash (E2E_TEST_PASSWORD_HASH) declared above with the admin user.
   await prisma.$executeRaw`
     INSERT INTO users (id, tenant_id, email, role, password_hash)
     VALUES

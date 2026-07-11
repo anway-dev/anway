@@ -231,7 +231,7 @@ services:
       # structural-only if agent-service is down.
       AGENT_SERVICE_URL: http://agent-service:8000
       # Dev-only demo login (POST /api/auth/demo) — required by apps/web/e2e/fixtures.ts
-      DEMO_MODE: "true"
+      DEMO_MODE: "false"
       # Deploy Agent build stage — real registry to enable actual `docker build`
       # + `docker push` (Strategy B in pipeline.ts). Points at the host's
       # localhost:5000 via the mounted docker socket below (commands run

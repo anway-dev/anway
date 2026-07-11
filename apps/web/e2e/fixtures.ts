@@ -19,12 +19,20 @@ let cachedToken: string | undefined
 let cachedToken2: string | undefined
 let cachedToken3: string | undefined
 
-// Auth via demo login — requires DEMO_MODE=true on gateway
+const E2E_DEFAULT_PASSWORD = 'E2ETestPassword2026!'
+
+// Auth for the admin fixture user. Prefers demo login when DEMO_MODE=true;
+// falls back to real password login (admin@demo.anway.dev, seeded with a
+// password_hash) when demo is disabled — so the suite works in BOTH modes.
 export async function getToken(request: APIRequestContext): Promise<string> {
   if (cachedToken !== undefined) return cachedToken
   const r = await request.post(`${GATEWAY}/api/auth/demo`)
-  const body = await r.json() as { token?: string }
-  cachedToken = body.token ?? ''
+  if (r.ok()) {
+    const body = await r.json() as { token?: string }
+    if (body.token) { cachedToken = body.token; return cachedToken }
+  }
+  // Demo disabled (404) — log in as the seeded admin with the test password.
+  cachedToken = await loginAs(request, DEMO_EMAIL, E2E_DEFAULT_PASSWORD)
   return cachedToken
 }
 
@@ -43,7 +51,6 @@ async function loginAs(request: APIRequestContext, email: string, password: stri
 // exact seeded users — without SEED_DEMO=true having run, login correctly
 // 401s and these helpers return an empty token (same as before), but against
 // a demo-seeded DB this now actually authenticates instead of always failing.
-const E2E_DEFAULT_PASSWORD = 'E2ETestPassword2026!'
 
 export async function getToken2(request: APIRequestContext): Promise<string> {
   if (cachedToken2 !== undefined) return cachedToken2

@@ -71,6 +71,10 @@ providerRegistry.register({
   fields: [{ key: 'apiKey', label: 'API Key', type: 'password', required: true, placeholder: 'sk-...' }],
   models: 'dynamic',
   modelsEndpoint: '/v1/models',
+  // Shown when the live /v1/models call can't run (e.g. no key yet) so the
+  // Model / Cheap-model pickers always have options — DeepSeek's real model
+  // set is exactly these two.
+  staticFallback: ['deepseek-chat', 'deepseek-reasoner'],
   defaultBaseUrl: 'https://api.deepseek.com',
   openAICompatible: true,
 })

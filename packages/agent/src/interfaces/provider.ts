@@ -73,6 +73,9 @@ export interface ProviderManifest {
   fields: ProviderField[]
   models: string[] | 'dynamic'
   modelsEndpoint?: string
+  // Shown when a dynamic model list can't be fetched (no key yet, endpoint
+  // down) so the model pickers always have options.
+  staticFallback?: string[]
   defaultBaseUrl?: string
   openAICompatible: boolean
   factory?: (config: ProviderConfig) => IModelProvider

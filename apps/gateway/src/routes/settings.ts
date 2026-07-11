@@ -95,15 +95,31 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
   )
 
   app.get('/api/settings/models', { preHandler: [app.authenticate, requireRole('admin')] }, async (request, reply) => {
-    const user = request.user as { role?: string }
+    const user = request.user as { role?: string; tenantId?: string }
     const p = (request.query as { provider?: string }).provider
     const baseUrl = (request.query as { baseUrl?: string }).baseUrl
     // apiKey sent via X-Api-Key header (not query string) to prevent SSRF via URL leak
-    const apiKey = request.headers['x-api-key'] as string | undefined
+    let apiKey = request.headers['x-api-key'] as string | undefined
     if (!p) return { models: [] }
 
     const manifest = providerRegistry.get(p)
     if (!manifest) return { models: [] }
+
+    // Editing an already-configured provider: the browser has no plaintext key
+    // (it's never returned for security), so the model-list call would arrive
+    // keyless and every dynamic-model provider (deepseek/openai/groq/…) 401s →
+    // empty list → the Model / Cheap-model dropdowns never render. Found in
+    // manual testing. Fall back to the tenant's STORED key for THIS provider.
+    if (!apiKey && user.tenantId) {
+      const stored = await withTenant(prisma, user.tenantId, (tx) =>
+        tx.$queryRaw<{ api_key_enc: string | null }[]>`
+          SELECT api_key_enc FROM provider_config
+          WHERE tenant_id = ${user.tenantId}::uuid AND provider = ${p} LIMIT 1
+        `
+      ).catch(() => [])
+      const enc = stored[0]?.api_key_enc
+      if (enc) { try { apiKey = decryptJson<string>(enc) } catch { /* ignore */ } }
+    }
 
     // Static model list
     if (Array.isArray(manifest.models)) return { models: manifest.models }
@@ -123,6 +139,12 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
         if (data.models) return { models: data.models.map((m: { name: string }) => m.name) }
         if (data.data) return { models: data.data.map((m: { id: string }) => m.id) }
       } catch { /* fall through */ }
+    }
+
+    // Dynamic fetch produced nothing (no/invalid key, endpoint unreachable) —
+    // fall back to the manifest's known model set so the pickers still render.
+    if (manifest.staticFallback && manifest.staticFallback.length > 0) {
+      return { models: manifest.staticFallback }
     }
 
     return { models: [] }

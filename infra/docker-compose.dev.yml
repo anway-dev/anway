@@ -295,12 +295,17 @@ services:
   web:
     image: node:22-slim
     working_dir: /app/apps/web
+    # Production build (next build + next start) — NOT `next dev`. Dev mode
+    # compiles each route on first visit, which surfaced as cold-compile
+    # timeouts across the UI. `pnpm build` once, then `start` serves the
+    # prebuilt output. Trade-off: code changes need a `docker compose up -d
+    # --force-recreate web` to rebuild (no HMR).
     command: >-
       sh -c "npm install -g pnpm@9.15.4 --quiet &&
              cd /app && pnpm install &&
-             cd /app/apps/web && pnpm dev"
+             cd /app/apps/web && pnpm build && pnpm start"
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       PORT: "8500"
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
@@ -321,7 +326,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 20
-      start_period: 180s
+      start_period: 480s
     networks:
       - anway-dev
 

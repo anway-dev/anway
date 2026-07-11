@@ -67,6 +67,16 @@ export default function App() {
   // User identity — fetched from /api/auth/me
   const [userEmail, setUserEmail] = useState("—");
   const [userRole, setUserRole] = useState("—");
+  // Demo mode status — the one-click "Try Demo" admin mint only exists when
+  // the gateway has DEMO_MODE=true; hide the button otherwise (it would just
+  // 404 on /api/auth/demo).
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  useEffect(() => {
+    fetch('/api/auth/methods')
+      .then(r => r.ok ? r.json() as Promise<{ demo?: boolean }> : { demo: false })
+      .then(m => setDemoEnabled(Boolean(m.demo)))
+      .catch(() => setDemoEnabled(false));
+  }, []);
 
   // Handle #token= fragment from OAuth/OIDC redirects
   useEffect(() => {
@@ -282,18 +292,20 @@ export default function App() {
               <div style={{ fontSize: "10px", color: "#555" }}>{userRole}</div>
             </div>
           </div>
-          <button
-            onClick={async () => {
-              try {
-                const r = await fetch('/api/auth/demo', { method: 'POST' })
-                const d = await r.json() as { token?: string }
-                if (d.token) { await fetch('/api/auth/set-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: d.token }) }); window.location.reload() }
-              } catch { /* ignore */ }
-            }}
-            style={{ marginTop: '8px', width: '100%', padding: '6px', background: '#1a2a1a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '5px', color: '#10b981', fontSize: '11px', cursor: 'pointer' }}
-          >
-            Try Demo
-          </button>
+          {demoEnabled && (
+            <button
+              onClick={async () => {
+                try {
+                  const r = await fetch('/api/auth/demo', { method: 'POST' })
+                  const d = await r.json() as { token?: string }
+                  if (d.token) { await fetch('/api/auth/set-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: d.token }) }); window.location.reload() }
+                } catch { /* ignore */ }
+              }}
+              style={{ marginTop: '8px', width: '100%', padding: '6px', background: '#1a2a1a', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '5px', color: '#10b981', fontSize: '11px', cursor: 'pointer' }}
+            >
+              Try Demo
+            </button>
+          )}
           <button
             onClick={async () => {
               try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* ignore */ }

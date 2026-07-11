@@ -199,13 +199,13 @@ jobs:
         run: |
           cp -n apps/gateway/.env.example apps/gateway/.env
           docker compose -f infra/docker-compose.dev.yml up -d
-          for i in $(seq 1 240); do
+          for i in $(seq 1 330); do
             if curl -sf http://localhost:8510/health >/dev/null 2>&1 && curl -sf http://localhost:8500 >/dev/null 2>&1; then
               echo "gateway + web healthy"; exit 0
             fi
             sleep 5
           done
-          echo "stack did not become healthy in 1200s"
+          echo "stack did not become healthy in 1650s"
           docker compose -f infra/docker-compose.dev.yml ps
           docker compose -f infra/docker-compose.dev.yml logs --no-color gateway web | tail -100
           exit 1

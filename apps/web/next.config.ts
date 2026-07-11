@@ -8,7 +8,8 @@ const nextConfig: NextConfig = {
   // 29158802923). Type-checking and linting are dedicated CI `check`-job steps
   // (npx tsc --noEmit on both apps) — skip them during the build itself so the
   // production build is fast and self-contained.
+  // Next 16 doesn't run ESLint during `next build`, so only the TypeScript
+  // check needs disabling here.
   typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
 };
 export default nextConfig;

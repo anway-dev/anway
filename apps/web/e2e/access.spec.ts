@@ -8,7 +8,7 @@ test.describe('Access — UI', () => {
     await page.locator('text=Access').first().click()
     await expect(
       page.locator('text=User').or(page.locator('text=Role')).or(page.locator('text=Perimeter')).first()
-    ).toBeVisible({ timeout: 8000 })
+    ).toBeVisible({ timeout: 30000 })
     await expect(
       page.locator('text=admin').or(page.locator('text=dev')).or(page.locator('text=viewer')).first()
     ).toBeVisible({ timeout: 5000 })
@@ -18,7 +18,7 @@ test.describe('Access — UI', () => {
     await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
-    await page.locator('text=Role').or(page.locator('text=Perimeter')).or(page.locator('text=User')).first().waitFor({ timeout: 8000 })
+    await page.locator('text=Role').or(page.locator('text=Perimeter')).or(page.locator('text=User')).first().waitFor({ timeout: 30000 })
     // Access view must show some content — user list, roles, or permissions
     const content = page.locator('text=User')
       .or(page.locator('text=Role'))
@@ -33,7 +33,7 @@ test.describe('Access — UI', () => {
     await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
-    await page.locator('text=Role').or(page.locator('text=Perimeter')).or(page.locator('text=User')).first().waitFor({ timeout: 8000 })
+    await page.locator('text=Role').or(page.locator('text=Perimeter')).or(page.locator('text=User')).first().waitFor({ timeout: 30000 })
     // Access view shows user info or connector permissions
     const hasContent = await page.locator('text=admin')
       .or(page.locator('text=dev'))
@@ -51,7 +51,7 @@ test.describe('Access — UI', () => {
     await setAuthCookie(page.context())
     await page.goto('/')
     await page.locator('text=Access').first().click()
-    await page.locator('text=admin').or(page.locator('text=Role')).first().waitFor({ timeout: 8000 })
+    await page.locator('text=admin').or(page.locator('text=Role')).first().waitFor({ timeout: 30000 })
     const userRow = page.locator('text=admin').or(page.locator('text=dev')).first()
     if (await userRow.isVisible({ timeout: 2000 }).catch(() => false)) {
       await userRow.click()

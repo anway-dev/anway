@@ -1,4 +1,4 @@
-import { resolveAuthHeader } from '@/lib/server-auth'
+import { resolveAuthHeader, envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:8510'
 
@@ -8,7 +8,7 @@ export async function DELETE(request: Request) {
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/admin/token-usage/reset`, {
       method: 'DELETE',
-      headers: { Authorization: auth },
+      headers: { Authorization: auth, ...envFwd(request) },
     })
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({ error: 'gateway error' }))

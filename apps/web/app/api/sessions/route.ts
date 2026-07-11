@@ -1,4 +1,4 @@
-import { resolveAuthHeader } from '@/lib/server-auth'
+import { resolveAuthHeader, envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:8510'
 
@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   if (!auth) return Response.json([], { status: 200 })
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/sessions`, {
-      headers: { Authorization: auth },
+      headers: { Authorization: auth, ...envFwd(request) },
     })
     const data = await resp.text()
     return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })
@@ -22,7 +22,7 @@ export async function DELETE(request: Request) {
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/sessions`, {
       method: 'DELETE',
-      headers: { Authorization: auth },
+      headers: { Authorization: auth, ...envFwd(request) },
     })
     return new Response(null, { status: resp.status })
   } catch {

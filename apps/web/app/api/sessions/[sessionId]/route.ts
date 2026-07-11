@@ -1,4 +1,4 @@
-import { resolveAuthHeader } from '@/lib/server-auth'
+import { resolveAuthHeader, envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://127.0.0.1:8510'
 
@@ -9,7 +9,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ s
     const { sessionId } = await params
     const resp = await fetch(`${GATEWAY_URL}/api/sessions/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE',
-      headers: { Authorization: auth },
+      headers: { Authorization: auth, ...envFwd(request) },
     })
     return new Response(null, { status: resp.status })
   } catch {

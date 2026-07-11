@@ -1,4 +1,4 @@
-import { resolveAuthHeader } from '@/lib/server-auth'
+import { resolveAuthHeader, envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env['GATEWAY_URL'] ?? 'http://localhost:8510'
 
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const resp = await fetch(`${GATEWAY_URL}/api/gate`, {
       method: 'POST',
-      headers: { ...(auth ? { Authorization: auth } : {}), 'content-type': 'application/json' },
+      headers: { ...(auth ? { Authorization: auth } : {}), 'content-type': 'application/json', ...envFwd(request) },
       body: JSON.stringify(body),
     })
     return new Response(resp.body, { status: resp.status, headers: { 'content-type': 'application/json' } })

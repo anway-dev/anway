@@ -1,3 +1,4 @@
+import { envFwd } from '@/lib/server-auth'
 const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:8510"
 
 async function getToken(): Promise<string | null> {
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
   const qs = url.search
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/signals${qs}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...envFwd(request) },
     })
     const data = await resp.text()
     return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })

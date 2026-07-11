@@ -7,6 +7,7 @@ import { IncidentService } from '../services/incident.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
+import { resolveEnvId } from '../utils/env-scope.js'
 import { requireRole } from '../plugins/rbac.js'
 import { appendAuditEvent } from './audit.js'
 import { UUID_RE } from '../utils/validators.js'
@@ -47,10 +48,11 @@ export async function incidentRoutes(app: FastifyInstance) {
       },
     },
   }, async (request) => {
-    const { tenantId } = request.user as { tenantId: string }
+    const { tenantId, env } = request.user as { tenantId: string; env?: string }
     const { status, severity, cursor, limit: limitStr } = request.query as { status?: IncidentStatus; severity?: IncidentSeverity; cursor?: string; limit?: string }
     const limit = Math.min(parseInt(limitStr ?? '50', 10) || 50, 500)
-    return service.list(tenantId, { status, severity, cursor, limit })
+    const envId = await resolveEnvId(prisma, tenantId, env)
+    return service.list(tenantId, { status, severity, cursor, limit, envId })
   })
 
   app.get<{ Params: { id: string } }>('/api/incidents/:id', {
@@ -78,9 +80,10 @@ export async function incidentRoutes(app: FastifyInstance) {
       },
     },
   }, async (request) => {
-    const user = request.user as { tenantId: string; sub: string }
+    const user = request.user as { tenantId: string; sub: string; env?: string }
     const { title, severity, description } = request.body
-    const incident = await service.create(user.tenantId, { title, severity, description })
+    const envId = await resolveEnvId(prisma, user.tenantId, user.env)
+    const incident = await service.create(user.tenantId, { title, severity, description, envId })
 
     // Emit incident_created for graph builder + SRE subscriber (best-effort)
     try {

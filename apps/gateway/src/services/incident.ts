@@ -9,7 +9,7 @@ function sanitizeText(s: string): string {
 export class IncidentService {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async create(tenantId: string, data: { title: string; severity: IncidentSeverity; description?: string }) {
+  async create(tenantId: string, data: { title: string; severity: IncidentSeverity; description?: string; envId?: string | null }) {
     return withTenant(this.prisma, tenantId, (tx) =>
       tx.incident.create({
         data: {
@@ -18,6 +18,9 @@ export class IncidentService {
           severity: data.severity,
           status: 'active' as IncidentStatus,
           description: data.description ? sanitizeText(data.description) : null,
+          // env scoping: stamp the creator's active environment; system-created
+          // incidents (webhooks/triggers) pass nothing and stay global (NULL)
+          env_id: data.envId ?? null,
         },
       })
     )
@@ -41,14 +44,18 @@ export class IncidentService {
     )
   }
 
-  async list(tenantId: string, filters?: { status?: IncidentStatus; severity?: IncidentSeverity; cursor?: string; limit?: number }) {
-    const { status, severity, cursor, limit = 50 } = filters ?? {}
+  async list(tenantId: string, filters?: { status?: IncidentStatus; severity?: IncidentSeverity; cursor?: string; limit?: number; envId?: string | null }) {
+    const { status, severity, cursor, limit = 50, envId } = filters ?? {}
     // Cursor is ISO timestamp for chronological ordering
     const cursorDate = cursor ? new Date(cursor) : undefined
     return withTenant(this.prisma, tenantId, async (tx) => {
       const rows = await tx.incident.findMany({
         where: {
           tenant_id: tenantId,
+          // env scoping: global rows (env_id NULL) show everywhere; pinned
+          // rows only in their own environment. envId undefined = no scoping
+          // (system callers); null = unknown env name → global rows only.
+          ...(envId !== undefined ? { OR: [{ env_id: null }, ...(envId ? [{ env_id: envId }] : [])] } : {}),
           ...(status ? { status } : {}),
           ...(severity ? { severity } : {}),
           ...(cursorDate ? { created_at: { lt: cursorDate } } : {}),

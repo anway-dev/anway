@@ -1,3 +1,4 @@
+import { envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:8510"
 
@@ -30,7 +31,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const token = await getToken()
   if (!token) return new Response(JSON.stringify({ error: 'auth failed' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
@@ -38,7 +39,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/automations/triggers/${id}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...envFwd(request) },
     })
     const data = await resp.text()
     return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })

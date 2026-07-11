@@ -1,3 +1,4 @@
+import { envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:8510"
 
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
 
   try {
     const resp = await fetch(`${GATEWAY_URL}/api/connectors`, {
-      headers: { Authorization: auth },
+      headers: { Authorization: auth, ...envFwd(request) },
     })
     const data = await resp.text()
     return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })

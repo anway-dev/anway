@@ -70,3 +70,32 @@ test.describe('Manual findings — chat gate bubble', () => {
     expect(nextMiss).toBeUndefined()
   })
 })
+
+test.describe('Manual findings — environment scoping (X-Anway-Env)', () => {
+  // Found in manual testing: the env switcher changed nothing — the header
+  // existed end to end but no query consumed it. Scoping convention:
+  // env_id NULL = global (all envs), set = pinned to that env only.
+  test('an incident created in staging is invisible in prod and visible in staging', async ({ request }) => {
+    const h = await authHeaders(request)
+    const title = `ENV-E2E-${Date.now()}`
+    const create = await request.post(`${GATEWAY}/api/incidents`, {
+      headers: { ...h, 'Content-Type': 'application/json', 'x-anway-env': 'staging' },
+      data: { title, severity: 'low' },
+    })
+    expect([200, 201], 'incident create must succeed').toContain(create.status())
+    const created = await create.json() as { env_id?: string | null }
+    expect(created.env_id, 'incident must be stamped with the active env').toBeTruthy()
+
+    const inStaging = await request.get(`${GATEWAY}/api/incidents?limit=100`, {
+      headers: { ...h, 'x-anway-env': 'staging' },
+    })
+    const stagingBody = await inStaging.text()
+    expect(stagingBody, 'staging must see its own incident').toContain(title)
+
+    const inProd = await request.get(`${GATEWAY}/api/incidents?limit=100`, {
+      headers: { ...h, 'x-anway-env': 'prod' },
+    })
+    const prodBody = await inProd.text()
+    expect(prodBody, 'prod must NOT see a staging-pinned incident').not.toContain(title)
+  })
+})

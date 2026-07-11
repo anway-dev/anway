@@ -14,3 +14,12 @@ export async function resolveAuthHeader(request: Request): Promise<string | null
     return null
   }
 }
+
+// Forward the active-environment header to the gateway. The env selector
+// (lib/env-context.tsx) attaches X-Anway-Env on every browser /api call;
+// proxy routes must pass it through or the gateway can never scope by env
+// (found in manual testing: the header died at the Next proxy layer).
+export function envFwd(request: Request): Record<string, string> {
+  const env = request.headers.get('x-anway-env')
+  return env ? { 'x-anway-env': env } : {}
+}

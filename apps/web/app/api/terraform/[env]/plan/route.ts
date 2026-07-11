@@ -1,4 +1,4 @@
-import { resolveAuthHeader } from '@/lib/server-auth'
+import { resolveAuthHeader, envFwd } from '@/lib/server-auth'
 
 const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:8510"
 
@@ -9,7 +9,7 @@ export async function GET(
   const { env } = await params
   const auth = await resolveAuthHeader(request)
   const upstream = await fetch(`${GATEWAY_URL}/api/terraform/${env}/plan`, {
-    headers: { ...(auth ? { Authorization: auth } : {}) },
+    headers: { ...(auth ? { Authorization: auth } : {}), ...envFwd(request) },
   })
   return new Response(upstream.body, {
     status: upstream.status,

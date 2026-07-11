@@ -38,6 +38,7 @@ import { RedisGateSink } from '../gate/redis-gate-sink.js'
 import { getMemoryGateSink } from '../gate/memory-gate-fallback.js'
 import { isValidUUID } from '../utils/validators.js'
 import { decryptJson } from '../utils/crypto.js'
+import { resolveEnvId } from '../utils/env-scope.js'
 
 type ClientModelConfig = Pick<ProviderConfig, 'type' | 'defaultModel'>
 
@@ -416,10 +417,15 @@ export async function chatRoutes(app: FastifyInstance) {
     // already carry their own capability_manifest.allowedTools (set at
     // registration by connectors/registry.ts's register_connector) and are
     // already covered by the dbConnectors-based manifests/scopes below.
+    // Environment scoping: connector_config rows with env_id stay visible
+    // only in their own environment; NULL rows are global. Same convention
+    // as utils/env-scope.ts everywhere else.
+    const activeEnvId = await resolveEnvId(prisma, tenantId, (request.user as { env?: string }).env)
     const nativeConnectorRows = await withTenant(prisma, tenantId, (tx) =>
       tx.$queryRaw<Array<{ connector_type: string; mode: string }>>`
         SELECT connector_type, 'read' AS mode FROM connector_config
         WHERE tenant_id = ${tenantId}::uuid AND enabled = true
+          AND (env_id IS NULL OR env_id = ${activeEnvId}::uuid)
       `
     ).catch(() => [] as Array<{ connector_type: string; mode: string }>)
 
@@ -462,6 +468,7 @@ export async function chatRoutes(app: FastifyInstance) {
       tx.$queryRaw<{ connector_name: string; read_scopes: string[]; write_scopes: string[] }[]>`
         SELECT connector_name, read_scopes, write_scopes FROM user_perimeters
         WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId}::uuid
+          AND (env_id IS NULL OR env_id = ${activeEnvId}::uuid)
       `
     ).catch(() => [])
     for (let i = 0; i < connectorScopes.length; i++) {

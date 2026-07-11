@@ -55,12 +55,25 @@ test.describe('A: Health + Metrics', () => {
 // (valid credentials produce a working JWT, that JWT grants access,
 // missing a required field is rejected).
 test.describe('B: Auth', () => {
-  test('B.1 POST /api/auth/demo returns a working JWT', async ({ request }) => {
-    const resp = await request.post(`${GATEWAY}/api/auth/demo`)
-    expect(resp.status()).toBe(200)
-    const body = await resp.json()
-    expect(body.token).toBeDefined()
-    expect(body.expiresIn).toBe('24h')
+  test('B.1 auth works — demo JWT when DEMO_MODE=true, else admin password login', async ({ request }) => {
+    // Demo is a configurable feature, not a guarantee. When enabled it mints
+    // a JWT; when disabled (DEMO_MODE=false) it 404s and admin uses password
+    // login. Assert whichever mode this deployment is in yields a working
+    // token.
+    const demo = await request.post(`${GATEWAY}/api/auth/demo`)
+    if (demo.status() === 200) {
+      const body = await demo.json()
+      expect(body.token).toBeDefined()
+      expect(body.expiresIn).toBe('24h')
+    } else {
+      expect(demo.status()).toBe(404)
+      const login = await request.post(`${GATEWAY}/api/auth/login`, {
+        data: { email: 'admin@demo.anway.dev', password: 'E2ETestPassword2026!' },
+        headers: { 'Content-Type': 'application/json' },
+      })
+      expect(login.status()).toBe(200)
+      expect((await login.json()).token).toBeDefined()
+    }
   })
 
   test('B.2 JWT grants access to protected routes', async ({ request }) => {

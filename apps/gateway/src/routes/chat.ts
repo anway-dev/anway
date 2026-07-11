@@ -529,7 +529,7 @@ export async function chatRoutes(app: FastifyInstance) {
     // Load native connector tools early so we can add them to the perimeter
     // builtins list as a safety fallback (engine.ts also handles them via
     // the connector__action scope check).
-    const nativeConnectorTools = await getNativeConnectorTools(prisma, tenantId)
+    const nativeConnectorTools = await getNativeConnectorTools(prisma, tenantId, activeEnvId)
 
     // Harness built-in tools (bare names, no connector prefix) — explicit
     // allowlist in the perimeter. register_connector is a write action and

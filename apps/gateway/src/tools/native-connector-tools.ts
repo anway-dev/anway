@@ -335,12 +335,20 @@ function makeGitHubTools(creds: Record<string, unknown>): ExecutableTool[] {
 export async function getNativeConnectorTools(
   prismaClient: PrismaClient,
   tenantId: string,
+  envId?: string | null,
 ): Promise<ExecutableTool[]> {
+  // Env scoping must match chat.ts's perimeter query exactly: without the
+  // same env_id filter here, tools get BUILT for connectors the perimeter
+  // then hard-blocks in another environment — not a leak, but wasted work
+  // and a confusing "tool exists but always blocked" state. envId undefined
+  // = no scoping (callers that don't pass it, e.g. tests); null = unknown
+  // env → global rows only.
   const rows = await withTenant(prismaClient, tenantId, (tx) =>
     tx.$queryRaw<ConnectorConfigRow[]>`
       SELECT connector_type, credentials_enc, instance_name
       FROM connector_config
       WHERE tenant_id = ${tenantId}::uuid AND enabled = true
+        AND (${envId === undefined} OR env_id IS NULL OR env_id = ${envId ?? null}::uuid)
     `
   ).catch(() => [] as ConnectorConfigRow[])
 

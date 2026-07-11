@@ -294,6 +294,15 @@ export default function App() {
           >
             Try Demo
           </button>
+          <button
+            onClick={async () => {
+              try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* ignore */ }
+              window.location.href = '/login'
+            }}
+            style={{ marginTop: '6px', width: '100%', padding: '6px', background: 'transparent', border: '1px solid #2a2a2a', borderRadius: '5px', color: '#888', fontSize: '11px', cursor: 'pointer' }}
+          >
+            Log out
+          </button>
         </div>
       </div>
 

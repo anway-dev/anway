@@ -139,7 +139,7 @@ function LogEntry({ line, idx }: { line: LogLine; idx: number }) {
   );
 }
 
-function MessageBlock({ message, onApproveGate }: { message: Message; onApproveGate?: (gateId: string) => void }) {
+function MessageBlock({ message, onApproveGate, onRejectGate }: { message: Message; onApproveGate?: (gateId: string) => void; onRejectGate?: (gateId: string) => void }) {
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -246,6 +246,24 @@ function MessageBlock({ message, onApproveGate }: { message: Message; onApproveG
           >
             ✓ Approve
           </button>
+          {onRejectGate && (
+            <button
+              onClick={() => onRejectGate(message.gateId!)}
+              style={{
+                marginLeft: 8,
+                padding: '6px 16px',
+                background: 'transparent',
+                color: '#888',
+                border: '1px solid #2a2a2a',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 13,
+                fontFamily: 'monospace',
+              }}
+            >
+              ✕ Cancel
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -640,7 +658,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
             setMessages(prev => [...prev, {
               id: `gate-${event.gateId}`,
               role: "assistant",
-              content: `🚦 Gate required: **${event.toolName}** — reply "approve" to proceed or "cancel" to abort\n\`\`\`json\n${JSON.stringify(event.args, null, 2)}\n\`\`\``,
+              content: `🚦 Gate required: **${event.toolName}** — click Approve to proceed or Cancel to abort\n\`\`\`json\n${JSON.stringify(event.args, null, 2)}\n\`\`\``,
               gateId: event.gateId,
               gateStatus: "pending",
             }]);
@@ -699,13 +717,31 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
     const t = input.trim(); setInput(""); sendRealForm(t);
   }
 
-  function handleApproveGate(gateId: string) {
-    if (isThinking) return;
+  // While a gate is pending the SSE stream is still open (the orchestrator
+  // blocks in pollGate), so isThinking is true — the old guard made this
+  // button a no-op exactly when it was needed, and `sendRealForm("approve
+  // gate …")` queued a chat message the blocked orchestrator could never
+  // read. The gate-decision API is the real mechanism: the orchestrator's
+  // poll picks the decision up mid-stream and the run continues.
+  function decideGate(gateId: string, decision: 'approved' | 'rejected') {
     setMessages(prev => prev.map(m =>
-      m.gateId === gateId ? { ...m, gateStatus: 'approved' as const } : m
+      m.gateId === gateId ? { ...m, gateStatus: decision } : m
     ));
     setGateRequired(null);
-    sendRealForm(`approve gate ${gateId}`);
+    void fetch(`/api/gate/${gateId}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    }).then(r => {
+      if (!r.ok) pushLog({ actor: 'GATE', actorColor: '#ef4444', text: `gate decision failed: HTTP ${r.status}`, status: 'error' });
+      else pushLog({ actor: 'GATE', actorColor: '#10b981', text: `${decision} — resuming`, status: 'done' });
+    }).catch(() => {
+      pushLog({ actor: 'GATE', actorColor: '#ef4444', text: 'gate decision failed: network', status: 'error' });
+    });
+  }
+
+  function handleApproveGate(gateId: string) {
+    decideGate(gateId, 'approved');
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -813,7 +849,7 @@ export function OrchestratorChat({ initialContext, onContextConsumed, onNavigate
             <EmptyState onScenario={runScenario} />
           ) : (
             <>
-              {messages.map(msg => <MessageBlock key={msg.id} message={msg} onApproveGate={handleApproveGate} />)}
+              {messages.map(msg => <MessageBlock key={msg.id} message={msg} onApproveGate={handleApproveGate} onRejectGate={(id) => decideGate(id, 'rejected')} />)}
               {noProvider && (
                 <div style={{
                   margin: "16px 0", padding: "14px 16px",

@@ -72,6 +72,23 @@ async function seedDemo() {
     ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash
   `
 
+  // Provision read perimeters for the demo dev/sre users. The perimeter is
+  // default-deny for non-admins (CLAUDE.md: resolved_capabilities =
+  // user_perimeter ∩ connector_manifest) — correct posture, but without
+  // seeded rows the demo dev/sre logins get PERIMETER_BLOCKED on every
+  // data-source tool call in chat (found during first manual test). Read-only
+  // ('*' read, no writes), matching the V1 read-via-chat contract.
+  await prisma.$executeRaw`
+    INSERT INTO user_perimeters (tenant_id, user_id, connector_name, read_scopes, write_scopes)
+    SELECT ${DEMO_TENANT_ID}::uuid, u.id, cc.connector_type, ARRAY['*'], ARRAY[]::text[]
+    FROM (VALUES ('00000000-0000-0000-0000-000000000003'::uuid), ('00000000-0000-0000-0000-000000000004'::uuid)) AS u(id)
+    CROSS JOIN (SELECT DISTINCT connector_type FROM connector_config WHERE tenant_id = ${DEMO_TENANT_ID}::uuid AND enabled = true) cc
+    WHERE NOT EXISTS (
+      SELECT 1 FROM user_perimeters p
+      WHERE p.tenant_id = ${DEMO_TENANT_ID}::uuid AND p.user_id = u.id AND p.connector_name = cc.connector_type
+    )
+  `
+
   await prisma.connector.createMany({
     skipDuplicates: true,
     data: [

@@ -198,7 +198,7 @@ jobs:
         # environment block; the file just has to exist).
         run: |
           cp -n apps/gateway/.env.example apps/gateway/.env
-          docker compose -f infra/docker-compose.dev.yml up -d
+          docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml up -d
           for i in $(seq 1 330); do
             if curl -sf http://localhost:8510/health >/dev/null 2>&1 && curl -sf http://localhost:8500 >/dev/null 2>&1; then
               echo "gateway + web healthy"; exit 0
@@ -206,8 +206,8 @@ jobs:
             sleep 5
           done
           echo "stack did not become healthy in 1650s"
-          docker compose -f infra/docker-compose.dev.yml ps
-          docker compose -f infra/docker-compose.dev.yml logs --no-color gateway web | tail -100
+          docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml ps
+          docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml logs --no-color gateway web | tail -100
           exit 1
       - name: Apply migrations
         env:
@@ -243,10 +243,10 @@ jobs:
           retention-days: 7
       - name: Dump container logs on failure
         if: failure()
-        run: docker compose -f infra/docker-compose.dev.yml logs --no-color
+        run: docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml logs --no-color
       - name: Tear down
         if: always()
-        run: docker compose -f infra/docker-compose.dev.yml down -v
+        run: docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml down -v
 
   build-and-push:
     # Only runs for the pipeline's workflow_dispatch trigger (apps/gateway/src/routes/pipeline.ts's

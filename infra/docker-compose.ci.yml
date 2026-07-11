@@ -1,0 +1,22 @@
+# CI override for the e2e job. The base docker-compose.dev.yml runs the web
+# container as a PRODUCTION build (next build + next start) for fast local
+# page loads — but that in-container build is fragile on a fresh CI runner:
+# `next build` needs the `typescript` package to parse next.config.ts, and the
+# bind-mount + named-volume pnpm install hits ERR_PNPM_INCLUDED_DEPS_CONFLICT,
+# leaving typescript unavailable and the build (and web container) dead.
+#
+# CI doesn't need the prod build — it needs a web server that boots reliably.
+# `next dev` compiles routes on first visit (cold-compile), which the e2e
+# specs already tolerate via generous first-load timeouts, and which passed
+# the full 500-test suite before the prod-build switch. So in CI only, run
+# next dev.
+#
+# Usage (e2e job): docker compose -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml up -d
+services:
+  web:
+    command: >-
+      sh -c "npm install -g pnpm@9.15.4 --quiet &&
+             cd /app && pnpm install &&
+             cd /app/apps/web && pnpm dev"
+    environment:
+      NODE_ENV: development

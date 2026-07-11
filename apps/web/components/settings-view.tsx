@@ -61,7 +61,7 @@ export function SettingsView() {
       {/* Tabs */}
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+          <button key={t.id} data-testid={`settings-tab-${t.id}`} onClick={() => setTab(t.id)}
             style={{
               padding: "6px 14px", borderRadius: "5px", border: "none",
               background: tab === t.id ? "rgba(16,185,129,0.15)" : "transparent",

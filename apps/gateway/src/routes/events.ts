@@ -6,6 +6,7 @@ import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
 import { decryptJson } from '../utils/crypto.js'
 import { IncidentService } from '../services/incident.js'
+import { resolveEnvId } from '../utils/env-scope.js'
 import { publishDurable } from '../events/durable-events.js'
 import { registerGithubWebhookRoute } from './github-webhook.js'
 import { stampEventReceivedByType } from '../events/webhook-registrar.js'
@@ -185,7 +186,7 @@ export async function eventRoutes(app: FastifyInstance) {
   app.post('/api/events/alert', { preHandler: [authenticateEvent] }, async (request, reply) => {
     const body = request.body as {
       alerts?: Array<{
-        labels?: { alertname?: string; severity?: string; service?: string; job?: string }
+        labels?: { alertname?: string; severity?: string; service?: string; job?: string; environment?: string; env?: string; namespace?: string }
         status?: string
         annotations?: { summary?: string; description?: string }
       }>
@@ -211,12 +212,21 @@ export async function eventRoutes(app: FastifyInstance) {
       const svc = alert.labels?.service ?? alert.labels?.job ?? null
       const description = alert.annotations?.summary ?? alert.annotations?.description ?? null
       const desc = [svc, description].filter(Boolean).join(' — ') || undefined
+      // Environment scoping: an alert that declares its environment
+      // (environment/env/namespace label) produces an incident pinned to
+      // that env, so the env switcher segregates real per-env alerts. An
+      // alert with NO such label stays global (env_id NULL, shows in every
+      // env) — honest: we don't invent an environment the alert never
+      // declared.
+      const envLabel = alert.labels?.environment ?? alert.labels?.env ?? alert.labels?.namespace
+      const alertEnvId = await resolveEnvId(prisma, tenantId, envLabel)
 
       try {
         const incident = await service.create(tenantId, {
           title,
           severity: severity as 'critical' | 'high' | 'medium' | 'low',
           description: desc,
+          envId: alertEnvId,
         })
         if (pub) {
           await tryPublish(pub, 'incident_created', {

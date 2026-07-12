@@ -1,8 +1,30 @@
 # Anway
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](./LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-10b981.svg)](./CONTRIBUTING.md)
+
 **The central nervous system of a software organisation.**
 
 Connects GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty, Terraform, and any cloud provider into a single intelligence surface. Every person in the org — SRE, PM, BA, Dev — queries, acts, and governs the entire software lifecycle through one orchestrator.
+
+> **Not a devtool. The connective tissue between Product, Eng and SRE.**
+> Every connector added = more intelligence for the entire org. Ask once, see
+> everything across every tool, act with confidence behind a governed write path.
+
+---
+
+## Repositories
+
+Anway is split across three repositories under the [`anway-dev`](https://github.com/anway-dev) org:
+
+| Repo | What it is |
+|------|-----------|
+| **[anway-dev/anway](https://github.com/anway-dev/anway)** (this repo) | The platform — web UI, gateway, agent harness, agent-service, CLI, connectors, and infra. |
+| **[anway-dev/anway-landing-page](https://github.com/anway-dev/anway-landing-page)** | The public marketing page — a standalone static site (deploys to Vercel). |
+| **[anway-dev/anway-test-setup](https://github.com/anway-dev/anway-test-setup)** | Cloud / e2e test environment — Terraform, k8s manifests, runners, service defs. |
+
+The product demo video and its capture harness live in this repo under
+[`apps/web/demo/`](./apps/web/demo).
 
 ---
 
@@ -394,3 +416,20 @@ Re-run the seed: `cd apps/gateway && pnpm prisma db seed`.
 
 **SSE streams drop under load**
 Redis is required for SSE fan-out across multiple gateway pods. Ensure `REDIS_URL` is set. Single-pod deployments work without Redis but cannot fan-out.
+
+---
+
+## Contributing
+
+Contributions are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for
+setup, workflow and guidelines, and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
+
+## Security
+
+Found a vulnerability? Please report it privately — see
+[`SECURITY.md`](./SECURITY.md). Do **not** open a public issue for anything
+exploitable. Note the non-production defaults table there before deploying.
+
+## License
+
+[MIT](./LICENSE) © Anway.

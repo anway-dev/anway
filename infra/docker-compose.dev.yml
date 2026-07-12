@@ -214,6 +214,7 @@ services:
              chmod +x /usr/local/bin/kubectl &&
              npm install -g pnpm@9.15.4 --quiet &&
              pnpm install &&
+             pnpm --filter './packages/**' build && pnpm --filter './connectors/**' build &&
              pnpm --filter anway-gateway dev"
     environment:
       NODE_ENV: development
@@ -221,6 +222,10 @@ services:
       HOST: "0.0.0.0"
       DATABASE_URL: postgresql://anway:anway_dev_secret@postgres:5432/anway_dev
       REDIS_URL: redis://redis:6379
+      # Dev-only defaults so `git clone && docker compose up` works with no manual .env.
+      JWT_SECRET: dev-only-secret-anway-local-stack-min-32-chars-abc
+      ANWAY_WEBHOOK_TOKEN: anway-demo-webhook-token
+      ANWAY_ENCRYPTION_KEY: YW53YXktZGV2LWVuY3J5cHRpb24ta2V5LTMyYnl0ZXM=
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       LOG_LEVEL: info
       # Docker → host Ollama. Overrides the localhost-only .env default which

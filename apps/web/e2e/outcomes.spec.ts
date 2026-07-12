@@ -51,6 +51,34 @@ test.describe('Outcome — provider models are fetched, never fabricated', () =>
   })
 })
 
+test.describe('Outcome — Pipeline view does not fetch-loop (no flicker)', () => {
+  test('selecting a pipeline does not trigger a runaway /api/pipelines loop', async ({ page }) => {
+    await setAuthCookie(page.context())
+    await page.goto('/')
+    await page.locator('nav button', { hasText: 'Pipeline' }).first().click()
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+
+    const row = page.getByTestId('pipeline-row').first()
+    await expect(row, 'at least one pipeline row must render').toBeVisible({ timeout: 15000 })
+
+    // Count list-fetches AFTER selecting. The bug: selecting a pipeline set off
+    // an infinite setSelected→refetch loop that hammered /api/pipelines (255+
+    // requests) and flickered the screen. A healthy view issues at most a
+    // couple of list calls, then stops.
+    let listFetches = 0
+    page.on('request', r => {
+      const u = r.url()
+      // match the list endpoint only (…/api/pipelines[?…]), not …/api/pipelines/<id>
+      if (/\/api\/pipelines(\?|$)/.test(u)) listFetches++
+    })
+
+    await row.click()
+    await page.waitForTimeout(4000) // if it loops, requests pile up fast
+
+    expect(listFetches, `runaway list-fetch loop after selecting a pipeline (got ${listFetches})`).toBeLessThan(4)
+  })
+})
+
 test.describe('Outcome — env switcher reloads and applies the selected env (UI)', () => {
   test('choosing a different env reloads the app and the switcher shows it', async ({ page, request }) => {
     // Env names are seed-dependent (local: prod/preprod; CI demo: staging/…),

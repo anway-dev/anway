@@ -118,20 +118,30 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
   const logsRef = useRef<HTMLDivElement>(null);
   const { env, apiFetch } = useEnv();
 
+  // Track the selected pipeline's id in a ref so fetchPipelines can refresh the
+  // selected row WITHOUT depending on the `selected` object. Depending on
+  // `selected` here caused an infinite fetch loop: each fetch calls
+  // setSelected(new object) → `selected` identity changes → fetchPipelines is
+  // recreated → the effect below refires → fetch again … (the Pipeline screen
+  // flickered and hammered /api/pipelines as soon as any pipeline was selected).
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => { selectedIdRef.current = selected?.id ?? null; }, [selected]);
+
   const fetchPipelines = useCallback(async () => {
     try {
       const r = await apiFetch("/api/pipelines");
       if (r.ok) {
         const { data } = await r.json() as { data: Pipeline[]; nextCursor: string | null };
         setPipelines(data ?? []);
-        if (selected) {
-          const updated = (data ?? []).find(p => p.id === selected.id);
+        const id = selectedIdRef.current;
+        if (id) {
+          const updated = (data ?? []).find(p => p.id === id);
           if (updated) setSelected(updated);
         }
       }
     } catch { /* ignore */ }
     setLoading(false);
-  }, [selected]);
+  }, [apiFetch]);
 
   const fetchPipeline = useCallback(async (id: string) => {
     try {
@@ -304,6 +314,7 @@ export function PipelineView({ onGoToConnectors }: { onGoToConnectors?: () => vo
           {pipelines.map(p => (
             <div
               key={p.id}
+              data-testid="pipeline-row"
               onClick={() => { setSelected(p); void fetchPipeline(p.id); }}
               style={{
                 padding: "10px 12px",

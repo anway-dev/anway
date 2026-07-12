@@ -167,4 +167,31 @@ test.describe('Outcome — provider model field is always usable (UI)', () => {
     const modelControl = page.locator('select, input').filter({ hasNot: page.locator('[type="password"]') })
     expect(await modelControl.count(), 'a model select or text input must exist').toBeGreaterThan(0)
   })
+
+  test('an INVALID key produces a visible on-screen error, not a silent empty state', async ({ page }) => {
+    // The user's exact complaint: if the provider rejects the key, the screen
+    // must SAY so — not just render nothing. Type a syntactically-valid but
+    // unauthorized key, then assert the real upstream rejection surfaces as a
+    // visible banner (the gateway forwards the provider's own error verbatim).
+    await setAuthCookie(page.context())
+    await page.goto('/')
+    await page.locator('nav button', { hasText: 'Settings' }).first().click()
+    await page.getByTestId('settings-tab-provider').click({ timeout: 30000 })
+    await page.waitForTimeout(1500)
+    const edit = page.locator('button', { hasText: /^Edit$/ }).first()
+    if (await edit.count() > 0) { await edit.click(); await page.waitForTimeout(800) }
+
+    const keyField = page.locator('input[type="password"]').first()
+    await expect(keyField, 'API key field must be present to test an invalid key').toBeVisible({ timeout: 10000 })
+    await keyField.fill('sk-badbadbadbadbadbadbadbadbadbad00')
+    // debounce (600ms) + network round-trip to the provider
+    await page.waitForTimeout(2500)
+
+    // The amber banner must appear and must carry the REAL reason (rejected /
+    // invalid / verify), not a blank screen.
+    await expect(
+      page.getByText(/rejected the request|invalid|verify your API key|could not (reach|fetch)/i).first(),
+      'an invalid key must surface a visible error banner, never a silent empty state',
+    ).toBeVisible({ timeout: 10000 })
+  })
 })

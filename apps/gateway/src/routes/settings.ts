@@ -128,24 +128,31 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
     const effectiveBaseUrl = baseUrl ?? manifest.defaultBaseUrl
     if (manifest.modelsEndpoint && effectiveBaseUrl) {
       const url = `${effectiveBaseUrl.replace(/\/$/, '')}/${manifest.modelsEndpoint.replace(/^\//, '')}`
-      if (!await isSafeURL(url)) return { models: [] }
+      if (!await isSafeURL(url)) return { models: [], error: 'provider models URL failed the safety/SSRF check' }
       try {
         const headers: Record<string, string> = {}
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
         const resp = await fetch(url, { headers, redirect: 'manual' })
-        if (resp.status >= 300 && resp.status < 400) return { models: [] }
-        const data = await resp.json() as { models?: { name: string }[]; data?: { id: string }[] }
-        // Handle both Ollama format ({ models: [{ name }] }) and OpenAI format ({ data: [{ id }] })
-        if (data.models) return { models: data.models.map((m: { name: string }) => m.name) }
-        if (data.data) return { models: data.data.map((m: { id: string }) => m.id) }
-      } catch { /* fall through */ }
+        if (resp.ok) {
+          const data = await resp.json() as { models?: { name: string }[]; data?: { id: string }[] }
+          if (data.models) return { models: data.models.map((m: { name: string }) => m.name) }
+          if (data.data) return { models: data.data.map((m: { id: string }) => m.id) }
+          return { models: [], error: 'provider returned an unrecognized models response' }
+        }
+        // Surface the REAL upstream error verbatim (e.g. DeepSeek's
+        // "Authentication Fails, your api key ...9090 is invalid") so the UI
+        // tells the user exactly what's wrong instead of a generic message.
+        const rawBody = await resp.text().catch(() => '')
+        let upstream = ''
+        try { upstream = (JSON.parse(rawBody) as { error?: { message?: string } }).error?.message ?? '' } catch { upstream = rawBody.slice(0, 200) }
+        const detail = upstream || `HTTP ${resp.status}`
+        return { models: [], error: `provider rejected the request: ${detail}` }
+      } catch (err) {
+        return { models: [], error: `could not reach the provider: ${err instanceof Error ? err.message : String(err)}` }
+      }
     }
 
-    // Dynamic fetch produced nothing (no/invalid key, endpoint unreachable).
-    // Do NOT fabricate a model list — return empty with a reason so the UI
-    // shows an honest "couldn't load models, check your API key" state rather
-    // than assuming model names the vendor may have renamed/deprecated.
-    return { models: [], error: 'could not fetch models from the provider — verify the API key and that the provider is reachable' }
+    return { models: [], error: 'no models endpoint configured for this provider' }
   })
 
   app.get('/api/settings/workspace', { preHandler: [app.authenticate] }, async (request) => {

@@ -52,35 +52,38 @@ test.describe('Outcome — provider models are fetched, never fabricated', () =>
 })
 
 test.describe('Outcome — env switcher reloads and applies the selected env (UI)', () => {
-  test('choosing a different env reloads the app and the switcher shows it', async ({ page }) => {
+  test('choosing a different env reloads the app and the switcher shows it', async ({ page, request }) => {
+    // Env names are seed-dependent (local: prod/preprod; CI demo: staging/…),
+    // so learn them from the API instead of hardcoding labels.
+    const h = await authHeaders(request)
+    const envs = await (await request.get(`${GATEWAY}/api/environments`, { headers: h })).json() as Array<{ name: string; label: string }>
+    test.skip(envs.length < 2, 'need >=2 environments to exercise the switcher')
+
     await setAuthCookie(page.context())
     await page.goto('/')
-    // The env selector button shows the active env's label (e.g. "Production").
-    const selector = page.locator('button', { hasText: /Production|Pre-production/ }).first()
+    const selector = page.getByTestId('env-selector')
     await expect(selector, 'env selector must render').toBeVisible({ timeout: 20000 })
-    const before = (await selector.innerText()).replace(/[▾\s]+$/, '').trim()
+    const activeLabel = (await selector.innerText()).replace(/[▾\s]+$/, '').trim()
+    // Pick any env whose label differs from the active one.
+    const target = envs.find(e => !activeLabel.includes(e.label)) ?? envs.find(e => e.label !== activeLabel)!
 
-    // Mark the current document so we can prove a real reload happened (a reload
+    // Mark the document so we can prove a real reload happened (a reload
     // discards this property; an in-place state update would keep it).
     await page.evaluate(() => { (window as unknown as { __noReload?: boolean }).__noReload = true })
 
-    // Open the dropdown and pick the OTHER environment.
     await selector.click()
-    const other = before.includes('Pre-production') ? 'Production' : 'Pre-production'
-    await page.locator('button', { hasText: new RegExp(`^\\s*${other}\\s*$`) }).first().click()
+    await page.getByTestId(`env-option-${target.name}`).click()
 
-    // A genuine page reload must occur (switcher's contract: reload with the
-    // new env's data). Wait for the app to come back up post-reload.
+    // The switcher's contract: hard-reload so every view refetches the new
+    // env's data. Wait for the app to come back up post-reload.
     await page.waitForLoadState('load')
-    await expect(page.locator('button', { hasText: /Production|Pre-production/ }).first())
-      .toBeVisible({ timeout: 20000 })
+    await expect(page.getByTestId('env-selector')).toBeVisible({ timeout: 20000 })
     const reloaded = await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload !== true)
     expect(reloaded, 'switching env must hard-reload the page (not just swap state)').toBe(true)
 
     // After reload the switcher must reflect the chosen env, and it must persist.
-    const after = (await page.locator('button', { hasText: /Production|Pre-production/ }).first().innerText())
-      .replace(/[▾\s]+$/, '').trim()
-    expect(after, 'switcher must show the newly selected env after reload').toContain(other)
+    const after = (await page.getByTestId('env-selector').innerText()).replace(/[▾\s]+$/, '').trim()
+    expect(after, 'switcher must show the newly selected env after reload').toContain(target.label)
   })
 })
 

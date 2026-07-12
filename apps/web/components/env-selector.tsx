@@ -23,6 +23,7 @@ export function EnvSelector() {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
+        data-testid="env-selector"
         onClick={() => setOpen(o => !o)}
         style={{
           display: "flex", alignItems: "center", gap: 6, padding: "4px 10px",
@@ -44,6 +45,7 @@ export function EnvSelector() {
           {environments.map(e => (
             <button
               key={e.name}
+              data-testid={`env-option-${e.name}`}
               onClick={() => { setEnv(e.name); setOpen(false); }}
               style={{
                 display: "flex", alignItems: "center", gap: 8, width: "100%",

@@ -133,6 +133,13 @@ async function clickAllButtons(page: Page, navLabel: string, secondWave = false)
     if (!(await btn.isVisible().catch(() => false))) continue
     if (!(await btn.isEnabled().catch(() => false))) continue
 
+    // Skip the env switcher and its options: selecting an env hard-reloads the
+    // whole page (so every view refetches for that env), which tears down the
+    // sweep's in-progress state. The switcher is exercised by its own outcome
+    // spec; here it must not be clicked.
+    const testid = (await btn.getAttribute('data-testid').catch(() => '')) ?? ''
+    if (testid === 'env-selector' || testid.startsWith('env-option-')) continue
+
     // skip the left nav (would leave the view) and already-clicked labels
     const label = ((await btn.innerText().catch(() => '')) || (await btn.getAttribute('title').catch(() => '')) || `#${i}`).trim().slice(0, 40)
     if (isNavButton(label)) continue

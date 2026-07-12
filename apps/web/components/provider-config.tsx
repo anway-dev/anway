@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 
 interface ProviderInfo { configured: boolean; provider?: string; defaultModel?: string }
-interface ModelList { models: string[] }
+interface ModelList { models: string[]; error?: string }
 interface ManifestField { key: string; label: string; type: string; required: boolean; placeholder?: string; defaultValue?: string }
 interface ProviderManifest { id: string; displayName: string; website: string; fields: ManifestField[]; models: string[]; modelsEndpoint?: string; defaultBaseUrl?: string; openAICompatible: boolean }
 interface TokenLimits { monthlyBudget: number | null; perQueryLimit: number | null; perSessionLimit: number | null }
@@ -87,6 +87,7 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [models, setModels] = useState<string[]>([]);
+  const [modelsError, setModelsError] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState("");
   const [cheapModel, setCheapModel] = useState("");
   const [saving, setSaving] = useState(false);
@@ -134,19 +135,25 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
         .then((data: ModelList) => {
           const list = data.models ?? [];
           setModels(list);
+          setModelsError(list.length === 0 ? (data.error ?? "No models returned — verify your API key.") : "");
           if (initialModelRef.current && list.includes(initialModelRef.current)) {
             setSelectedModel(initialModelRef.current);
             initialModelRef.current = '';
           }
         })
-        .catch(() => setModels([]));
+        .catch(() => { setModels([]); setModelsError("Could not reach the provider to list models."); });
     }, 600)
     return () => clearTimeout(handle)
   }, [selectedProvider, baseUrl, apiKey, selectedManifest]);
 
   async function handleSave() {
     const needsApiKey = selectedManifest?.fields.some(f => f.required && f.key === 'apiKey');
-    if (needsApiKey && !apiKey) return;
+    // Editing an already-configured provider keeps the stored key (the gateway
+    // preserves it via COALESCE when apiKey is omitted) — so changing only the
+    // model must NOT require re-typing the key. Only a FRESH provider with no
+    // stored key needs one. (Before: Save silently no-op'd on model-only edits.)
+    const alreadyConfigured = providerInfo?.configured && providerInfo.provider === selectedProvider;
+    if (needsApiKey && !apiKey && !alreadyConfigured) { setSaveError('API key required for a new provider'); return; }
     setSaving(true);
     setSaveError("");
     setSaved(false);
@@ -181,7 +188,8 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
 
   function renderForm(cancelable = false) {
     const needsApiKey = selectedManifest?.fields.some(f => f.required && f.key === 'apiKey');
-    const canSave = !saving && (apiKey || !needsApiKey);
+    const alreadyConfigured = providerInfo?.configured && providerInfo.provider === selectedProvider;
+    const canSave = !saving && (apiKey || !needsApiKey || alreadyConfigured);
     return (
       <div>
         <div style={{ marginBottom: "16px" }}>
@@ -205,6 +213,11 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
           </div>
         ))}
 
+        {models.length === 0 && modelsError && apiKey && (
+          <div style={{ marginBottom: "16px", padding: "8px 10px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "4px", fontSize: "11px", color: "#ef4444", fontFamily: "monospace" }}>
+            {modelsError}
+          </div>
+        )}
         {models.length > 0 && (
           <>
             <div style={{ marginBottom: "16px" }}>

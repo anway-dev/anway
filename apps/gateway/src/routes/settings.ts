@@ -141,13 +141,11 @@ export async function settingsRoutes(app: FastifyInstance, opts?: { pub?: import
       } catch { /* fall through */ }
     }
 
-    // Dynamic fetch produced nothing (no/invalid key, endpoint unreachable) —
-    // fall back to the manifest's known model set so the pickers still render.
-    if (manifest.staticFallback && manifest.staticFallback.length > 0) {
-      return { models: manifest.staticFallback }
-    }
-
-    return { models: [] }
+    // Dynamic fetch produced nothing (no/invalid key, endpoint unreachable).
+    // Do NOT fabricate a model list — return empty with a reason so the UI
+    // shows an honest "couldn't load models, check your API key" state rather
+    // than assuming model names the vendor may have renamed/deprecated.
+    return { models: [], error: 'could not fetch models from the provider — verify the API key and that the provider is reachable' }
   })
 
   app.get('/api/settings/workspace', { preHandler: [app.authenticate] }, async (request) => {

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 
-interface ProviderInfo { configured: boolean; provider?: string; defaultModel?: string }
+interface ProviderInfo { configured: boolean; provider?: string; defaultModel?: string; cheapModel?: string }
 interface ModelList { models: string[]; error?: string }
 interface ManifestField { key: string; label: string; type: string; required: boolean; placeholder?: string; defaultValue?: string }
 interface ProviderManifest { id: string; displayName: string; website: string; fields: ManifestField[]; models: string[]; modelsEndpoint?: string; defaultBaseUrl?: string; openAICompatible: boolean }
@@ -109,7 +109,8 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
         setProviderInfo(prov);
         if (prov.configured && prov.provider) {
           setSelectedProvider(prov.provider);
-          if (prov.defaultModel) initialModelRef.current = prov.defaultModel;
+          if (prov.defaultModel) { initialModelRef.current = prov.defaultModel; setSelectedModel(prov.defaultModel); }
+          if (prov.cheapModel) setCheapModel(prov.cheapModel);
         }
         if (!prov.configured) { setShowPanel(true); setEditing(true); }
       })
@@ -120,7 +121,6 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
   const selectedManifest = manifests.find(m => m.id === selectedProvider);
 
   useEffect(() => {
-    setSelectedModel("");
     const needsKey = selectedManifest?.fields.some(f => f.key === 'apiKey' && f.required);
     if (needsKey && apiKey.length > 0 && apiKey.length < 10) { setModels([]); return; }
     // Debounced: this fires a real POST carrying the in-progress apiKey to the
@@ -213,31 +213,39 @@ export function ProviderConfig({ onConfigured, inline }: { onConfigured?: () => 
           </div>
         ))}
 
-        {models.length === 0 && modelsError && apiKey && (
-          <div style={{ marginBottom: "16px", padding: "8px 10px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "4px", fontSize: "11px", color: "#ef4444", fontFamily: "monospace" }}>
-            {modelsError}
+        {models.length === 0 && modelsError && (
+          <div style={{ marginBottom: "12px", padding: "8px 10px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: "4px", fontSize: "11px", color: "#f59e0b", fontFamily: "monospace" }}>
+            {modelsError} You can type the model name below.
           </div>
         )}
-        {models.length > 0 && (
-          <>
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>Model</label>
-              <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-                style={{ width: "100%", background: "#080808", border: "1px solid #2a2a2a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "13px", fontFamily: "monospace", outline: "none" }}>
-                <option value="">— select model</option>
-                {models.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>Cheap model <span style={{ color: "#444" }}>(optional — for fast ops)</span></label>
-              <select value={cheapModel} onChange={e => setCheapModel(e.target.value)}
-                style={{ width: "100%", background: "#080808", border: "1px solid #2a2a2a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "13px", fontFamily: "monospace", outline: "none" }}>
-                <option value="">— use main model</option>
-                {models.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-          </>
-        )}
+        {/* Model fields always render for a selected provider. Dropdown when
+            the live list loaded; free-text input otherwise (never stuck). */}
+        <div style={{ marginBottom: "16px" }}>
+          <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>Model</label>
+          {models.length > 0 ? (
+            <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+              style={{ width: "100%", background: "#080808", border: "1px solid #2a2a2a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "13px", fontFamily: "monospace", outline: "none" }}>
+              <option value="">— select model</option>
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input value={selectedModel} onChange={e => setSelectedModel(e.target.value)} placeholder="e.g. deepseek-chat"
+              style={{ width: "100%", background: "#080808", border: "1px solid #2a2a2a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "13px", fontFamily: "monospace", outline: "none", boxSizing: "border-box" }} />
+          )}
+        </div>
+        <div style={{ marginBottom: "20px" }}>
+          <label style={{ display: "block", fontSize: "10px", color: "#555", marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>Cheap model <span style={{ color: "#444" }}>(optional — for fast ops)</span></label>
+          {models.length > 0 ? (
+            <select value={cheapModel} onChange={e => setCheapModel(e.target.value)}
+              style={{ width: "100%", background: "#080808", border: "1px solid #2a2a2a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "13px", fontFamily: "monospace", outline: "none" }}>
+              <option value="">— use main model</option>
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input value={cheapModel} onChange={e => setCheapModel(e.target.value)} placeholder="(optional) e.g. deepseek-chat"
+              style={{ width: "100%", background: "#080808", border: "1px solid #2a2a2a", borderRadius: "4px", color: "#e5e5e5", padding: "8px 10px", fontSize: "13px", fontFamily: "monospace", outline: "none", boxSizing: "border-box" }} />
+          )}
+        </div>
 
         {saveError && (
           <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "4px", fontSize: "11px", color: "#ef4444", fontFamily: "monospace", marginBottom: "12px" }}>

@@ -682,6 +682,7 @@ const ROLES = [
 /* ———————————————————— page ———————————————————— */
 
 const NAV_LINKS: [string, string][] = [
+  ["demo", "Watch demo"],
   ["why", "Why"],
   ["analysis", "Agentic analysis"],
   ["autonomy", "Zero-touch"],
@@ -773,13 +774,13 @@ export default function LandingPage() {
             }}>
               Open Dashboard →
             </Link>
-            <button onClick={() => scrollTo("analysis")} style={{
+            <button onClick={() => scrollTo("demo")} style={{
               border: "1px solid #2a2a2a", color: "#e5e5e5", padding: "13px 28px",
               borderRadius: 6, fontSize: 15, background: "none", cursor: "pointer",
             }}
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#10b981"; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#2a2a2a"; }}>
-              See it investigate ↓
+              ▸ Watch 90s demo
             </button>
           </div>
         </div>
@@ -792,6 +793,39 @@ export default function LandingPage() {
           <span><span style={{ color: "#10b981" }}>1</span> orchestrator — you never pick an agent</span>
           <span><span style={{ color: "#10b981" }}>0</span> ungated writes in V1</span>
           <span><span style={{ color: "#10b981" }}>100%</span> of actions audited</span>
+        </div>
+      </section>
+
+      {/* ——— demo video ——— */}
+      <section id="demo" style={{ padding: "80px 40px 88px", borderTop: "1px solid #1a1a1a" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <Kicker>SEE IT IN ACTION — 90 SECONDS</Kicker>
+          <SectionTitle>One signal. One question.<br />The whole org&apos;s context, in seconds.</SectionTitle>
+          <SectionSub>
+            A live walkthrough: a signal fires, you ask once, and Anway traces the root cause across
+            every connector — then the same surface carries you through services, pipelines, cloud,
+            clusters and the immutable audit trail.
+          </SectionSub>
+          <div style={{
+            position: "relative", borderRadius: 10, overflow: "hidden",
+            border: "1px solid #1a1a1a", background: "#0a0a0a",
+            boxShadow: "0 0 80px rgba(16,185,129,0.06)",
+          }}>
+            <video
+              src="/demo/anway-demo.mp4"
+              poster="/demo/anway-demo-poster.png"
+              controls
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              style={{ display: "block", width: "100%", height: "auto", background: "#080808" }}
+            />
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 11, color: "#444", marginTop: 14, textAlign: "center" }}>
+            captured live against the running product · unmute for the full experience
+          </div>
         </div>
       </section>
 

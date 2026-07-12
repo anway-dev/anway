@@ -52,10 +52,17 @@ function groupStages(stages: PipelineStage[]): LayoutItem[] {
     if (stage.type === "gate" || stage.gate) {
       if (currentEnv) { items.push({ type: "env", env: currentEnv }); currentEnv = null; }
       items.push({ type: "gate", gate: stage });
-    } else if (stage.env) {
-      if (!currentEnv || currentEnv.id !== stage.env) {
+    } else {
+      // A non-gate stage always belongs in the pipeline flow. Stages that carry
+      // an explicit env group under that env; stages without one fall into a
+      // default lane so they still render (previously they were silently
+      // dropped, leaving a blank detail panel for pipelines whose stages have
+      // no env set).
+      const envId = stage.env ?? "__pipeline__";
+      const envLabel = stage.envLabel ?? stage.env ?? "Stages";
+      if (!currentEnv || currentEnv.id !== envId) {
         if (currentEnv) items.push({ type: "env", env: currentEnv });
-        currentEnv = { id: stage.env, label: stage.envLabel ?? stage.env, color: stage.color, stages: [] };
+        currentEnv = { id: envId, label: envLabel, color: stage.color, stages: [] };
       }
       currentEnv.stages.push(stage);
     }
@@ -67,9 +74,11 @@ function groupStages(stages: PipelineStage[]): LayoutItem[] {
 function statusColor(status?: string): string {
   switch (status) {
     case "done": return "#10b981";
+    case "success": return "#10b981";
     case "running": return "#f59e0b";
     case "failed": return "#ef4444";
     case "waiting": return "#8b5cf6";
+    case "pending": return "#8b5cf6";
     case "approved": return "#10b981";
     default: return "#333";
   }

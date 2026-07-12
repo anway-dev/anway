@@ -168,7 +168,7 @@ function MessageBlock({ message, onApproveGate, onRejectGate }: { message: Messa
   }
 
   return (
-    <div style={{ marginBottom: "24px" }}>
+    <div data-testid="assistant-msg" style={{ marginBottom: "24px" }}>
       {/* Response header bar */}
       <div style={{
         display: "flex", alignItems: "center", gap: "8px",

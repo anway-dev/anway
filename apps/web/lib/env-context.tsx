@@ -29,14 +29,28 @@ const EnvContext = createContext<EnvContextValue>({
 const STORAGE_KEY = "anway-env";
 
 export function EnvProvider({ children }: { children: ReactNode }) {
-  const [env, setEnvState] = useState<string>("prod");
+  // Init from localStorage on the client so the persisted env is authoritative
+  // from the first client render (and first fetch) after a reload. On the
+  // server there is no localStorage, so it defaults to "prod"; reloadEnvs()
+  // reconciles once the env list loads.
+  const [env, setEnvState] = useState<string>(() => {
+    if (typeof window === "undefined") return "prod";
+    try { return localStorage.getItem(STORAGE_KEY) ?? "prod"; } catch { return "prod"; }
+  });
   const [environments, setEnvironments] = useState<Env[]>([]);
   const envRef = useRef(env);
   useEffect(() => { envRef.current = env; }, [env]);
 
   const setEnv = useCallback((name: string) => {
-    setEnvState(name);
+    // Persist first, then hard-reload so EVERY view refetches its data under
+    // the new env. Views fetch on mount and don't re-run when only the env
+    // header changes, so without a reload the switcher would update the header
+    // for future calls but leave the currently-shown data stale. Reload only
+    // when the env actually changes (re-selecting the active env is a no-op).
+    if (name === envRef.current) return;
     try { localStorage.setItem(STORAGE_KEY, name); } catch { /* ignore */ }
+    setEnvState(name);
+    try { window.location.reload(); } catch { /* ignore — state already set */ }
   }, []);
 
   const reloadEnvs = useCallback(async () => {

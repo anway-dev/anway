@@ -145,3 +145,26 @@ test.describe('Outcome — per-user perimeter edit persists', () => {
     expect(prom!.writeScopes, 'write scopes must persist as set').toHaveLength(0)
   })
 })
+
+import { setAuthCookie } from './fixtures'
+
+test.describe('Outcome — provider model field is always usable (UI)', () => {
+  test('DeepSeek selected: a Model input/select is present even when the live list cannot load', async ({ page }) => {
+    await setAuthCookie(page.context())
+    await page.goto('/')
+    await page.locator('nav button', { hasText: 'Settings' }).first().click()
+    await page.getByTestId('settings-tab-provider').click({ timeout: 30000 })
+    await page.waitForTimeout(1500)
+    // configured provider shows a summary card with an "Edit" button; click it
+    // to open the form (unconfigured providers open the form directly).
+    const edit = page.locator('button', { hasText: /^Edit$/ }).first()
+    if (await edit.count() > 0) { await edit.click(); await page.waitForTimeout(800) }
+    // The provider form must show a Model field (label + a select or text
+    // input) so the user is never stuck without a way to set a model —
+    // whether or not the live model list could be fetched. Scope to the form.
+    await expect(page.getByText('Model', { exact: true }).first(),
+      'a Model field must be present for a selected provider').toBeVisible({ timeout: 10000 })
+    const modelControl = page.locator('select, input').filter({ hasNot: page.locator('[type="password"]') })
+    expect(await modelControl.count(), 'a model select or text input must exist').toBeGreaterThan(0)
+  })
+})

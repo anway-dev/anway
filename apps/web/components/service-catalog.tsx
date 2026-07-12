@@ -279,6 +279,7 @@ export function ServiceCatalog({ onTriggerOrchestrator, onGoToConnectors }: Prop
           {filtered.map(s => (
             <button
               key={s.id}
+              data-testid="service-card"
               onClick={() => setSelectedId(s.id)}
               style={{
                 display: "block", width: "100%", padding: "11px 14px", textAlign: "left",

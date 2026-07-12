@@ -380,20 +380,43 @@ test.describe('Every-flow — Access perimeter edit', () => {
 })
 
 test.describe('Every-flow — Settings provider model picker', () => {
-  test('selecting a provider loads model options (the reported bug)', async ({ page, request }) => {
-    // The AI Provider tab must surface Model + Cheap-model pickers. Backed by
-    // /api/settings/models which now falls back to stored key + static set.
+  test('selecting a provider surfaces models or an honest empty+error (never fabricated)', async ({ page, request }) => {
+    // No-fabrication contract: /api/settings/models either returns REAL model
+    // names fetched from the provider (valid key) OR an empty list with an
+    // honest error (no/invalid key) — it must NEVER invent a static list.
+    // In CI there is no live DeepSeek key, so empty+error is the expected,
+    // correct outcome; the UI must still give the user a usable Model field.
     const h = await authHeaders(request)
     const models = await request.get(`${GATEWAY}/api/settings/models?provider=deepseek`, { headers: h })
     expect(models.status()).toBe(200)
-    const body = await models.json() as { models: string[] }
-    expect(body.models.length, 'deepseek must expose model options').toBeGreaterThan(0)
+    const body = await models.json() as { models: string[]; error?: string }
+    if (body.models.length === 0) {
+      expect(body.error, 'empty models must carry an honest error, not silent []').toBeTruthy()
+    }
 
     const errs = trackErrors(page)
     await gotoView(page, 'Settings')
     await expect(page.getByTestId('settings-tab-provider')).toBeVisible({ timeout: 30000 })
     await page.getByTestId('settings-tab-provider').click()
-    await page.waitForTimeout(1500)
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+    // Open the provider form deterministically. A configured provider renders a
+    // summary card with an Edit button; clicking it toggles the form. In the
+    // prod build the button can be clicked before hydration completes, so click
+    // and confirm the form's key field appeared, retrying the click if the
+    // summary card is still showing. (Unconfigured providers render the form
+    // directly, so a missing Edit button is fine.)
+    const keyField = page.locator('input[type="password"]').first()
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await keyField.isVisible({ timeout: 2000 }).catch(() => false)) break
+      const edit = page.locator('button', { hasText: /^Edit$/ }).first()
+      if (await edit.isVisible({ timeout: 3000 }).catch(() => false)) { await edit.click().catch(() => {}) }
+      await page.waitForTimeout(600)
+    }
+    // A Model field must exist regardless of whether the live list loaded —
+    // dropdown when models fetched, free-text input otherwise. The user is
+    // never stuck without a way to set a model.
+    await expect(page.getByText('Model', { exact: true }).first(),
+      'a Model field must be present for a selected provider').toBeVisible({ timeout: 15000 })
     expect(realErrors(errs), realErrors(errs).join('\n')).toHaveLength(0)
   })
 })

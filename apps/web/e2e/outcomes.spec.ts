@@ -148,17 +148,34 @@ test.describe('Outcome — per-user perimeter edit persists', () => {
 
 import { setAuthCookie } from './fixtures'
 
+// Open the AI Provider form deterministically. A configured provider renders a
+// summary card with an "Edit" button; an unconfigured one renders the form
+// directly. Clicking Edit is a synchronous state toggle, but in the prod build
+// the button can be clicked before hydration finishes — so click and then
+// confirm the form actually opened (its password key field appears), retrying
+// the click once if the summary card is still showing.
+async function openProviderForm(page: import('@playwright/test').Page): Promise<void> {
+  await page.locator('nav button', { hasText: 'Settings' }).first().click()
+  await page.getByTestId('settings-tab-provider').click({ timeout: 30000 })
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+  const keyField = page.locator('input[type="password"]').first()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await keyField.isVisible({ timeout: 2000 }).catch(() => false)) return
+    const edit = page.locator('button', { hasText: /^Edit$/ }).first()
+    if (await edit.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await edit.click().catch(() => {})
+    }
+    await page.waitForTimeout(600)
+  }
+  // Final wait — form must be open for the assertions that follow.
+  await expect(keyField, 'provider form (key field) must open').toBeVisible({ timeout: 8000 })
+}
+
 test.describe('Outcome — provider model field is always usable (UI)', () => {
   test('DeepSeek selected: a Model input/select is present even when the live list cannot load', async ({ page }) => {
     await setAuthCookie(page.context())
     await page.goto('/')
-    await page.locator('nav button', { hasText: 'Settings' }).first().click()
-    await page.getByTestId('settings-tab-provider').click({ timeout: 30000 })
-    await page.waitForTimeout(1500)
-    // configured provider shows a summary card with an "Edit" button; click it
-    // to open the form (unconfigured providers open the form directly).
-    const edit = page.locator('button', { hasText: /^Edit$/ }).first()
-    if (await edit.count() > 0) { await edit.click(); await page.waitForTimeout(800) }
+    await openProviderForm(page)
     // The provider form must show a Model field (label + a select or text
     // input) so the user is never stuck without a way to set a model —
     // whether or not the live model list could be fetched. Scope to the form.
@@ -175,11 +192,7 @@ test.describe('Outcome — provider model field is always usable (UI)', () => {
     // visible banner (the gateway forwards the provider's own error verbatim).
     await setAuthCookie(page.context())
     await page.goto('/')
-    await page.locator('nav button', { hasText: 'Settings' }).first().click()
-    await page.getByTestId('settings-tab-provider').click({ timeout: 30000 })
-    await page.waitForTimeout(1500)
-    const edit = page.locator('button', { hasText: /^Edit$/ }).first()
-    if (await edit.count() > 0) { await edit.click(); await page.waitForTimeout(800) }
+    await openProviderForm(page)
 
     const keyField = page.locator('input[type="password"]').first()
     await expect(keyField, 'API key field must be present to test an invalid key').toBeVisible({ timeout: 10000 })

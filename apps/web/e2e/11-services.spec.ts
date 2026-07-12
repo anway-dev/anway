@@ -47,21 +47,23 @@ test.describe('Services — UI', () => {
 
   test('P0: click a service or view renders detail panel', async ({ page }) => {
     await page.goto('/')
-    await page.locator('text=Services').first().click()
-    await page.waitForTimeout(500)
+    // Use the nav button explicitly (not a bare text= that can match the
+    // "Service Catalog" heading) and let the route settle — in CI dev-mode the
+    // catalog compiles on first visit, so a fixed 500ms wait races the render.
+    await page.locator('nav button', { hasText: 'Services' }).first().click()
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(1200)
 
-    // Try clicking any service-like element
-    const anyItem = page.locator('text=payments')
-      .or(page.locator('text=auth'))
-      .or(page.locator('text=checkout'))
-      .or(page.locator('text=catalog'))
-      .or(page.locator('[class*="service-item"]'))
-      .first()
-    const found = await anyItem.isVisible({ timeout: 3000 }).catch(() => false)
+    // Click a real service CARD in the catalog — scoped by test id so it can't
+    // accidentally match sidebar audit rows like "auth.local_login" (which the
+    // old text=auth locator grabbed, clicking a non-service and never opening a
+    // detail panel).
+    const anyItem = page.getByTestId('service-card').first()
+    const found = await anyItem.isVisible({ timeout: 10000 }).catch(() => false)
 
     if (found) {
       await anyItem.click()
-      await page.waitForTimeout(300)
+      await page.waitForTimeout(600)
       const detail = page.locator('text=Error Rate')
         .or(page.locator('text=P99'))
         .or(page.locator('text=RPS'))
@@ -70,7 +72,7 @@ test.describe('Services — UI', () => {
         .or(page.locator('text=Metrics'))
         .or(page.locator('text=Repo'))
         .first()
-      await expect(detail, 'Service detail or metrics must appear').toBeVisible({ timeout: 5000 })
+      await expect(detail, 'Service detail or metrics must appear').toBeVisible({ timeout: 15000 })
     } else {
       // No services found — page still loaded without crashing
       await expect(page.locator('body'), 'Services page body must be visible').toBeVisible()

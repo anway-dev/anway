@@ -47,3 +47,6 @@ __pycache__/
 
 # Prisma generated
 apps/gateway/prisma/generated/
+
+# local infra secrets (use infra/.env.example as template)
+infra/.env

@@ -1,0 +1,32 @@
+# gitleaks configuration.
+# Extends the default ruleset and allowlists KNOWN NON-SECRETS so scans don't
+# drown in false positives. Everything listed here has been reviewed:
+#   - vendor-spec/*.openapi.yaml: upstream API documentation from GitHub/Slack
+#     that ships THEIR OWN example tokens (ghp_1234…, a documented RSA example
+#     key, xoxb-… placeholders). Not our credentials.
+#   - Development defaults intended to be changed (see SECURITY.md).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed non-secrets: vendor-spec examples and dev defaults"
+
+paths = [
+  '''connectors/.*/vendor-spec/.*\.ya?ml''',
+  '''.*\.env\.example$''',
+  '''apps/web/e2e/.*''',            # test fixtures (fake keys like sk-badbad…)
+]
+
+regexes = [
+  # non-production defaults shipped so the stack runs locally
+  '''anway_dev_secret''',
+  '''anway-demo-webhook-token''',
+  '''E2ETestPassword2026!''',
+  '''ci-test-secret-not-for-real-use-32chars''',
+  '''CHANGE_ME''',
+  # obvious placeholder/example tokens
+  '''ghp_1234567890abcdef1234567890abcdef12345678''',
+  '''xox[baprs]-(XXX|1234|access-token)''',
+  '''sk-badbadbadbadbadbadbadbadbadbad00''',
+]

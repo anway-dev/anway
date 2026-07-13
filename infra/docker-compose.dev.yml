@@ -307,7 +307,7 @@ services:
     # --force-recreate web` to rebuild (no HMR).
     command: >-
       sh -c "npm install -g pnpm@9.15.4 --quiet &&
-             cd /app && pnpm install &&
+             cd /app && pnpm install --prod=false &&
              cd /app/apps/web && pnpm build && pnpm start"
     environment:
       NODE_ENV: production

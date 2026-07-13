@@ -15,12 +15,11 @@ Connects GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty
 
 ## Repositories
 
-Anway is split across three repositories under the [`anway-dev`](https://github.com/anway-dev) org:
+Anway is split across repositories under the [`anway-dev`](https://github.com/anway-dev) org:
 
 | Repo | What it is |
 |------|-----------|
 | **[anway-dev/anway](https://github.com/anway-dev/anway)** (this repo) | The platform — web UI, gateway, agent harness, agent-service, CLI, connectors, and infra. |
-| **[anway-dev/anway-landing-page](https://github.com/anway-dev/anway-landing-page)** | The public marketing page — a standalone static site (deploys to Vercel). |
 | **[anway-dev/anway-test-setup](https://github.com/anway-dev/anway-test-setup)** | Cloud / e2e test environment — Terraform, k8s manifests, runners, service defs. |
 
 The product demo video and its capture harness live in this repo under

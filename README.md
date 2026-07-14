@@ -13,7 +13,7 @@ Connects GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty
 > Every connector added = more intelligence for the entire org. Ask once, see
 > everything across every tool, act with confidence behind a governed write path.
 
-**🌐 Live:** [www.anway.dev](https://www.anway.dev)  ·  **🎬 Demo:** watch the 90-second walkthrough below.
+**🌐 Website:** [www.anway.dev](https://www.anway.dev)  ·  **🎬 Demo:** watch the 90-second walkthrough below.
 
 ## Demo
 

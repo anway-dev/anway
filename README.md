@@ -3,6 +3,7 @@
 [![Status: Beta](https://img.shields.io/badge/status-beta-f59e0b.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-10b981.svg)](./CONTRIBUTING.md)
+[![Website](https://img.shields.io/badge/site-anway.dev-10b981.svg)](https://www.anway.dev)
 
 **The central nervous system of a software organisation.** _Beta — actively developed; APIs and schemas may change._
 
@@ -11,6 +12,18 @@ Connects GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty
 > **Not a devtool. The connective tissue between Product, Eng and SRE.**
 > Every connector added = more intelligence for the entire org. Ask once, see
 > everything across every tool, act with confidence behind a governed write path.
+
+**🌐 Live:** [www.anway.dev](https://www.anway.dev)  ·  **🎬 Demo:** watch the 90-second walkthrough below.
+
+## Demo
+
+https://github.com/anway-dev/anway/releases/download/v0.1.0-beta/anway-demo.mp4
+
+> If the player above doesn't load, [**▶ watch the 90-second demo on anway.dev**](https://www.anway.dev) — or click the thumbnail:
+>
+> [![Watch the Anway demo](./assets/anway-demo-poster.png)](https://www.anway.dev)
+
+A signal fires → ask once → agents trace the root cause across every tool → gated action, then a tour of services, pipelines, connectors and the audit trail.
 
 ---
 

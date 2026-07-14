@@ -1,9 +1,10 @@
 # Anway
 
+[![Status: Beta](https://img.shields.io/badge/status-beta-f59e0b.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](./LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-10b981.svg)](./CONTRIBUTING.md)
 
-**The central nervous system of a software organisation.**
+**The central nervous system of a software organisation.** _Beta — actively developed; APIs and schemas may change._
 
 Connects GitHub, Datadog, Linear, K8s, Loki, Prometheus, Jira, ArgoCD, PagerDuty, Terraform, and any cloud provider into a single intelligence surface. Every person in the org — SRE, PM, BA, Dev — queries, acts, and governs the entire software lifecycle through one orchestrator.
 

@@ -15,9 +15,20 @@ interface ApiIncident {
   resolved_at?: string | null;
 }
 
+// Recall — prior-resolution memory for this signal's fingerprint
+interface RecallInfo {
+  count: number;
+  lastRootCause: string | null;
+  lastFixAction: { toolName: string; connectorId: string; toolArgs: unknown } | null;
+  lastTtrSeconds: number | null;
+  lastResolvedAt: string | null;
+  avgTtrSeconds: number | null;
+}
+
 // Display shape used by the view — enriches real data with UI-only fields
 interface DisplayIncident {
   id: string;
+  fullId: string;
   title: string;
   severity: "critical" | "high" | "medium" | "low";
   status: "active" | "investigating" | "resolved";
@@ -120,6 +131,7 @@ function formatDuration(createdAt: string, resolvedAt?: string | null): string {
 function toDisplay(a: ApiIncident): DisplayIncident {
   return {
     id: a.id.slice(-8),
+    fullId: a.id,
     title: a.title,
     severity: a.severity,
     status: a.status,
@@ -263,6 +275,8 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   const [filter, setFilter] = useState<Filter>("all");
   const [runbookOpen, setRunbookOpen] = useState(true);
   const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
+  const [recall, setRecall] = useState<RecallInfo | null>(null);
+  const [fixResult, setFixResult] = useState<string | null>(null);
 
   const loadIncidents = useCallback(async (isInitial: boolean) => {
     try {
@@ -319,6 +333,34 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
 
   const filtered = incidents.filter(i => filter === "all" || i.status === filter);
   const selected = selectedId ? incidents.find(i => i.id === selectedId) ?? incidents[0] : incidents[0];
+
+  // Recall: fetch prior-resolution memory for the selected incident. The detail
+  // route attaches `recall` (count, last cause, TTR, prior gated fix).
+  useEffect(() => {
+    setRecall(null); setFixResult(null);
+    if (!selected?.fullId) return;
+    let live = true;
+    fetch(`/api/incidents/${selected.fullId}`)
+      .then(r => r.ok ? r.json() as Promise<{ recall?: RecallInfo | null }> : { recall: null })
+      .then(d => { if (live) setRecall(d.recall ?? null); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [selected?.fullId]);
+
+  // Apply the prior fix through the orchestrator — which runs the real L2 gate
+  // (V1: every write is shown + confirmed before execute). We never bypass it
+  // with a direct write; recall only *proposes* replaying what worked before.
+  const applyPriorFix = () => {
+    if (!recall?.lastFixAction || !selected) return;
+    const fx = recall.lastFixAction;
+    onTriggerOrchestrator(
+      `This incident matches ${recall.count} prior resolution(s). Last time it was fixed with `
+      + `\`${fx.toolName}\` on \`${fx.connectorId}\` (args: ${JSON.stringify(fx.toolArgs)}). `
+      + `Propose applying that same fix now — show me the gated action to confirm.`,
+      { title: selected.title, source: "incident-recall-fix" },
+    );
+    setFixResult("Sent to orchestrator — confirm the gated action there.");
+  };
 
   if (!loading && incidents.length === 0) {
     return (
@@ -456,6 +498,32 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
 
           {/* Scrollable body */}
           <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Recall banner — institutional memory for this signal's fingerprint */}
+            {recall && recall.count > 0 && (
+              <div style={{ background: "#1a1405", border: "1px solid rgba(245,158,11,0.3)", borderLeft: "3px solid #f59e0b", borderRadius: "8px", padding: "14px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "10px", color: "#f59e0b", fontWeight: 700, letterSpacing: "0.08em" }}>⚡ RECALL — SEEN {recall.count}× BEFORE</span>
+                </div>
+                <p style={{ fontSize: "12px", color: "#f5deb3", lineHeight: "1.6", margin: 0 }}>
+                  {recall.lastRootCause ? <>Last cause: <strong style={{ color: "#fcd34d" }}>{recall.lastRootCause}</strong>. </> : "No root cause was recorded last time. "}
+                  {recall.avgTtrSeconds != null && <>Resolved in ~{Math.max(1, Math.round(recall.avgTtrSeconds / 60))}m on average.</>}
+                </p>
+                {recall.lastFixAction && (
+                  <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    <button
+                      onClick={applyPriorFix}
+                      style={{ fontSize: "11px", fontWeight: 700, color: "#080808", background: "#f59e0b", border: "none", borderRadius: "6px", padding: "7px 14px", cursor: "pointer" }}
+                    >
+                      Apply prior fix →
+                    </button>
+                    <span style={{ fontSize: "10px", color: "#8a7a55", fontFamily: "monospace" }}>
+                      {recall.lastFixAction.toolName} · {recall.lastFixAction.connectorId}
+                    </span>
+                    {fixResult && <span style={{ fontSize: "10px", color: "#f59e0b" }}>{fixResult}</span>}
+                  </div>
+                )}
+              </div>
+            )}
             {/* Hypothesis box */}
             <div style={{ background: "#0a150e", border: "1px solid rgba(16,185,129,0.2)", borderLeft: "3px solid #10b981", borderRadius: "8px", padding: "14px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>

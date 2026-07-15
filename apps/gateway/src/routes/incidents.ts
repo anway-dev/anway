@@ -4,6 +4,7 @@ import { createClient } from 'redis'
 import type { RedisClientType } from 'redis'
 import { TenantId, UserId, SessionId } from '@anway/types'
 import { IncidentService } from '../services/incident.js'
+import { RecallService } from '../services/recall.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
@@ -63,7 +64,10 @@ export async function incidentRoutes(app: FastifyInstance) {
     if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const incident = await service.get(id, tenantId)
     if (!incident) { reply.code(404); return { error: 'Incident not found' } }
-    return incident
+    // Recall: attach prior-resolution memory for this signal's fingerprint, so
+    // the War Room can show "seen N× before" + offer the prior fix (gated).
+    const recall = await new RecallService(prisma).forIncident(tenantId, id).catch(() => null)
+    return { ...incident, recall }
   })
 
   app.post<{ Body: { title: string; severity: IncidentSeverity; description?: string } }>('/api/incidents', {
@@ -161,6 +165,11 @@ export async function incidentRoutes(app: FastifyInstance) {
     if (!UUID_RE.test(id)) return reply.code(400).send({ error: 'invalid id' })
     const result = await service.resolve(id, user.tenantId)
     if (result.count === 0) { reply.code(404); return { error: 'Incident not found' } }
+
+    // Recall: capture this resolution so the next incident of its kind can be
+    // triaged against it. Best-effort — never block the resolve on it.
+    void new RecallService(prisma).recordResolution(user.tenantId, id)
+      .catch((err) => request.log.warn({ err, incidentId: id }, 'recall: recordResolution failed'))
 
     const audit = new PostgresAuditSink(prisma, (err) => request.log.error({ err }, 'incident audit write failed'))
     void audit.append({

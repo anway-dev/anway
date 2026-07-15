@@ -6,6 +6,8 @@ import { UUID_RE } from '../utils/validators.js'
 import { prisma } from '../db/client.js'
 import { decryptJson } from '../utils/crypto.js'
 import { IncidentService } from '../services/incident.js'
+import { RecallService, fingerprint } from '../services/recall.js'
+import { withTenant } from '../db/prisma.js'
 import { resolveEnvId } from '../utils/env-scope.js'
 import { publishDurable } from '../events/durable-events.js'
 import { registerGithubWebhookRoute } from './github-webhook.js'
@@ -199,6 +201,7 @@ export async function eventRoutes(app: FastifyInstance) {
     const { tenantId } = user
     const pub = await getEventPub()
     const service = new IncidentService(prisma)
+    const recall = new RecallService(prisma)
 
     // Event-silence visibility: stamp the alertmanager connector as having
     // delivered a real event (webhook-registrar.ts).
@@ -228,6 +231,28 @@ export async function eventRoutes(app: FastifyInstance) {
           description: desc,
           envId: alertEnvId,
         })
+
+        // Recall: fingerprint this signal, store it on the incident, and if
+        // we've resolved this kind of problem before, surface it as the
+        // starting root-cause hint (compounds triage — every incident makes
+        // the next of its kind faster).
+        try {
+          const fp = fingerprint(svc || null, title, severity)
+          await withTenant(prisma, tenantId, (tx) => tx.$executeRaw`
+            UPDATE incidents SET fingerprint = ${fp}, service = ${svc || null}
+            WHERE id = ${incident.id}::uuid AND tenant_id = ${tenantId}::uuid`)
+          const match = await recall.findMatches(tenantId, fp, incident.id)
+          if (match && match.count > 0) {
+            const mins = match.lastTtrSeconds ? Math.max(1, Math.round(match.lastTtrSeconds / 60)) : null
+            const hint = `⚡ Recall — seen ${match.count}× before.`
+              + (match.lastRootCause ? ` Last cause: ${match.lastRootCause}.` : '')
+              + (mins ? ` Resolved in ~${mins}m last time.` : '')
+            await service.setRootCause(incident.id, tenantId, hint)
+          }
+        } catch (err) {
+          request.log.warn({ err, incidentId: incident.id }, 'recall: lookup failed (non-fatal)')
+        }
+
         if (pub) {
           await tryPublish(pub, 'incident_created', {
             type: 'incident_created',

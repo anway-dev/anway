@@ -255,6 +255,61 @@ export async function eventRoutes(app: FastifyInstance) {
     return { ok: true }
   })
 
+  // ── Live incident stream (SSE) ──────────────────────────────────────────
+  // The War Room subscribes here to get incident changes pushed in real time
+  // instead of only on page load. On any incident/alert event for THIS tenant
+  // we emit a lightweight "incidents_changed" signal; the client re-fetches
+  // /api/incidents (so it applies its own env filter). Tenant isolation is
+  // enforced by matching payload.tenantId to the authenticated user's tenant.
+  app.get('/api/events/stream', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tenantId } = request.user as { tenantId: string }
+
+    // Take over the raw response — we stream SSE frames manually and keep the
+    // socket open until the client disconnects, so Fastify must not try to
+    // send/serialise its own reply.
+    reply.hijack()
+    const raw = reply.raw
+    raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    raw.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`)
+
+    // keep-alive comment ping so proxies/browsers don't drop an idle stream
+    const heartbeat = setInterval(() => { try { raw.write(': ping\n\n') } catch { /* closed */ } }, 25_000)
+
+    const CHANNELS = ['incident_created', 'incident_updated', 'incident_resolved', 'alert_fired']
+    const redisUrl = process.env['REDIS_URL']
+    let sub: import('redis').RedisClientType | null = null
+
+    const cleanup = async () => {
+      clearInterval(heartbeat)
+      if (sub) { try { await sub.quit() } catch { /* ignore */ } sub = null }
+    }
+    raw.on('close', () => { void cleanup() })
+
+    if (redisUrl) {
+      try {
+        sub = createClient({ url: redisUrl }) as import('redis').RedisClientType
+        await sub.connect()
+        const onMsg = (message: string) => {
+          try {
+            const payload = JSON.parse(message) as { tenantId?: string }
+            if (payload.tenantId && payload.tenantId !== tenantId) return  // tenant isolation
+            raw.write(`data: ${JSON.stringify({ type: 'incidents_changed' })}\n\n`)
+          } catch { /* ignore malformed */ }
+        }
+        for (const ch of CHANNELS) await sub.subscribe(ch, onMsg)
+      } catch (err) {
+        request.log.warn({ err }, 'incident stream: Redis subscribe failed — heartbeat-only')
+        await cleanup().catch(() => {})
+      }
+    }
+    // hijacked — connection stays open until the client closes (see raw.on close)
+  })
+
   // Deploy event receiver
   app.post('/api/events/deploy', {
     preHandler: [authenticateEvent],

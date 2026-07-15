@@ -1,7 +1,7 @@
 "use client";
 import { EmptyState } from "@/components/empty-state"
 import { FreshnessBadge } from "@/components/freshness-badge"
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 // Shape returned by /api/incidents
 interface ApiIncident {
@@ -264,24 +264,41 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   const [runbookOpen, setRunbookOpen] = useState(true);
   const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    fetch("/api/incidents")
-      .then(r => r.ok ? r.json() as Promise<{ data: ApiIncident[]; nextCursor: string | null }> : Promise.resolve({ data: [] as ApiIncident[], nextCursor: null }))
-      .then(res => {
-        if (!mounted) return;
-        const list = res.data ?? []
-        const display = list.map(toDisplay);
-        setIncidents(display);
-        if (display.length > 0) {
-          const firstActive = display.find(i => i.status === "active");
-          setSelectedId(firstActive?.id ?? display[0].id);
-        }
-      })
-      .catch(() => { if (mounted) setIncidents([]); })
-      .finally(() => { if (mounted) setLoading(false); });
-    return () => { mounted = false; };
+  const loadIncidents = useCallback(async (isInitial: boolean) => {
+    try {
+      const r = await fetch("/api/incidents");
+      const res = r.ok ? (await r.json() as { data: ApiIncident[]; nextCursor: string | null }) : { data: [] as ApiIncident[], nextCursor: null };
+      const display = (res.data ?? []).map(toDisplay);
+      setIncidents(display);
+      // Pick a selection on first load only — a live refresh must not yank the
+      // user off the incident they're reading.
+      if (isInitial && display.length > 0) {
+        const firstActive = display.find(i => i.status === "active");
+        setSelectedId(firstActive?.id ?? display[0].id);
+      }
+    } catch {
+      if (isInitial) setIncidents([]);
+    } finally {
+      if (isInitial) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void loadIncidents(true); }, [loadIncidents]);
+
+  // Live updates: subscribe to the incident SSE stream and re-fetch whenever
+  // the server signals a change (new alert/incident, status transition), so an
+  // open War Room stays current without a manual reload.
+  useEffect(() => {
+    const es = new EventSource("/api/events/stream");
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data) as { type?: string };
+        if (msg.type === "incidents_changed") void loadIncidents(false);
+      } catch { /* ignore heartbeats / non-JSON */ }
+    };
+    es.onerror = () => { /* EventSource auto-reconnects; ignore transient errors */ };
+    return () => es.close();
+  }, [loadIncidents]);
 
   useEffect(() => {
     fetch("/api/connectors/catalog")

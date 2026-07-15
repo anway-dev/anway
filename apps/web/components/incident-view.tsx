@@ -25,6 +25,17 @@ interface RecallInfo {
   avgTtrSeconds: number | null;
 }
 
+// Change Timeline event — "what changed before this broke?"
+interface ChangeEvent {
+  at: string;
+  kind: "deploy" | "alert" | "incident_opened" | "incident_resolved" | "action" | "pr" | "event";
+  source: string;
+  title: string;
+  detail?: string;
+  service?: string | null;
+  ref?: string | null;
+}
+
 // Display shape used by the view — enriches real data with UI-only fields
 interface DisplayIncident {
   id: string;
@@ -89,6 +100,16 @@ const STATUS_COLOR: Record<DisplayIncident["status"], string> = {
   active: "#ef4444",
   investigating: "#f59e0b",
   resolved: "#10b981",
+};
+
+const CHANGE_KIND_COLOR: Record<ChangeEvent["kind"], string> = {
+  deploy: "#8b5cf6",
+  alert: "#ef4444",
+  incident_opened: "#f59e0b",
+  incident_resolved: "#10b981",
+  action: "#3b82f6",
+  pr: "#10b981",
+  event: "#888",
 };
 
 const STATUS_BG: Record<DisplayIncident["status"], string> = {
@@ -277,6 +298,9 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   const [freshnessTimestamp, setFreshnessTimestamp] = useState<string | null>(null);
   const [recall, setRecall] = useState<RecallInfo | null>(null);
   const [fixResult, setFixResult] = useState<string | null>(null);
+  const [detailMeta, setDetailMeta] = useState<{ service: string | null; createdAt: string | null }>({ service: null, createdAt: null });
+  const [timeline, setTimeline] = useState<ChangeEvent[] | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   const loadIncidents = useCallback(async (isInitial: boolean) => {
     try {
@@ -337,15 +361,34 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
   // Recall: fetch prior-resolution memory for the selected incident. The detail
   // route attaches `recall` (count, last cause, TTR, prior gated fix).
   useEffect(() => {
-    setRecall(null); setFixResult(null);
+    setRecall(null); setFixResult(null); setTimeline(null); setDetailMeta({ service: null, createdAt: null });
     if (!selected?.fullId) return;
     let live = true;
     fetch(`/api/incidents/${selected.fullId}`)
-      .then(r => r.ok ? r.json() as Promise<{ recall?: RecallInfo | null }> : { recall: null })
-      .then(d => { if (live) setRecall(d.recall ?? null); })
+      .then(r => r.ok ? r.json() as Promise<{ recall?: RecallInfo | null; service?: string | null; created_at?: string }> : {})
+      .then(d => { if (live) { setRecall(d.recall ?? null); setDetailMeta({ service: d.service ?? null, createdAt: d.created_at ?? null }); } })
       .catch(() => {});
     return () => { live = false; };
   }, [selected?.fullId]);
+
+  // Change Timeline: on demand, load everything that changed in the ~6h before
+  // this incident opened, scoped to its service — "what changed before X broke?"
+  const loadTimeline = async () => {
+    if (!selected) return;
+    setTimelineLoading(true);
+    try {
+      const params = new URLSearchParams({ hoursBack: "6" });
+      if (detailMeta.service) params.set("service", detailMeta.service);
+      if (detailMeta.createdAt) params.set("before", detailMeta.createdAt);
+      const r = await fetch(`/api/timeline?${params.toString()}`);
+      const d = r.ok ? await r.json() as { events?: ChangeEvent[] } : { events: [] };
+      setTimeline(d.events ?? []);
+    } catch {
+      setTimeline([]);
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
 
   // Apply the prior fix through the orchestrator — which runs the real L2 gate
   // (V1: every write is shown + confirmed before execute). We never bypass it
@@ -532,6 +575,43 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
               <p style={{ fontSize: "12px", color: "#c8e6c9", lineHeight: "1.6", margin: 0 }}>
                 {selected.hypothesis}
               </p>
+            </div>
+
+            {/* Change Timeline — "what changed before this broke?" */}
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "12px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "10px", color: "#555", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>
+                  Change Timeline{detailMeta.service ? ` · ${detailMeta.service}` : ""}
+                </span>
+                {timeline === null && (
+                  <button
+                    onClick={loadTimeline}
+                    disabled={timelineLoading}
+                    style={{ fontSize: "10px", fontWeight: 700, color: "#3b82f6", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "6px", padding: "5px 10px", cursor: timelineLoading ? "default" : "pointer" }}
+                  >
+                    {timelineLoading ? "Loading…" : "What changed before this? ↑"}
+                  </button>
+                )}
+              </div>
+              {timeline !== null && (
+                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {timeline.length === 0 ? (
+                    <div style={{ fontSize: "11px", color: "#444" }}>No recorded changes in the 6h before this incident.</div>
+                  ) : timeline.map((ev, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                      <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: CHANGE_KIND_COLOR[ev.kind], marginTop: "4px", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "11px", color: "#e5e5e5" }}>
+                          <span style={{ color: CHANGE_KIND_COLOR[ev.kind], fontWeight: 700, textTransform: "uppercase", fontSize: "9px", marginRight: "6px" }}>{ev.kind.replace(/_/g, " ")}</span>
+                          {ev.title}
+                        </div>
+                        {ev.detail && <div style={{ fontSize: "10px", color: "#666", marginTop: "1px" }}>{ev.detail}</div>}
+                      </div>
+                      <span style={{ fontSize: "10px", color: "#555", fontFamily: "monospace", flexShrink: 0 }}>{new Date(ev.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Timeline strip */}

@@ -5,6 +5,7 @@ import type { RedisClientType } from 'redis'
 import { TenantId, UserId, SessionId } from '@anway/types'
 import { IncidentService } from '../services/incident.js'
 import { RecallService } from '../services/recall.js'
+import { TimelineService } from '../services/timeline.js'
 import { PostgresAuditSink } from '../audit/postgres-sink.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
@@ -67,7 +68,36 @@ export async function incidentRoutes(app: FastifyInstance) {
     // Recall: attach prior-resolution memory for this signal's fingerprint, so
     // the War Room can show "seen N× before" + offer the prior fix (gated).
     const recall = await new RecallService(prisma).forIncident(tenantId, id).catch(() => null)
-    return { ...incident, recall }
+    // `service` lives in a raw-added column not on the Prisma model — surface it
+    // so the War Room can scope the change timeline to the affected service.
+    const svcRow = await withTenant(prisma, tenantId, (tx) =>
+      tx.$queryRaw<Array<{ service: string | null }>>`
+        SELECT service FROM incidents WHERE id = ${id}::uuid AND tenant_id = ${tenantId}::uuid LIMIT 1`
+    ).catch(() => [] as Array<{ service: string | null }>)
+    return { ...incident, service: svcRow[0]?.service ?? null, recall }
+  })
+
+  // Change Timeline — "what changed before X broke?". Read-only, tenant-scoped.
+  app.get('/api/timeline', {
+    preHandler: [app.authenticate],
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          service: { type: 'string' },
+          hoursBack: { type: 'string' },
+          before: { type: 'string' },
+        },
+      },
+    },
+  }, async (request) => {
+    const { tenantId } = request.user as { tenantId: string }
+    const { service, hoursBack, before } = request.query as { service?: string; hoursBack?: string; before?: string }
+    const to = before ? new Date(before) : new Date()
+    const hours = Math.min(Math.max(parseFloat(hoursBack ?? '24') || 24, 0.1), 720)
+    const from = new Date(to.getTime() - hours * 3600 * 1000)
+    const events = await new TimelineService(prisma).getTimeline(tenantId, { from, to, service, limit: 200 })
+    return { window: { from: from.toISOString(), to: to.toISOString() }, service: service ?? null, count: events.length, events }
   })
 
   app.post<{ Body: { title: string; severity: IncidentSeverity; description?: string } }>('/api/incidents', {

@@ -1,0 +1,34 @@
+import { envFwd } from '@/lib/server-auth'
+
+const GATEWAY_URL = process.env["GATEWAY_URL"] ?? "http://127.0.0.1:8510"
+
+async function getToken(): Promise<string | null> {
+  try {
+    const { cookies } = await import("next/headers")
+    return (await cookies()).get("anway_token")?.value ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const query = searchParams.toString()
+
+  const token = await getToken()
+  const empty = JSON.stringify({ events: [], count: 0 })
+  if (!token) {
+    return new Response(empty, { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  try {
+    const url = `${GATEWAY_URL}/api/timeline${query ? `?${query}` : ''}`
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...envFwd(request) },
+    })
+    const data = await resp.text()
+    return new Response(data, { status: resp.status, headers: { 'Content-Type': 'application/json' } })
+  } catch {
+    return new Response(empty, { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+}

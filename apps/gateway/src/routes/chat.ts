@@ -33,6 +33,7 @@ import { withTenant } from '../db/prisma.js'
 import { getToolsForTenant } from '../connectors/registry.js'
 import { makeRegistrationTools } from '../connectors/registration-tools.js'
 import { makeDeployTools } from '../tools/deploy-tools.js'
+import { makeTimelineTools } from '../tools/timeline-tools.js'
 import { getNativeConnectorTools } from '../tools/native-connector-tools.js'
 import { RedisGateSink } from '../gate/redis-gate-sink.js'
 import { getMemoryGateSink } from '../gate/memory-gate-fallback.js'
@@ -538,7 +539,8 @@ export async function chatRoutes(app: FastifyInstance) {
     // Deploy tools (trigger_pipeline, approve_gate) are bare-named harness tools.
     // They must be in the builtins allowlist or the perimeter hard-blocks them.
     // T1's gate logic ensures writes are L2-gated once reachable.
-    const deployToolNames = ['trigger_pipeline', 'approve_gate']
+    // get_change_timeline is a bare-named read-only harness tool — same allowlist rule.
+    const deployToolNames = ['trigger_pipeline', 'approve_gate', 'get_change_timeline']
     const perimeter = AgentPerimeter.resolveCapabilities(
       userPerimeter,
       manifests,
@@ -606,7 +608,8 @@ export async function chatRoutes(app: FastifyInstance) {
     const knowledgeGraph: IKnowledgeGraph = createKnowledgeGraph(TenantId(tenantId), embedder ?? undefined)
     const connectorTools = await getToolsForTenant(prisma, tenantId)
     const deployTools = makeDeployTools(tenantId, userId, role, provider, knowledgeGraph)
-    const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools]
+    const timelineTools = makeTimelineTools(tenantId)
+    const allTools = [...connectorTools, ...nativeConnectorTools, ...registrationTools, ...deployTools, ...timelineTools]
 
     // L2 gate — write actions require user approval (V1 trust principle)
     const gateSink = redisUrl ? new RedisGateSink(redisUrl, tenantId) : getMemoryGateSink()

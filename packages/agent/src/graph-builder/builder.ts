@@ -11,9 +11,17 @@ export interface GraphBuilderLogger {
 
 /** Cheap-model service name extraction. Returns null if no service found. */
 const EXTRACT_PROMPT =
-  'Extract the primary service or software component name from this text. ' +
-  'Respond with ONLY the name (max 3 words), or empty string if none found.\n\n' +
-  'Text: '
+  'You extract the primary service or software-component name that is EXPLICITLY named in the text. ' +
+  'Respond with ONLY that exact name (max 3 words) when one is explicitly named; otherwise respond with an empty string. ' +
+  'Do NOT invent, guess, infer, or generalise a name. If the text only describes a vague problem ' +
+  '(e.g. "the site is slow", "users are complaining", "errors this morning") WITHOUT naming a specific service, ' +
+  'return an empty string. Never answer with a generic placeholder such as "web server", "server", "frontend", ' +
+  '"backend", "the app", "website", or "database" unless that exact word is the named service.\n\n' +
+  'Examples:\n' +
+  '"Checkout failing on payments-api since 14:30" -> payments-api\n' +
+  '"auth-service throwing 401s after the rollout" -> auth-service\n' +
+  '"the whole site feels slow this morning" -> \n' +
+  '"a few users are complaining about errors" -> '
 
 // GitHub's standard issue-closing keywords (case-insensitive). Matches the
 // CLAUDE.md-documented trigger: "pr_merged → ... extract 'fixes #N' →

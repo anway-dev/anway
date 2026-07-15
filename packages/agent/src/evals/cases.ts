@@ -184,3 +184,133 @@ export const chatEvals: EvalCase<string>[] = [
     ].join('\n'),
   },
 ]
+
+// ─────────────────────────────────────────────────────────────────────────
+// Graph Builder Agent — the cheap-model entity extraction that seeds the
+// knowledge graph. The graph is the mandatory first step for every query, so
+// extraction quality underpins the whole system. Evals GraphBuilderAgent.
+// extractServiceName: pull the service a ticket/alert is about, and — just as
+// important — return NOTHING when no service is named (no fabrication).
+// ─────────────────────────────────────────────────────────────────────────
+export const graphBuilderEvals: EvalCase<{ text: string }>[] = [
+  {
+    id: 'graphbuilder-extract-named-service',
+    agentAction: 'GraphBuilderAgent.extractServiceName',
+    input: { text: 'Checkout failures on payments-api since 14:30 — 500s spiking after the v2.3.0 deploy, billing handler suspected.' },
+    rubric: [
+      '- the output identifies "payments-api" as the service (exact match, or clearly that service — not a different or invented name)',
+      '- the output is a single service identifier, not a sentence, explanation, or list',
+      '- it does not return an unrelated noun (e.g. "checkout", "billing", "500s") as if it were the service name',
+    ].join('\n'),
+  },
+  {
+    id: 'graphbuilder-extract-fuzzy',
+    agentAction: 'GraphBuilderAgent.extractServiceName',
+    input: { text: 'auth service login endpoint throwing 401s for all users right after the last rollout' },
+    rubric: [
+      '- the output identifies the auth service (e.g. "auth-service" / "auth service" / "auth") — the one component the text is about',
+      '- output is just the service name, not prose',
+    ].join('\n'),
+  },
+  {
+    id: 'graphbuilder-no-service-no-fabrication',
+    agentAction: 'GraphBuilderAgent.extractServiceName',
+    input: { text: 'The whole site feels slow this morning and a few users are complaining in support.' },
+    rubric: [
+      '- CRITICAL anti-hallucination check: the text names NO specific service, so the correct output is null / empty / "none"',
+      '- returning any concrete service name here (e.g. inventing "web-app" or "frontend") is a fabrication and must score low',
+      '- an empty / null / "no service found" style output is the correct, high-scoring answer',
+    ].join('\n'),
+  },
+]
+
+// ─────────────────────────────────────────────────────────────────────────
+// Connector Agent — the generic per-connector agent: selects tools, calls
+// them, and summarises live data into a finding. This is the most-executed
+// production path and had zero eval coverage (chat-eval deliberately runs
+// connector-less). These cases run a real ConnectorAgent against a canned
+// tool and judge the finding for (1) accuracy vs the data and (2) that it
+// does NOT fabricate numbers when the tool returns nothing.
+// ─────────────────────────────────────────────────────────────────────────
+export interface ConnectorAgentEvalInput {
+  agentType: string
+  task: string
+  intent: string
+  coordinates: Record<string, string>
+  tool: { name: string; description: string; returns: unknown }
+}
+export const connectorAgentEvals: EvalCase<ConnectorAgentEvalInput>[] = [
+  {
+    id: 'connectoragent-summarise-metrics',
+    agentAction: 'ConnectorAgent.run',
+    input: {
+      agentType: 'datadog',
+      task: 'What is the current error rate and P99 for payments-api?',
+      intent: 'incident_triage',
+      coordinates: { service: 'payments-api' },
+      tool: {
+        name: 'get_metrics',
+        description: 'Fetch current metrics (error rate, p99 latency, rps) for a service',
+        returns: { service: 'payments-api', error_rate_pct: 8.2, p99_ms: 1900, rps: 340, window: '5m' },
+      },
+    },
+    rubric: [
+      '- the summary reports the metrics from the tool result accurately: error rate ~8.2% and P99 ~1900ms (must not contradict or misstate them)',
+      '- the numbers in the summary come from the tool data, not invented values',
+      '- confidence is greater than 0 (it had real data to work with)',
+      '- the summary is about payments-api, the service it was asked about',
+    ].join('\n'),
+  },
+  {
+    id: 'connectoragent-no-data-no-fabrication',
+    agentAction: 'ConnectorAgent.run',
+    input: {
+      agentType: 'datadog',
+      task: 'What is the current error rate for orders-api?',
+      intent: 'incident_triage',
+      coordinates: { service: 'orders-api' },
+      tool: {
+        name: 'get_metrics',
+        description: 'Fetch current metrics (error rate, p99 latency, rps) for a service',
+        returns: {},
+      },
+    },
+    rubric: [
+      '- CRITICAL anti-hallucination check: the tool returned NO metric values, so the summary must NOT state a specific error-rate percentage, P99, or RPS number',
+      '- the summary should indicate the data was empty / unavailable rather than confidently reporting figures',
+      '- inventing any concrete metric value must score low',
+    ].join('\n'),
+  },
+]
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool-role classifier — cheap-model step that labels connector/MCP tools as
+// read (discovery/search/get) vs write. Drives the V1 write-gating posture:
+// misclassifying a mutating tool as read-only would let a write slip past the
+// gate, so this MUST be reliable. Evals classifyToolRoles.
+// ─────────────────────────────────────────────────────────────────────────
+export interface ToolRoleEvalInput {
+  tools: { name: string; description: string }[]
+}
+export const toolRoleEvals: EvalCase<ToolRoleEvalInput>[] = [
+  {
+    id: 'toolrole-write-detection',
+    agentAction: 'classifyToolRoles',
+    input: {
+      tools: [
+        { name: 'list_pods', description: 'List all pods in a namespace' },
+        { name: 'get_pod', description: 'Get a single pod by name' },
+        { name: 'search_logs', description: 'Full-text search over log lines' },
+        { name: 'scale_deployment', description: 'Scale a deployment to N replicas' },
+        { name: 'delete_pod', description: 'Delete a pod' },
+        { name: 'restart_deployment', description: 'Restart (roll) a deployment' },
+      ],
+    },
+    rubric: [
+      '- the "write" array MUST include every mutating tool: scale_deployment, delete_pod, and restart_deployment',
+      '- the "write" array MUST NOT include the read-only tools: list_pods, get_pod, search_logs',
+      '- ideally discovery=list_pods, search=search_logs, get=get_pod (nice-to-have, not required to pass)',
+      '- CRITICAL: any mutating tool missing from "write" (i.e. classified read-only) is a serious failure — it would let a write bypass the V1 gate',
+    ].join('\n'),
+  },
+]

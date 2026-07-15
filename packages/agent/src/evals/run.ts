@@ -10,9 +10,17 @@ import { TestAgent } from '../agents/test.js'
 import { DeployAgent } from '../agents/deploy.js'
 import { OncallAgent } from '../agents/oncall.js'
 import { BAAgent } from '../agents/ba.js'
+import { GraphBuilderAgent } from '../graph-builder/builder.js'
+import { ConnectorAgent } from '../agents/connector-agent.js'
+import type { SpecialistContext } from '../agents/connector-agent.js'
+import type { ExecutableTool } from '../orchestrator.js'
+import type { AgentPerimeter } from '../perimeter/engine.js'
+import type { PerimeterCtx } from '../middleware/perimeter.js'
+import type { IAuditSink } from '../interfaces/audit.js'
+import { classifyToolRoles } from '../connectors/tool-role-classifier.js'
 import { judge } from './judge.js'
 import { runChatEval } from './chat-eval.js'
-import { productEvals, techspecEvals, reviewEvals, sreEvals, bootstrapEvals, testEvals, deployEvals, oncallEvals, baEvals, chatEvals } from './cases.js'
+import { productEvals, techspecEvals, reviewEvals, sreEvals, bootstrapEvals, testEvals, deployEvals, oncallEvals, baEvals, chatEvals, graphBuilderEvals, connectorAgentEvals, toolRoleEvals } from './cases.js'
 import type { EvalResult } from './types.js'
 
 const TENANT = '00000000-0000-0000-0000-000000000001' as TenantId
@@ -105,6 +113,47 @@ export async function runEvals(model: IModelProvider, kg: IKnowledgeGraph, judge
   // entry point rather than a single specialist-agent method call.
   for (const c of chatEvals) {
     results.push(await runChatEval(model, judgeModel, c.id, c.input, c.rubric))
+  }
+
+  // Graph Builder — cheap-model service extraction that seeds the graph.
+  const graphBuilder = new GraphBuilderAgent(kg, model)
+  for (const c of graphBuilderEvals) {
+    results.push(await run(c.id, c.agentAction, c.rubric, async () => {
+      const name = await graphBuilder.extractServiceName(c.input.text, TENANT)
+      return { extractedServiceName: name }
+    }))
+  }
+
+  // Connector Agent — real agent run against a canned tool. Permissive
+  // perimeter + no-op audit sink: this eval scores answer QUALITY (accuracy +
+  // no fabrication), not perimeter/audit behaviour, which have their own tests.
+  const allowAllPerimeter = { allows: () => true } as unknown as AgentPerimeter
+  const noopAudit: IAuditSink = { append: async () => {} }
+  const evalPerimeterCtx = { tenantId: TENANT, userId: 'eval-user', sessionId: 'eval-session' } as unknown as PerimeterCtx
+  for (const c of connectorAgentEvals) {
+    results.push(await run(c.id, c.agentAction, c.rubric, async () => {
+      const tools: ExecutableTool[] = [{
+        name: c.input.tool.name,
+        description: c.input.tool.description,
+        parameters: { type: 'object', properties: {} },
+        run: async () => c.input.tool.returns,
+      }]
+      const agent = new ConnectorAgent({
+        agentType: c.input.agentType, model, tools,
+        perimeter: allowAllPerimeter, auditSink: noopAudit, perimeterCtx: evalPerimeterCtx,
+      })
+      const ctx: SpecialistContext = {
+        task: c.input.task, intent: c.input.intent, coordinates: c.input.coordinates,
+        tenantId: TENANT, sessionId: 'eval-session', userId: 'eval-user',
+      }
+      const finding = await agent.run(ctx)
+      return { summary: finding.summary, confidence: finding.confidence, toolsUsed: finding.toolsUsed }
+    }))
+  }
+
+  // Tool-role classifier — cheap-model read/write labelling that gates writes.
+  for (const c of toolRoleEvals) {
+    results.push(await run(c.id, c.agentAction, c.rubric, () => classifyToolRoles(model, c.input.tools)))
   }
 
   return results

@@ -232,10 +232,18 @@ jobs:
           for i in $(seq 1 80); do
             TOK=$(curl -s -XPOST http://localhost:8510/api/auth/demo -H 'Content-Type: application/json' -d '{}' \
               | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))' 2>/dev/null || echo "")
+            # Warm when demo-login mints a token AND the catalog endpoint serves a
+            # valid JSON array (empty is fine — an empty list is a served response,
+            # a non-array/error body is not). Proves gateway + DB + auth are live.
             if [ -n "$TOK" ]; then
               if curl -s http://localhost:8510/api/connectors/catalog -H "Authorization: Bearer $TOK" \
-                | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d,list) and len(d)>0 else 1)' 2>/dev/null; then
-                echo "stack warm — catalog serving real data after ${i} tries"; exit 0
+                | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d,list) else 1)' 2>/dev/null; then
+                echo "stack warm — gateway serving after ${i} tries"
+                # Pre-warm the web dev server's root route so the first spec doesn't
+                # pay the on-demand compile cost inside a 20s locator wait.
+                curl -s http://localhost:8500 >/dev/null 2>&1 || true
+                curl -s http://localhost:8500 >/dev/null 2>&1 || true
+                exit 0
               fi
             fi
             sleep 3

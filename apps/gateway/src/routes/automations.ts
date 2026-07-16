@@ -4,6 +4,7 @@ import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { appendAuditEvent } from './audit.js'
 import { TriggerEngine } from '../triggers/engine.js'
+import { resolveTemplates } from '../triggers/template.js'
 import type { TriggerAction, TriggerRule } from '../triggers/engine.js'
 import { getActiveScheduler, registerUserMonitor, MONITOR_IMPLS } from '../jobs/scheduler.js'
 import { UUID_RE } from '../utils/validators.js'
@@ -46,7 +47,7 @@ export async function automationsRoutes(app: FastifyInstance) {
               type: 'object',
               required: ['type'],
               properties: {
-                type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate'] },
+                type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate', 'open_war_room', 'http_request', 'db_op', 'emit_event'] },
                 params: { type: 'object' },
               },
               additionalProperties: false,
@@ -111,7 +112,10 @@ export async function automationsRoutes(app: FastifyInstance) {
     const engine = new TriggerEngine()
     engine.loadRules(rules)
     const { actions } = await engine.evaluate(eventType, payload)
-    return { matched: actions.length, actions }
+    // Resolve {{ payload.* }} templates so the preview shows the real params
+    // that would run — same resolution the executor applies before the gate.
+    const resolved = actions.map((a) => ({ ...a, params: resolveTemplates(a.params, payload) }))
+    return { matched: resolved.length, actions: resolved }
   })
 
   app.patch<{ Params: { id: string }; Body: Partial<{ enabled: boolean; condition: Record<string, unknown>; actions: TriggerAction[] }> }>('/api/automations/triggers/:id', {
@@ -131,7 +135,7 @@ export async function automationsRoutes(app: FastifyInstance) {
               required: ['type'],
               additionalProperties: false,
               properties: {
-                type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate'] },
+                type: { type: 'string', enum: ['notify_oncall', 'create_incident', 'surface_context', 'run_runbook', 'notify_channel', 'escalate', 'block_deploy_gate', 'open_war_room', 'http_request', 'db_op', 'emit_event'] },
                 params: { type: 'object' },
               },
             },

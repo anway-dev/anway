@@ -49,7 +49,9 @@ export async function startTriggerSubscriber(redisUrl: string): Promise<void> {
       const { actions, perimeters } = await engine.evaluate(channel, rest)
 
       if (actions.length > 0) {
-        await publishDurable(pub as never, tenantId, 'trigger_matched', { tenantId, channel, actions, perimeters })
+        // `event: rest` carries the triggering payload so the executor can
+        // resolve {{ payload.* }} templates in generic action params.
+        await publishDurable(pub as never, tenantId, 'trigger_matched', { tenantId, channel, actions, perimeters, event: rest })
         // Write audit event so CERT V can verify trigger actually fired
         await withTenant(prisma, tenantId, (tx) =>
           tx.$executeRaw`

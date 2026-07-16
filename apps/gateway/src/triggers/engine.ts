@@ -15,7 +15,14 @@ export interface TriggerRule {
 }
 
 export interface TriggerAction {
-  type: 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook' | 'notify_channel' | 'escalate' | 'block_deploy_gate' | 'open_war_room'
+  type:
+    // named presets
+    | 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook'
+    | 'notify_channel' | 'escalate' | 'block_deploy_gate' | 'open_war_room'
+    // generic primitives — user-defined params, resolved against the event payload
+    | 'http_request'   // call any (external, allowlisted) endpoint
+    | 'db_op'          // internal op: resolve/update/comment an incident
+    | 'emit_event'     // re-emit an event onto the bus (chain automations)
   params: Record<string, unknown>
 }
 

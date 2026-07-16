@@ -1,6 +1,7 @@
 import { createClient } from 'redis'
 import type { TriggerAction, TriggerPerimeter } from './engine.js'
 import { executeTriggerAction } from './actions.js'
+import { resolveTemplates } from './template.js'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import pino from 'pino'
@@ -11,6 +12,8 @@ const log = pino({ name: 'trigger-executor' })
 const WRITE_ACTIONS = new Set([
   'notify_oncall', 'create_incident', 'run_runbook', 'notify_channel',
   'escalate', 'block_deploy_gate', 'open_war_room',
+  // generic primitives — all gated in V1 (writes / outbound / chaining)
+  'http_request', 'db_op', 'emit_event',
 ])
 
 function perimeterAllows(perimeters: TriggerPerimeter[], action: TriggerAction): boolean {
@@ -39,6 +42,7 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
       eventType?: string
       actions: TriggerAction[]
       perimeters?: TriggerPerimeter[]
+      event?: Record<string, unknown>
       __eventLogId?: string
     }
     try { payload = JSON.parse(message) } catch { return }
@@ -50,7 +54,13 @@ export async function startTriggerExecutor(redisUrl: string): Promise<void> {
     const perimeters = payload.perimeters ?? []
     const systemSentinel = '00000000-0000-0000-0000-000000000000'
 
-    for (const action of payload.actions) {
+    const eventCtx = payload.event ?? {}
+
+    for (const rawAction of payload.actions) {
+      // Resolve {{ payload.* }} templates in the action params against the
+      // triggering event — "resolve THIS incident" needs the id from THIS event.
+      const action: TriggerAction = { ...rawAction, params: resolveTemplates(rawAction.params, eventCtx) }
+
       if (perimeters.length > 0 && !perimeterAllows(perimeters, action)) {
         log.warn({ action: action.type, tenantId: payload.tenantId }, 'trigger action blocked by perimeter')
         continue
@@ -111,6 +121,9 @@ function actionTypeToConnector(actionType: string): string {
     case 'notify_oncall':
     case 'escalate':       return 'pagerduty'
     case 'block_deploy_gate': return 'argocd'
+    case 'http_request':   return 'webhook'
+    case 'db_op':          return 'anway'
+    case 'emit_event':     return 'anway'
     default:               return 'trigger-system'
   }
 }

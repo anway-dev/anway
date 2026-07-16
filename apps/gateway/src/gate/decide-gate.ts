@@ -4,11 +4,14 @@ import { RedisGateSink } from './redis-gate-sink.js'
 import { getMemoryGateSink } from './memory-gate-fallback.js'
 import { gateDecisionsTotal } from '../metrics.js'
 import { executeTriggerAction } from '../triggers/actions.js'
+import type { TriggerAction } from '../triggers/engine.js'
 import { executePipelineRollback } from '../pipeline/rollback.js'
 
 const TRIGGER_ACTION_TYPES = new Set([
   'notify_oncall', 'create_incident', 'run_runbook', 'notify_channel',
   'escalate', 'block_deploy_gate', 'open_war_room', 'surface_context',
+  // generic primitives
+  'http_request', 'db_op', 'emit_event',
 ])
 
 const redisUrl = process.env['REDIS_URL']
@@ -182,7 +185,7 @@ export async function decideGate(
     if (TRIGGER_ACTION_TYPES.has(toolName)) {
       const toolArgs = (gateRows[0]!.tool_args ?? {}) as Record<string, unknown>
       void executeTriggerAction(tenantId, {
-        type: toolName as 'notify_oncall' | 'create_incident' | 'surface_context' | 'run_runbook' | 'notify_channel' | 'escalate' | 'block_deploy_gate' | 'open_war_room',
+        type: toolName as TriggerAction['type'],
         params: toolArgs,
       }).then((result) => {
         if (result.ok) {

@@ -1,6 +1,10 @@
+import { createClient } from 'redis'
+import type { RedisClientType } from 'redis'
 import { prisma } from '../db/client.js'
 import { withTenant } from '../db/prisma.js'
 import { effectiveCredentials } from '../utils/credentials.js'
+import { publishDurable } from '../events/durable-events.js'
+import { RecallService } from '../services/recall.js'
 import type { TriggerAction } from './engine.js'
 import pino from 'pino'
 
@@ -44,6 +48,12 @@ export async function executeTriggerAction(
       return surfaceContext(tenantId, action.params)
     case 'open_war_room':
       return openWarRoom(tenantId, action.params)
+    case 'http_request':
+      return httpRequest(tenantId, action.params)
+    case 'db_op':
+      return dbOp(tenantId, action.params)
+    case 'emit_event':
+      return emitEvent(tenantId, action.params)
     default:
       return { ok: false, action: action.type, error: `unknown action type: ${(action as { type: string }).type}` }
   }
@@ -321,6 +331,167 @@ async function surfaceContext(
   } catch (err) {
     log.error({ err, tenantId, eventType }, 'surface_context failed')
     return { ok: false, action: 'surface_context', error: String(err) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generic primitives — user-defined params (templated against the event).
+// ---------------------------------------------------------------------------
+
+const BLOCKED_HOST = /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|169\.254\.|::1|172\.(1[6-9]|2\d|3[01])\.)/i
+
+/**
+ * http_request — call any external endpoint with user-supplied method/url/
+ * headers/body. SSRF-guarded: only public https(/http) hosts; internal/private
+ * ranges are refused (use db_op for internal Anway operations, not this).
+ */
+async function httpRequest(
+  tenantId: string,
+  params: Record<string, unknown>,
+): Promise<ActionResult> {
+  const url = typeof params.url === 'string' ? params.url : ''
+  const method = (typeof params.method === 'string' ? params.method : 'POST').toUpperCase()
+  const headers = (params.headers && typeof params.headers === 'object' ? params.headers : {}) as Record<string, string>
+  const body = params.body
+
+  if (!url) return { ok: false, action: 'http_request', error: 'url is required' }
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return { ok: false, action: 'http_request', error: 'invalid url' } }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return { ok: false, action: 'http_request', error: 'only http(s) urls allowed' }
+  }
+  if (BLOCKED_HOST.test(parsed.hostname)) {
+    return { ok: false, action: 'http_request', error: `refused: ${parsed.hostname} is a private/internal host (use db_op for internal ops)` }
+  }
+
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10_000)
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: body === undefined || method === 'GET' ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(timer))
+
+    const detail = JSON.stringify({ status: res.status, host: parsed.hostname })
+    if (!res.ok) return { ok: false, action: 'http_request', error: `HTTP ${res.status}`, detail }
+    log.info({ tenantId, host: parsed.hostname, status: res.status }, 'http_request succeeded')
+    return { ok: true, action: 'http_request', detail }
+  } catch (err) {
+    log.error({ err, tenantId, url }, 'http_request failed')
+    return { ok: false, action: 'http_request', error: String(err) }
+  }
+}
+
+/**
+ * db_op — internal Anway operations, no external call, no token minting.
+ * Supported ops: resolve_incident | update_incident | comment_incident.
+ * This is the clean path for "resolve THIS incident from an event".
+ */
+async function dbOp(
+  tenantId: string,
+  params: Record<string, unknown>,
+): Promise<ActionResult> {
+  const op = typeof params.op === 'string' ? params.op : ''
+  const incidentId = typeof params.incidentId === 'string' ? params.incidentId : null
+
+  try {
+    switch (op) {
+      case 'resolve_incident': {
+        if (!incidentId) return { ok: false, action: 'db_op', error: 'incidentId is required' }
+        const affected = await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            UPDATE incidents SET status = 'resolved'::"IncidentStatus", resolved_at = NOW()
+            WHERE id = ${incidentId}::uuid AND tenant_id = ${tenantId}::uuid AND status <> 'resolved'::"IncidentStatus"
+          `
+        )
+        // Keep Recall consistent with the API resolve path — capture the fix.
+        if (Number(affected) > 0) {
+          await new RecallService(prisma).recordResolution(tenantId, incidentId).catch(() => {})
+        }
+        log.info({ tenantId, incidentId, affected: Number(affected) }, 'db_op resolve_incident')
+        return { ok: true, action: 'db_op', detail: JSON.stringify({ op, incidentId, affected: Number(affected) }) }
+      }
+      case 'update_incident': {
+        if (!incidentId) return { ok: false, action: 'db_op', error: 'incidentId is required' }
+        const status = typeof params.status === 'string' ? params.status : null
+        const severity = typeof params.severity === 'string' ? params.severity : null
+        if (!status && !severity) return { ok: false, action: 'db_op', error: 'update_incident needs status and/or severity' }
+        const affected = await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            UPDATE incidents SET
+              status = COALESCE(${status}::"IncidentStatus", status),
+              severity = COALESCE(${severity}::"IncidentSeverity", severity)
+            WHERE id = ${incidentId}::uuid AND tenant_id = ${tenantId}::uuid
+          `
+        )
+        log.info({ tenantId, incidentId, status, severity }, 'db_op update_incident')
+        return { ok: true, action: 'db_op', detail: JSON.stringify({ op, incidentId, affected: Number(affected) }) }
+      }
+      case 'comment_incident': {
+        if (!incidentId) return { ok: false, action: 'db_op', error: 'incidentId is required' }
+        const text = typeof params.text === 'string' ? params.text : ''
+        if (!text) return { ok: false, action: 'db_op', error: 'text is required' }
+        await withTenant(prisma, tenantId, (tx) =>
+          tx.$executeRaw`
+            INSERT INTO audit_events (id, tenant_id, user_id, session_id, event_type, payload, created_at)
+            VALUES (gen_random_uuid(), ${tenantId}::uuid, NULL, NULL, 'incident_comment',
+                    ${JSON.stringify({ incidentId, text, source: 'trigger' })}::jsonb, NOW())
+          `
+        )
+        return { ok: true, action: 'db_op', detail: JSON.stringify({ op, incidentId }) }
+      }
+      default:
+        return { ok: false, action: 'db_op', error: `unknown op: ${op} (resolve_incident|update_incident|comment_incident)` }
+    }
+  } catch (err) {
+    log.error({ err, tenantId, op }, 'db_op failed')
+    return { ok: false, action: 'db_op', error: String(err) }
+  }
+}
+
+let _emitPub: RedisClientType | null = null
+async function getEmitPub(): Promise<RedisClientType | null> {
+  const url = process.env['REDIS_URL']
+  if (!url) return null
+  if (_emitPub) return _emitPub
+  const client = createClient({ url }) as RedisClientType
+  client.on('error', () => {})
+  await client.connect()
+  _emitPub = client
+  return client
+}
+
+/**
+ * emit_event — re-emit an event onto the bus so another trigger can fire.
+ * Chains automations. Depth-guarded (__depth, cap 3) to prevent loops.
+ */
+async function emitEvent(
+  tenantId: string,
+  params: Record<string, unknown>,
+): Promise<ActionResult> {
+  const eventType = typeof params.eventType === 'string' ? params.eventType : ''
+  if (!eventType) return { ok: false, action: 'emit_event', error: 'eventType is required' }
+
+  const depth = typeof params.__depth === 'number' ? params.__depth : 0
+  if (depth >= 3) {
+    log.warn({ tenantId, eventType, depth }, 'emit_event depth cap reached — dropping to prevent loop')
+    return { ok: false, action: 'emit_event', error: 'emit depth cap (3) reached' }
+  }
+
+  const inner = (params.payload && typeof params.payload === 'object' ? params.payload : {}) as Record<string, unknown>
+  const outPayload: Record<string, unknown> = { ...inner, tenantId, __depth: depth + 1 }
+
+  try {
+    const pub = await getEmitPub()
+    // publishDurable writes the event_log outbox row AND publishes to Redis.
+    await publishDurable(pub, tenantId, eventType, outPayload)
+    log.info({ tenantId, eventType, depth: depth + 1 }, 'emit_event published')
+    return { ok: true, action: 'emit_event', detail: JSON.stringify({ eventType, depth: depth + 1 }) }
+  } catch (err) {
+    log.error({ err, tenantId, eventType }, 'emit_event failed')
+    return { ok: false, action: 'emit_event', error: String(err) }
   }
 }
 

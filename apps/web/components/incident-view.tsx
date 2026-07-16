@@ -25,6 +25,13 @@ interface RecallInfo {
   avgTtrSeconds: number | null;
 }
 
+// Incident detail response — all fields optional (fallback is {})
+interface IncidentDetail {
+  recall?: RecallInfo | null;
+  service?: string | null;
+  created_at?: string;
+}
+
 // Change Timeline event — "what changed before this broke?"
 interface ChangeEvent {
   at: string;
@@ -365,7 +372,7 @@ export function IncidentView({ onTriggerOrchestrator, onGoToConnectors }: {
     if (!selected?.fullId) return;
     let live = true;
     fetch(`/api/incidents/${selected.fullId}`)
-      .then(r => r.ok ? r.json() as Promise<{ recall?: RecallInfo | null; service?: string | null; created_at?: string }> : {})
+      .then((r): Promise<IncidentDetail> => r.ok ? r.json() as Promise<IncidentDetail> : Promise.resolve({}))
       .then(d => { if (live) { setRecall(d.recall ?? null); setDetailMeta({ service: d.service ?? null, createdAt: d.created_at ?? null }); } })
       .catch(() => {});
     return () => { live = false; };

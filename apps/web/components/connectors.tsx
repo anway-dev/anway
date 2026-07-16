@@ -117,7 +117,8 @@ export function ConnectorsView() {
   useEffect(() => {
     fetch("/api/connectors/catalog")
       .then(r => r.json() as Promise<Connector[]>)
-      .then(list => {
+      .then(raw => {
+        const list = Array.isArray(raw) ? raw : [];
         setCatalog(list);
         for (const c of list) {
           if (c.connected) {

@@ -221,6 +221,26 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
+      # Warm-stack gate — /health passing does NOT mean the gateway is serving
+      # real data yet (connector bootstrap, KG, seed reads warm up async). The
+      # early specs were racing a half-warm stack: the catalog endpoint returned
+      # a degraded/non-array body, the UI crashed on catalog.filter, and the
+      # cascade timed out unrelated pages. Poll a real authenticated data
+      # endpoint until it serves a proper populated array before running specs.
+      - name: Wait for the stack to serve real data
+        run: |
+          for i in $(seq 1 80); do
+            TOK=$(curl -s -XPOST http://localhost:8510/api/auth/demo -H 'Content-Type: application/json' -d '{}' \
+              | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))' 2>/dev/null || echo "")
+            if [ -n "$TOK" ]; then
+              if curl -s http://localhost:8510/api/connectors/catalog -H "Authorization: Bearer $TOK" \
+                | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d,list) and len(d)>0 else 1)' 2>/dev/null; then
+                echo "stack warm — catalog serving real data after ${i} tries"; exit 0
+              fi
+            fi
+            sleep 3
+          done
+          echo "warmup did not confirm in 240s — proceeding (specs will still run)"
       - name: Run e2e suite
         env:
           # CERT D registers the prometheus connector with this URL and the
